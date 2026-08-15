@@ -2,8 +2,10 @@
 
 Small React + FastAPI app for cataloging official health dataset pages.
 
-The app does not download datasets. It stores links to official dataset pages in SQLite
-and exposes them through a small API. Dataset pages are organized by theme.
+This is the initial no-collector version. The app does not download datasets, run
+collection jobs, or store raw dataset files. It stores links to official dataset
+pages in SQLite and exposes them through a small API. Dataset pages are organized
+by theme.
 
 ## Structure
 
@@ -61,6 +63,9 @@ Run the React app against the backend on port `8001`:
 cd frontend
 VITE_API_BASE_URL=http://127.0.0.1:8001 npm run dev
 ```
+
+If `VITE_API_BASE_URL` is not set, the frontend also defaults to
+`http://127.0.0.1:8001`.
 
 Open:
 
