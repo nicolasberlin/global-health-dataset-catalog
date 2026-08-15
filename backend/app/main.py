@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_database
+from app.routes.collector import router as collector_router
 from app.routes.sources import router as sources_router
 
 
@@ -30,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(sources_router)
+app.include_router(collector_router)
 
 
 @app.get("/health")

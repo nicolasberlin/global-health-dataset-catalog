@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import ipaddress
+import socket
+from dataclasses import dataclass
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+
+from collector.config import DEFAULT_CONFIG
+
+
+@dataclass(frozen=True)
+class FetchedPage:
+    url: str
+    final_url: str
+    html: str
+    status_code: int
+    content_type: str
+
+
+def fetch_public_html(
+    url: str,
+    timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
+    max_bytes: int = 1_000_000,
+) -> FetchedPage:
+    _ensure_public_http_url(url)
+
+    request = Request(
+        url,
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": DEFAULT_CONFIG.user_agent,
+        },
+        method="GET",
+    )
+
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            content_type = response.headers.get("Content-Type", "")
+            body = response.read(max_bytes + 1)
+            if len(body) > max_bytes:
+                raise ValueError("HTML response is too large for the collector test panel.")
+            return FetchedPage(
+                url=url,
+                final_url=response.geturl(),
+                html=_decode_html(body, content_type),
+                status_code=response.status,
+                content_type=content_type,
+            )
+    except HTTPError as exception:
+        raise ValueError(f"URL returned HTTP {exception.code}.") from exception
+    except (TimeoutError, URLError, OSError) as exception:
+        raise ValueError(f"Could not fetch URL: {exception}") from exception
+
+
+def _ensure_public_http_url(url: str) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Only http and https URLs can be analyzed.")
+    if not parsed.hostname:
+        raise ValueError("URL must include a hostname.")
+
+    for address_info in socket.getaddrinfo(parsed.hostname, None):
+        ip_address = ipaddress.ip_address(address_info[4][0])
+        if (
+            ip_address.is_private
+            or ip_address.is_loopback
+            or ip_address.is_link_local
+            or ip_address.is_multicast
+            or ip_address.is_reserved
+        ):
+            raise ValueError("Private or local network URLs cannot be fetched.")
+
+
+def _decode_html(body: bytes, content_type: str) -> str:
+    charset = "utf-8"
+    for part in content_type.split(";"):
+        part = part.strip()
+        if part.lower().startswith("charset="):
+            charset = part.split("=", 1)[1].strip()
+            break
+
+    return body.decode(charset, errors="replace")
+

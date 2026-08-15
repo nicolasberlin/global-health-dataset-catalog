@@ -2,11 +2,51 @@ import { useEffect, useMemo, useState } from 'react';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 
+const SAMPLE_COLLECTOR_HTML = `<html>
+  <head>
+    <title>Mortality by age and sex dataset</title>
+    <meta name="description" content="Official mortality health dataset." />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Dataset",
+      "name": "Mortality by age and sex",
+      "publisher": {"@type": "Organization", "name": "National Health Agency"},
+      "distribution": [
+        {
+          "@type": "DataDownload",
+          "contentUrl": "https://example.org/files/mortality.csv",
+          "encodingFormat": "text/csv"
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <h1>Mortality by age and sex</h1>
+    <p>This health dataset contains mortality and epidemiology indicators.</p>
+    <a href="https://example.org/files/mortality.xlsx">Download data as XLSX</a>
+    <a href="https://example.org/api/export?dataset=mortality&format=json">API export</a>
+  </body>
+</html>`;
+
 function normalizeSearchValue(value) {
     return String(value ?? '')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase();
+}
+
+function formatPercent(value) {
+    return `${Math.round(Number(value ?? 0) * 100)}%`;
+}
+
+function getHostname(url) {
+    try {
+        return new URL(url).hostname;
+    } catch {
+        return url;
+    }
 }
 
 export default function App() {
@@ -16,6 +56,11 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState('');
+    const [collectorUrl, setCollectorUrl] = useState('https://example.org/data/catalog');
+    const [collectorHtml, setCollectorHtml] = useState(SAMPLE_COLLECTOR_HTML);
+    const [collectorLoading, setCollectorLoading] = useState(false);
+    const [collectorError, setCollectorError] = useState('');
+    const [collectorResult, setCollectorResult] = useState(null);
 
     async function loadSources() {
         try {
@@ -42,6 +87,47 @@ export default function App() {
     useEffect(() => {
         loadSources();
     }, []);
+
+    async function analyzeCollector(endpoint, payload) {
+        try {
+            setCollectorLoading(true);
+            setCollectorError('');
+            setCollectorResult(null);
+
+            const response = await fetch(`${API_BASE_URL}/collector/${endpoint}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => null);
+                throw new Error(errorPayload?.detail ?? 'Impossible d’analyser cette page.');
+            }
+
+            setCollectorResult(await response.json());
+        } catch (exception) {
+            setCollectorError(exception instanceof Error ? exception.message : 'Erreur inconnue');
+        } finally {
+            setCollectorLoading(false);
+        }
+    }
+
+    async function analyzeCollectorHtml(event) {
+        event.preventDefault();
+        await analyzeCollector('analyze-html', {
+            url: collectorUrl,
+            html: collectorHtml,
+        });
+    }
+
+    async function analyzeCollectorUrl() {
+        await analyzeCollector('analyze-url', {
+            url: collectorUrl,
+        });
+    }
 
     const themes = useMemo(
         () => ['All', ...Array.from(new Set(sources.map((source) => source.theme))).sort()],
@@ -140,7 +226,7 @@ export default function App() {
                 <article className="metric-card metric-card--muted">
                     <span>Version</span>
                     <strong>0.1</strong>
-                    <small>sans collector</small>
+                    <small>collector MVP</small>
                 </article>
             </section>
 
@@ -199,7 +285,7 @@ export default function App() {
                                 <h3>{source.name}</h3>
                                 <p>{source.description}</p>
                                 <div className="source-card__footer">
-                                    <span>{new URL(source.page_url).hostname}</span>
+                                    <span>{getHostname(source.page_url)}</span>
                                     <a
                                         className="source-link"
                                         href={`${API_BASE_URL}/sources/${source.id}/page`}
@@ -223,6 +309,115 @@ export default function App() {
                         </article>
                     )}
                 </div>
+            </section>
+
+            <section className="collector-section">
+                <div className="section-heading">
+                    <div>
+                        <h2>Test collector</h2>
+                        <p>
+                            Colle du HTML ou analyse directement une URL publique pour voir comment
+                            le collector l’interprete.
+                        </p>
+                    </div>
+                </div>
+
+                <form className="collector-form" onSubmit={analyzeCollectorHtml}>
+                    <div className="collector-url-field">
+                        <label htmlFor="collector-url">URL de la page</label>
+                        <input
+                            id="collector-url"
+                            type="url"
+                            value={collectorUrl}
+                            onChange={(event) => setCollectorUrl(event.target.value)}
+                            required
+                        />
+                    </div>
+                    <div className="collector-html-field">
+                        <label htmlFor="collector-html">HTML a analyser</label>
+                        <textarea
+                            id="collector-html"
+                            value={collectorHtml}
+                            onChange={(event) => setCollectorHtml(event.target.value)}
+                            rows={12}
+                            required
+                        />
+                    </div>
+                    <div className="collector-action-row">
+                        <button type="submit" disabled={collectorLoading}>
+                            {collectorLoading ? 'Analyse...' : 'Analyser le HTML'}
+                        </button>
+                        <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={analyzeCollectorUrl}
+                            disabled={collectorLoading}
+                        >
+                            Analyser l’URL
+                        </button>
+                    </div>
+                </form>
+
+                {collectorError ? (
+                    <article className="collector-result collector-result--error">
+                        <h3>Erreur collector</h3>
+                        <p>{collectorError}</p>
+                    </article>
+                ) : null}
+
+                {collectorResult ? (
+                    <article className="collector-result">
+                        <div className="collector-result__header">
+                            <div>
+                                <span className="theme-pill">
+                                    {collectorResult.accepted ? 'Dataset accepte' : 'Dataset rejete'}
+                                </span>
+                                <h3>{collectorResult.title}</h3>
+                                <p>{collectorResult.description || collectorResult.dataset_url}</p>
+                            </div>
+                            <div className="collector-score-grid">
+                                <span>
+                                    Dataset
+                                    <strong>
+                                        {formatPercent(collectorResult.dataset_probability)}
+                                    </strong>
+                                </span>
+                                <span>
+                                    Sante
+                                    <strong>{formatPercent(collectorResult.health_probability)}</strong>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="collector-detail-grid">
+                            <div>
+                                <h4>Classification</h4>
+                                <p>
+                                    Label sante: <strong>{collectorResult.health_label}</strong>
+                                </p>
+                                <p>
+                                    Publisher:{' '}
+                                    <strong>{collectorResult.publisher || 'non detecte'}</strong>
+                                </p>
+                            </div>
+                            <div>
+                                <h4>Distributions trouvees</h4>
+                                {collectorResult.distributions.length > 0 ? (
+                                    <ul className="distribution-list">
+                                        {collectorResult.distributions.map((distribution) => (
+                                            <li key={`${distribution.format}-${distribution.url}`}>
+                                                <strong>{distribution.format}</strong>
+                                                <span>{distribution.url}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p>Aucun lien CSV/XLSX/API trouve.</p>
+                                )}
+                            </div>
+                        </div>
+                    </article>
+                ) : null}
             </section>
         </main>
     );
