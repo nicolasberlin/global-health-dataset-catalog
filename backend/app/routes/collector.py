@@ -38,6 +38,8 @@ class CollectorAnalyzeHTMLResponse(BaseModel):
     title: str
     description: str
     publisher: str
+    hosting_platform: str
+    uploader: str
     dataset_probability: float
     dataset_signals: dict[str, Any]
     health_probability: float
@@ -77,6 +79,8 @@ def _analyze_html(url: str, html: str) -> CollectorAnalyzeHTMLResponse:
         title=page.title or page.h1 or page.canonical_url,
         description=page.meta_description or page.og_description,
         publisher=page.publisher,
+        hosting_platform=page.hosting_platform,
+        uploader=page.uploader,
         dataset_probability=dataset_score.probability,
         dataset_signals=dataset_score.signals,
         health_probability=health_score.probability,

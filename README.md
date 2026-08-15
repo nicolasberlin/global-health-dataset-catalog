@@ -26,6 +26,7 @@ Current MVP layer:
 - extracts a normalized page snapshot from HTML;
 - detects Schema.org `Dataset` and deterministic dataset signals;
 - scores health relevance separately from dataset detection;
+- detects known publishers, hosting platforms, and uploaders when possible;
 - extracts likely CSV, XLSX, JSON, ZIP, API, and download distributions;
 - ignores PDF as a dataset distribution by default;
 - validates distributions with `HEAD` first, then partial `GET` fallback.
@@ -62,7 +63,7 @@ Run the API:
 
 ```bash
 cd backend
-PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app --reload --port 8001
+PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app --reload --reload-dir . --reload-dir ../collector --port 8001
 ```
 
 Useful endpoints:

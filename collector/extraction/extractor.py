@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
+from collector.source_identity import identify_source
 from collector.storage.models import LinkCandidate, PageSnapshot
 from collector.url_utils import canonicalize_url, same_domain
 
@@ -112,7 +114,7 @@ class _PageHTMLParser(HTMLParser):
     def _handle_meta(self, attributes: dict[str, str]) -> None:
         name = attributes.get("name", "").lower()
         property_name = attributes.get("property", "").lower()
-        content = _normalize_text(attributes.get("content", ""))
+        content = html_to_text(attributes.get("content", ""))
 
         if not content:
             return
@@ -141,10 +143,17 @@ class _PageHTMLParser(HTMLParser):
 def extract_page(url: str, html: str) -> PageSnapshot:
     parser = _PageHTMLParser(url)
     parser.feed(html)
+    canonical_url = parser.canonical_url or canonicalize_url(url)
+    source_identity = identify_source(canonical_url)
+    publisher = (
+        parser.publisher
+        or _publisher_from_json_ld(parser.json_ld)
+        or source_identity.publisher
+    )
 
     return PageSnapshot(
         url=url,
-        canonical_url=parser.canonical_url or canonicalize_url(url),
+        canonical_url=canonical_url,
         title=_normalize_text(" ".join(parser.title_parts)),
         h1=_normalize_text(" ".join(parser.h1_parts)),
         meta_description=parser.meta_description,
@@ -152,7 +161,9 @@ def extract_page(url: str, html: str) -> PageSnapshot:
         og_description=parser.og_description,
         headings=tuple(dict.fromkeys(parser.heading_parts)),
         text=_normalize_text(" ".join(parser.text_parts)),
-        publisher=parser.publisher or _publisher_from_json_ld(parser.json_ld),
+        publisher=publisher,
+        hosting_platform=source_identity.hosting_platform,
+        uploader=source_identity.uploader,
         links=tuple(parser.links),
         json_ld=tuple(parser.json_ld),
     )
@@ -189,8 +200,40 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def html_to_text(value: str) -> str:
+    if "<" not in value and "&" not in value:
+        return _normalize_text(value)
+
+    parser = _TextHTMLParser()
+    parser.feed(unescape(value))
+    return _normalize_text(" ".join(parser.text_parts))
+
+
+class _TextHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[str] = []
+        self.text_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.stack.append(tag.lower())
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self.stack:
+            last_index = len(self.stack) - 1 - self.stack[::-1].index(tag)
+            del self.stack[last_index:]
+
+    def handle_data(self, data: str) -> None:
+        if any(tag in SKIP_TEXT_TAGS for tag in self.stack):
+            return
+
+        text = _normalize_text(data)
+        if text:
+            self.text_parts.append(text)
+
+
 def _url_extension(url: str) -> str:
     path = urlsplit(url).path.lower()
     match = re.search(r"(\.[a-z0-9]+)$", path)
     return match.group(1) if match else ""
-

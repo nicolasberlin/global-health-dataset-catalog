@@ -3,7 +3,7 @@ from __future__ import annotations
 from collector.classification.dataset import score_dataset_page
 from collector.classification.health import score_health_page
 from collector.extraction.distributions import extract_distributions
-from collector.extraction.extractor import extract_page
+from collector.extraction.extractor import extract_page, html_to_text
 from collector.main import analyze_html_page
 from collector.storage.models import DistributionCandidate, HTTPProbe
 from collector.validation.downloads import validate_distribution
@@ -68,6 +68,66 @@ def test_collector_extracts_and_scores_health_dataset_page():
     assert dataset_score.signals["schema_dataset"] is True
     assert health_score.probability >= 0.75
     assert health_score.label == "HEALTH"
+
+
+def test_collector_cleans_html_descriptions():
+    html = """
+    <html>
+        <head>
+            <title>Household air pollution</title>
+            <meta
+                name="description"
+                content="<p><strong>Goal 7</strong>&nbsp;Exposure to indoor air pollutants.</p>"
+            />
+        </head>
+        <body><h1>Household air pollution</h1></body>
+    </html>
+    """
+
+    page = extract_page("https://example.org/household-air-pollution", html)
+
+    assert page.meta_description == "Goal 7 Exposure to indoor air pollutants."
+    assert html_to_text("<p>Mortality&nbsp;<strong>dataset</strong></p>") == "Mortality dataset"
+
+
+def test_collector_identifies_known_publisher_from_domain():
+    page = extract_page(
+        "https://www.who.int/data/gho/data/themes/air-pollution/household-air-pollution",
+        "<html><head><title>Household air pollution</title></head><body></body></html>",
+    )
+
+    assert page.publisher == "World Health Organization"
+    assert page.hosting_platform == ""
+    assert page.uploader == ""
+
+
+def test_collector_identifies_kaggle_platform_and_uploader():
+    page = extract_page(
+        "https://www.kaggle.com/datasets/prasad22/healthcare-dataset",
+        "<html><head><title>Healthcare Dataset</title></head><body></body></html>",
+    )
+
+    assert page.publisher == ""
+    assert page.hosting_platform == "Kaggle"
+    assert page.uploader == "prasad22"
+
+
+def test_collector_scores_healthcare_title_as_partial_health():
+    page = extract_page(
+        "https://www.kaggle.com/datasets/prasad22/healthcare-dataset",
+        """
+        <html>
+            <head><title>Healthcare Dataset | Kaggle</title></head>
+            <body><h1>Healthcare Dataset</h1></body>
+        </html>
+        """,
+    )
+
+    health_score = score_health_page(page)
+
+    assert health_score.probability >= 0.35
+    assert health_score.label == "PARTIALLY_HEALTH"
+    assert "healthcare" in health_score.signals["matched_keywords"]
 
 
 def test_collector_rejects_non_health_non_dataset_page():

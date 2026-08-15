@@ -43,6 +43,9 @@ def test_collector_analyze_html_route_returns_scores_and_distributions():
     response = analyze_html(payload)
 
     assert response.accepted is True
+    assert response.publisher == "National Health Agency"
+    assert response.hosting_platform == ""
+    assert response.uploader == ""
     assert response.dataset_probability >= 0.9
     assert response.health_probability >= 0.35
     assert response.health_label in {"HEALTH", "PARTIALLY_HEALTH"}
@@ -78,6 +81,9 @@ def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
     response = analyze_url(CollectorAnalyzeURLRequest(url="https://example.org/catalog"))
 
     assert response.accepted is True
+    assert response.publisher == ""
+    assert response.hosting_platform == ""
+    assert response.uploader == ""
     assert response.dataset_probability >= 0.6
     assert response.health_probability >= 0.35
     assert {distribution.format for distribution in response.distributions} == {"CSV"}

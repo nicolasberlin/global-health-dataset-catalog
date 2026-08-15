@@ -399,6 +399,16 @@ export default function App() {
                                     Publisher:{' '}
                                     <strong>{collectorResult.publisher || 'non detecte'}</strong>
                                 </p>
+                                <p>
+                                    Plateforme:{' '}
+                                    <strong>
+                                        {collectorResult.hosting_platform || 'non detectee'}
+                                    </strong>
+                                </p>
+                                <p>
+                                    Uploader:{' '}
+                                    <strong>{collectorResult.uploader || 'non detecte'}</strong>
+                                </p>
                             </div>
                             <div>
                                 <h4>Distributions trouvees</h4>

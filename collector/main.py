@@ -29,6 +29,8 @@ def analyze_html_page(
         title=page.title or page.h1 or page.canonical_url,
         description=page.meta_description or page.og_description,
         publisher=page.publisher,
+        hosting_platform=page.hosting_platform,
+        uploader=page.uploader,
         dataset_probability=dataset_score.probability,
         dataset_signals=dataset_score.signals,
         health_probability=health_score.probability,
@@ -36,4 +38,3 @@ def analyze_html_page(
         health_signals=health_score.signals,
         distributions=distributions,
     )
-

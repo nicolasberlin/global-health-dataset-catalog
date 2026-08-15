@@ -6,17 +6,23 @@ from collector.storage.models import HealthClassification, HealthLabel, PageSnap
 
 HEALTH_KEYWORDS = {
     "cancer",
+    "clinical",
     "disease",
+    "diagnosis",
     "epidemiology",
     "health",
+    "healthcare",
     "hospital",
     "maladie",
+    "medical",
     "mental health",
     "morbidity",
     "morbidite",
     "mortality",
     "mortalite",
+    "patient",
     "sante",
+    "treatment",
     "vaccination",
 }
 
@@ -31,7 +37,7 @@ def score_health_page(page: PageSnapshot) -> HealthClassification:
 
     score = 0.0
     if title_hits:
-        score += min(0.45, len(set(title_hits)) * 0.18)
+        score += min(0.55, len(set(title_hits)) * 0.35)
     if body_hits:
         score += min(0.45, len(set(body_hits)) * 0.08)
     if _publisher_health_signal(page.publisher):
@@ -75,4 +81,3 @@ def _label_for_probability(probability: float) -> HealthLabel:
 def _normalize(value: str) -> str:
     replacements = str.maketrans({"é": "e", "è": "e", "ê": "e", "à": "a", "ô": "o"})
     return value.lower().translate(replacements)
-

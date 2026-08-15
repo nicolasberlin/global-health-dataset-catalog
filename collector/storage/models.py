@@ -28,6 +28,8 @@ class PageSnapshot:
     headings: tuple[str, ...] = ()
     text: str = ""
     publisher: str = ""
+    hosting_platform: str = ""
+    uploader: str = ""
     links: tuple[LinkCandidate, ...] = ()
     json_ld: tuple[object, ...] = ()
 
@@ -90,10 +92,11 @@ class CollectedDataset:
     title: str
     description: str
     publisher: str
+    hosting_platform: str
+    uploader: str
     dataset_probability: float
     dataset_signals: dict[str, object]
     health_probability: float
     health_label: HealthLabel
     health_signals: dict[str, object]
     distributions: list[DistributionCandidate] = field(default_factory=list)
-
