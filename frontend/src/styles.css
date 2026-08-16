@@ -430,6 +430,13 @@ p {
     white-space: nowrap;
 }
 
+.source-card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
 .source-link {
     display: inline-flex;
     min-height: 36px;
@@ -446,6 +453,11 @@ p {
 .source-link:hover {
     border-color: #1f5f4a;
     background: #eef6f1;
+}
+
+.source-action-button {
+    min-height: 36px;
+    padding: 0 12px;
 }
 
 .empty-card {
@@ -468,6 +480,151 @@ p {
 
 .empty-card--loading {
     background: #f8faf9;
+}
+
+.collection-notice {
+    margin-top: 14px;
+    border: 1px solid #dbe4de;
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: #f8faf9;
+}
+
+.collection-notice p {
+    margin-bottom: 0;
+    color: #40514a;
+    font-weight: 700;
+}
+
+.collection-notice--ok {
+    border-color: #b8d1c4;
+    background: #eef6f1;
+}
+
+.collection-notice--empty {
+    border-color: #d9c6ad;
+    background: #fbf7f1;
+}
+
+.collection-notice--error {
+    border-color: #e0b9b4;
+    background: #fff7f6;
+}
+
+.collected-section {
+    margin-top: 18px;
+    border: 1px solid #dbe4de;
+    border-radius: 8px;
+    padding: 22px;
+    background: #fff;
+}
+
+.dataset-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.dataset-card {
+    display: flex;
+    min-height: 300px;
+    flex-direction: column;
+    border: 1px solid #dbe4de;
+    border-radius: 8px;
+    padding: 18px;
+    background: #fff;
+}
+
+.dataset-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.health-pill {
+    display: inline-flex;
+    min-height: 28px;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0 10px;
+    background: #f1f4f2;
+    color: #40514a;
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+.dataset-card p {
+    flex: 1;
+    margin-bottom: 14px;
+}
+
+.dataset-score-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.dataset-score-row span {
+    display: grid;
+    gap: 4px;
+    min-height: 72px;
+    align-content: center;
+    border: 1px solid #edf2ef;
+    border-radius: 8px;
+    padding: 10px;
+    background: #f8faf9;
+    color: #68766f;
+    font-size: 0.74rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.dataset-score-row strong {
+    color: #14231e;
+    font-size: 1.22rem;
+    line-height: 1;
+}
+
+.dataset-card__source {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid #edf2ef;
+    padding-top: 12px;
+}
+
+.dataset-card__source span {
+    min-width: 0;
+    overflow: hidden;
+    color: #68766f;
+    font-size: 0.86rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dataset-card__source a {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    border: 1px solid #b8d1c4;
+    border-radius: 8px;
+    padding: 0 10px;
+    color: #1f5f4a;
+    font-size: 0.88rem;
+    font-weight: 800;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.dataset-card__source a:hover {
+    border-color: #1f5f4a;
+    background: #eef6f1;
 }
 
 .collector-section {
@@ -602,6 +759,16 @@ p {
     font-size: 0.88rem;
 }
 
+.distribution-list small {
+    color: #68766f;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.distribution-list--compact {
+    margin-top: 14px;
+}
+
 @media (max-width: 900px) {
     .app-shell {
         width: min(100% - 28px, 720px);
@@ -612,6 +779,7 @@ p {
     .summary-grid,
     .catalog-toolbar,
     .source-grid,
+    .dataset-grid,
     .collector-result__header,
     .collector-detail-grid {
         grid-template-columns: 1fr;
@@ -625,6 +793,10 @@ p {
     .source-card {
         min-height: auto;
     }
+
+    .dataset-card {
+        min-height: auto;
+    }
 }
 
 @media (max-width: 560px) {
@@ -635,7 +807,9 @@ p {
     .title-block,
     .api-status,
     .catalog-section,
+    .collected-section,
     .collector-section,
+    .dataset-card,
     .source-card,
     .empty-card {
         padding: 16px;
@@ -654,7 +828,22 @@ p {
         flex-direction: column;
     }
 
+    .source-card__actions,
+    .dataset-card__source {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
     .source-link {
         justify-content: center;
+    }
+
+    .source-action-button,
+    .dataset-card__source a {
+        justify-content: center;
+    }
+
+    .dataset-score-row {
+        grid-template-columns: 1fr;
     }
 }

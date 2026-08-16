@@ -51,11 +51,16 @@ function getHostname(url) {
 
 export default function App() {
     const [sources, setSources] = useState([]);
+    const [collectedDatasets, setCollectedDatasets] = useState([]);
     const [selectedTheme, setSelectedTheme] = useState('All');
     const [searchTerm, setSearchTerm] = useState('');
     const [loading, setLoading] = useState(true);
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState('');
+    const [collectedLoading, setCollectedLoading] = useState(true);
+    const [collectedError, setCollectedError] = useState('');
+    const [collectingSourceId, setCollectingSourceId] = useState(null);
+    const [collectionNotice, setCollectionNotice] = useState(null);
     const [collectorUrl, setCollectorUrl] = useState('https://example.org/data/catalog');
     const [collectorHtml, setCollectorHtml] = useState(SAMPLE_COLLECTOR_HTML);
     const [collectorLoading, setCollectorLoading] = useState(false);
@@ -84,9 +89,73 @@ export default function App() {
         }
     }
 
+    async function loadCollectedDatasets({ silent = false } = {}) {
+        try {
+            if (!silent) {
+                setCollectedLoading(true);
+            }
+            setCollectedError('');
+
+            const response = await fetch(`${API_BASE_URL}/collector/collected-datasets`);
+            if (!response.ok) {
+                throw new Error('Impossible de récupérer les datasets collectés.');
+            }
+
+            const data = await response.json();
+            setCollectedDatasets(data.items ?? []);
+        } catch (exception) {
+            setCollectedDatasets([]);
+            setCollectedError(exception instanceof Error ? exception.message : 'Erreur inconnue');
+        } finally {
+            if (!silent) {
+                setCollectedLoading(false);
+            }
+        }
+    }
+
     useEffect(() => {
         loadSources();
+        loadCollectedDatasets();
     }, []);
+
+    async function collectSource(source) {
+        try {
+            setCollectingSourceId(source.id);
+            setCollectionNotice(null);
+
+            const response = await fetch(`${API_BASE_URL}/collector/collect-url`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    url: source.page_url,
+                }),
+            });
+
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => null);
+                throw new Error(errorPayload?.detail ?? 'Impossible de collecter cette source.');
+            }
+
+            const data = await response.json();
+            await loadCollectedDatasets({ silent: true });
+            setCollectionNotice({
+                tone: data.saved_count > 0 ? 'ok' : 'empty',
+                message:
+                    data.saved_count > 0
+                        ? `${data.saved_count} dataset(s) sauvegardé(s) depuis ${source.name}.`
+                        : `Aucun dataset santé avec fichier valide trouvé pour ${source.name}.`,
+            });
+        } catch (exception) {
+            setCollectionNotice({
+                tone: 'error',
+                message: exception instanceof Error ? exception.message : 'Erreur inconnue',
+            });
+        } finally {
+            setCollectingSourceId(null);
+        }
+    }
 
     async function analyzeCollector(endpoint, payload) {
         try {
@@ -154,6 +223,15 @@ export default function App() {
             return matchesTheme && matchesSearch;
         });
     }, [searchTerm, selectedTheme, sources]);
+
+    const collectedDistributionCount = useMemo(
+        () =>
+            collectedDatasets.reduce(
+                (total, dataset) => total + (dataset.distributions?.length ?? 0),
+                0,
+            ),
+        [collectedDatasets],
+    );
 
     const themeCount = themes.length > 0 ? themes.length - 1 : 0;
     const statusTone = error ? 'error' : loading ? 'loading' : 'ok';
@@ -224,9 +302,9 @@ export default function App() {
                     <small>{selectedThemeLabel}</small>
                 </article>
                 <article className="metric-card metric-card--muted">
-                    <span>Version</span>
-                    <strong>0.1</strong>
-                    <small>collector MVP</small>
+                    <span>Collectés</span>
+                    <strong>{collectedDatasets.length}</strong>
+                    <small>{collectedDistributionCount} fichiers valides</small>
                 </article>
             </section>
 
@@ -286,14 +364,26 @@ export default function App() {
                                 <p>{source.description}</p>
                                 <div className="source-card__footer">
                                     <span>{getHostname(source.page_url)}</span>
-                                    <a
-                                        className="source-link"
-                                        href={`${API_BASE_URL}/sources/${source.id}/page`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                    >
-                                        Ouvrir
-                                    </a>
+                                    <div className="source-card__actions">
+                                        <a
+                                            className="source-link"
+                                            href={`${API_BASE_URL}/sources/${source.id}/page`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                        >
+                                            Ouvrir
+                                        </a>
+                                        <button
+                                            type="button"
+                                            className="secondary-button source-action-button"
+                                            onClick={() => collectSource(source)}
+                                            disabled={collectingSourceId !== null}
+                                        >
+                                            {collectingSourceId === source.id
+                                                ? 'Collecte...'
+                                                : 'Collecter'}
+                                        </button>
+                                    </div>
                                 </div>
                             </article>
                         ))
@@ -309,6 +399,112 @@ export default function App() {
                         </article>
                     )}
                 </div>
+
+                {collectionNotice ? (
+                    <article className={`collection-notice collection-notice--${collectionNotice.tone}`}>
+                        <p>{collectionNotice.message}</p>
+                    </article>
+                ) : null}
+            </section>
+
+            <section className="collected-section">
+                <div className="section-heading">
+                    <div>
+                        <h2>Datasets collectés</h2>
+                        <p>Résultats sauvegardés après classification santé et validation des fichiers.</p>
+                    </div>
+                    <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => loadCollectedDatasets()}
+                        disabled={collectedLoading}
+                    >
+                        {collectedLoading ? 'Chargement...' : 'Actualiser'}
+                    </button>
+                </div>
+
+                {collectedError ? (
+                    <article className="empty-card empty-card--error">
+                        <h3>Impossible de charger les datasets collectés</h3>
+                        <p>{collectedError}</p>
+                    </article>
+                ) : null}
+
+                {!collectedError && collectedLoading ? (
+                    <article className="empty-card empty-card--loading">
+                        <h3>Chargement des datasets collectés</h3>
+                        <p>Lecture des résultats sauvegardés.</p>
+                    </article>
+                ) : null}
+
+                {!collectedError && !collectedLoading && collectedDatasets.length === 0 ? (
+                    <article className="empty-card">
+                        <h3>Aucun dataset collecté</h3>
+                        <p>Lance une collecte depuis une source pour remplir cette liste.</p>
+                    </article>
+                ) : null}
+
+                {!collectedError && !collectedLoading && collectedDatasets.length > 0 ? (
+                    <div className="dataset-grid">
+                        {collectedDatasets.map((dataset) => (
+                            <article className="dataset-card" key={dataset.dataset_url}>
+                                <div className="dataset-card__meta">
+                                    <span className="theme-pill">{dataset.discovery_method || 'source'}</span>
+                                    <span className="health-pill">{dataset.health_label}</span>
+                                </div>
+                                <h3>{dataset.title}</h3>
+                                <p>{dataset.description || dataset.dataset_url}</p>
+
+                                <div className="dataset-score-row">
+                                    <span>
+                                        Dataset
+                                        <strong>{formatPercent(dataset.dataset_probability)}</strong>
+                                    </span>
+                                    <span>
+                                        Santé
+                                        <strong>{formatPercent(dataset.health_probability)}</strong>
+                                    </span>
+                                    <span>
+                                        Fichiers
+                                        <strong>{dataset.distributions?.length ?? 0}</strong>
+                                    </span>
+                                </div>
+
+                                <div className="dataset-card__source">
+                                    <span>{dataset.publisher || getHostname(dataset.dataset_url)}</span>
+                                    <a href={dataset.dataset_url} target="_blank" rel="noreferrer">
+                                        Page dataset
+                                    </a>
+                                </div>
+
+                                {dataset.distributions?.length > 0 ? (
+                                    <ul className="distribution-list distribution-list--compact">
+                                        {dataset.distributions.slice(0, 4).map((distribution) => {
+                                            const validation = dataset.validation_results?.find(
+                                                (item) => item.url === distribution.url,
+                                            );
+
+                                            return (
+                                                <li key={`${dataset.dataset_url}-${distribution.url}`}>
+                                                    <strong>{distribution.format}</strong>
+                                                    <span>{distribution.url}</span>
+                                                    <small>
+                                                        {validation?.http_status
+                                                            ? `HTTP ${validation.http_status}`
+                                                            : 'validé'}
+                                                        {validation?.size_bytes
+                                                            ? ` · ${validation.size_bytes} bytes`
+                                                            : ''}
+                                                    </small>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                ) : null}
+                            </article>
+                        ))}
+                    </div>
+                ) : null}
             </section>
 
             <section className="collector-section">
