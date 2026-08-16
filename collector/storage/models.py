@@ -100,3 +100,8 @@ class CollectedDataset:
     health_label: HealthLabel
     health_signals: dict[str, object]
     distributions: list[DistributionCandidate] = field(default_factory=list)
+    discovery_method: str = ""
+    validation_results: list[ValidationResult] = field(default_factory=list)
+    source_url: str = ""
+    database_id: int | None = None
+    updated_at: str = ""

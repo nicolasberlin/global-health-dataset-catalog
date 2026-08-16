@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collector.classification.dataset import score_dataset_page
 from collector.classification.health import score_health_page
+from collector.discovery.adapters import DiscoveredPage
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
-from collector.main import analyze_html_page
-from collector.storage.models import DistributionCandidate, HTTPProbe
+from collector.fetch import FetchedPage
+from collector.main import analyze_html_page, collect_source
+from collector.storage.models import DistributionCandidate, HTTPProbe, ValidationResult
 from collector.validation.downloads import validate_distribution
 
 DATASET_HTML = """
@@ -208,3 +210,124 @@ def test_distribution_validation_falls_back_to_partial_get():
     assert calls == ["HEAD", "GET"]
     assert result.ok is True
     assert result.format == "CSV"
+
+
+def test_collect_source_uses_structured_discovery_metadata_without_fetching_html():
+    csv_distribution = DistributionCandidate(
+        url="https://data.example.org/mortality.csv",
+        format="CSV",
+        probability=0.95,
+        mime_type="text/csv",
+    )
+    json_distribution = DistributionCandidate(
+        url="https://data.example.org/mortality.json",
+        format="JSON",
+        probability=0.95,
+        mime_type="application/json",
+    )
+    discovered_page = DiscoveredPage(
+        url="https://catalog.example.org/dataset/mortality",
+        discovery_method="ckan",
+        priority=0.9,
+        title="Mortality health dataset",
+        description="Official epidemiology indicators.",
+        publisher="National Health Agency",
+        distributions=(csv_distribution, json_distribution),
+    )
+
+    def fake_discover(url):
+        assert url == "https://catalog.example.org"
+        return [discovered_page]
+
+    def fake_fetch_html(url):
+        raise AssertionError(f"Should not fetch structured discovery page: {url}")
+
+    def fake_validate(distribution):
+        return ValidationResult(
+            url=distribution.url,
+            final_url=distribution.url,
+            format=distribution.format,
+            ok=distribution.format == "CSV",
+            http_status=200 if distribution.format == "CSV" else 500,
+            mime_type=distribution.mime_type,
+        )
+
+    datasets = collect_source(
+        "https://catalog.example.org",
+        discover=fake_discover,
+        fetch_html=fake_fetch_html,
+        validate=fake_validate,
+    )
+
+    assert len(datasets) == 1
+    dataset = datasets[0]
+    assert dataset.dataset_url == "https://catalog.example.org/dataset/mortality"
+    assert dataset.title == "Mortality health dataset"
+    assert dataset.publisher == "National Health Agency"
+    assert dataset.discovery_method == "ckan"
+    assert dataset.dataset_probability >= 0.6
+    assert dataset.health_probability >= 0.35
+    assert [distribution.url for distribution in dataset.distributions] == [
+        "https://data.example.org/mortality.csv"
+    ]
+    assert [validation.ok for validation in dataset.validation_results] == [True]
+
+
+def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():
+    discovered_page = DiscoveredPage(
+        url="https://example.org/datasets/vaccination",
+        discovery_method="generic_website",
+        priority=0.1,
+    )
+
+    def fake_discover(url):
+        assert url == "https://example.org/catalog"
+        return [discovered_page]
+
+    def fake_fetch_html(url):
+        assert url == "https://example.org/datasets/vaccination"
+        return FetchedPage(
+            url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            html="""
+            <html>
+                <head>
+                    <title>Vaccination health dataset</title>
+                    <script type="application/ld+json">
+                    {"@type": "Dataset"}
+                    </script>
+                </head>
+                <body>
+                    <h1>Vaccination health dataset</h1>
+                    <p>Vaccination and epidemiology data.</p>
+                    <a href="https://example.org/files/vaccination.csv">Download CSV</a>
+                </body>
+            </html>
+            """,
+        )
+
+    def fake_validate(distribution):
+        return ValidationResult(
+            url=distribution.url,
+            final_url=distribution.url,
+            format=distribution.format,
+            ok=True,
+            http_status=200,
+            mime_type="text/csv",
+        )
+
+    datasets = collect_source(
+        "https://example.org/catalog",
+        discover=fake_discover,
+        fetch_html=fake_fetch_html,
+        validate=fake_validate,
+    )
+
+    assert len(datasets) == 1
+    dataset = datasets[0]
+    assert dataset.discovery_method == "generic_website"
+    assert dataset.title == "Vaccination health dataset"
+    assert [distribution.format for distribution in dataset.distributions] == ["CSV"]
+    assert dataset.validation_results[0].ok is True

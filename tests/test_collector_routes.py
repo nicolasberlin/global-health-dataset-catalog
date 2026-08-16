@@ -3,16 +3,19 @@ from __future__ import annotations
 from app.routes.collector import (
     CollectorAnalyzeHTMLRequest,
     CollectorAnalyzeURLRequest,
+    CollectorCollectURLRequest,
     CollectorDiscoverURLRequest,
     analyze_html,
     analyze_url,
+    collect_url,
     discover_url,
+    list_collected,
 )
 from fastapi import HTTPException
 
 from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage
-from collector.storage.models import DistributionCandidate
+from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 
 def test_collector_analyze_html_route_returns_scores_and_distributions():
@@ -150,3 +153,150 @@ def test_collector_discover_url_route_returns_bad_request_for_discovery_errors(m
         assert exception.detail == "Could not discover https://catalog.example.org/"
     else:
         raise AssertionError("Expected HTTPException.")
+
+
+def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
+    saved_calls = []
+
+    def fake_collect_source(url):
+        assert url == "https://catalog.example.org/"
+        return [
+            CollectedDataset(
+                dataset_url="https://catalog.example.org/dataset/mortality",
+                title="Mortality health dataset",
+                description="Official mortality health data.",
+                publisher="National Health Agency",
+                hosting_platform="",
+                uploader="",
+                dataset_probability=0.92,
+                dataset_signals={"schema_dataset": True},
+                health_probability=0.8,
+                health_label="HEALTH",
+                health_signals={"matched_keywords": ["mortality"]},
+                distributions=[
+                    DistributionCandidate(
+                        url="https://catalog.example.org/files/mortality.csv",
+                        format="CSV",
+                        probability=0.95,
+                        anchor="CSV download",
+                        mime_type="text/csv",
+                    )
+                ],
+                discovery_method="ckan",
+                validation_results=[
+                    ValidationResult(
+                        url="https://catalog.example.org/files/mortality.csv",
+                        final_url="https://catalog.example.org/files/mortality.csv",
+                        format="CSV",
+                        ok=True,
+                        http_status=200,
+                        mime_type="text/csv",
+                        size_bytes=123,
+                    )
+                ],
+            )
+        ]
+
+    def fake_save_collected_datasets(source_url, datasets):
+        saved_calls.append((source_url, datasets))
+        return datasets
+
+    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
+    monkeypatch.setattr(
+        "app.routes.collector.save_collected_datasets",
+        fake_save_collected_datasets,
+    )
+
+    response = collect_url(CollectorCollectURLRequest(url="https://catalog.example.org"))
+
+    assert len(saved_calls) == 1
+    assert saved_calls[0][0] == "https://catalog.example.org/"
+    assert len(response.items) == 1
+    assert response.saved is True
+    assert response.saved_count == 1
+    item = response.items[0]
+    assert item.dataset_url == "https://catalog.example.org/dataset/mortality"
+    assert item.discovery_method == "ckan"
+    assert item.dataset_probability == 0.92
+    assert item.health_label == "HEALTH"
+    assert item.distributions[0].format == "CSV"
+    assert item.validation_results[0].ok is True
+    assert item.validation_results[0].size_bytes == 123
+
+
+def test_collector_collect_url_route_can_skip_saving(monkeypatch):
+    def fake_collect_source(url):
+        return [
+            CollectedDataset(
+                dataset_url="https://catalog.example.org/dataset/mortality",
+                title="Mortality health dataset",
+                description="Official mortality health data.",
+                publisher="National Health Agency",
+                hosting_platform="",
+                uploader="",
+                dataset_probability=0.92,
+                dataset_signals={},
+                health_probability=0.8,
+                health_label="HEALTH",
+                health_signals={},
+                distributions=[],
+                discovery_method="ckan",
+                validation_results=[],
+            )
+        ]
+
+    def fake_save_collected_datasets(source_url, datasets):
+        raise AssertionError("Should not save when save is false.")
+
+    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
+    monkeypatch.setattr(
+        "app.routes.collector.save_collected_datasets",
+        fake_save_collected_datasets,
+    )
+
+    response = collect_url(
+        CollectorCollectURLRequest(url="https://catalog.example.org", save=False)
+    )
+
+    assert response.saved is False
+    assert response.saved_count == 0
+    assert len(response.items) == 1
+
+
+def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):
+    def fake_list_collected_datasets():
+        return [
+            CollectedDataset(
+                dataset_url="https://catalog.example.org/dataset/mortality",
+                title="Mortality health dataset",
+                description="Official mortality health data.",
+                publisher="National Health Agency",
+                hosting_platform="",
+                uploader="",
+                dataset_probability=0.92,
+                dataset_signals={},
+                health_probability=0.8,
+                health_label="HEALTH",
+                health_signals={},
+                distributions=[],
+                discovery_method="ckan",
+                validation_results=[],
+                source_url="https://catalog.example.org/",
+                database_id=7,
+                updated_at="2026-08-16 12:00:00",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.routes.collector.list_collected_datasets",
+        fake_list_collected_datasets,
+    )
+
+    response = list_collected()
+
+    assert response.saved is False
+    assert response.saved_count == 0
+    assert len(response.items) == 1
+    assert response.items[0].id == 7
+    assert response.items[0].source_url == "https://catalog.example.org/"
+    assert response.items[0].updated_at == "2026-08-16 12:00:00"

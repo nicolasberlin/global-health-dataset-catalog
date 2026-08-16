@@ -75,6 +75,9 @@ POST /sources
 GET  /sources/{id}/page
 POST /collector/analyze-html
 POST /collector/analyze-url
+POST /collector/discover-url
+POST /collector/collect-url
+GET  /collector/collected-datasets
 ```
 
 Example:
@@ -89,6 +92,28 @@ Add a dataset page:
 curl -i -X POST http://127.0.0.1:8001/sources \
   -H "Content-Type: application/json" \
   -d '{"source_key":"who_data_portal","name":"WHO Data","description":"WHO data portal","theme":"General","page_url":"https://platform.who.int/data"}'
+```
+
+Collect, classify, validate, and save datasets from a source URL:
+
+```bash
+curl -i -X POST http://127.0.0.1:8001/collector/collect-url \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://catalog.data.gov"}'
+```
+
+Run the same collection without saving:
+
+```bash
+curl -i -X POST http://127.0.0.1:8001/collector/collect-url \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://catalog.data.gov","save":false}'
+```
+
+List saved collected datasets:
+
+```bash
+curl -i http://127.0.0.1:8001/collector/collected-datasets
 ```
 
 ## Frontend
