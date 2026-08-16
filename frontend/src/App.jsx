@@ -49,6 +49,12 @@ function getHostname(url) {
     }
 }
 
+function wait(milliseconds) {
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, milliseconds);
+    });
+}
+
 export default function App() {
     const [sources, setSources] = useState([]);
     const [collectedDatasets, setCollectedDatasets] = useState([]);
@@ -61,6 +67,7 @@ export default function App() {
     const [collectedError, setCollectedError] = useState('');
     const [collectingSourceId, setCollectingSourceId] = useState(null);
     const [collectionNotice, setCollectionNotice] = useState(null);
+    const [activeCollectionJob, setActiveCollectionJob] = useState(null);
     const [collectorUrl, setCollectorUrl] = useState('https://example.org/data/catalog');
     const [collectorHtml, setCollectorHtml] = useState(SAMPLE_COLLECTOR_HTML);
     const [collectorLoading, setCollectorLoading] = useState(false);
@@ -118,12 +125,58 @@ export default function App() {
         loadCollectedDatasets();
     }, []);
 
+    async function loadCollectionJob(jobId) {
+        const response = await fetch(`${API_BASE_URL}/collector/collection-jobs/${jobId}`);
+        if (!response.ok) {
+            const errorPayload = await response.json().catch(() => null);
+            throw new Error(errorPayload?.detail ?? 'Impossible de lire le statut de collecte.');
+        }
+
+        const data = await response.json();
+        return data.job;
+    }
+
+    async function pollCollectionJob(jobId, sourceName) {
+        const maxAttempts = 80;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            await wait(attempt === 0 ? 700 : 1500);
+
+            const job = await loadCollectionJob(jobId);
+            setActiveCollectionJob(job);
+
+            if (job.status === 'done') {
+                await loadCollectedDatasets({ silent: true });
+                setCollectionNotice({
+                    tone: job.saved_count > 0 ? 'ok' : 'empty',
+                    message:
+                        job.saved_count > 0
+                            ? `${job.saved_count} dataset(s) sauvegardé(s) depuis ${sourceName}.`
+                            : `Aucun dataset santé avec fichier valide trouvé pour ${sourceName}.`,
+                });
+                return;
+            }
+
+            if (job.status === 'error') {
+                throw new Error(job.error || 'Collecte échouée.');
+            }
+
+            setCollectionNotice({
+                tone: 'loading',
+                message: `Job #${job.id}: ${job.message || 'collecte en cours.'}`,
+            });
+        }
+
+        throw new Error('La collecte prend trop de temps. Réessaie plus tard.');
+    }
+
     async function collectSource(source) {
         try {
             setCollectingSourceId(source.id);
             setCollectionNotice(null);
+            setActiveCollectionJob(null);
 
-            const response = await fetch(`${API_BASE_URL}/collector/collect-url`, {
+            const response = await fetch(`${API_BASE_URL}/collector/collection-jobs`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -139,14 +192,12 @@ export default function App() {
             }
 
             const data = await response.json();
-            await loadCollectedDatasets({ silent: true });
+            setActiveCollectionJob(data.job);
             setCollectionNotice({
-                tone: data.saved_count > 0 ? 'ok' : 'empty',
-                message:
-                    data.saved_count > 0
-                        ? `${data.saved_count} dataset(s) sauvegardé(s) depuis ${source.name}.`
-                        : `Aucun dataset santé avec fichier valide trouvé pour ${source.name}.`,
+                tone: 'loading',
+                message: `Job #${data.job.id}: collecte lancée pour ${source.name}.`,
             });
+            await pollCollectionJob(data.job.id, source.name);
         } catch (exception) {
             setCollectionNotice({
                 tone: 'error',
@@ -154,6 +205,7 @@ export default function App() {
             });
         } finally {
             setCollectingSourceId(null);
+            setActiveCollectionJob(null);
         }
     }
 
@@ -403,6 +455,12 @@ export default function App() {
                 {collectionNotice ? (
                     <article className={`collection-notice collection-notice--${collectionNotice.tone}`}>
                         <p>{collectionNotice.message}</p>
+                        {activeCollectionJob ? (
+                            <small>
+                                Statut: {activeCollectionJob.status} · sauvegardés:{' '}
+                                {activeCollectionJob.saved_count}
+                            </small>
+                        ) : null}
                     </article>
                 ) : null}
             </section>

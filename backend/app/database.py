@@ -91,6 +91,20 @@ CREATE TABLE collected_distributions (
 )
 """
 
+COLLECTION_JOBS_SCHEMA = """
+CREATE TABLE collection_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_url TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    saved_count INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT NOT NULL DEFAULT ''
+)
+"""
+
 
 def get_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(DATABASE_PATH)
@@ -105,6 +119,7 @@ def init_database() -> None:
     with get_connection() as connection:
         _ensure_data_sources_table(connection)
         _ensure_collected_tables(connection)
+        _ensure_collection_jobs_table(connection)
         _seed_data_sources(connection)
         connection.execute("DROP TABLE IF EXISTS accounts")
 
@@ -254,6 +269,101 @@ def list_collected_datasets() -> list[CollectedDataset]:
     ]
 
 
+def create_collection_job(source_url: str) -> dict[str, int | str]:
+    with get_connection() as connection:
+        _ensure_collection_jobs_table(connection)
+        cursor = connection.execute(
+            """
+            INSERT INTO collection_jobs (source_url, status, message)
+            VALUES (?, 'pending', 'Collecte en attente.')
+            """,
+            (source_url,),
+        )
+        row = _get_collection_job_row(connection, int(cursor.lastrowid))
+
+    return _collection_job_to_dict(row)
+
+
+def get_collection_job(job_id: int) -> dict[str, int | str] | None:
+    with get_connection() as connection:
+        _ensure_collection_jobs_table(connection)
+        row = _get_collection_job_row(connection, job_id)
+
+    return _collection_job_to_dict(row) if row else None
+
+
+def mark_collection_job_running(job_id: int) -> dict[str, int | str] | None:
+    with get_connection() as connection:
+        _ensure_collection_jobs_table(connection)
+        connection.execute(
+            """
+            UPDATE collection_jobs
+            SET status = 'running',
+                message = 'Collecte en cours.',
+                error = '',
+                updated_at = CURRENT_TIMESTAMP,
+                finished_at = ''
+            WHERE id = ?
+            """,
+            (job_id,),
+        )
+        row = _get_collection_job_row(connection, job_id)
+
+    return _collection_job_to_dict(row) if row else None
+
+
+def mark_collection_job_done(
+    job_id: int,
+    saved_count: int,
+) -> dict[str, int | str] | None:
+    message = (
+        f"{saved_count} dataset(s) sauvegardé(s)."
+        if saved_count
+        else "Aucun dataset santé avec fichier valide trouvé."
+    )
+    with get_connection() as connection:
+        _ensure_collection_jobs_table(connection)
+        connection.execute(
+            """
+            UPDATE collection_jobs
+            SET status = 'done',
+                saved_count = ?,
+                message = ?,
+                error = '',
+                updated_at = CURRENT_TIMESTAMP,
+                finished_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (saved_count, message, job_id),
+        )
+        row = _get_collection_job_row(connection, job_id)
+
+    return _collection_job_to_dict(row) if row else None
+
+
+def mark_collection_job_error(
+    job_id: int,
+    error: str,
+) -> dict[str, int | str] | None:
+    with get_connection() as connection:
+        _ensure_collection_jobs_table(connection)
+        connection.execute(
+            """
+            UPDATE collection_jobs
+            SET status = 'error',
+                message = 'Collecte échouée.',
+                error = ?,
+                updated_at = CURRENT_TIMESTAMP,
+                finished_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (error, job_id),
+        )
+        row = _get_collection_job_row(connection, job_id)
+
+    return _collection_job_to_dict(row) if row else None
+
+
 def _ensure_data_sources_table(connection: sqlite3.Connection) -> None:
     if not _table_exists(connection, "data_sources"):
         connection.execute(DATA_SOURCES_SCHEMA)
@@ -296,6 +406,11 @@ def _ensure_collected_tables(connection: sqlite3.Connection) -> None:
         connection.execute(COLLECTED_DISTRIBUTIONS_SCHEMA)
 
 
+def _ensure_collection_jobs_table(connection: sqlite3.Connection) -> None:
+    if not _table_exists(connection, "collection_jobs"):
+        connection.execute(COLLECTION_JOBS_SCHEMA)
+
+
 def _seed_data_sources(connection: sqlite3.Connection) -> None:
     for source in DATA_SOURCE_SEEDS:
         connection.execute(
@@ -334,6 +449,35 @@ def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
 def _table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
     rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {row["name"] for row in rows}
+
+
+def _get_collection_job_row(
+    connection: sqlite3.Connection,
+    job_id: int,
+) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT id, source_url, status, saved_count, message, error,
+               created_at, updated_at, finished_at
+        FROM collection_jobs
+        WHERE id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+
+
+def _collection_job_to_dict(row: sqlite3.Row) -> dict[str, int | str]:
+    return {
+        "id": int(row["id"]),
+        "source_url": str(row["source_url"]),
+        "status": str(row["status"]),
+        "saved_count": int(row["saved_count"]),
+        "message": str(row["message"]),
+        "error": str(row["error"]),
+        "created_at": str(row["created_at"]),
+        "updated_at": str(row["updated_at"]),
+        "finished_at": str(row["finished_at"]),
+    }
 
 
 def _upsert_collected_dataset(

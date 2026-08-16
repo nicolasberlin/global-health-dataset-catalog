@@ -496,9 +496,22 @@ p {
     font-weight: 700;
 }
 
+.collection-notice small {
+    display: block;
+    margin-top: 6px;
+    color: #68766f;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
 .collection-notice--ok {
     border-color: #b8d1c4;
     background: #eef6f1;
+}
+
+.collection-notice--loading {
+    border-color: #b9c8d8;
+    background: #f3f7fb;
 }
 
 .collection-notice--empty {

@@ -194,3 +194,50 @@ def test_save_and_list_collected_datasets(tmp_path, monkeypatch):
     assert len(collected) == 1
     assert collected[0].title == "Updated mortality health dataset"
     assert [distribution.format for distribution in collected[0].distributions] == ["JSON"]
+
+
+def test_collection_job_lifecycle(tmp_path, monkeypatch):
+    monkeypatch.setenv("GLOBAL_HEALTH_DB_PATH", str(tmp_path / "jobs.db"))
+
+    from app import database
+
+    importlib.reload(database)
+    database.init_database()
+
+    job = database.create_collection_job("https://catalog.example.org/")
+
+    assert job["id"] == 1
+    assert job["source_url"] == "https://catalog.example.org/"
+    assert job["status"] == "pending"
+    assert job["saved_count"] == 0
+    assert job["message"] == "Collecte en attente."
+
+    running = database.mark_collection_job_running(int(job["id"]))
+    assert running["status"] == "running"
+    assert running["message"] == "Collecte en cours."
+
+    done = database.mark_collection_job_done(int(job["id"]), 3)
+    assert done["status"] == "done"
+    assert done["saved_count"] == 3
+    assert done["message"] == "3 dataset(s) sauvegardé(s)."
+    assert done["finished_at"] != ""
+
+    fetched = database.get_collection_job(int(job["id"]))
+    assert fetched == done
+
+
+def test_collection_job_records_errors(tmp_path, monkeypatch):
+    monkeypatch.setenv("GLOBAL_HEALTH_DB_PATH", str(tmp_path / "job-error.db"))
+
+    from app import database
+
+    importlib.reload(database)
+    database.init_database()
+
+    job = database.create_collection_job("https://catalog.example.org/")
+    failed = database.mark_collection_job_error(int(job["id"]), "network timeout")
+
+    assert failed["status"] == "error"
+    assert failed["message"] == "Collecte échouée."
+    assert failed["error"] == "network timeout"
+    assert failed["finished_at"] != ""

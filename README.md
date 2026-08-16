@@ -77,6 +77,8 @@ POST /collector/analyze-html
 POST /collector/analyze-url
 POST /collector/discover-url
 POST /collector/collect-url
+POST /collector/collection-jobs
+GET  /collector/collection-jobs/{job_id}
 GET  /collector/collected-datasets
 ```
 
@@ -94,12 +96,26 @@ curl -i -X POST http://127.0.0.1:8001/sources \
   -d '{"source_key":"who_data_portal","name":"WHO Data","description":"WHO data portal","theme":"General","page_url":"https://platform.who.int/data"}'
 ```
 
-Collect, classify, validate, and save datasets from a source URL:
+Start an asynchronous collection job:
+
+```bash
+curl -i -X POST http://127.0.0.1:8001/collector/collection-jobs \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://data.humdata.org/?q=health"}'
+```
+
+Poll the collection job:
+
+```bash
+curl -i http://127.0.0.1:8001/collector/collection-jobs/1
+```
+
+Collect, classify, validate, and save synchronously from a source URL:
 
 ```bash
 curl -i -X POST http://127.0.0.1:8001/collector/collect-url \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://catalog.data.gov"}'
+  -d '{"url":"https://data.humdata.org/?q=health"}'
 ```
 
 Run the same collection without saving:
@@ -107,7 +123,7 @@ Run the same collection without saving:
 ```bash
 curl -i -X POST http://127.0.0.1:8001/collector/collect-url \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://catalog.data.gov","save":false}'
+  -d '{"url":"https://data.humdata.org/?q=health","save":false}'
 ```
 
 List saved collected datasets:

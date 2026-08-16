@@ -3,15 +3,19 @@ from __future__ import annotations
 from app.routes.collector import (
     CollectorAnalyzeHTMLRequest,
     CollectorAnalyzeURLRequest,
+    CollectorCollectionJobRequest,
     CollectorCollectURLRequest,
     CollectorDiscoverURLRequest,
+    _run_collection_job,
     analyze_html,
     analyze_url,
     collect_url,
     discover_url,
     list_collected,
+    read_collection_job,
+    start_collection_job,
 )
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage
@@ -261,6 +265,147 @@ def test_collector_collect_url_route_can_skip_saving(monkeypatch):
     assert response.saved is False
     assert response.saved_count == 0
     assert len(response.items) == 1
+
+
+def test_collector_start_collection_job_route_enqueues_background_task(monkeypatch):
+    def fake_create_collection_job(source_url):
+        assert source_url == "https://catalog.example.org/"
+        return {
+            "id": 12,
+            "source_url": source_url,
+            "status": "pending",
+            "saved_count": 0,
+            "message": "Collecte en attente.",
+            "error": "",
+            "created_at": "2026-08-16 12:00:00",
+            "updated_at": "2026-08-16 12:00:00",
+            "finished_at": "",
+        }
+
+    background_tasks = BackgroundTasks()
+
+    monkeypatch.setattr(
+        "app.routes.collector.db_create_collection_job",
+        fake_create_collection_job,
+    )
+
+    response = start_collection_job(
+        CollectorCollectionJobRequest(url="https://catalog.example.org"),
+        background_tasks,
+    )
+
+    assert response.job.id == 12
+    assert response.job.status == "pending"
+    assert len(background_tasks.tasks) == 1
+
+
+def test_collector_read_collection_job_route_returns_status(monkeypatch):
+    def fake_get_collection_job(job_id):
+        assert job_id == 12
+        return {
+            "id": 12,
+            "source_url": "https://catalog.example.org/",
+            "status": "done",
+            "saved_count": 2,
+            "message": "2 dataset(s) sauvegardé(s).",
+            "error": "",
+            "created_at": "2026-08-16 12:00:00",
+            "updated_at": "2026-08-16 12:01:00",
+            "finished_at": "2026-08-16 12:01:00",
+        }
+
+    monkeypatch.setattr("app.routes.collector.get_collection_job", fake_get_collection_job)
+
+    response = read_collection_job(12)
+
+    assert response.job.id == 12
+    assert response.job.status == "done"
+    assert response.job.saved_count == 2
+
+
+def test_collector_read_collection_job_route_returns_not_found(monkeypatch):
+    monkeypatch.setattr("app.routes.collector.get_collection_job", lambda job_id: None)
+
+    try:
+        read_collection_job(404)
+    except HTTPException as exception:
+        assert exception.status_code == 404
+        assert exception.detail == "Collection job not found"
+    else:
+        raise AssertionError("Expected HTTPException.")
+
+
+def test_run_collection_job_marks_done(monkeypatch):
+    calls = []
+
+    def fake_collect_source(source_url):
+        calls.append(("collect", source_url))
+        return [
+            CollectedDataset(
+                dataset_url="https://catalog.example.org/dataset/mortality",
+                title="Mortality health dataset",
+                description="Official mortality health data.",
+                publisher="National Health Agency",
+                hosting_platform="",
+                uploader="",
+                dataset_probability=0.92,
+                dataset_signals={},
+                health_probability=0.8,
+                health_label="HEALTH",
+                health_signals={},
+                distributions=[],
+                discovery_method="ckan",
+                validation_results=[],
+            )
+        ]
+
+    def fake_save_collected_datasets(source_url, datasets):
+        calls.append(("save", source_url, len(datasets)))
+        return datasets
+
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_running",
+        lambda job_id: calls.append(("running", job_id)),
+    )
+    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
+    monkeypatch.setattr(
+        "app.routes.collector.save_collected_datasets",
+        fake_save_collected_datasets,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_done",
+        lambda job_id, saved_count: calls.append(("done", job_id, saved_count)),
+    )
+
+    _run_collection_job(12, "https://catalog.example.org/")
+
+    assert calls == [
+        ("running", 12),
+        ("collect", "https://catalog.example.org/"),
+        ("save", "https://catalog.example.org/", 1),
+        ("done", 12, 1),
+    ]
+
+
+def test_run_collection_job_marks_errors(monkeypatch):
+    calls = []
+
+    def fake_collect_source(source_url):
+        raise ValueError("bad source")
+
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_running",
+        lambda job_id: calls.append(("running", job_id)),
+    )
+    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_error",
+        lambda job_id, error: calls.append(("error", job_id, error)),
+    )
+
+    _run_collection_job(12, "https://catalog.example.org/")
+
+    assert calls == [("running", 12), ("error", 12, "bad source")]
 
 
 def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):

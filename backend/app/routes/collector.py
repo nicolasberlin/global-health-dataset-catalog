@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
-from app.database import list_collected_datasets, save_collected_datasets
+from app.database import create_collection_job as db_create_collection_job
+from app.database import (
+    get_collection_job,
+    list_collected_datasets,
+    mark_collection_job_done,
+    mark_collection_job_error,
+    mark_collection_job_running,
+    save_collected_datasets,
+)
 from collector.classification.dataset import score_dataset_page
 from collector.classification.health import score_health_page
 from collector.config import DEFAULT_CONFIG
@@ -35,6 +43,10 @@ class CollectorDiscoverURLRequest(BaseModel):
 class CollectorCollectURLRequest(BaseModel):
     url: HttpUrl
     save: bool = True
+
+
+class CollectorCollectionJobRequest(BaseModel):
+    url: HttpUrl
 
 
 class CollectorDistribution(BaseModel):
@@ -116,6 +128,22 @@ class CollectorCollectionResponse(BaseModel):
     saved_count: int = 0
 
 
+class CollectorCollectionJob(BaseModel):
+    id: int
+    source_url: str
+    status: str
+    saved_count: int
+    message: str = ""
+    error: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    finished_at: str = ""
+
+
+class CollectorCollectionJobResponse(BaseModel):
+    job: CollectorCollectionJob
+
+
 @router.post("/analyze-html")
 def analyze_html(payload: CollectorAnalyzeHTMLRequest) -> CollectorAnalyzeHTMLResponse:
     return _analyze_html(str(payload.url), payload.html)
@@ -158,6 +186,26 @@ def discover_url(payload: CollectorDiscoverURLRequest) -> CollectorDiscoveryResp
     )
 
 
+@router.post("/collection-jobs", status_code=202)
+def start_collection_job(
+    payload: CollectorCollectionJobRequest,
+    background_tasks: BackgroundTasks,
+) -> CollectorCollectionJobResponse:
+    job = db_create_collection_job(str(payload.url))
+    background_tasks.add_task(_run_collection_job, int(job["id"]), str(payload.url))
+
+    return CollectorCollectionJobResponse(job=CollectorCollectionJob(**job))
+
+
+@router.get("/collection-jobs/{job_id}")
+def read_collection_job(job_id: int) -> CollectorCollectionJobResponse:
+    job = get_collection_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Collection job not found")
+
+    return CollectorCollectionJobResponse(job=CollectorCollectionJob(**job))
+
+
 @router.post("/collect-url")
 def collect_url(payload: CollectorCollectURLRequest) -> CollectorCollectionResponse:
     try:
@@ -185,6 +233,16 @@ def list_collected() -> CollectorCollectionResponse:
         saved=False,
         saved_count=0,
     )
+
+
+def _run_collection_job(job_id: int, source_url: str) -> None:
+    try:
+        mark_collection_job_running(job_id)
+        collected_datasets = collect_source(source_url)
+        saved_datasets = save_collected_datasets(source_url, collected_datasets)
+        mark_collection_job_done(job_id, len(saved_datasets))
+    except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
+        mark_collection_job_error(job_id, str(exception))
 
 
 def _analyze_html(url: str, html: str) -> CollectorAnalyzeHTMLResponse:
