@@ -115,10 +115,41 @@ def test_discovery_manager_falls_back_to_generic_when_ckan_detection_fails():
     def fake_fetch_json(url: str) -> dict[str, object]:
         raise ValueError("not a CKAN catalog")
 
+    def fake_fetch_text(url: str) -> str:
+        raise ValueError("no sitemap available")
+
     pages = discover_source(
         "https://example.org/data",
-        adapters=(CKANAdapter(fetch_json=fake_fetch_json), GenericWebsiteAdapter()),
+        adapters=(
+            CKANAdapter(fetch_json=fake_fetch_json),
+            GenericWebsiteAdapter(fetch_text=fake_fetch_text),
+        ),
     )
 
     assert [page.discovery_method for page in pages] == ["generic_website"]
     assert pages[0].url == "https://example.org/data"
+
+
+def test_generic_website_adapter_discovers_sitemap_urls_before_source_url_fallback():
+    responses = {
+        "https://example.org/robots.txt": "Sitemap: https://example.org/sitemap.xml",
+        "https://example.org/sitemap.xml": """
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+                <url><loc>https://example.org/news/update</loc></url>
+                <url><loc>https://example.org/datasets/vaccination</loc></url>
+            </urlset>
+        """,
+    }
+
+    def fake_fetch_text(url: str) -> str:
+        return responses[url]
+
+    pages = GenericWebsiteAdapter(fetch_text=fake_fetch_text).discover("https://example.org")
+
+    assert [page.url for page in pages] == [
+        "https://example.org/datasets/vaccination",
+        "https://example.org/news/update",
+    ]
+    assert [page.discovery_method for page in pages] == ["sitemap", "sitemap"]
+    assert pages[0].priority > pages[1].priority
+    assert pages[0].metadata["source_sitemap_url"] == "https://example.org/sitemap.xml"

@@ -30,6 +30,8 @@ Current MVP layer:
 - extracts likely CSV, XLSX, JSON, ZIP, API, and download distributions;
 - ignores PDF as a dataset distribution by default;
 - validates distributions with `HEAD` first, then partial `GET` fallback.
+- discovers structured CKAN catalogues first, then uses `robots.txt`/`sitemap.xml`
+  as the generic website fallback before analyzing pages.
 
 The collector is intentionally site-agnostic. Site-specific logic should live in
 future adapters, not in the core extractor or classifier.

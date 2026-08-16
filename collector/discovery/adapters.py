@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from collector.config import DEFAULT_CONFIG
+from collector.discovery.sitemap import TextFetcher, discover_sitemap_entries
 from collector.extraction.distributions import guess_format
 from collector.fetch import _ensure_public_http_url
 from collector.storage.models import DistributionCandidate
@@ -44,11 +45,44 @@ class DiscoveryAdapter(Protocol):
 class GenericWebsiteAdapter:
     name = "generic_website"
 
+    def __init__(
+        self,
+        fetch_text: TextFetcher | None = None,
+        max_sitemap_urls: int = 50,
+    ) -> None:
+        self._fetch_text = fetch_text
+        self._max_sitemap_urls = max_sitemap_urls
+
     def detect(self, source_url: str) -> bool:
         return source_url.startswith(("http://", "https://"))
 
     def discover(self, source_url: str) -> list[DiscoveredPage]:
-        return [DiscoveredPage(url=source_url, discovery_method=self.name, priority=0.1)]
+        sitemap_entries = discover_sitemap_entries(
+            source_url,
+            fetch_text=self._fetch_text,
+            max_urls=self._max_sitemap_urls,
+        )
+        if sitemap_entries:
+            return [
+                DiscoveredPage(
+                    url=entry.url,
+                    discovery_method="sitemap",
+                    priority=entry.priority,
+                    metadata={
+                        **entry.metadata,
+                        "source_sitemap_url": entry.source_sitemap_url,
+                    },
+                )
+                for entry in sitemap_entries
+            ]
+
+        return [
+            DiscoveredPage(
+                url=canonicalize_url(source_url),
+                discovery_method=self.name,
+                priority=0.1,
+            )
+        ]
 
 
 class CKANAdapter:
