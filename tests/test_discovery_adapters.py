@@ -142,12 +142,13 @@ def test_socrata_adapter_discovers_dataset_pages_and_api_resources():
                         "description": "Public health dataset.",
                         "attribution": "Centers for Disease Control and Prevention",
                         "type": "dataset",
-                        "permalink": (
-                            "https://data.cdc.gov/Public-Health/"
-                            "COVID-19-Case-Surveillance/abcd-1234"
-                        ),
                     },
                     "metadata": {"domain": "data.cdc.gov"},
+                    "permalink": "https://data.cdc.gov/d/abcd-1234",
+                    "link": (
+                        "https://data.cdc.gov/Public-Health/"
+                        "COVID-19-Case-Surveillance/abcd-1234"
+                    ),
                 },
                 {
                     "resource": {
@@ -171,7 +172,7 @@ def test_socrata_adapter_discovers_dataset_pages_and_api_resources():
     assert len(pages) == 1
 
     page = pages[0]
-    assert page.url == "https://data.cdc.gov/Public-Health/COVID-19-Case-Surveillance/abcd-1234"
+    assert page.url == "https://data.cdc.gov/d/abcd-1234"
     assert page.discovery_method == "socrata"
     assert page.priority == 0.9
     assert page.title == "COVID-19 Case Surveillance Public Use Data"

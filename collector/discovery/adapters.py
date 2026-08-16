@@ -32,6 +32,14 @@ class DiscoveredPage:
     metadata: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class SocrataCatalogResult:
+    resource: dict[object, object]
+    metadata: dict[object, object]
+    permalink: str = ""
+    link: str = ""
+
+
 class DiscoveryAdapter(Protocol):
     name: str
 
@@ -177,7 +185,7 @@ class SocrataAdapter:
 
         discovered_pages: list[DiscoveredPage] = []
         for result in _socrata_results(data, source_url):
-            resource = result["resource"]
+            resource = result.resource
             socrata_id = _text(resource.get("id"))
             if not socrata_id:
                 continue
@@ -379,13 +387,13 @@ def _socrata_domain(source_url: str) -> str:
 def _socrata_results(
     data: dict[str, object],
     source_url: str,
-) -> list[dict[str, dict[object, object]]]:
+) -> list[SocrataCatalogResult]:
     results = data.get("results")
     if not isinstance(results, list):
         return []
 
     source_domain = _socrata_domain(source_url)
-    socrata_results: list[dict[str, dict[object, object]]] = []
+    socrata_results: list[SocrataCatalogResult] = []
     for result in results:
         if not isinstance(result, dict):
             continue
@@ -404,17 +412,29 @@ def _socrata_results(
         if resource_type and resource_type not in {"dataset", "file"}:
             continue
 
-        socrata_results.append({"resource": resource, "metadata": metadata})
+        socrata_results.append(
+            SocrataCatalogResult(
+                resource=resource,
+                metadata=metadata,
+                permalink=_text(result.get("permalink")),
+                link=_text(result.get("link")),
+            )
+        )
 
     return socrata_results
 
 
 def _socrata_dataset_url(
     source_url: str,
-    result: dict[str, dict[object, object]],
+    result: SocrataCatalogResult,
 ) -> str:
-    resource = result["resource"]
-    metadata = result["metadata"]
+    if result.permalink:
+        return canonicalize_url(result.permalink, _socrata_site_root(source_url))
+    if result.link:
+        return canonicalize_url(result.link, _socrata_site_root(source_url))
+
+    resource = result.resource
+    metadata = result.metadata
     for key in ("permalink", "link", "webUri", "web_uri"):
         resource_url = _text(resource.get(key)) or _text(metadata.get(key))
         if resource_url:
