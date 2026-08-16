@@ -112,6 +112,10 @@ Poll the collection job:
 curl -i http://127.0.0.1:8001/collector/collection-jobs/1
 ```
 
+Collection jobs include discovery counters such as `discovered_count`,
+`analyzed_count`, `accepted_count`, `rejected_count`,
+`invalid_distribution_count`, and `discovery_methods`.
+
 Collect, classify, validate, and save synchronously from a source URL:
 
 ```bash

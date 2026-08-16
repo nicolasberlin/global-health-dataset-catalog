@@ -6,7 +6,7 @@ from collector.discovery.adapters import DiscoveredPage
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
 from collector.fetch import FetchedPage
-from collector.main import analyze_html_page, collect_source
+from collector.main import analyze_html_page, collect_source, collect_source_with_report
 from collector.storage.models import DistributionCandidate, HTTPProbe, ValidationResult
 from collector.validation.downloads import validate_distribution
 
@@ -331,3 +331,89 @@ def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():
     assert dataset.title == "Vaccination health dataset"
     assert [distribution.format for distribution in dataset.distributions] == ["CSV"]
     assert dataset.validation_results[0].ok is True
+
+
+def test_collect_source_with_report_summarizes_discovery_analysis_and_validation():
+    mortality_distribution = DistributionCandidate(
+        url="https://example.org/files/mortality.csv",
+        format="CSV",
+        probability=0.95,
+        mime_type="text/csv",
+    )
+    cancer_distribution = DistributionCandidate(
+        url="https://example.org/files/cancer.csv",
+        format="CSV",
+        probability=0.95,
+        mime_type="text/csv",
+    )
+    discovered_pages = [
+        DiscoveredPage(
+            url="https://example.org/datasets/mortality",
+            discovery_method="ckan",
+            priority=0.9,
+            title="Mortality health dataset",
+            description="Official mortality and epidemiology indicators.",
+            publisher="National Health Agency",
+            distributions=(mortality_distribution,),
+        ),
+        DiscoveredPage(
+            url="https://example.org/datasets/cancer",
+            discovery_method="sitemap",
+            priority=0.8,
+            title="Cancer health dataset",
+            description="Official cancer health data.",
+            publisher="National Health Agency",
+            distributions=(cancer_distribution,),
+        ),
+        DiscoveredPage(
+            url="https://example.org/news/careers",
+            discovery_method="sitemap",
+            priority=0.1,
+        ),
+    ]
+
+    def fake_discover(url):
+        assert url == "https://example.org"
+        return discovered_pages
+
+    def fake_fetch_html(url):
+        assert url == "https://example.org/news/careers"
+        return FetchedPage(
+            url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            html="""
+            <html>
+                <head><title>Careers and office news</title></head>
+                <body><h1>Join our team</h1><p>Jobs and press events.</p></body>
+            </html>
+            """,
+        )
+
+    def fake_validate(distribution):
+        return ValidationResult(
+            url=distribution.url,
+            final_url=distribution.url,
+            format=distribution.format,
+            ok=distribution.url == "https://example.org/files/mortality.csv",
+            http_status=200,
+            mime_type=distribution.mime_type,
+        )
+
+    result = collect_source_with_report(
+        "https://example.org",
+        discover=fake_discover,
+        fetch_html=fake_fetch_html,
+        validate=fake_validate,
+    )
+
+    assert [dataset.dataset_url for dataset in result.datasets] == [
+        "https://example.org/datasets/mortality"
+    ]
+    assert result.report.discovered_count == 3
+    assert result.report.analyzed_count == 3
+    assert result.report.accepted_count == 1
+    assert result.report.rejected_count == 2
+    assert result.report.invalid_distribution_count == 1
+    assert result.report.discovery_methods == ("ckan", "sitemap")

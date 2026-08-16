@@ -13,6 +13,8 @@ from collector.extraction.extractor import extract_page
 from collector.fetch import FetchedPage, fetch_public_html
 from collector.storage.models import (
     CollectedDataset,
+    CollectionReport,
+    CollectionResult,
     DistributionCandidate,
     PageSnapshot,
     ValidationResult,
@@ -63,14 +65,60 @@ def collect_source(
     fetch_html: FetchHTMLFunction = fetch_public_html,
     validate: ValidateDistributionFunction = validate_distribution,
 ) -> list[CollectedDataset]:
-    collected_datasets: list[CollectedDataset] = []
+    return collect_source_with_report(
+        source_url,
+        config=config,
+        discover=discover,
+        fetch_html=fetch_html,
+        validate=validate,
+    ).datasets
 
-    for discovered_page in discover(source_url)[: config.max_pages_per_source]:
-        dataset = _collect_discovered_page(discovered_page, config, fetch_html, validate)
+
+def collect_source_with_report(
+    source_url: str,
+    config: CollectorConfig = DEFAULT_CONFIG,
+    discover: DiscoverFunction = discover_source,
+    fetch_html: FetchHTMLFunction = fetch_public_html,
+    validate: ValidateDistributionFunction = validate_distribution,
+) -> CollectionResult:
+    collected_datasets: list[CollectedDataset] = []
+    rejected_count = 0
+    invalid_distribution_count = 0
+    discovered_pages = discover(source_url)
+    selected_pages = discovered_pages[: config.max_pages_per_source]
+
+    for discovered_page in selected_pages:
+        dataset, invalid_count = _collect_discovered_page_with_report(
+            discovered_page,
+            config,
+            fetch_html,
+            validate,
+        )
+        invalid_distribution_count += invalid_count
         if dataset is not None:
             collected_datasets.append(dataset)
+        else:
+            rejected_count += 1
 
-    return collected_datasets
+    return CollectionResult(
+        datasets=collected_datasets,
+        report=CollectionReport(
+            discovered_count=len(discovered_pages),
+            analyzed_count=len(selected_pages),
+            accepted_count=len(collected_datasets),
+            rejected_count=rejected_count,
+            invalid_distribution_count=invalid_distribution_count,
+            discovery_methods=tuple(
+                sorted(
+                    {
+                        page.discovery_method
+                        for page in discovered_pages
+                        if page.discovery_method
+                    }
+                )
+            ),
+        ),
+    )
 
 
 def _collect_discovered_page(
@@ -79,22 +127,37 @@ def _collect_discovered_page(
     fetch_html: FetchHTMLFunction,
     validate: ValidateDistributionFunction,
 ) -> CollectedDataset | None:
+    dataset, _invalid_count = _collect_discovered_page_with_report(
+        discovered_page,
+        config,
+        fetch_html,
+        validate,
+    )
+    return dataset
+
+
+def _collect_discovered_page_with_report(
+    discovered_page: DiscoveredPage,
+    config: CollectorConfig,
+    fetch_html: FetchHTMLFunction,
+    validate: ValidateDistributionFunction,
+) -> tuple[CollectedDataset | None, int]:
     if _has_structured_discovery_metadata(discovered_page):
         dataset = analyze_discovered_page(discovered_page, config)
     else:
         try:
             fetched_page = fetch_html(discovered_page.url)
         except ValueError:
-            return None
+            return None, 0
 
         dataset = analyze_html_page(fetched_page.final_url, fetched_page.html, config)
         if dataset is not None:
             dataset = replace(dataset, discovery_method=discovered_page.discovery_method)
 
     if dataset is None:
-        return None
+        return None, 0
 
-    return _with_valid_distributions(dataset, config, validate)
+    return _with_valid_distributions_and_report(dataset, config, validate)
 
 
 def analyze_discovered_page(
@@ -158,22 +221,36 @@ def _with_valid_distributions(
     config: CollectorConfig,
     validate: ValidateDistributionFunction,
 ) -> CollectedDataset | None:
+    dataset, _invalid_count = _with_valid_distributions_and_report(dataset, config, validate)
+    return dataset
+
+
+def _with_valid_distributions_and_report(
+    dataset: CollectedDataset,
+    config: CollectorConfig,
+    validate: ValidateDistributionFunction,
+) -> tuple[CollectedDataset | None, int]:
     valid_distributions: list[DistributionCandidate] = []
     validation_results: list[ValidationResult] = []
+    invalid_count = 0
 
     for distribution in dataset.distributions[: config.max_distributions_per_dataset]:
         validation_result = validate(distribution)
         if not validation_result.ok:
+            invalid_count += 1
             continue
 
         valid_distributions.append(distribution)
         validation_results.append(validation_result)
 
     if not valid_distributions:
-        return None
+        return None, invalid_count
 
-    return replace(
-        dataset,
-        distributions=valid_distributions,
-        validation_results=validation_results,
+    return (
+        replace(
+            dataset,
+            distributions=valid_distributions,
+            validation_results=validation_results,
+        ),
+        invalid_count,
     )

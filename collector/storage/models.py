@@ -105,3 +105,19 @@ class CollectedDataset:
     source_url: str = ""
     database_id: int | None = None
     updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class CollectionReport:
+    discovered_count: int = 0
+    analyzed_count: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
+    invalid_distribution_count: int = 0
+    discovery_methods: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CollectionResult:
+    datasets: list[CollectedDataset] = field(default_factory=list)
+    report: CollectionReport = field(default_factory=CollectionReport)

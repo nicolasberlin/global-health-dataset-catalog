@@ -55,6 +55,11 @@ function wait(milliseconds) {
     });
 }
 
+function formatCollectionMethods(methods) {
+    const values = Array.isArray(methods) ? methods.filter(Boolean) : [];
+    return values.length > 0 ? values.join(', ') : 'n/a';
+}
+
 export default function App() {
     const [sources, setSources] = useState([]);
     const [collectedDatasets, setCollectedDatasets] = useState([]);
@@ -205,7 +210,6 @@ export default function App() {
             });
         } finally {
             setCollectingSourceId(null);
-            setActiveCollectionJob(null);
         }
     }
 
@@ -456,10 +460,40 @@ export default function App() {
                     <article className={`collection-notice collection-notice--${collectionNotice.tone}`}>
                         <p>{collectionNotice.message}</p>
                         {activeCollectionJob ? (
-                            <small>
-                                Statut: {activeCollectionJob.status} · sauvegardés:{' '}
-                                {activeCollectionJob.saved_count}
-                            </small>
+                            <>
+                                <small>
+                                    Statut: {activeCollectionJob.status} · méthodes:{' '}
+                                    {formatCollectionMethods(activeCollectionJob.discovery_methods)}
+                                </small>
+                                <div className="collection-notice__summary">
+                                    <span>
+                                        <strong>{activeCollectionJob.discovered_count ?? 0}</strong>
+                                        découvertes
+                                    </span>
+                                    <span>
+                                        <strong>{activeCollectionJob.analyzed_count ?? 0}</strong>
+                                        analysées
+                                    </span>
+                                    <span>
+                                        <strong>{activeCollectionJob.accepted_count ?? 0}</strong>
+                                        acceptées
+                                    </span>
+                                    <span>
+                                        <strong>{activeCollectionJob.rejected_count ?? 0}</strong>
+                                        rejetées
+                                    </span>
+                                    <span>
+                                        <strong>
+                                            {activeCollectionJob.invalid_distribution_count ?? 0}
+                                        </strong>
+                                        fichiers invalides
+                                    </span>
+                                    <span>
+                                        <strong>{activeCollectionJob.saved_count ?? 0}</strong>
+                                        sauvegardées
+                                    </span>
+                                </div>
+                            </>
                         ) : null}
                     </article>
                 ) : null}

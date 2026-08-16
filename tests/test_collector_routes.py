@@ -19,7 +19,13 @@ from fastapi import BackgroundTasks, HTTPException
 
 from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage
-from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
+from collector.storage.models import (
+    CollectedDataset,
+    CollectionReport,
+    CollectionResult,
+    DistributionCandidate,
+    ValidationResult,
+)
 
 
 def test_collector_analyze_html_route_returns_scores_and_distributions():
@@ -307,6 +313,12 @@ def test_collector_read_collection_job_route_returns_status(monkeypatch):
             "source_url": "https://catalog.example.org/",
             "status": "done",
             "saved_count": 2,
+            "discovered_count": 10,
+            "analyzed_count": 5,
+            "accepted_count": 2,
+            "rejected_count": 3,
+            "invalid_distribution_count": 1,
+            "discovery_methods": ["sitemap"],
             "message": "2 dataset(s) sauvegardé(s).",
             "error": "",
             "created_at": "2026-08-16 12:00:00",
@@ -321,6 +333,8 @@ def test_collector_read_collection_job_route_returns_status(monkeypatch):
     assert response.job.id == 12
     assert response.job.status == "done"
     assert response.job.saved_count == 2
+    assert response.job.discovered_count == 10
+    assert response.job.discovery_methods == ["sitemap"]
 
 
 def test_collector_read_collection_job_route_returns_not_found(monkeypatch):
@@ -338,26 +352,36 @@ def test_collector_read_collection_job_route_returns_not_found(monkeypatch):
 def test_run_collection_job_marks_done(monkeypatch):
     calls = []
 
-    def fake_collect_source(source_url):
+    def fake_collect_source_with_report(source_url):
         calls.append(("collect", source_url))
-        return [
-            CollectedDataset(
-                dataset_url="https://catalog.example.org/dataset/mortality",
-                title="Mortality health dataset",
-                description="Official mortality health data.",
-                publisher="National Health Agency",
-                hosting_platform="",
-                uploader="",
-                dataset_probability=0.92,
-                dataset_signals={},
-                health_probability=0.8,
-                health_label="HEALTH",
-                health_signals={},
-                distributions=[],
-                discovery_method="ckan",
-                validation_results=[],
-            )
-        ]
+        return CollectionResult(
+            datasets=[
+                CollectedDataset(
+                    dataset_url="https://catalog.example.org/dataset/mortality",
+                    title="Mortality health dataset",
+                    description="Official mortality health data.",
+                    publisher="National Health Agency",
+                    hosting_platform="",
+                    uploader="",
+                    dataset_probability=0.92,
+                    dataset_signals={},
+                    health_probability=0.8,
+                    health_label="HEALTH",
+                    health_signals={},
+                    distributions=[],
+                    discovery_method="ckan",
+                    validation_results=[],
+                )
+            ],
+            report=CollectionReport(
+                discovered_count=5,
+                analyzed_count=5,
+                accepted_count=1,
+                rejected_count=4,
+                invalid_distribution_count=1,
+                discovery_methods=("ckan",),
+            ),
+        )
 
     def fake_save_collected_datasets(source_url, datasets):
         calls.append(("save", source_url, len(datasets)))
@@ -367,14 +391,19 @@ def test_run_collection_job_marks_done(monkeypatch):
         "app.routes.collector.mark_collection_job_running",
         lambda job_id: calls.append(("running", job_id)),
     )
-    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
+    monkeypatch.setattr(
+        "app.routes.collector.collect_source_with_report",
+        fake_collect_source_with_report,
+    )
     monkeypatch.setattr(
         "app.routes.collector.save_collected_datasets",
         fake_save_collected_datasets,
     )
     monkeypatch.setattr(
         "app.routes.collector.mark_collection_job_done",
-        lambda job_id, saved_count: calls.append(("done", job_id, saved_count)),
+        lambda job_id, saved_count, report: calls.append(
+            ("done", job_id, saved_count, report.discovered_count, report.discovery_methods)
+        ),
     )
 
     _run_collection_job(12, "https://catalog.example.org/")
@@ -383,21 +412,24 @@ def test_run_collection_job_marks_done(monkeypatch):
         ("running", 12),
         ("collect", "https://catalog.example.org/"),
         ("save", "https://catalog.example.org/", 1),
-        ("done", 12, 1),
+        ("done", 12, 1, 5, ("ckan",)),
     ]
 
 
 def test_run_collection_job_marks_errors(monkeypatch):
     calls = []
 
-    def fake_collect_source(source_url):
+    def fake_collect_source_with_report(source_url):
         raise ValueError("bad source")
 
     monkeypatch.setattr(
         "app.routes.collector.mark_collection_job_running",
         lambda job_id: calls.append(("running", job_id)),
     )
-    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
+    monkeypatch.setattr(
+        "app.routes.collector.collect_source_with_report",
+        fake_collect_source_with_report,
+    )
     monkeypatch.setattr(
         "app.routes.collector.mark_collection_job_error",
         lambda job_id, error: calls.append(("error", job_id, error)),

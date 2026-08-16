@@ -21,7 +21,7 @@ from collector.discovery.manager import discover_source
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
 from collector.fetch import fetch_public_html
-from collector.main import collect_source
+from collector.main import collect_source, collect_source_with_report
 from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 router = APIRouter(prefix="/collector", tags=["collector"])
@@ -133,6 +133,12 @@ class CollectorCollectionJob(BaseModel):
     source_url: str
     status: str
     saved_count: int
+    discovered_count: int = 0
+    analyzed_count: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
+    invalid_distribution_count: int = 0
+    discovery_methods: list[str] = Field(default_factory=list)
     message: str = ""
     error: str = ""
     created_at: str = ""
@@ -238,9 +244,9 @@ def list_collected() -> CollectorCollectionResponse:
 def _run_collection_job(job_id: int, source_url: str) -> None:
     try:
         mark_collection_job_running(job_id)
-        collected_datasets = collect_source(source_url)
-        saved_datasets = save_collected_datasets(source_url, collected_datasets)
-        mark_collection_job_done(job_id, len(saved_datasets))
+        collection_result = collect_source_with_report(source_url)
+        saved_datasets = save_collected_datasets(source_url, collection_result.datasets)
+        mark_collection_job_done(job_id, len(saved_datasets), collection_result.report)
     except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
         mark_collection_job_error(job_id, str(exception))
 

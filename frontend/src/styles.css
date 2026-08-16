@@ -504,6 +504,33 @@ p {
     font-weight: 700;
 }
 
+.collection-notice__summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.collection-notice__summary span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 28px;
+    border: 1px solid #d5ded8;
+    border-radius: 8px;
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.58);
+    color: #51635a;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.collection-notice__summary strong {
+    color: #2f4038;
+    font-size: 0.88rem;
+}
+
 .collection-notice--ok {
     border-color: #b8d1c4;
     background: #eef6f1;

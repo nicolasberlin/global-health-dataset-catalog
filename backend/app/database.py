@@ -5,7 +5,12 @@ import os
 import sqlite3
 from pathlib import Path
 
-from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
+from collector.storage.models import (
+    CollectedDataset,
+    CollectionReport,
+    DistributionCandidate,
+    ValidationResult,
+)
 
 DATABASE_PATH = Path(
     os.environ.get(
@@ -97,6 +102,12 @@ CREATE TABLE collection_jobs (
     source_url TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     saved_count INTEGER NOT NULL DEFAULT 0,
+    discovered_count INTEGER NOT NULL DEFAULT 0,
+    analyzed_count INTEGER NOT NULL DEFAULT 0,
+    accepted_count INTEGER NOT NULL DEFAULT 0,
+    rejected_count INTEGER NOT NULL DEFAULT 0,
+    invalid_distribution_count INTEGER NOT NULL DEFAULT 0,
+    discovery_methods TEXT NOT NULL DEFAULT '[]',
     message TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -104,6 +115,15 @@ CREATE TABLE collection_jobs (
     finished_at TEXT NOT NULL DEFAULT ''
 )
 """
+
+COLLECTION_JOB_ADDED_COLUMNS = {
+    "discovered_count": "discovered_count INTEGER NOT NULL DEFAULT 0",
+    "analyzed_count": "analyzed_count INTEGER NOT NULL DEFAULT 0",
+    "accepted_count": "accepted_count INTEGER NOT NULL DEFAULT 0",
+    "rejected_count": "rejected_count INTEGER NOT NULL DEFAULT 0",
+    "invalid_distribution_count": "invalid_distribution_count INTEGER NOT NULL DEFAULT 0",
+    "discovery_methods": "discovery_methods TEXT NOT NULL DEFAULT '[]'",
+}
 
 
 def get_connection() -> sqlite3.Connection:
@@ -269,7 +289,7 @@ def list_collected_datasets() -> list[CollectedDataset]:
     ]
 
 
-def create_collection_job(source_url: str) -> dict[str, int | str]:
+def create_collection_job(source_url: str) -> dict[str, object]:
     with get_connection() as connection:
         _ensure_collection_jobs_table(connection)
         cursor = connection.execute(
@@ -284,7 +304,7 @@ def create_collection_job(source_url: str) -> dict[str, int | str]:
     return _collection_job_to_dict(row)
 
 
-def get_collection_job(job_id: int) -> dict[str, int | str] | None:
+def get_collection_job(job_id: int) -> dict[str, object] | None:
     with get_connection() as connection:
         _ensure_collection_jobs_table(connection)
         row = _get_collection_job_row(connection, job_id)
@@ -292,13 +312,20 @@ def get_collection_job(job_id: int) -> dict[str, int | str] | None:
     return _collection_job_to_dict(row) if row else None
 
 
-def mark_collection_job_running(job_id: int) -> dict[str, int | str] | None:
+def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
     with get_connection() as connection:
         _ensure_collection_jobs_table(connection)
         connection.execute(
             """
             UPDATE collection_jobs
             SET status = 'running',
+                saved_count = 0,
+                discovered_count = 0,
+                analyzed_count = 0,
+                accepted_count = 0,
+                rejected_count = 0,
+                invalid_distribution_count = 0,
+                discovery_methods = '[]',
                 message = 'Collecte en cours.',
                 error = '',
                 updated_at = CURRENT_TIMESTAMP,
@@ -315,12 +342,10 @@ def mark_collection_job_running(job_id: int) -> dict[str, int | str] | None:
 def mark_collection_job_done(
     job_id: int,
     saved_count: int,
-) -> dict[str, int | str] | None:
-    message = (
-        f"{saved_count} dataset(s) sauvegardé(s)."
-        if saved_count
-        else "Aucun dataset santé avec fichier valide trouvé."
-    )
+    report: CollectionReport | None = None,
+) -> dict[str, object] | None:
+    report = report or CollectionReport()
+    message = _collection_job_done_message(saved_count, report)
     with get_connection() as connection:
         _ensure_collection_jobs_table(connection)
         connection.execute(
@@ -328,13 +353,29 @@ def mark_collection_job_done(
             UPDATE collection_jobs
             SET status = 'done',
                 saved_count = ?,
+                discovered_count = ?,
+                analyzed_count = ?,
+                accepted_count = ?,
+                rejected_count = ?,
+                invalid_distribution_count = ?,
+                discovery_methods = ?,
                 message = ?,
                 error = '',
                 updated_at = CURRENT_TIMESTAMP,
                 finished_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (saved_count, message, job_id),
+            (
+                saved_count,
+                report.discovered_count,
+                report.analyzed_count,
+                report.accepted_count,
+                report.rejected_count,
+                report.invalid_distribution_count,
+                _serialize_discovery_methods(report.discovery_methods),
+                message,
+                job_id,
+            ),
         )
         row = _get_collection_job_row(connection, job_id)
 
@@ -344,7 +385,7 @@ def mark_collection_job_done(
 def mark_collection_job_error(
     job_id: int,
     error: str,
-) -> dict[str, int | str] | None:
+) -> dict[str, object] | None:
     with get_connection() as connection:
         _ensure_collection_jobs_table(connection)
         connection.execute(
@@ -409,6 +450,12 @@ def _ensure_collected_tables(connection: sqlite3.Connection) -> None:
 def _ensure_collection_jobs_table(connection: sqlite3.Connection) -> None:
     if not _table_exists(connection, "collection_jobs"):
         connection.execute(COLLECTION_JOBS_SCHEMA)
+        return
+
+    columns = _table_columns(connection, "collection_jobs")
+    for column_name, column_definition in COLLECTION_JOB_ADDED_COLUMNS.items():
+        if column_name not in columns:
+            connection.execute(f"ALTER TABLE collection_jobs ADD COLUMN {column_definition}")
 
 
 def _seed_data_sources(connection: sqlite3.Connection) -> None:
@@ -457,7 +504,9 @@ def _get_collection_job_row(
 ) -> sqlite3.Row | None:
     return connection.execute(
         """
-        SELECT id, source_url, status, saved_count, message, error,
+        SELECT id, source_url, status, saved_count, discovered_count,
+               analyzed_count, accepted_count, rejected_count,
+               invalid_distribution_count, discovery_methods, message, error,
                created_at, updated_at, finished_at
         FROM collection_jobs
         WHERE id = ?
@@ -466,12 +515,18 @@ def _get_collection_job_row(
     ).fetchone()
 
 
-def _collection_job_to_dict(row: sqlite3.Row) -> dict[str, int | str]:
+def _collection_job_to_dict(row: sqlite3.Row) -> dict[str, object]:
     return {
         "id": int(row["id"]),
         "source_url": str(row["source_url"]),
         "status": str(row["status"]),
         "saved_count": int(row["saved_count"]),
+        "discovered_count": int(row["discovered_count"]),
+        "analyzed_count": int(row["analyzed_count"]),
+        "accepted_count": int(row["accepted_count"]),
+        "rejected_count": int(row["rejected_count"]),
+        "invalid_distribution_count": int(row["invalid_distribution_count"]),
+        "discovery_methods": _deserialize_discovery_methods(str(row["discovery_methods"])),
         "message": str(row["message"]),
         "error": str(row["error"]),
         "created_at": str(row["created_at"]),
@@ -634,6 +689,32 @@ def _collected_dataset_from_rows(
         database_id=int(dataset_row["id"]),
         updated_at=str(dataset_row["updated_at"]),
     )
+
+
+def _collection_job_done_message(saved_count: int, report: CollectionReport) -> str:
+    if saved_count:
+        return f"{saved_count} dataset(s) sauvegardé(s)."
+    if report.discovered_count == 0:
+        return "Aucune URL candidate découverte."
+    if report.analyzed_count == 0:
+        return "Aucune page analysée."
+    return "Aucun dataset santé avec fichier valide trouvé."
+
+
+def _serialize_discovery_methods(discovery_methods: tuple[str, ...]) -> str:
+    return json.dumps(list(discovery_methods), sort_keys=True)
+
+
+def _deserialize_discovery_methods(value: str) -> list[str]:
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(data, list):
+        return []
+
+    return [item for item in data if isinstance(item, str)]
 
 
 def _serialize_signals(signals: dict[str, object]) -> str:
