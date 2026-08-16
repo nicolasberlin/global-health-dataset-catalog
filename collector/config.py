@@ -10,9 +10,9 @@ class CollectorConfig:
     max_sample_bytes: int = 65_536
     min_dataset_probability: float = 0.6
     min_health_probability: float = 0.35
-    max_pages_per_source: int = 500
+    max_pages_per_source: int = 5
     max_crawl_depth: int = 3
+    max_distributions_per_dataset: int = 1
 
 
 DEFAULT_CONFIG = CollectorConfig()
-

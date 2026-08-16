@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from collector.config import DEFAULT_CONFIG
@@ -57,7 +57,7 @@ class CKANAdapter:
     def __init__(
         self,
         fetch_json: JsonFetcher | None = None,
-        rows: int = 100,
+        rows: int = 5,
     ) -> None:
         self._fetch_json = fetch_json or fetch_json_url
         self._rows = rows
@@ -72,7 +72,11 @@ class CKANAdapter:
 
     def discover(self, source_url: str) -> list[DiscoveredPage]:
         data = self._fetch_json(
-            _ckan_action_url(source_url, "package_search", {"rows": str(self._rows)})
+            _ckan_action_url(
+                source_url,
+                "package_search",
+                _ckan_search_params(source_url, self._rows),
+            )
         )
         result = data.get("result")
         if data.get("success") is not True or not isinstance(result, dict):
@@ -154,7 +158,7 @@ def _ckan_action_url(
     action: str,
     params: dict[str, str] | None = None,
 ) -> str:
-    base_url = source_url.rstrip("/") + "/"
+    base_url = _ckan_site_root(source_url)
     action_url = urljoin(base_url, f"api/3/action/{action}")
     if not params:
         return action_url
@@ -162,14 +166,31 @@ def _ckan_action_url(
     return f"{action_url}?{urlencode(params)}"
 
 
+def _ckan_site_root(source_url: str) -> str:
+    parts = urlsplit(source_url)
+    return urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+
+
+def _ckan_search_params(source_url: str, rows: int) -> dict[str, str]:
+    supported_params = {"q", "fq", "sort"}
+    source_params = dict(parse_qsl(urlsplit(source_url).query))
+    params = {
+        key: value
+        for key, value in source_params.items()
+        if key in supported_params and value.strip()
+    }
+    params["rows"] = str(rows)
+    return params
+
+
 def _dataset_page_url(source_url: str, package: dict[object, object]) -> str:
     name = _text(package.get("name"))
     if name:
-        return canonicalize_url(f"dataset/{name}", source_url.rstrip("/") + "/")
+        return canonicalize_url(f"dataset/{name}", _ckan_site_root(source_url))
 
     package_id = _text(package.get("id"))
     if package_id:
-        return canonicalize_url(f"dataset/{package_id}", source_url.rstrip("/") + "/")
+        return canonicalize_url(f"dataset/{package_id}", _ckan_site_root(source_url))
 
     return ""
 

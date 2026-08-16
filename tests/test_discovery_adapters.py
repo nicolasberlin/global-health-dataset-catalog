@@ -81,6 +81,21 @@ def test_ckan_adapter_discovers_dataset_pages_and_resources():
     assert distribution.signals["ckan_resource"] is True
 
 
+def test_ckan_adapter_uses_source_query_to_filter_package_search():
+    calls: list[str] = []
+
+    def fake_fetch_json(url: str) -> dict[str, object]:
+        calls.append(url)
+        return {"success": True, "result": {"results": [{"name": "mortality"}]}}
+
+    adapter = CKANAdapter(fetch_json=fake_fetch_json, rows=5)
+
+    pages = adapter.discover("https://catalog.example.org/search?q=health&ignored=yes")
+
+    assert calls == ["https://catalog.example.org/api/3/action/package_search?q=health&rows=5"]
+    assert pages[0].url == "https://catalog.example.org/dataset/mortality"
+
+
 def test_discovery_manager_prefers_ckan_before_generic_fallback():
     def fake_fetch_json(url: str) -> dict[str, object]:
         if url.endswith("/status_show"):

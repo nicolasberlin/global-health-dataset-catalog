@@ -94,7 +94,7 @@ def _collect_discovered_page(
     if dataset is None:
         return None
 
-    return _with_valid_distributions(dataset, validate)
+    return _with_valid_distributions(dataset, config, validate)
 
 
 def analyze_discovered_page(
@@ -155,12 +155,13 @@ def _has_structured_discovery_metadata(discovered_page: DiscoveredPage) -> bool:
 
 def _with_valid_distributions(
     dataset: CollectedDataset,
+    config: CollectorConfig,
     validate: ValidateDistributionFunction,
 ) -> CollectedDataset | None:
     valid_distributions: list[DistributionCandidate] = []
     validation_results: list[ValidationResult] = []
 
-    for distribution in dataset.distributions:
+    for distribution in dataset.distributions[: config.max_distributions_per_dataset]:
         validation_result = validate(distribution)
         if not validation_result.ok:
             continue
