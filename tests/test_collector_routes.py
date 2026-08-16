@@ -3,11 +3,16 @@ from __future__ import annotations
 from app.routes.collector import (
     CollectorAnalyzeHTMLRequest,
     CollectorAnalyzeURLRequest,
+    CollectorDiscoverURLRequest,
     analyze_html,
     analyze_url,
+    discover_url,
 )
+from fastapi import HTTPException
 
+from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage
+from collector.storage.models import DistributionCandidate
 
 
 def test_collector_analyze_html_route_returns_scores_and_distributions():
@@ -87,3 +92,61 @@ def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
     assert response.dataset_probability >= 0.6
     assert response.health_probability >= 0.35
     assert {distribution.format for distribution in response.distributions} == {"CSV"}
+
+
+def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
+    def fake_discover_source(url):
+        assert url == "https://catalog.example.org/"
+        return [
+            DiscoveredPage(
+                url="https://catalog.example.org/dataset/mortality",
+                discovery_method="ckan",
+                priority=0.9,
+                title="Mortality dataset",
+                description="Official mortality health data.",
+                publisher="National Health Agency",
+                metadata={"ckan_name": "mortality"},
+                distributions=(
+                    DistributionCandidate(
+                        url="https://catalog.example.org/files/mortality.csv",
+                        format="CSV",
+                        probability=0.95,
+                        anchor="CSV download",
+                        mime_type="text/csv",
+                    ),
+                ),
+            )
+        ]
+
+    monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
+
+    response = discover_url(CollectorDiscoverURLRequest(url="https://catalog.example.org"))
+
+    assert len(response.items) == 1
+    item = response.items[0]
+    assert item.url == "https://catalog.example.org/dataset/mortality"
+    assert item.discovery_method == "ckan"
+    assert item.priority == 0.9
+    assert item.title == "Mortality dataset"
+    assert item.description == "Official mortality health data."
+    assert item.publisher == "National Health Agency"
+    assert item.metadata == {"ckan_name": "mortality"}
+    assert len(item.distributions) == 1
+    assert item.distributions[0].url == "https://catalog.example.org/files/mortality.csv"
+    assert item.distributions[0].format == "CSV"
+    assert item.distributions[0].mime_type == "text/csv"
+
+
+def test_collector_discover_url_route_returns_bad_request_for_discovery_errors(monkeypatch):
+    def fake_discover_source(url):
+        raise ValueError(f"Could not discover {url}")
+
+    monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
+
+    try:
+        discover_url(CollectorDiscoverURLRequest(url="https://catalog.example.org"))
+    except HTTPException as exception:
+        assert exception.status_code == 400
+        assert exception.detail == "Could not discover https://catalog.example.org/"
+    else:
+        raise AssertionError("Expected HTTPException.")

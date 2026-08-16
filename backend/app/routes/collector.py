@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from collector.classification.dataset import score_dataset_page
 from collector.classification.health import score_health_page
 from collector.config import DEFAULT_CONFIG
+from collector.discovery.manager import discover_source
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
 from collector.fetch import fetch_public_html
@@ -24,12 +25,31 @@ class CollectorAnalyzeURLRequest(BaseModel):
     url: HttpUrl
 
 
+class CollectorDiscoverURLRequest(BaseModel):
+    url: HttpUrl
+
+
 class CollectorDistribution(BaseModel):
     url: str
     format: str
     probability: float
     anchor: str = ""
     mime_type: str = ""
+
+
+class CollectorDiscoveredPage(BaseModel):
+    url: str
+    discovery_method: str
+    priority: float
+    title: str = ""
+    description: str = ""
+    publisher: str = ""
+    metadata: dict[str, Any]
+    distributions: list[CollectorDistribution]
+
+
+class CollectorDiscoveryResponse(BaseModel):
+    items: list[CollectorDiscoveredPage]
 
 
 class CollectorAnalyzeHTMLResponse(BaseModel):
@@ -61,6 +81,39 @@ def analyze_url(payload: CollectorAnalyzeURLRequest) -> CollectorAnalyzeHTMLResp
         raise HTTPException(status_code=400, detail=str(exception)) from exception
 
     return _analyze_html(fetched_page.final_url, fetched_page.html)
+
+
+@router.post("/discover-url")
+def discover_url(payload: CollectorDiscoverURLRequest) -> CollectorDiscoveryResponse:
+    try:
+        discovered_pages = discover_source(str(payload.url))
+    except ValueError as exception:
+        raise HTTPException(status_code=400, detail=str(exception)) from exception
+
+    return CollectorDiscoveryResponse(
+        items=[
+            CollectorDiscoveredPage(
+                url=page.url,
+                discovery_method=page.discovery_method,
+                priority=page.priority,
+                title=page.title,
+                description=page.description,
+                publisher=page.publisher,
+                metadata=page.metadata,
+                distributions=[
+                    CollectorDistribution(
+                        url=distribution.url,
+                        format=distribution.format,
+                        probability=distribution.probability,
+                        anchor=distribution.anchor,
+                        mime_type=distribution.mime_type,
+                    )
+                    for distribution in page.distributions
+                ],
+            )
+            for page in discovered_pages
+        ]
+    )
 
 
 def _analyze_html(url: str, html: str) -> CollectorAnalyzeHTMLResponse:
