@@ -59,6 +59,9 @@ class DistributionCandidate:
     same_domain: bool = False
     dom_path: str = ""
     signals: dict[str, object] = field(default_factory=dict)
+    first_seen_at: str = ""
+    last_seen_at: str = ""
+    last_checked_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,8 @@ class CollectedDataset:
     validation_results: list[ValidationResult] = field(default_factory=list)
     source_url: str = ""
     database_id: int | None = None
+    first_seen_at: str = ""
+    last_seen_at: str = ""
     updated_at: str = ""
 
 

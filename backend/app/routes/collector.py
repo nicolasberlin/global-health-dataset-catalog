@@ -55,6 +55,9 @@ class CollectorDistribution(BaseModel):
     probability: float
     anchor: str = ""
     mime_type: str = ""
+    first_seen_at: str = ""
+    last_seen_at: str = ""
+    last_checked_at: str = ""
 
 
 class CollectorDiscoveredPage(BaseModel):
@@ -119,6 +122,8 @@ class CollectorCollectedDataset(BaseModel):
     health_signals: dict[str, Any]
     distributions: list[CollectorDistribution]
     validation_results: list[CollectorValidation]
+    first_seen_at: str = ""
+    last_seen_at: str = ""
     updated_at: str = ""
 
 
@@ -288,6 +293,9 @@ def _collector_distribution(distribution: DistributionCandidate) -> CollectorDis
         probability=distribution.probability,
         anchor=distribution.anchor,
         mime_type=distribution.mime_type,
+        first_seen_at=distribution.first_seen_at,
+        last_seen_at=distribution.last_seen_at,
+        last_checked_at=distribution.last_checked_at,
     )
 
 
@@ -331,5 +339,7 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
             _collector_validation(validation)
             for validation in dataset.validation_results
         ],
+        first_seen_at=dataset.first_seen_at,
+        last_seen_at=dataset.last_seen_at,
         updated_at=dataset.updated_at,
     )
