@@ -7,7 +7,12 @@ from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
 from collector.fetch import FetchedPage
 from collector.main import analyze_html_page, collect_source, collect_source_with_report
-from collector.storage.models import DistributionCandidate, HTTPProbe, ValidationResult
+from collector.storage.models import (
+    DistributionCandidate,
+    HTTPProbe,
+    PageSnapshot,
+    ValidationResult,
+)
 from collector.validation.downloads import validate_distribution
 
 DATASET_HTML = """
@@ -70,6 +75,99 @@ def test_collector_extracts_and_scores_health_dataset_page():
     assert dataset_score.signals["schema_dataset"] is True
     assert health_score.probability >= 0.75
     assert health_score.label == "HEALTH"
+
+
+def test_dataset_score_rejects_catalog_page_with_only_weak_access_signals():
+    page = PageSnapshot(
+        url="https://example.org/catalog",
+        canonical_url="https://example.org/catalog",
+        title="WHO Data Catalogue",
+        h1="Browse datasets and indicators",
+        text="Browse our datasets and indicators catalogue. Download CSV resources from the API.",
+    )
+    distributions = [
+        DistributionCandidate(
+            url="https://example.org/catalog.csv",
+            format="CSV",
+            probability=0.9,
+        )
+    ]
+
+    dataset_score = score_dataset_page(page, distributions)
+
+    assert dataset_score.probability < 0.6
+    assert dataset_score.signals["accepted_by_heuristics"] is False
+    assert "catalog" in dataset_score.signals["catalog_concepts"]
+
+
+def test_dataset_score_accepts_individual_dataset_without_structured_metadata():
+    page = PageSnapshot(
+        url="https://example.org/datasets/malaria-mortality",
+        canonical_url="https://example.org/datasets/malaria-mortality",
+        title="Global Malaria Mortality Estimates",
+        h1="Mortality estimates dataset",
+        meta_description="Annual malaria mortality estimates.",
+        text="Download CSV data for this dataset.",
+    )
+    distributions = [
+        DistributionCandidate(
+            url="https://example.org/files/malaria-mortality.csv",
+            format="CSV",
+            probability=0.9,
+        )
+    ]
+
+    dataset_score = score_dataset_page(page, distributions)
+
+    assert dataset_score.probability >= 0.6
+    assert dataset_score.signals["accepted_by_heuristics"] is True
+
+
+def test_dataset_score_uses_whole_word_matching_for_access_terms():
+    page = PageSnapshot(
+        url="https://example.org/capital-projects",
+        canonical_url="https://example.org/capital-projects",
+        title="Capital projects",
+        h1="Capital projects",
+        text="Capital investments and office planning.",
+    )
+
+    dataset_score = score_dataset_page(page, [])
+
+    assert dataset_score.probability == 0
+    assert "access_concepts" not in dataset_score.signals
+
+
+def test_dataset_score_treats_dcat_dataset_as_stronger_than_distribution():
+    dataset_page = PageSnapshot(
+        url="https://example.org/dataset",
+        canonical_url="https://example.org/dataset",
+        text='<div typeof="dcat:Dataset">Dataset metadata</div>',
+    )
+    distribution_page = PageSnapshot(
+        url="https://example.org/catalog",
+        canonical_url="https://example.org/catalog",
+        text='<div typeof="dcat:Distribution">CSV resource</div>',
+    )
+
+    dataset_score = score_dataset_page(dataset_page, [])
+    distribution_score = score_dataset_page(distribution_page, [])
+
+    assert dataset_score.probability >= 0.6
+    assert distribution_score.probability < 0.6
+
+
+def test_dataset_score_recognizes_schema_org_dataset_url_type():
+    page = PageSnapshot(
+        url="https://example.org/dataset",
+        canonical_url="https://example.org/dataset",
+        json_ld=({"@type": "https://schema.org/Dataset"},),
+    )
+
+    dataset_score = score_dataset_page(page, [])
+
+    assert dataset_score.probability >= 0.6
+    assert dataset_score.signals["schema_dataset"] is True
 
 
 def test_collector_cleans_html_descriptions():

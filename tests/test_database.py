@@ -17,6 +17,7 @@ SCHEMA_TABLES = (
     "data_sources",
     "collected_datasets",
     "collected_distributions",
+    "dataset_discovery_observations",
     "collection_jobs",
 )
 
@@ -555,6 +556,101 @@ def test_save_and_list_collected_datasets(tmp_path, monkeypatch):
         "CSV",
         "JSON",
     }
+
+
+def test_save_preserves_every_dataset_discovery_observation(tmp_path, monkeypatch):
+    database = _load_database(monkeypatch, tmp_path, "discovery-observations.db")
+    database.init_database()
+
+    dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/mortality",
+        title="Mortality health dataset",
+        description="Official mortality health data.",
+        publisher="National Health Agency",
+        hosting_platform="",
+        uploader="",
+        dataset_probability=0.92,
+        dataset_signals={"schema_dataset": True},
+        health_probability=0.8,
+        health_label="HEALTH",
+        health_signals={"matched_keywords": ["mortality"]},
+        distributions=[],
+        discovery_method="ckan",
+    )
+
+    saved = database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    updated_dataset = CollectedDataset(
+        dataset_url=dataset.dataset_url,
+        title="Mortality health dataset from sitemap",
+        description=dataset.description,
+        publisher=dataset.publisher,
+        hosting_platform="",
+        uploader="",
+        dataset_probability=0.9,
+        dataset_signals=dataset.dataset_signals,
+        health_probability=0.78,
+        health_label="HEALTH",
+        health_signals=dataset.health_signals,
+        distributions=[],
+        discovery_method="sitemap",
+    )
+    database.save_collected_datasets("https://www.who.int/data/", [updated_dataset])
+
+    collected = database.list_collected_datasets()[0]
+    observations = database.list_dataset_discovery_observations(saved[0].database_id)
+
+    assert collected.source_url == "https://www.who.int/data/"
+    assert collected.discovery_method == "sitemap"
+    observation_keys = [
+        (
+            observation["source_url"],
+            observation["discovery_method"],
+            observation["collection_job_id"],
+        )
+        for observation in observations
+    ]
+    assert len(observations) == 3
+    assert observation_keys.count(("https://catalog.example.org/", "ckan", None)) == 2
+    assert observation_keys.count(("https://www.who.int/data/", "sitemap", None)) == 1
+    assert all(observation["observed_at"] for observation in observations)
+
+
+def test_save_links_dataset_discovery_observation_to_collection_job(
+    tmp_path,
+    monkeypatch,
+):
+    database = _load_database(monkeypatch, tmp_path, "job-discovery-observations.db")
+    database.init_database()
+    job = database.create_collection_job("https://catalog.example.org/")
+    dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/mortality",
+        title="Mortality health dataset",
+        description="Official mortality health data.",
+        publisher="National Health Agency",
+        hosting_platform="",
+        uploader="",
+        dataset_probability=0.92,
+        dataset_signals={"schema_dataset": True},
+        health_probability=0.8,
+        health_label="HEALTH",
+        health_signals={"matched_keywords": ["mortality"]},
+        distributions=[],
+        discovery_method="ckan",
+    )
+
+    saved = database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [dataset],
+        collection_job_id=int(job["id"]),
+    )
+
+    observations = database.list_dataset_discovery_observations(saved[0].database_id)
+
+    assert len(observations) == 1
+    assert observations[0]["collection_job_id"] == job["id"]
+    assert observations[0]["source_url"] == "https://catalog.example.org/"
+    assert observations[0]["discovery_method"] == "ckan"
 
 
 def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(

@@ -250,7 +250,11 @@ def _run_collection_job(job_id: int, source_url: str) -> None:
     try:
         mark_collection_job_running(job_id)
         collection_result = collect_source_with_report(source_url)
-        saved_datasets = save_collected_datasets(source_url, collection_result.datasets)
+        saved_datasets = save_collected_datasets(
+            source_url,
+            collection_result.datasets,
+            collection_job_id=job_id,
+        )
         mark_collection_job_done(job_id, len(saved_datasets), collection_result.report)
     except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
         mark_collection_job_error(job_id, str(exception))

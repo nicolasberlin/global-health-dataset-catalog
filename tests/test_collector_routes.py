@@ -383,8 +383,8 @@ def test_run_collection_job_marks_done(monkeypatch):
             ),
         )
 
-    def fake_save_collected_datasets(source_url, datasets):
-        calls.append(("save", source_url, len(datasets)))
+    def fake_save_collected_datasets(source_url, datasets, collection_job_id=None):
+        calls.append(("save", source_url, len(datasets), collection_job_id))
         return datasets
 
     monkeypatch.setattr(
@@ -411,7 +411,7 @@ def test_run_collection_job_marks_done(monkeypatch):
     assert calls == [
         ("running", 12),
         ("collect", "https://catalog.example.org/"),
-        ("save", "https://catalog.example.org/", 1),
+        ("save", "https://catalog.example.org/", 1, 12),
         ("done", 12, 1, 5, ("ckan",)),
     ]
 

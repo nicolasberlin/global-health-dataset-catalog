@@ -117,6 +117,29 @@ CREATE TABLE collected_distributions (
 )
 """
 
+DATASET_DISCOVERY_OBSERVATIONS_SCHEMA = """
+CREATE TABLE dataset_discovery_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_job_id INTEGER,
+    dataset_id INTEGER NOT NULL,
+    source_url TEXT NOT NULL DEFAULT '',
+    discovery_method TEXT NOT NULL DEFAULT '',
+    observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(collection_job_id) REFERENCES collection_jobs(id) ON DELETE SET NULL,
+    FOREIGN KEY(dataset_id) REFERENCES collected_datasets(id) ON DELETE CASCADE
+)
+"""
+DATASET_DISCOVERY_OBSERVATIONS_INDEXES = (
+    """
+    CREATE INDEX dataset_discovery_observations_dataset_seen_idx
+    ON dataset_discovery_observations(dataset_id, observed_at)
+    """,
+    """
+    CREATE INDEX dataset_discovery_observations_job_idx
+    ON dataset_discovery_observations(collection_job_id)
+    """,
+)
+
 COLLECTION_JOBS_SCHEMA = """
 CREATE TABLE collection_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,11 +166,14 @@ INITIAL_SCHEMA_STATEMENTS = (
     COLLECTED_DATASETS_SCHEMA,
     COLLECTED_DISTRIBUTIONS_SCHEMA,
     COLLECTION_JOBS_SCHEMA,
+    DATASET_DISCOVERY_OBSERVATIONS_SCHEMA,
+    *DATASET_DISCOVERY_OBSERVATIONS_INDEXES,
 )
 MANAGED_TABLES = (
     "data_sources",
     "collected_datasets",
     "collected_distributions",
+    "dataset_discovery_observations",
     "collection_jobs",
 )
 
@@ -238,41 +264,19 @@ def upsert_data_source(
 def save_collected_datasets(
     source_url: str,
     datasets: list[CollectedDataset],
+    collection_job_id: int | None = None,
 ) -> list[CollectedDataset]:
-    saved_datasets: list[CollectedDataset] = []
-
     with get_connection() as connection:
         _require_current_schema(connection)
-        for dataset in datasets:
-            row = _upsert_collected_dataset(connection, source_url, dataset)
-            dataset_id = int(row["id"])
-            validation_by_distribution_key = _validation_results_by_distribution_key(
-                dataset.validation_results
+        return [
+            _save_collected_dataset(
+                connection,
+                source_url,
+                dataset,
+                collection_job_id,
             )
-            for distribution in dataset.distributions:
-                _upsert_collected_distribution(
-                    connection,
-                    dataset_id,
-                    distribution,
-                    validation_by_distribution_key.get(
-                        (distribution.url, distribution.format)
-                    ),
-                )
-
-            distribution_rows = connection.execute(
-                """
-                SELECT *
-                FROM collected_distributions
-                WHERE dataset_id = ?
-                ORDER BY probability DESC, url
-                """,
-                (dataset_id,),
-            ).fetchall()
-            saved_datasets.append(
-                _collected_dataset_from_rows(row, distribution_rows)
-            )
-
-    return saved_datasets
+            for dataset in datasets
+        ]
 
 
 def list_collected_datasets() -> list[CollectedDataset]:
@@ -308,6 +312,16 @@ def list_collected_datasets() -> list[CollectedDataset]:
         )
         for dataset_row in dataset_rows
     ]
+
+
+def list_dataset_discovery_observations(
+    dataset_id: int | None = None,
+) -> list[dict[str, int | str | None]]:
+    with get_connection() as connection:
+        _require_current_schema(connection)
+        rows = _select_dataset_discovery_observations(connection, dataset_id)
+
+    return [_dataset_discovery_observation_to_dict(row) for row in rows]
 
 
 def create_collection_job(source_url: str) -> dict[str, object]:
@@ -670,6 +684,29 @@ def _collection_job_to_dict(row: sqlite3.Row) -> dict[str, object]:
     }
 
 
+def _save_collected_dataset(
+    connection: sqlite3.Connection,
+    source_url: str,
+    dataset: CollectedDataset,
+    collection_job_id: int | None,
+) -> CollectedDataset:
+    dataset_row = _upsert_collected_dataset(connection, source_url, dataset)
+    dataset_id = int(dataset_row["id"])
+    _insert_dataset_discovery_observation(
+        connection,
+        dataset_id,
+        source_url,
+        dataset.discovery_method,
+        collection_job_id,
+    )
+    _upsert_collected_distributions(connection, dataset_id, dataset)
+
+    return _collected_dataset_from_rows(
+        dataset_row,
+        _fetch_collected_distribution_rows(connection, dataset_id),
+    )
+
+
 def _upsert_collected_dataset(
     connection: sqlite3.Connection,
     source_url: str,
@@ -729,6 +766,63 @@ def _upsert_collected_dataset(
     ).fetchone()
 
 
+def _insert_dataset_discovery_observation(
+    connection: sqlite3.Connection,
+    dataset_id: int,
+    source_url: str,
+    discovery_method: str,
+    collection_job_id: int | None,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO dataset_discovery_observations (
+            collection_job_id, dataset_id, source_url, discovery_method, observed_at
+        )
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (collection_job_id, dataset_id, source_url, discovery_method),
+    )
+
+
+def _select_dataset_discovery_observations(
+    connection: sqlite3.Connection,
+    dataset_id: int | None,
+) -> list[sqlite3.Row]:
+    sql = """
+        SELECT observation.id, observation.dataset_id, dataset.dataset_url,
+               observation.collection_job_id,
+               observation.source_url, observation.discovery_method,
+               observation.observed_at
+        FROM dataset_discovery_observations AS observation
+        JOIN collected_datasets AS dataset ON dataset.id = observation.dataset_id
+    """
+    parameters: tuple[int, ...] = ()
+    if dataset_id is not None:
+        sql += " WHERE observation.dataset_id = ?"
+        parameters = (dataset_id,)
+    sql += " ORDER BY observation.observed_at DESC, observation.id DESC"
+
+    return connection.execute(sql, parameters).fetchall()
+
+
+def _dataset_discovery_observation_to_dict(
+    row: sqlite3.Row,
+) -> dict[str, int | str | None]:
+    return {
+        "id": int(row["id"]),
+        "dataset_id": int(row["dataset_id"]),
+        "dataset_url": str(row["dataset_url"]),
+        "collection_job_id": (
+            int(row["collection_job_id"])
+            if row["collection_job_id"] is not None
+            else None
+        ),
+        "source_url": str(row["source_url"]),
+        "discovery_method": str(row["discovery_method"]),
+        "observed_at": str(row["observed_at"]),
+    }
+
+
 def _validation_results_by_distribution_key(
     validation_results: list[ValidationResult],
 ) -> dict[tuple[str, str], ValidationResult]:
@@ -743,6 +837,23 @@ def _validation_results_by_distribution_key(
         validation_by_distribution_key[key] = validation
 
     return validation_by_distribution_key
+
+
+def _upsert_collected_distributions(
+    connection: sqlite3.Connection,
+    dataset_id: int,
+    dataset: CollectedDataset,
+) -> None:
+    validation_by_distribution_key = _validation_results_by_distribution_key(
+        dataset.validation_results
+    )
+    for distribution in dataset.distributions:
+        _upsert_collected_distribution(
+            connection,
+            dataset_id,
+            distribution,
+            validation_by_distribution_key.get((distribution.url, distribution.format)),
+        )
 
 
 def _upsert_collected_distribution(
@@ -853,6 +964,21 @@ def _upsert_collected_distribution(
             validation.error if validation else "",
         ),
     )
+
+
+def _fetch_collected_distribution_rows(
+    connection: sqlite3.Connection,
+    dataset_id: int,
+) -> list[sqlite3.Row]:
+    return connection.execute(
+        """
+        SELECT *
+        FROM collected_distributions
+        WHERE dataset_id = ?
+        ORDER BY probability DESC, url
+        """,
+        (dataset_id,),
+    ).fetchall()
 
 
 def _collected_dataset_from_rows(
