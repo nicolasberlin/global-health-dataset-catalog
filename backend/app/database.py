@@ -49,6 +49,10 @@ class ReservedDataSourceKeyError(ValueError):
     pass
 
 
+class StoredJSONError(ValueError):
+    pass
+
+
 DATA_SOURCES_SCHEMA = """
 CREATE TABLE data_sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,7 +147,7 @@ DATASET_DISCOVERY_OBSERVATIONS_INDEXES = (
 COLLECTION_JOBS_SCHEMA = """
 CREATE TABLE collection_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_url TEXT NOT NULL,
+    source_url TEXT NOT NULL CHECK(source_url != ''),
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'done', 'error')),
     saved_count INTEGER NOT NULL DEFAULT 0 CHECK(saved_count >= 0),
     discovered_count INTEGER NOT NULL DEFAULT 0 CHECK(discovered_count >= 0),
@@ -996,7 +1000,10 @@ def _collected_dataset_from_rows(
             nearby_text=str(row["nearby_text"]),
             same_domain=bool(row["same_domain"]),
             dom_path=str(row["dom_path"]),
-            signals=_deserialize_signals(str(row["signals"])),
+            signals=_deserialize_signals(
+                str(row["signals"]),
+                "collected_distributions.signals",
+            ),
             first_seen_at=str(row["first_seen_at"]),
             last_seen_at=str(row["last_seen_at"]),
             last_checked_at=str(row["last_checked_at"]),
@@ -1029,10 +1036,16 @@ def _collected_dataset_from_rows(
         hosting_platform=str(dataset_row["hosting_platform"]),
         uploader=str(dataset_row["uploader"]),
         dataset_probability=float(dataset_row["dataset_probability"]),
-        dataset_signals=_deserialize_signals(str(dataset_row["dataset_signals"])),
+        dataset_signals=_deserialize_signals(
+            str(dataset_row["dataset_signals"]),
+            "collected_datasets.dataset_signals",
+        ),
         health_probability=float(dataset_row["health_probability"]),
         health_label=dataset_row["health_label"],
-        health_signals=_deserialize_signals(str(dataset_row["health_signals"])),
+        health_signals=_deserialize_signals(
+            str(dataset_row["health_signals"]),
+            "collected_datasets.health_signals",
+        ),
         distributions=distributions,
         discovery_method=str(dataset_row["discovery_method"]),
         validation_results=validation_results,
@@ -1088,18 +1101,22 @@ def _serialize_signals(signals: dict[str, object]) -> str:
     return json.dumps(signals, sort_keys=True)
 
 
-def _deserialize_signals(value: str) -> dict[str, object]:
+def _deserialize_signals(
+    value: str,
+    field_name: str = "signals",
+) -> dict[str, object]:
     try:
         data = json.loads(value)
     except json.JSONDecodeError as exception:
-        logger.warning("Invalid JSON in stored signals: %s", exception)
-        return {}
+        raise StoredJSONError(
+            f"Invalid JSON in stored signals field {field_name}: "
+            f"{exception.msg} at line {exception.lineno}, column {exception.colno}."
+        ) from exception
 
     if not isinstance(data, dict):
-        logger.warning(
-            "Invalid signals JSON type: expected dict, got %s",
-            type(data).__name__,
+        raise StoredJSONError(
+            f"Invalid JSON type in stored signals field {field_name}: "
+            f"expected object, got {type(data).__name__}."
         )
-        return {}
 
     return data

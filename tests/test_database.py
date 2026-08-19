@@ -146,6 +146,13 @@ def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
             ),
             (
                 """
+                INSERT INTO collection_jobs (source_url)
+                VALUES (?)
+                """,
+                ("",),
+            ),
+            (
+                """
                 INSERT INTO collection_jobs (source_url, status)
                 VALUES (?, ?)
                 """,
@@ -1005,29 +1012,113 @@ def test_new_collected_schema_rejects_invalid_values(tmp_path, monkeypatch):
             )
 
 
-def test_signal_json_errors_are_visible(monkeypatch, tmp_path, caplog):
+def test_signal_json_errors_are_explicit(monkeypatch, tmp_path):
     database = _load_database(monkeypatch, tmp_path, "json-errors.db")
 
-    with caplog.at_level(logging.WARNING, logger="app.database"):
-        assert database._deserialize_signals("{malformed") == {}
+    with pytest.raises(
+        database.StoredJSONError,
+        match="Invalid JSON in stored signals field collected_datasets.dataset_signals",
+    ):
+        database._deserialize_signals(
+            "{malformed",
+            "collected_datasets.dataset_signals",
+        )
 
-    assert "Invalid JSON in stored signals" in caplog.text
-    caplog.clear()
+    with pytest.raises(
+        database.StoredJSONError,
+        match="Invalid JSON type in stored signals field collected_datasets.dataset_signals",
+    ):
+        database._deserialize_signals(
+            "[]",
+            "collected_datasets.dataset_signals",
+        )
+
+
+def test_corrupted_stored_signals_fail_when_listing_datasets(tmp_path, monkeypatch):
+    database = _load_database(monkeypatch, tmp_path, "corrupted-signals.db")
+    database.init_database()
+    dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/corrupted-signals",
+        title="Corrupted signals health dataset",
+        description="Official health data.",
+        publisher="National Health Agency",
+        hosting_platform="",
+        uploader="",
+        dataset_probability=0.8,
+        dataset_signals={},
+        health_probability=0.7,
+        health_label="HEALTH",
+        health_signals={},
+        distributions=[],
+    )
+    database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    with database.get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE collected_datasets
+            SET dataset_signals = ?
+            WHERE dataset_url = ?
+            """,
+            ("{malformed", dataset.dataset_url),
+        )
+
+    with pytest.raises(
+        database.StoredJSONError,
+        match="collected_datasets.dataset_signals",
+    ):
+        database.list_collected_datasets()
+
+
+def test_discovery_methods_json_errors_are_visible(monkeypatch, tmp_path, caplog):
+    database = _load_database(monkeypatch, tmp_path, "discovery-method-json-errors.db")
 
     with caplog.at_level(logging.WARNING, logger="app.database"):
-        assert database._deserialize_signals("[]") == {}
         assert database._deserialize_discovery_methods('"bonjour"') == []
         assert database._deserialize_discovery_methods('["google", 42, "bing"]') == [
             "google",
             "bing",
         ]
 
-    assert "Invalid signals JSON type" in caplog.text
     assert "Invalid discovery methods JSON type" in caplog.text
     assert "Invalid discovery methods JSON items ignored at indexes: [1]" in caplog.text
 
     with pytest.raises(TypeError):
         database._serialize_signals({"bad": object()})
+
+
+def test_non_json_serializable_signals_do_not_leave_partial_rows(
+    tmp_path,
+    monkeypatch,
+):
+    database = _load_database(monkeypatch, tmp_path, "bad-signals-write.db")
+    database.init_database()
+    dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/bad-signals",
+        title="Bad signals health dataset",
+        description="Official health data.",
+        publisher="National Health Agency",
+        hosting_platform="",
+        uploader="",
+        dataset_probability=0.8,
+        dataset_signals={},
+        health_probability=0.7,
+        health_label="HEALTH",
+        health_signals={},
+        distributions=[
+            DistributionCandidate(
+                url="https://catalog.example.org/files/bad-signals.csv",
+                format="CSV",
+                probability=0.9,
+                signals={"bad": object()},
+            )
+        ],
+    )
+
+    with pytest.raises(TypeError):
+        database.save_collected_datasets("https://catalog.example.org/", [dataset])
+
+    assert database.list_collected_datasets() == []
+    assert database.list_dataset_discovery_observations() == []
 
 
 def test_collection_job_lifecycle(tmp_path, monkeypatch):
