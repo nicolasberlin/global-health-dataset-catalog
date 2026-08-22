@@ -216,7 +216,9 @@ project/
 
 │   │       ├── sources.py
 
-│   │       └── collector.py
+│   │       ├── collector.py
+
+│   │       └── collector_schemas.py
 
 │   ├── requirements.txt
 
@@ -239,6 +241,8 @@ project/
 │   ├── config.py
 
 │   ├── fetch.py
+
+│   ├── repository_search.py
 
 │   └── main.py
 
@@ -312,6 +316,95 @@ The idea is simple:
 > use structured metadata when available and scrape HTML only when necessary.
 
 More Open Data Platforms can be added 
+
+---
+
+# 4.1 Query-Based Repository Search
+
+The newer search flow starts from a user query instead of a source URL.
+
+```text
+User query
+
+    ↓
+
+POST /collector/search-repositories
+
+    ↓
+
+search_repository_metadata(query)
+
+    ↓
+
+Repository providers
+
+    ↓
+
+Normalized results + controlled warnings
+
+```
+
+Current implementation:
+
+- `backend/app/routes/collector_schemas.py` contains the FastAPI/Pydantic request and response schemas;
+- `backend/app/routes/collector.py` keeps the route functions;
+- `collector/repository_search.py` contains the provider interface, DataCite provider, normalization, filtering, sorting, and partial-failure warnings;
+- DataCite is the first active provider.
+
+The public response shape is:
+
+```json
+{
+  "query": "malaria mortality",
+  "items": [
+    {
+      "title": "Malaria mortality estimates",
+      "url": "https://example.org/dataset",
+      "source": "DataCite",
+      "publisher": "Example Repository",
+      "date": "2025",
+      "doi": "10.1234/example",
+      "keywords": ["malaria", "mortality"],
+      "relevance_score": 0.93,
+      "metadata": {}
+    }
+  ],
+  "warnings": [
+    {
+      "provider": "HDX",
+      "message": "This source could not be searched."
+    }
+  ]
+}
+```
+
+Warnings are controlled messages. They indicate partial search coverage without exposing raw backend exceptions. Provider-specific warnings include the provider name; global search warnings use `"provider": null`. If all providers fail, the API returns `502 Repository search failed.`
+
+Search results are filtered before being returned:
+
+- title must not be empty;
+- URL must be valid `http` or `https` with a hostname;
+- relevance score must be numeric and inside `[0, 1]`;
+- boolean scores such as `true` and `false` are rejected.
+
+Important distinction:
+
+```text
+RepositorySearchResult
+    = candidate dataset found through repository APIs
+
+CollectedDataset
+    = dataset accepted by the older URL-based collection pipeline and possibly saved
+```
+
+Future providers should be added by API family, not one class per website. For example:
+
+```text
+DataCiteRepositorySearchProvider()
+CKANRepositorySearchProvider("HDX", "https://data.humdata.org")
+CKANRepositorySearchProvider("data.gov.uk", "https://www.data.gov.uk")
+DataverseRepositorySearchProvider("Harvard Dataverse", "https://dataverse.harvard.edu")
+```
 
 ---
 
@@ -862,6 +955,8 @@ POST /collector/discover-url
 
 POST /collector/collect-url
 
+POST /collector/search-repositories
+
 ```
 
 ---
@@ -1046,7 +1141,7 @@ The Python test suite currently contains:
 
 ```text
 
-76 tests
+89 tests
 
 ```
 
@@ -1054,7 +1149,7 @@ In the last documented validation:
 
 ```text
 
-76 passed
+89 passed
 
 ```
 
@@ -1071,6 +1166,12 @@ migrations
 routes
 
 collector pipeline
+
+repository search
+
+DataCite
+
+partial provider warnings
 
 CKAN
 

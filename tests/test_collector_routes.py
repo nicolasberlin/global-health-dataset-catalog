@@ -1,11 +1,6 @@
 from __future__ import annotations
 
 from app.routes.collector import (
-    CollectorAnalyzeHTMLRequest,
-    CollectorAnalyzeURLRequest,
-    CollectorCollectionJobRequest,
-    CollectorCollectURLRequest,
-    CollectorDiscoverURLRequest,
     _run_collection_job,
     analyze_html,
     analyze_url,
@@ -13,12 +8,24 @@ from app.routes.collector import (
     discover_url,
     list_collected,
     read_collection_job,
+    search_repositories,
     start_collection_job,
+)
+from app.routes.collector_schemas import (
+    CollectorAnalyzeHTMLRequest,
+    CollectorCollectURLRequest,
+    CollectorRepositorySearchRequest,
+    CollectorURLRequest,
 )
 from fastapi import BackgroundTasks, HTTPException
 
 from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage
+from collector.repository_search import (
+    RepositorySearchResponse,
+    RepositorySearchResult,
+    RepositorySearchWarning,
+)
 from collector.storage.models import (
     CollectedDataset,
     CollectionReport,
@@ -96,7 +103,7 @@ def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
 
     monkeypatch.setattr("app.routes.collector.fetch_public_html", fake_fetch_public_html)
 
-    response = analyze_url(CollectorAnalyzeURLRequest(url="https://example.org/catalog"))
+    response = analyze_url(CollectorURLRequest(url="https://example.org/catalog"))
 
     assert response.accepted is True
     assert response.publisher == ""
@@ -133,7 +140,7 @@ def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
 
     monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
 
-    response = discover_url(CollectorDiscoverURLRequest(url="https://catalog.example.org"))
+    response = discover_url(CollectorURLRequest(url="https://catalog.example.org"))
 
     assert len(response.items) == 1
     item = response.items[0]
@@ -157,12 +164,91 @@ def test_collector_discover_url_route_returns_bad_request_for_discovery_errors(m
     monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
 
     try:
-        discover_url(CollectorDiscoverURLRequest(url="https://catalog.example.org"))
+        discover_url(CollectorURLRequest(url="https://catalog.example.org"))
     except HTTPException as exception:
         assert exception.status_code == 400
         assert exception.detail == "Could not discover https://catalog.example.org/"
     else:
         raise AssertionError("Expected HTTPException.")
+
+
+def test_collector_search_repositories_route_accepts_query_and_returns_results(monkeypatch):
+    def fake_search_repository_metadata(query):
+        assert query == "malaria mortality"
+        return RepositorySearchResponse(
+            results=[
+                RepositorySearchResult(
+                    title="Malaria mortality estimates",
+                    description="Annual mortality estimates by country.",
+                    url="https://example.org/datasets/malaria-mortality",
+                    source="DataCite",
+                    publisher="Global Health Repository",
+                    date="2025",
+                    doi="10.1234/example",
+                    keywords=["malaria", "mortality"],
+                    relevance_score=0.93,
+                    metadata={"provider": "datacite"},
+                )
+            ],
+            warnings=[
+                RepositorySearchWarning(
+                    provider="HDX",
+                    message="This source could not be searched.",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        "app.routes.collector.search_repository_metadata",
+        fake_search_repository_metadata,
+    )
+
+    response = search_repositories(
+        CollectorRepositorySearchRequest(query=" malaria mortality ")
+    )
+
+    assert response.query == "malaria mortality"
+    assert len(response.items) == 1
+    item = response.items[0]
+    assert item.title == "Malaria mortality estimates"
+    assert item.source == "DataCite"
+    assert item.publisher == "Global Health Repository"
+    assert item.date == "2025"
+    assert item.doi == "10.1234/example"
+    assert item.keywords == ["malaria", "mortality"]
+    assert item.relevance_score == 0.93
+    assert len(response.warnings) == 1
+    assert response.warnings[0].provider == "HDX"
+    assert response.warnings[0].message == "This source could not be searched."
+
+
+def test_collector_search_repositories_route_returns_bad_gateway_for_provider_errors(
+    monkeypatch,
+):
+    def fake_search_repository_metadata(query):
+        raise ValueError("Could not fetch JSON URL: timeout")
+
+    monkeypatch.setattr(
+        "app.routes.collector.search_repository_metadata",
+        fake_search_repository_metadata,
+    )
+
+    try:
+        search_repositories(CollectorRepositorySearchRequest(query="malaria mortality"))
+    except HTTPException as exception:
+        assert exception.status_code == 502
+        assert exception.detail == "Repository search failed."
+    else:
+        raise AssertionError("Expected HTTPException.")
+
+
+def test_collector_search_repositories_request_rejects_too_long_query():
+    try:
+        CollectorRepositorySearchRequest(query="x" * 301)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected validation error.")
 
 
 def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
@@ -296,7 +382,7 @@ def test_collector_start_collection_job_route_enqueues_background_task(monkeypat
     )
 
     response = start_collection_job(
-        CollectorCollectionJobRequest(url="https://catalog.example.org"),
+        CollectorURLRequest(url="https://catalog.example.org"),
         background_tasks,
     )
 

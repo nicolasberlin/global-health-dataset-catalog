@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from dataclasses import asdict
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel, Field, HttpUrl
 
 from app.database import create_collection_job as db_create_collection_job
 from app.database import (
@@ -14,6 +13,24 @@ from app.database import (
     mark_collection_job_running,
     save_collected_datasets,
 )
+from app.routes.collector_schemas import (
+    CollectorAnalyzeHTMLRequest,
+    CollectorAnalyzeHTMLResponse,
+    CollectorCollectedDataset,
+    CollectorCollectionJob,
+    CollectorCollectionJobResponse,
+    CollectorCollectionResponse,
+    CollectorCollectURLRequest,
+    CollectorDiscoveredPage,
+    CollectorDiscoveryResponse,
+    CollectorDistribution,
+    CollectorRepositorySearchItem,
+    CollectorRepositorySearchRequest,
+    CollectorRepositorySearchResponse,
+    CollectorRepositorySearchWarning,
+    CollectorURLRequest,
+    CollectorValidation,
+)
 from collector.classification.dataset import score_dataset_page
 from collector.classification.health import score_health_page
 from collector.config import DEFAULT_CONFIG
@@ -22,137 +39,14 @@ from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
 from collector.fetch import fetch_public_html
 from collector.main import collect_source, collect_source_with_report
+from collector.repository_search import (
+    RepositorySearchResult,
+    RepositorySearchWarning,
+    search_repository_metadata,
+)
 from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 router = APIRouter(prefix="/collector", tags=["collector"])
-
-
-class CollectorAnalyzeHTMLRequest(BaseModel):
-    url: HttpUrl
-    html: str = Field(min_length=1)
-
-
-class CollectorAnalyzeURLRequest(BaseModel):
-    url: HttpUrl
-
-
-class CollectorDiscoverURLRequest(BaseModel):
-    url: HttpUrl
-
-
-class CollectorCollectURLRequest(BaseModel):
-    url: HttpUrl
-    save: bool = True
-
-
-class CollectorCollectionJobRequest(BaseModel):
-    url: HttpUrl
-
-
-class CollectorDistribution(BaseModel):
-    url: str
-    format: str
-    probability: float
-    anchor: str = ""
-    mime_type: str = ""
-    first_seen_at: str = ""
-    last_seen_at: str = ""
-    last_checked_at: str = ""
-
-
-class CollectorDiscoveredPage(BaseModel):
-    url: str
-    discovery_method: str
-    priority: float
-    title: str = ""
-    description: str = ""
-    publisher: str = ""
-    metadata: dict[str, Any]
-    distributions: list[CollectorDistribution]
-
-
-class CollectorDiscoveryResponse(BaseModel):
-    items: list[CollectorDiscoveredPage]
-
-
-class CollectorValidation(BaseModel):
-    url: str
-    final_url: str
-    format: str
-    ok: bool
-    http_status: Optional[int]  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
-    mime_type: str = ""
-    size_bytes: Optional[int] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
-    etag: str = ""
-    last_modified: str = ""
-    content_disposition: str = ""
-    error: str = ""
-
-
-class CollectorAnalyzeHTMLResponse(BaseModel):
-    accepted: bool
-    dataset_url: str
-    title: str
-    description: str
-    publisher: str
-    hosting_platform: str
-    uploader: str
-    dataset_probability: float
-    dataset_signals: dict[str, Any]
-    health_probability: float
-    health_label: str
-    health_signals: dict[str, Any]
-    distributions: list[CollectorDistribution]
-
-
-class CollectorCollectedDataset(BaseModel):
-    id: Optional[int] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
-    source_url: str = ""
-    dataset_url: str
-    title: str
-    description: str
-    publisher: str
-    hosting_platform: str
-    uploader: str
-    discovery_method: str
-    dataset_probability: float
-    dataset_signals: dict[str, Any]
-    health_probability: float
-    health_label: str
-    health_signals: dict[str, Any]
-    distributions: list[CollectorDistribution]
-    validation_results: list[CollectorValidation]
-    first_seen_at: str = ""
-    last_seen_at: str = ""
-    updated_at: str = ""
-
-
-class CollectorCollectionResponse(BaseModel):
-    items: list[CollectorCollectedDataset]
-    saved: bool = False
-    saved_count: int = 0
-
-
-class CollectorCollectionJob(BaseModel):
-    id: int
-    source_url: str
-    status: str
-    saved_count: int
-    discovered_count: int = 0
-    analyzed_count: int = 0
-    accepted_count: int = 0
-    rejected_count: int = 0
-    invalid_distribution_count: int = 0
-    discovery_methods: list[str] = Field(default_factory=list)
-    message: str = ""
-    error: str = ""
-    created_at: str = ""
-    updated_at: str = ""
-    finished_at: str = ""
-
-
-class CollectorCollectionJobResponse(BaseModel):
-    job: CollectorCollectionJob
 
 
 @router.post("/analyze-html")
@@ -161,7 +55,7 @@ def analyze_html(payload: CollectorAnalyzeHTMLRequest) -> CollectorAnalyzeHTMLRe
 
 
 @router.post("/analyze-url")
-def analyze_url(payload: CollectorAnalyzeURLRequest) -> CollectorAnalyzeHTMLResponse:
+def analyze_url(payload: CollectorURLRequest) -> CollectorAnalyzeHTMLResponse:
     try:
         fetched_page = fetch_public_html(str(payload.url))
     except ValueError as exception:
@@ -171,7 +65,7 @@ def analyze_url(payload: CollectorAnalyzeURLRequest) -> CollectorAnalyzeHTMLResp
 
 
 @router.post("/discover-url")
-def discover_url(payload: CollectorDiscoverURLRequest) -> CollectorDiscoveryResponse:
+def discover_url(payload: CollectorURLRequest) -> CollectorDiscoveryResponse:
     try:
         discovered_pages = discover_source(str(payload.url))
     except ValueError as exception:
@@ -199,7 +93,7 @@ def discover_url(payload: CollectorDiscoverURLRequest) -> CollectorDiscoveryResp
 
 @router.post("/collection-jobs", status_code=202)
 def start_collection_job(
-    payload: CollectorCollectionJobRequest,
+    payload: CollectorURLRequest,
     background_tasks: BackgroundTasks,
 ) -> CollectorCollectionJobResponse:
     job = db_create_collection_job(str(payload.url))
@@ -243,6 +137,32 @@ def list_collected() -> CollectorCollectionResponse:
         ],
         saved=False,
         saved_count=0,
+    )
+
+
+@router.post("/search-repositories")
+def search_repositories(
+    payload: CollectorRepositorySearchRequest,
+) -> CollectorRepositorySearchResponse:
+    query = payload.query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Search query is required")
+
+    try:
+        search_response = search_repository_metadata(query)
+    except ValueError as exception:
+        raise HTTPException(status_code=502, detail="Repository search failed.") from exception
+
+    return CollectorRepositorySearchResponse(
+        query=query,
+        items=[
+            _collector_repository_search_item(item)
+            for item in search_response.results
+        ],
+        warnings=[
+            _collector_repository_search_warning(warning)
+            for warning in search_response.warnings
+        ],
     )
 
 
@@ -301,6 +221,18 @@ def _collector_distribution(distribution: DistributionCandidate) -> CollectorDis
         last_seen_at=distribution.last_seen_at,
         last_checked_at=distribution.last_checked_at,
     )
+
+
+def _collector_repository_search_item(
+    item: RepositorySearchResult,
+) -> CollectorRepositorySearchItem:
+    return CollectorRepositorySearchItem(**asdict(item))
+
+
+def _collector_repository_search_warning(
+    warning: RepositorySearchWarning,
+) -> CollectorRepositorySearchWarning:
+    return CollectorRepositorySearchWarning(**asdict(warning))
 
 
 def _collector_validation(validation: ValidationResult) -> CollectorValidation:

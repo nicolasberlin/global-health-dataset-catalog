@@ -13,8 +13,8 @@
 | `frontend/package.json` et `frontend/package-lock.json` | Configuration frontend | React/Vite et versions verrouillees | React 18.3.1, React DOM 18.3.1, Vite 5.4.21, plugin React Vite 4.7.0. Scripts `dev`, `build`, `preview`. | Haute pour l'environnement frontend local. |
 | `backend/app/main.py` | Code source backend | Application FastAPI | Initialisation de la base au demarrage, CORS limite a `localhost`/`127.0.0.1:5173`, routes `/sources`, `/collector`, `/health`. | Haute. |
 | `backend/app/database.py` | Code source backend | Schema SQLite, migrations, queries | Schema courant version 1, seeds WHO reserves, tables sources, datasets collectes, distributions, observations de decouverte, jobs de collecte, contraintes et upserts. | Haute pour l'intention applicative actuelle. |
-| `backend/app/routes/*.py` | Code source backend | API HTTP | Routes de catalogue, analyse HTML/URL, decouverte, collecte synchrone, jobs asynchrones, liste des datasets collectes. | Haute. |
-| `collector/**/*.py` | Code source collecteur | Extraction, classification, decouverte, validation | Collecteur generique, adaptateurs CKAN/Socrata/data.json/site generique, scoring dataset/sante, detection de distributions, validation HEAD puis GET partiel. | Haute. |
+| `backend/app/routes/*.py` | Code source backend | API HTTP | Routes de catalogue, analyse HTML/URL, decouverte, collecte synchrone, jobs asynchrones, recherche repositories, liste des datasets collectes. | Haute. |
+| `collector/**/*.py` | Code source collecteur | Extraction, classification, decouverte, validation, recherche repositories | Collecteur generique, adaptateurs CKAN/Socrata/data.json/site generique, scoring dataset/sante, detection de distributions, validation HEAD puis GET partiel, recherche DataCite normalisee. | Haute. |
 | `frontend/src/App.jsx`, `frontend/src/styles.css` | Code source frontend | Interface utilisateur | Catalogue des sources, filtres, lancement et polling de jobs, liste des datasets collectes, panneau de test collecteur. | Haute. |
 | `tests/*.py` | Tests automatises | Comportement attendu | 76 tests couvrent base, routes, pipeline collecteur, discovery adapters et sitemaps. Ils confirment les regles metier et les erreurs attendues. | Haute. Tests executes localement avec succes le 2026-08-19. |
 | `backend/global_health.db` | Base SQLite locale | Donnees locales existantes | 4 sources, 10 datasets collectes, 10 distributions validees, 3 jobs. Schema historique non versionne (`PRAGMA user_version = 0`) et incomplet par rapport au code actuel. | Moyenne. Donnees utiles, mais schema incompatible avec l'application actuelle. |
@@ -33,7 +33,7 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 ### Informations confirmees
 
 - **CONFIRME** - Le projet est nomme `global-health-dataset-catalog` et versionne `0.1.0` dans `pyproject.toml` et `frontend/package.json`.
-- **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/analyze-html`, `/collector/analyze-url`, `/collector/discover-url`, `/collector/collect-url`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}` et `/collector/collected-datasets`.
+- **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/analyze-html`, `/collector/analyze-url`, `/collector/discover-url`, `/collector/collect-url`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}`, `/collector/search-repositories` et `/collector/collected-datasets`.
 - **CONFIRME** - Le frontend utilise React/Vite et pointe par defaut vers `http://127.0.0.1:8001`.
 - **CONFIRME** - La base cible du code est SQLite, configuree par `GLOBAL_HEALTH_DB_PATH` ou par defaut `backend/global_health.db`.
 - **CONFIRME** - Les seeds applicatifs reserves sont `who_gho_indicators` et `who_gho_life_expectancy`.
@@ -50,6 +50,7 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 - **DEDUCTION** - Le collecteur est concu pour stocker des metadonnees et des validations de liens, pas les donnees dataset elles-memes : le README le dit explicitement et le schema SQLite ne contient pas de stockage de fichiers.
 - **DEDUCTION** - Une migration de donnees est necessaire avant de considerer `backend/global_health.db` comme utilisable avec le code courant : le code refuse les schemas non versionnes avec tables gerees, et la base locale est precisement dans cet etat.
 - **DEDUCTION** - Les sources institutionnelles sont le coeur du cas d'usage : les seeds sont WHO et la base locale contient HDX/CDC, mais la politique d'acceptation des sources reste a valider.
+- **DEDUCTION** - La recherche repositories doit etre etendue par famille d'API et non par site individuel : DataCite est implemente, CKAN/Dataverse/WHO/World Bank restent des adapters cibles a ajouter.
 
 ### Informations manquantes
 
@@ -58,6 +59,7 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 - **INFORMATION MANQUANTE** - Proprietaires metier, reviewers, approbateurs et equipe de support.
 - **INFORMATION MANQUANTE** - Volumetrie attendue : nombre de sources, frequence de collecte, taille des sitemaps, nombre d'utilisateurs.
 - **INFORMATION MANQUANTE** - Politique de conservation des metadonnees, des jobs et des resultats de validation.
+- **INFORMATION MANQUANTE** - Liste officielle des repositories interroges par defaut et politique de degradation si un provider externe echoue.
 - **INFORMATION MANQUANTE** - Strategie de migration de la base SQLite locale historique vers le schema versionne courant.
 - **INFORMATION MANQUANTE** - CI/CD, environnements de test/QA/staging/production, monitoring et alerting.
 - **INFORMATION MANQUANTE** - Politique d'acceptation pour les sources non officielles comme Kaggle, HDX ou portails gouvernementaux externes.
@@ -208,6 +210,7 @@ Elements non clairement definis : gouvernance des sources, SLA, volumetrie, poli
 | Ouvrir une source | Rediriger vers la page externe. | `source_id`. | Recherche source par id. | Redirect HTTP. | 404 source inconnue. | SQLite. |
 | Analyser du HTML | Tester le collecteur sans fetch reseau. | URL + HTML. | Extraction page, distributions, scoring dataset/sante. | Scores, signaux, distributions, acceptation. | HTML vide refuse par modele. | Collecteur. |
 | Analyser une URL | Tester une page publique. | URL HTTP/HTTPS. | Controle URL publique, fetch HTML, analyse. | Meme reponse qu'analyse HTML. | 400 fetch impossible, URL locale/privee, page trop grosse. | Reseau externe. |
+| Rechercher des repositories | Trouver des datasets dans des catalogues externes sans ajouter une source manuellement. | Query texte. | Orchestrateur `search_repository_metadata`, providers configures par defaut, normalisation en `RepositorySearchResult`. | Liste de resultats normalises. | 400 query vide, 502 erreur provider actuelle. | APIs externes, adapters repository. |
 | Decouvrir une URL | Identifier des pages candidates. | URL source. | Adaptateur CKAN/Socrata/data.json/generic. | Liste `DiscoveredPage`. | 400 erreur de decouverte. | APIs externes, sitemaps. |
 | Collecter une URL | Decouvrir, classifier, valider et optionnellement sauvegarder. | URL + `save`. | Pipeline `collect_source`, validation, persistance si `save=true`. | Datasets collectes, compteur sauvegarde. | 400 source invalide. | Collecteur, reseau, SQLite. |
 | Lancer un job de collecte | Executer la collecte en arriere-plan. | URL source. | Creation job `pending`, tache FastAPI background, mise a jour statut. | 202 + job. | Erreur persistee dans job. | FastAPI background tasks, SQLite. |
@@ -259,6 +262,7 @@ La cible proposee conserve l'architecture modulaire actuelle et ajoute les capac
 | --- | --- | --- | --- | --- | --- |
 | Frontend | Consultation, filtres, test collecteur, lancement et suivi de jobs. | React 18, Vite 5 | API JSON | Interface utilisateur | Backend API |
 | API backend | Validation HTTP, orchestration, exposition des routes. | FastAPI, Pydantic | Requetes HTTP | JSON, redirects | SQLite/DB cible, collecteur |
+| Recherche repositories | Recherche federee dans des catalogues externes configures. | Python, providers JSON | Query utilisateur | `RepositorySearchResult[]` | APIs DataCite/CKAN/Dataverse/WHO/World Bank |
 | Collecteur | Decouverte, extraction, scoring, validation des distributions. | Python stdlib + modules projet | URLs, HTML, metadonnees externes | `CollectedDataset`, rapports | Reseau public |
 | Stockage | Persistance des sources, datasets, distributions, observations, jobs. | SQLite MVP ; HYPOTHESE PostgreSQL si production multi-user | Donnees applicatives | Resultats consultables | Migrations, sauvegardes |
 | Worker jobs | Execution des collectes longues. | CONFIRME FastAPI BackgroundTasks ; HYPOTHESE queue dediee | Jobs de collecte | Statuts et resultats | API, collecteur, stockage |
@@ -269,8 +273,12 @@ flowchart TB
     Browser["Navigateur"] --> Web["Frontend statique"]
     Web --> Api["FastAPI API"]
     Api --> Auth["Auth / rate limiting\nA CONFIRMER"]
+    Api --> RepoSearch["Recherche repositories\nConfig + adapters"]
     Api --> JobRunner["Runner de jobs\nBackgroundTasks MVP / Queue cible"]
     Api --> Store[("Base applicative\nSQLite MVP / DB cible")]
+    RepoSearch --> DataCite["DataCite API"]
+    RepoSearch --> RepoCKAN["CKAN repositories"]
+    RepoSearch --> Dataverse["Dataverse APIs"]
     JobRunner --> Collector["Collector modulaire"]
     Collector --> CKAN["CKAN APIs"]
     Collector --> Socrata["Socrata Catalog API"]
@@ -280,7 +288,239 @@ flowchart TB
     Api --> Logs["Logs, metriques, alertes\nA DEFINIR"]
 ```
 
+### Recherche multi-repositories - cible
+
+Objectif : permettre une recherche federee dans plusieurs catalogues externes sans ecrire une classe par repository individuel. La generalisation se fait par famille d'API : un adapter CKAN peut servir HDX, `data.gov.uk` ou un autre portail CKAN ; un adapter Dataverse peut servir Harvard Dataverse ou LSHTM Data Compass.
+
+Etat courant confirme : `collector/repository_search.py` contient un `DataCiteRepositorySearchProvider`, un protocole `RepositorySearchProvider`, un modele `RepositorySearchResult` et l'orchestrateur `search_repository_metadata`. La structure ci-dessous est la cible recommandee pour etendre cette approche.
+
+Schema global :
+
+```mermaid
+flowchart LR
+    UI["Frontend"] --> Route["POST /collector/search-repositories"]
+    Route --> Search["search_repository_metadata(query)"]
+    Search --> Defaults["Repositories par defaut"]
+    Defaults --> Registry["ADAPTERS registry"]
+    Registry --> Providers["Providers configures"]
+    Providers --> APIs["APIs externes"]
+    APIs --> Normalized["RepositorySearchResult[]"]
+    Normalized --> Clean["Validation minimale + tri"]
+    Clean --> Response["Reponse API"]
+    Response --> UI
+```
+
+Difference entre config et adapter :
+
+```mermaid
+flowchart LR
+    subgraph Config["RepositoryConfig = quoi interroger"]
+        Name["name: HDX"]
+        Type["type: ckan"]
+        BaseUrl["base_url: https://data.humdata.org"]
+        PageSize["page_size: 10"]
+    end
+
+    Config --> Registry["ADAPTERS[type]"]
+    Registry --> Adapter["CKAN adapter = comment interroger"]
+    Adapter --> Url["Construit /api/3/action/package_search"]
+    Url --> Json["Lit le JSON CKAN"]
+    Json --> Result["Produit RepositorySearchResult"]
+```
+
+Reutilisation d'un meme adapter :
+
+```mermaid
+flowchart TB
+    subgraph RepoConfigs["Repository configs"]
+        DataCiteConfig["DataCite config<br/>type=datacite"]
+        HDXConfig["HDX config<br/>type=ckan"]
+        DataGovConfig["data.gov.uk config<br/>type=ckan"]
+        HarvardConfig["Harvard config<br/>type=dataverse"]
+    end
+
+    DataCiteConfig --> DataCiteAdapter["DataCite adapter"]
+    HDXConfig --> CKANAdapter["CKAN adapter"]
+    DataGovConfig --> CKANAdapter
+    HarvardConfig --> DataverseAdapter["Dataverse adapter"]
+
+    DataCiteAdapter --> Results["Resultats normalises"]
+    CKANAdapter --> Results
+    DataverseAdapter --> Results
+    Results --> Frontend["Frontend"]
+```
+
+Regle pour ajouter un repository :
+
+```mermaid
+flowchart TD
+    NewRepo["Nouveau repository"] --> KnownApi{"API deja supportee ?"}
+    KnownApi -- "Oui" --> AddConfig["Ajouter une RepositoryConfig"]
+    KnownApi -- "Non" --> AddAdapter["Coder un nouvel adapter"]
+    AddConfig --> Done["Aucun nouveau mapping JSON"]
+    AddAdapter --> Contract["Respecter search(query)"]
+    Contract --> Done
+```
+
+```text
+POST /collector/search-repositories
+        |
+        v
+search_repository_metadata(query)
+        |
+        v
+default_repository_providers()
+        |
+        v
+[
+  DataCiteProvider(config DataCite),
+  CKANProvider(config HDX),
+  CKANProvider(config data.gov.uk),
+  DataverseProvider(config Harvard)
+]
+        |
+        v
+RepositorySearchResult[]
+        |
+        v
+validation minimale + tri
+        |
+        v
+reponse frontend
+```
+
+Note de scope MVP : avec DataCite comme seul provider actif, le backend applique seulement des garde-fous minimaux avant affichage : query bornee, forme de reponse DataCite explicite, URL `http/https` ou fallback DOI, score normalise. Un filtre metier strict et une validation de sauvegarde restent reserves a la pipeline de collecte/ecriture DB. Le dedoublonnage global par DOI/URL devient utile quand plusieurs providers actifs peuvent renvoyer le meme dataset.
+
+Structures cibles :
+
+```python
+@dataclass(frozen=True)
+class RepositoryConfig:
+    name: str
+    type: str
+    base_url: str
+    page_size: int = 10
+    enabled: bool = True
+```
+
+`RepositoryConfig` decrit quoi interroger. Il ne contient pas la logique HTTP ni la logique de parsing JSON.
+
+```python
+DEFAULT_REPOSITORIES = [
+    RepositoryConfig("DataCite", "datacite", "https://api.datacite.org"),
+    RepositoryConfig("HDX", "ckan", "https://data.humdata.org"),
+    RepositoryConfig("Harvard Dataverse", "dataverse", "https://dataverse.harvard.edu"),
+]
+```
+
+```python
+ADAPTERS = {
+    "datacite": DataCiteRepositorySearchProvider,
+    "ckan": CKANRepositorySearchProvider,
+    "dataverse": DataverseRepositorySearchProvider,
+}
+```
+
+Le registre `ADAPTERS` choisit comment parler a un repository selon son `type`.
+
+```python
+class RepositorySearchProvider(Protocol):
+    name: str
+
+    def search(self, query: str) -> list[RepositorySearchResult]:
+        ...
+```
+
+Tous les adapters exposent le meme contrat : `search(query)`.
+
+```python
+@dataclass(frozen=True)
+class RepositorySearchResult:
+    title: str
+    url: str
+    source: str
+    description: str = ""
+    publisher: str = ""
+    date: str = ""
+    doi: str = ""
+    keywords: list[str] = field(default_factory=list)
+    relevance_score: float = 0.0
+    metadata: dict[str, object] = field(default_factory=dict)
+```
+
+`RepositorySearchResult` est le format commun renvoye a l'API et au frontend. Le frontend ne doit pas connaitre la structure JSON DataCite, CKAN ou Dataverse.
+
+Squelette commun recommande quand au moins deux familles d'API existent :
+
+```python
+class BaseJsonRepositorySearchProvider:
+    def __init__(self, config: RepositoryConfig):
+        self.config = config
+
+    def search(self, query: str) -> list[RepositorySearchResult]:
+        url = self.build_search_url(query)
+        data = fetch_json(url)
+        items = self.extract_items(data)
+        return [
+            self.normalize_item(item, rank)
+            for rank, item in enumerate(items)
+        ]
+
+    def build_search_url(self, query: str) -> str:
+        raise NotImplementedError
+
+    def extract_items(self, data: dict[str, object]) -> list[object]:
+        raise NotImplementedError
+
+    def normalize_item(self, item: object, rank: int) -> RepositorySearchResult | None:
+        raise NotImplementedError
+```
+
+Ce squelette generalise la mecanique HTTP/JSON/liste/resultats. Chaque adapter conserve le mapping propre a son API :
+
+| Adapter | Config exemples | URL recherche type | Extraction items | Normalisation |
+| --- | --- | --- | --- | --- |
+| `DataCiteRepositorySearchProvider` | DataCite | `/dois?query=...&resource-type-id=dataset` | `data[]` | `attributes.titles`, `attributes.publisher`, DOI, subjects |
+| `CKANRepositorySearchProvider` | HDX, `data.gov.uk`, portails CKAN | `/api/3/action/package_search?q=...` | `result.results[]` | `title`, `notes`, `organization`, `resources` |
+| `DataverseRepositorySearchProvider` | Harvard Dataverse, LSHTM Data Compass | `/api/search?q=...&type=dataset` | `data.items[]` | `name`, `global_id`, `description`, `published_at` |
+| `WHORepositorySearchProvider` | WHO data APIs | A definir | A definir selon API retenue | Mapping specifique WHO |
+| `WorldBankRepositorySearchProvider` | World Bank data/catalog APIs | A definir | A definir selon API retenue | Mapping specifique World Bank |
+
+Regle d'extension :
+
+- Nouveau repository utilisant une API deja supportee : ajouter une `RepositoryConfig`.
+- Nouvelle famille d'API : ajouter un adapter.
+- Ne pas creer `HDXProvider`, `DataGovUkProvider`, `HarvardProvider` si ces sites utilisent deja CKAN ou Dataverse.
+
 ## 11. Flux fonctionnels principaux
+
+### Recherche repositories
+
+```mermaid
+sequenceDiagram
+    actor User as Utilisateur
+    participant UI as Frontend
+    participant API as FastAPI
+    participant Search as Orchestrateur recherche
+    participant Registry as Config + registry
+    participant Provider as Adapter repository
+    participant External as API externe
+
+    User->>UI: Saisir une query
+    UI->>API: POST /collector/search-repositories
+    API->>Search: search_repository_metadata(query)
+    Search->>Registry: Charger repositories par defaut
+    Registry-->>Search: Providers configures
+    loop Pour chaque provider enabled
+        Search->>Provider: search(query)
+        Provider->>External: GET endpoint API
+        External-->>Provider: JSON provider
+        Provider-->>Search: RepositorySearchResult[]
+    end
+    Search->>Search: Valider, dedoublonner, trier
+    Search-->>API: Resultats normalises
+    API-->>UI: items[]
+```
 
 ### Collecte asynchrone depuis une source
 
@@ -426,13 +666,17 @@ Note critique : ce modele correspond au code courant. La base locale `backend/gl
 | POST | `/collector/collect-url` | Collecte synchrone, option save. | Non documentee | `{url, save=true}` | `{items, saved, saved_count}` |
 | POST | `/collector/collection-jobs` | Lancer une collecte async. | Non documentee | `{url}` | `{job}`, status 202 |
 | GET | `/collector/collection-jobs/{job_id}` | Lire un job. | Non documentee | Path `job_id` | `{job}` ou 404 |
+| POST | `/collector/search-repositories` | Rechercher des datasets dans les repositories externes configures. | Non documentee | `{query}` | `{query, items: RepositorySearchResult[], warnings: RepositorySearchWarning[]}` |
 | GET | `/collector/collected-datasets` | Lister les datasets sauvegardes. | Non documentee | Aucune | `{items, saved=false, saved_count=0}` |
 
 ### Interfaces externes
 
 | Interface | Systeme source | Protocole | Auth | Donnees echangees | Retry / timeout |
 | --- | --- | --- | --- | --- | --- |
+| DataCite `/dois` | DataCite | HTTPS JSON | Non documentee | DOI datasets, titres, publisher, sujets, score | Timeout 10 s via fetch JSON commun, pas de retry documente. |
 | CKAN `status_show` et `package_search` | Portails CKAN | HTTPS JSON | Non documentee | Status catalogue, packages, resources | Timeout 10 s, pas de retry documente. |
+| Dataverse `/api/search` | Portails Dataverse | HTTPS JSON | Non documentee | Resultats dataset, identifiants, descriptions | Cible TO-BE, adapter non confirme dans le code courant. |
+| WHO / World Bank APIs | Catalogues institutionnels | HTTPS JSON | A confirmer | Metadonnees datasets/indicateurs | Cible TO-BE, choix API et adapter a definir. |
 | Socrata Catalog API | `api.us.socrata.com` | HTTPS JSON | Non documentee | Resultats catalogue, metadata resources | Timeout 10 s, pas de retry documente. |
 | `data.json` / DCAT | Sites open data | HTTPS JSON | Non documentee | Datasets et distributions | Timeout 10 s, pas de retry documente. |
 | `robots.txt` / `sitemap.xml` | Sites generiques | HTTPS texte/XML | Non documentee | URLs candidates | Timeout 10 s, limites 10 sitemaps/1000 URLs. |
@@ -460,6 +704,7 @@ project/
 │   ├── validation/
 │   ├── config.py
 │   ├── fetch.py
+│   ├── repository_search.py
 │   └── main.py
 ├── frontend/
 │   ├── src/
@@ -477,6 +722,7 @@ Separation des responsabilites :
 
 - Backend : transport HTTP, validation request/response, persistance, orchestration jobs.
 - Collector : logique domaine, decouverte, extraction, scoring, validation.
+- Repository search : orchestration de recherche externe, adapters par famille d'API, normalisation en `RepositorySearchResult`.
 - Storage models : dataclasses partagees entre collecteur et backend.
 - Frontend : experience utilisateur et polling.
 - Tests : specification executable du comportement.
@@ -541,6 +787,14 @@ Separation des responsabilites :
 - Inconvenients : bloque le demarrage local avec la base actuelle.
 - Consequences : une migration historique explicite est prioritaire.
 
+### Decision 6 - Recherche repositories par config et adapters
+
+- Contexte : besoin d'interroger plusieurs catalogues externes sans multiplier les classes par site.
+- Solution retenue : separer `RepositoryConfig` (quoi interroger), adapter par famille d'API (comment interroger), orchestrateur `search_repository_metadata` (regrouper, valider, dedoublonner, trier).
+- Avantages : ajout d'un nouveau repository CKAN/Dataverse par simple configuration, contrat unique `search(query)`, frontend decouple des JSON externes.
+- Inconvenients : chaque nouvelle famille d'API necessite un adapter dedie ; les scores de relevance doivent etre normalises pour rester comparables.
+- Consequences : ajouter CKAN/Dataverse/WHO/World Bank via adapters de famille d'API, pas via `HDXProvider` ou `HarvardProvider` individuels. Pour le MVP DataCite-only, limiter le filtrage a la qualite minimale d'affichage ; reserver les regles strictes a la collecte et a l'ecriture DB.
+
 ## 18. Securite
 
 Controles confirmes :
@@ -567,6 +821,7 @@ Points a valider :
 - Source inconnue : HTTP 404 sur `/sources/{id}/page`.
 - Erreurs fetch/analyse URL : `ValueError` convertie en HTTP 400.
 - Job inconnu : HTTP 404.
+- Erreurs provider recherche repositories : `ValueError` convertie en HTTP 502 dans l'endpoint courant.
 - Erreur de collecte asynchrone : capture large et stockage dans `collection_jobs.error`.
 - JSON stocke invalide dans les signaux : `StoredJSONError` explicite.
 - Validation distribution : resultat `ok=false` avec statut, headers et message d'erreur si disponible.
@@ -576,6 +831,7 @@ Manques :
 - Pas de typologie d'erreurs standardisee cote API.
 - Pas de correlation id.
 - Pas de retry/backoff documente.
+- Pas encore de degradation partielle documentee pour la recherche multi-providers si un provider echoue.
 - Pas d'alerte exploitation.
 
 ## 20. Logging, monitoring et observabilite
@@ -590,6 +846,7 @@ TO-BE recommande :
 
 - Logs structures JSON avec request id/job id/source url.
 - Metriques : jobs lances, duree, accepted/rejected, invalid distributions, erreurs par adaptateur, temps de fetch, taux de validation.
+- Metriques recherche repositories : duree par provider, resultats par provider, erreurs provider, taux de dedoublonnage.
 - Dashboard exploitation pour statut collectes et erreurs recentes.
 - Alertes sur echecs repetes, schema DB invalide, hausse des timeouts, indisponibilite API.
 
@@ -625,6 +882,7 @@ A confirmer :
 | Tests pipeline collecteur | Extraction, scoring, validation, collecte structuree/generique. | pytest | Developpeurs collecteur. |
 | Tests routes | Handlers FastAPI, erreurs 400/404, jobs. | pytest | Developpeurs backend. |
 | Tests adaptateurs | CKAN, Socrata, data.json, generic fallback. | pytest | Developpeurs collecteur. |
+| Tests recherche repositories | URL de recherche, normalisation provider, tri, erreurs route. | pytest | Developpeurs backend/collecteur. |
 | Tests sitemap | robots, parsing XML, scoring URL. | pytest | Developpeurs collecteur. |
 | Build frontend | Verifier compilation UI. | Vite build | Developpeurs frontend. |
 | Tests E2E | INFORMATION MANQUANTE | A definir | A definir. |
@@ -634,6 +892,10 @@ Validation locale du 2026-08-19 :
 
 - `76 passed in 0.39s`
 - Build frontend Vite reussi.
+
+Validation ciblee du 2026-08-21 :
+
+- `.venv/bin/pytest tests/test_repository_search.py tests/test_collector_routes.py -q` : `25 passed`.
 
 ## 23. CI/CD
 
@@ -745,6 +1007,7 @@ Alternative : exporter les donnees utiles, supprimer/regenerer la base, reimport
 | Heuristiques faux positifs/faux negatifs | Moyenne | Moyen | Moyenne | Jeu d'evaluation, revue humaine, enrichissement vocabulaire/adaptateurs. | Data owner / collecteur |
 | BackgroundTasks insuffisant pour jobs longs | Moyenne | Moyen/eleve | Moyenne | Queue dediee, retries, reprise apres crash. | Architecture |
 | Dependances externes indisponibles ou lentes | Elevee | Moyen | Moyenne | Timeouts, retries, cache, degradation controlee. | Backend / infra |
+| Recherche repositories bloquee par un provider indisponible | Moyenne | Moyen | Moyenne | Resultats partiels avec warning/logs, timeout par provider, tests d'erreur. | Backend / collecteur |
 | Donnees sensibles dans metadonnees externes | Faible/moyenne | Eleve | Moyenne | Validation legal/data governance, filtrage, politique retention. | DPO / data owner |
 | Pas de monitoring | Moyenne | Moyen | Moyenne | Logs structures, metriques et alertes. | Infra / backend |
 | Perimetre des sources non formalise | Moyenne | Moyen | Moyenne | Regles d'acceptation et workflow de validation. | Product owner |
@@ -759,6 +1022,7 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 | Jobs | FastAPI BackgroundTasks | Queue dediee type Celery/RQ/worker | BackgroundTasks pour MVP ; queue si jobs longs/retries requis. |
 | Classification | Heuristiques deterministes | Modele ML/LLM | Conserver heuristiques jusqu'a mesure de performance ; envisager ML seulement avec dataset d'evaluation. |
 | Discovery | Adaptateurs generiques | Scrapers par site | Garder adaptateurs generiques ; ajouter adaptateurs specifiques uniquement si necessaire. |
+| Recherche repositories | Adapter par famille d'API + config | Provider par repository individuel | Retenir adapter par famille d'API ; nouveau site CKAN/Dataverse par config seulement. |
 | Migration | Migration in-place | Export/recreation/import | Migration in-place si preservation complete requise ; export/recreation si base locale non critique. |
 
 ## 30. Plan d'implementation
@@ -781,19 +1045,25 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 - Taches : jeu de validation, seuils documentes, vocabulaire sante, regles officialite.
 - Livrable : criteres d'acceptation mesurables.
 
-### Phase 4 - Frontend operationnel
+### Phase 4 - Recherche repositories
+
+- Objectif : generaliser la recherche externe sans creer une classe par site.
+- Taches : `RepositoryConfig`, liste `DEFAULT_REPOSITORIES`, registry adapters, adapter CKAN, adapter Dataverse, validation URL minimale, dedoublonnage lorsque plusieurs providers sont actifs, gestion resultats partiels.
+- Livrable : recherche multi-repositories avec DataCite + au moins une famille d'API supplementaire.
+
+### Phase 5 - Frontend operationnel
 
 - Objectif : faciliter supervision et review.
-- Taches : details jobs, erreurs par source, export metadonnees, clarifier formats supportes.
+- Taches : details jobs, erreurs par source, affichage recherche repositories, export metadonnees, clarifier formats supportes.
 - Livrable : UI de pilotage catalogue.
 
-### Phase 5 - Securite et exploitation
+### Phase 6 - Securite et exploitation
 
 - Objectif : preparer environnement partage ou production.
 - Taches : auth, rate limiting, HTTPS, backup, monitoring, alertes.
 - Livrable : checklist production.
 
-### Phase 6 - CI/CD et deploiement
+### Phase 7 - CI/CD et deploiement
 
 - Objectif : automatiser validation et livraison.
 - Taches : pipeline ruff/pytest/build, artefacts, deploiement test/staging/prod.
@@ -812,6 +1082,8 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 | Q7 | Quels indicateurs de qualite pour les heuristiques ? | Mesure faux positifs/faux negatifs. | Data owner / dev collecteur | Moyenne |
 | Q8 | Faut-il exposer une API d'administration complete ? | Périmètre frontend/backend. | Product owner | Moyenne |
 | Q9 | Quel monitoring minimum avant usage partage ? | Support et exploitation. | Infra / backend | Moyenne |
+| Q10 | Quels repositories doivent etre interroges par defaut et lesquels doivent etre optionnels ? | Cout reseau, qualite resultats, bruit et latence. | Product owner / data owner | Haute |
+| Q11 | Une erreur provider doit-elle bloquer toute la recherche ou retourner des resultats partiels ? | UX, fiabilite, observabilite. | Backend / product owner | Haute |
 
 ## 32. Decisions necessaires des responsables
 
@@ -821,6 +1093,7 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 - **DECISION NECESSAIRE** - Perimetre des sources officielles et non officielles.
 - **DECISION NECESSAIRE** - Base cible pour usage partage : SQLite conservee ou migration vers DB serveur.
 - **DECISION NECESSAIRE** - Strategie jobs : background tasks MVP ou worker/queue.
+- **DECISION NECESSAIRE** - Liste des repositories par defaut et politique de resultats partiels.
 - **DECISION NECESSAIRE** - CI/CD minimal obligatoire avant livraison.
 - **DECISION NECESSAIRE** - Monitoring, sauvegardes et retention.
 
@@ -830,6 +1103,7 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 2. Confirmation de l'environnement cible et du niveau de securite attendu.
 3. Liste des sources officielles et regles d'acceptation.
 4. Volumetrie cible et frequence des collectes.
-5. Responsables metier, techniques, securite et approbateurs.
-6. Strategie deploiement, CI/CD, monitoring et sauvegarde.
-7. Politique de retention et de conformite des metadonnees.
+5. Repositories externes recherches par defaut.
+6. Responsables metier, techniques, securite et approbateurs.
+7. Strategie deploiement, CI/CD, monitoring et sauvegarde.
+8. Politique de retention et de conformite des metadonnees.
