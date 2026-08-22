@@ -4,7 +4,12 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, HttpUrl
 
-from app.database import get_data_source, list_data_sources, upsert_data_source
+from app.database import (
+    ReservedDataSourceKeyError,
+    get_data_source,
+    list_data_sources,
+    upsert_data_source,
+)
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -37,13 +42,17 @@ def list_sources() -> DataSourcesResponse:
 
 @router.post("", status_code=201)
 def create_source(source: DataSourceCreate) -> DataSource:
-    saved_source = upsert_data_source(
-        source.source_key,
-        source.name,
-        source.description,
-        source.theme,
-        str(source.page_url),
-    )
+    try:
+        saved_source = upsert_data_source(
+            source.source_key,
+            source.name,
+            source.description,
+            source.theme,
+            str(source.page_url),
+        )
+    except ReservedDataSourceKeyError as exception:
+        raise HTTPException(status_code=400, detail=str(exception)) from exception
+
     return DataSource(**saved_source)
 
 
