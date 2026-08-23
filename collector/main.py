@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 
-from collector.classification.dataset import score_dataset_page
-from collector.classification.health import score_health_page
+from collector.classification.factory import build_default_page_classifier
+from collector.classification.page import PageClassifier
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.discovery.adapters import DiscoveredPage
 from collector.discovery.manager import discover_source
@@ -30,16 +30,14 @@ def analyze_html_page(
     url: str,
     html: str,
     config: CollectorConfig = DEFAULT_CONFIG,
+    classifier: PageClassifier | None = None,
 ) -> CollectedDataset | None:
     page = extract_page(url, html)
     distributions = extract_distributions(page)
-    dataset_score = score_dataset_page(page, distributions)
-    health_score = score_health_page(page)
+    page_classifier = _classifier_or_default(config, classifier)
+    classification = page_classifier.classify(page, distributions)
 
-    if (
-        dataset_score.probability < config.min_dataset_probability
-        or health_score.probability < config.min_health_probability
-    ):
+    if not classification.accepted:
         return None
 
     return CollectedDataset(
@@ -49,11 +47,11 @@ def analyze_html_page(
         publisher=page.publisher,
         hosting_platform=page.hosting_platform,
         uploader=page.uploader,
-        dataset_probability=dataset_score.probability,
-        dataset_signals=dataset_score.signals,
-        health_probability=health_score.probability,
-        health_label=health_score.label,
-        health_signals=health_score.signals,
+        dataset_probability=classification.dataset_probability,
+        dataset_signals=classification.dataset_signals,
+        health_probability=classification.health_probability,
+        health_label=classification.health_label,
+        health_signals=classification.health_signals,
         distributions=distributions,
     )
 
@@ -64,6 +62,7 @@ def collect_source(
     discover: DiscoverFunction = discover_source,
     fetch_html: FetchHTMLFunction = fetch_public_html,
     validate: ValidateDistributionFunction = validate_distribution,
+    classifier: PageClassifier | None = None,
 ) -> list[CollectedDataset]:
     return collect_source_with_report(
         source_url,
@@ -71,6 +70,7 @@ def collect_source(
         discover=discover,
         fetch_html=fetch_html,
         validate=validate,
+        classifier=classifier,
     ).datasets
 
 
@@ -80,12 +80,14 @@ def collect_source_with_report(
     discover: DiscoverFunction = discover_source,
     fetch_html: FetchHTMLFunction = fetch_public_html,
     validate: ValidateDistributionFunction = validate_distribution,
+    classifier: PageClassifier | None = None,
 ) -> CollectionResult:
     collected_datasets: list[CollectedDataset] = []
     rejected_count = 0
     invalid_distribution_count = 0
     discovered_pages = discover(source_url)
     selected_pages = discovered_pages[: config.max_pages_per_source]
+    page_classifier = _classifier_or_default(config, classifier)
 
     for discovered_page in selected_pages:
         dataset, invalid_count = _collect_discovered_page_with_report(
@@ -93,6 +95,7 @@ def collect_source_with_report(
             config,
             fetch_html,
             validate,
+            page_classifier,
         )
         invalid_distribution_count += invalid_count
         if dataset is not None:
@@ -126,12 +129,14 @@ def _collect_discovered_page(
     config: CollectorConfig,
     fetch_html: FetchHTMLFunction,
     validate: ValidateDistributionFunction,
+    classifier: PageClassifier | None = None,
 ) -> CollectedDataset | None:
     dataset, _invalid_count = _collect_discovered_page_with_report(
         discovered_page,
         config,
         fetch_html,
         validate,
+        classifier,
     )
     return dataset
 
@@ -141,16 +146,23 @@ def _collect_discovered_page_with_report(
     config: CollectorConfig,
     fetch_html: FetchHTMLFunction,
     validate: ValidateDistributionFunction,
+    classifier: PageClassifier | None = None,
 ) -> tuple[CollectedDataset | None, int]:
+    page_classifier = _classifier_or_default(config, classifier)
     if _has_structured_discovery_metadata(discovered_page):
-        dataset = analyze_discovered_page(discovered_page, config)
+        dataset = analyze_discovered_page(discovered_page, config, page_classifier)
     else:
         try:
             fetched_page = fetch_html(discovered_page.url)
         except ValueError:
             return None, 0
 
-        dataset = analyze_html_page(fetched_page.final_url, fetched_page.html, config)
+        dataset = analyze_html_page(
+            fetched_page.final_url,
+            fetched_page.html,
+            config,
+            page_classifier,
+        )
         if dataset is not None:
             dataset = replace(dataset, discovery_method=discovered_page.discovery_method)
 
@@ -163,6 +175,7 @@ def _collect_discovered_page_with_report(
 def analyze_discovered_page(
     discovered_page: DiscoveredPage,
     config: CollectorConfig = DEFAULT_CONFIG,
+    classifier: PageClassifier | None = None,
 ) -> CollectedDataset | None:
     page = PageSnapshot(
         url=discovered_page.url,
@@ -181,13 +194,10 @@ def analyze_discovered_page(
         json_ld=({"@type": "Dataset"},),
     )
     distributions = list(discovered_page.distributions)
-    dataset_score = score_dataset_page(page, distributions)
-    health_score = score_health_page(page)
+    page_classifier = _classifier_or_default(config, classifier)
+    classification = page_classifier.classify(page, distributions)
 
-    if (
-        dataset_score.probability < config.min_dataset_probability
-        or health_score.probability < config.min_health_probability
-    ):
+    if not classification.accepted:
         return None
 
     return CollectedDataset(
@@ -197,14 +207,21 @@ def analyze_discovered_page(
         publisher=page.publisher,
         hosting_platform="",
         uploader="",
-        dataset_probability=dataset_score.probability,
-        dataset_signals=dataset_score.signals,
-        health_probability=health_score.probability,
-        health_label=health_score.label,
-        health_signals=health_score.signals,
+        dataset_probability=classification.dataset_probability,
+        dataset_signals=classification.dataset_signals,
+        health_probability=classification.health_probability,
+        health_label=classification.health_label,
+        health_signals=classification.health_signals,
         distributions=distributions,
         discovery_method=discovered_page.discovery_method,
     )
+
+
+def _classifier_or_default(
+    config: CollectorConfig,
+    classifier: PageClassifier | None,
+) -> PageClassifier:
+    return classifier if classifier is not None else build_default_page_classifier(config)
 
 
 def _has_structured_discovery_metadata(discovered_page: DiscoveredPage) -> bool:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.routes.collector import (
+    _analyze_html,
     _run_collection_job,
     analyze_html,
     analyze_url,
@@ -19,6 +20,9 @@ from app.routes.collector_schemas import (
 )
 from fastapi import BackgroundTasks, HTTPException
 
+from collector.classification.heuristic import HeuristicPageClassifier
+from collector.classification.page import PageClassificationError
+from collector.config import DEFAULT_CONFIG
 from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage
 from collector.repository_search import (
@@ -35,7 +39,15 @@ from collector.storage.models import (
 )
 
 
-def test_collector_analyze_html_route_returns_scores_and_distributions():
+def _use_heuristic_default_classifier(monkeypatch):
+    monkeypatch.setattr(
+        "app.routes.collector.build_default_page_classifier",
+        lambda config=DEFAULT_CONFIG: HeuristicPageClassifier(config),
+    )
+
+
+def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypatch):
+    _use_heuristic_default_classifier(monkeypatch)
     payload = CollectorAnalyzeHTMLRequest(
         url="https://example.org/datasets/mortality",
         html="""
@@ -78,6 +90,8 @@ def test_collector_analyze_html_route_returns_scores_and_distributions():
 
 
 def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
+    _use_heuristic_default_classifier(monkeypatch)
+
     def fake_fetch_public_html(url):
         return FetchedPage(
             url=url,
@@ -112,6 +126,39 @@ def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
     assert response.dataset_probability >= 0.6
     assert response.health_probability >= 0.35
     assert {distribution.format for distribution in response.distributions} == {"CSV"}
+
+
+def test_collector_analyze_html_route_returns_502_when_classification_fails():
+    class FailingClassifier:
+        def classify(self, page, distributions):
+            raise PageClassificationError("LLM classification failed.")
+
+    try:
+        _analyze_html(
+            "https://example.org/datasets/mortality",
+            "<html><head><title>Mortality dataset</title></head></html>",
+            classifier=FailingClassifier(),
+        )
+    except HTTPException as exception:
+        assert exception.status_code == 502
+        assert exception.detail == "Page classification failed."
+    else:
+        raise AssertionError("Expected HTTPException.")
+
+
+def test_collector_analyze_html_route_uses_llm_default_classifier(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    try:
+        _analyze_html(
+            "https://example.org/datasets/mortality",
+            "<html><head><title>Mortality dataset</title></head></html>",
+        )
+    except HTTPException as exception:
+        assert exception.status_code == 502
+        assert exception.detail == "Page classification failed."
+    else:
+        raise AssertionError("Expected HTTPException.")
 
 
 def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
@@ -357,6 +404,21 @@ def test_collector_collect_url_route_can_skip_saving(monkeypatch):
     assert response.saved is False
     assert response.saved_count == 0
     assert len(response.items) == 1
+
+
+def test_collector_collect_url_route_returns_502_when_classification_fails(monkeypatch):
+    def fake_collect_source(url):
+        raise PageClassificationError("LLM classification failed.")
+
+    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
+
+    try:
+        collect_url(CollectorCollectURLRequest(url="https://catalog.example.org"))
+    except HTTPException as exception:
+        assert exception.status_code == 502
+        assert exception.detail == "Page classification failed."
+    else:
+        raise AssertionError("Expected HTTPException.")
 
 
 def test_collector_start_collection_job_route_enqueues_background_task(monkeypatch):

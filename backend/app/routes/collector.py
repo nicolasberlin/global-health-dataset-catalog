@@ -31,8 +31,8 @@ from app.routes.collector_schemas import (
     CollectorURLRequest,
     CollectorValidation,
 )
-from collector.classification.dataset import score_dataset_page
-from collector.classification.health import score_health_page
+from collector.classification.factory import build_default_page_classifier
+from collector.classification.page import PageClassificationError, PageClassifier
 from collector.config import DEFAULT_CONFIG
 from collector.discovery.manager import discover_source
 from collector.extraction.distributions import extract_distributions
@@ -117,6 +117,8 @@ def collect_url(payload: CollectorCollectURLRequest) -> CollectorCollectionRespo
         collected_datasets = collect_source(str(payload.url))
     except ValueError as exception:
         raise HTTPException(status_code=400, detail=str(exception)) from exception
+    except PageClassificationError as exception:
+        raise HTTPException(status_code=502, detail="Page classification failed.") from exception
 
     if payload.save:
         collected_datasets = save_collected_datasets(str(payload.url), collected_datasets)
@@ -180,29 +182,37 @@ def _run_collection_job(job_id: int, source_url: str) -> None:
         mark_collection_job_error(job_id, str(exception))
 
 
-def _analyze_html(url: str, html: str) -> CollectorAnalyzeHTMLResponse:
+def _analyze_html(
+    url: str,
+    html: str,
+    classifier: PageClassifier | None = None,
+) -> CollectorAnalyzeHTMLResponse:
     page = extract_page(url, html)
     distributions = extract_distributions(page)
-    dataset_score = score_dataset_page(page, distributions)
-    health_score = score_health_page(page)
-    accepted = (
-        dataset_score.probability >= DEFAULT_CONFIG.min_dataset_probability
-        and health_score.probability >= DEFAULT_CONFIG.min_health_probability
+    page_classifier = (
+        classifier
+        if classifier is not None
+        else build_default_page_classifier(DEFAULT_CONFIG)
     )
 
+    try:
+        classification = page_classifier.classify(page, distributions)
+    except PageClassificationError as exception:
+        raise HTTPException(status_code=502, detail="Page classification failed.") from exception
+
     return CollectorAnalyzeHTMLResponse(
-        accepted=accepted,
+        accepted=classification.accepted,
         dataset_url=page.canonical_url,
         title=page.title or page.h1 or page.canonical_url,
         description=page.meta_description or page.og_description,
         publisher=page.publisher,
         hosting_platform=page.hosting_platform,
         uploader=page.uploader,
-        dataset_probability=dataset_score.probability,
-        dataset_signals=dataset_score.signals,
-        health_probability=health_score.probability,
-        health_label=health_score.label,
-        health_signals=health_score.signals,
+        dataset_probability=classification.dataset_probability,
+        dataset_signals=classification.dataset_signals,
+        health_probability=classification.health_probability,
+        health_label=classification.health_label,
+        health_signals=classification.health_signals,
         distributions=[
             _collector_distribution(distribution)
             for distribution in distributions

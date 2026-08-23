@@ -1,0 +1,29 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Protocol
+
+from collector.storage.models import DistributionCandidate, HealthLabel, PageSnapshot
+
+
+class PageClassificationError(RuntimeError):
+    """Raised when a page classifier cannot produce a usable classification."""
+
+
+@dataclass(frozen=True)
+class PageClassification:
+    accepted: bool
+    dataset_probability: float
+    health_probability: float
+    health_label: HealthLabel
+    dataset_signals: dict[str, object] = field(default_factory=dict)
+    health_signals: dict[str, object] = field(default_factory=dict)
+
+
+class PageClassifier(Protocol):
+    def classify(
+        self,
+        page: PageSnapshot,
+        distributions: list[DistributionCandidate],
+    ) -> PageClassification:
+        ...
