@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from collector.classification.dataset import score_dataset_page
 from collector.classification.health import score_health_page
+from collector.classification.heuristic import HeuristicPageClassifier
+from collector.classification.page import PageClassification, PageClassificationError
 from collector.discovery.adapters import DiscoveredPage
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
@@ -242,7 +246,85 @@ def test_collector_rejects_non_health_non_dataset_page():
     </html>
     """
 
-    result = analyze_html_page("https://example.org/about/careers", html)
+    result = analyze_html_page(
+        "https://example.org/about/careers",
+        html,
+        classifier=HeuristicPageClassifier(),
+    )
+
+    assert result is None
+
+
+def test_analyze_html_page_uses_llm_default_classifier(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(PageClassificationError, match="OPENAI_API_KEY"):
+        analyze_html_page("https://example.org/data/catalog", DATASET_HTML)
+
+
+def test_heuristic_page_classifier_matches_existing_scores():
+    page = extract_page("https://example.org/data/catalog", DATASET_HTML)
+    distributions = extract_distributions(page)
+
+    dataset_score = score_dataset_page(page, distributions)
+    health_score = score_health_page(page)
+    classification = HeuristicPageClassifier().classify(page, distributions)
+
+    assert classification.accepted is True
+    assert classification.dataset_probability == dataset_score.probability
+    assert classification.dataset_signals == dataset_score.signals
+    assert classification.health_probability == health_score.probability
+    assert classification.health_label == health_score.label
+    assert classification.health_signals == health_score.signals
+
+
+def test_analyze_html_page_uses_injected_page_classifier():
+    class AcceptingClassifier:
+        def classify(self, page, distributions):
+            assert page.canonical_url == "https://example.org/datasets/mortality"
+            assert {distribution.format for distribution in distributions} == {
+                "CSV",
+                "API",
+                "XLSX",
+            }
+            return PageClassification(
+                accepted=True,
+                dataset_probability=0.81,
+                health_probability=0.77,
+                health_label="HEALTH",
+                dataset_signals={"source": "fake"},
+                health_signals={"source": "fake"},
+            )
+
+    result = analyze_html_page(
+        "https://example.org/data/catalog",
+        DATASET_HTML,
+        classifier=AcceptingClassifier(),
+    )
+
+    assert result is not None
+    assert result.dataset_probability == 0.81
+    assert result.dataset_signals == {"source": "fake"}
+    assert result.health_probability == 0.77
+    assert result.health_label == "HEALTH"
+    assert result.health_signals == {"source": "fake"}
+
+
+def test_analyze_html_page_respects_injected_page_classifier_rejection():
+    class RejectingClassifier:
+        def classify(self, page, distributions):
+            return PageClassification(
+                accepted=False,
+                dataset_probability=0.95,
+                health_probability=0.95,
+                health_label="HEALTH",
+            )
+
+    result = analyze_html_page(
+        "https://example.org/data/catalog",
+        DATASET_HTML,
+        classifier=RejectingClassifier(),
+    )
 
     assert result is None
 
@@ -355,6 +437,7 @@ def test_collect_source_uses_structured_discovery_metadata_without_fetching_html
         discover=fake_discover,
         fetch_html=fake_fetch_html,
         validate=fake_validate,
+        classifier=HeuristicPageClassifier(),
     )
 
     assert len(datasets) == 1
@@ -421,6 +504,7 @@ def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():
         discover=fake_discover,
         fetch_html=fake_fetch_html,
         validate=fake_validate,
+        classifier=HeuristicPageClassifier(),
     )
 
     assert len(datasets) == 1
@@ -504,6 +588,7 @@ def test_collect_source_with_report_summarizes_discovery_analysis_and_validation
         discover=fake_discover,
         fetch_html=fake_fetch_html,
         validate=fake_validate,
+        classifier=HeuristicPageClassifier(),
     )
 
     assert [dataset.dataset_url for dataset in result.datasets] == [
