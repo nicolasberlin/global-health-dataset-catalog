@@ -90,7 +90,7 @@ External sources
 
     ↓
 
-SQLite
+PostgreSQL
 
 ```
 
@@ -186,13 +186,13 @@ Validation
 
 ```text
 
-backend/global_health.db
+PostgreSQL
 
 ```
 
-SQLite is currently used to store metadata during development. The local database contains test data only and can be deleted and recreated if its schema becomes incompatible with the current code.
-
-The long-term goal is to transition to **PostgreSQL** for a persistent or shared environment.
+PostgreSQL stores application metadata. The backend uses `DATABASE_URL` and
+fails at startup if that variable is missing. Historical SQLite data is not
+migrated.
 
 ---
 
@@ -212,6 +212,18 @@ project/
 
 │   │   ├── database.py
 
+│   │   ├── db_connection.py
+
+│   │   ├── db_schema.py
+
+│   │   ├── db_sources.py
+
+│   │   ├── db_collected_datasets.py
+
+│   │   ├── db_collection_jobs.py
+
+│   │   ├── db_serialization.py
+
 │   │   └── routes/
 
 │   │       ├── sources.py
@@ -220,9 +232,7 @@ project/
 
 │   │       └── collector_schemas.py
 
-│   ├── requirements.txt
-
-│   └── global_health.db
+│   └── requirements.txt
 
 │
 
@@ -763,7 +773,7 @@ Accepted dataset
 
     ↓
 
-SQLite
+PostgreSQL
 
 ```
 
@@ -1051,19 +1061,22 @@ This notably reduces the risk of SSRF.
 
 # 19. Local Database
 
-SQLite is used for local development. The database included in the project contains only **test data** and is considered **disposable**.
+PostgreSQL is used for local development. Start it with Docker Compose and
+provide `DATABASE_URL` to the backend.
 
-If the schema becomes incompatible with the current code, the expected procedure is simply:
+Example:
 
-```text
-delete backend/global_health.db
-    ↓
-restart the application
-    ↓
-the database is recreated with the current schema
+```bash
+export POSTGRES_PASSWORD='change-me-locally'
+docker compose up -d postgres
+export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
 ```
 
-There is therefore no need to write a historical migration to preserve the contents of this development database.
+The PostgreSQL database is managed by the application and must be empty on first
+startup. The backend creates the current schema, records it in
+`schema_migrations`, and applies the default system seeds. Old SQLite data,
+partial PostgreSQL schemas, and hand-modified application tables are not
+migrated automatically.
 
 ---
 
@@ -1072,16 +1085,11 @@ There is therefore no need to write a historical migration to preserve the conte
 For the MVP and local development:
 
 ```text
-SQLite
-```
-
-For a persistent, shared, or production environment, the goal is to move to:
-
-```text
 PostgreSQL
 ```
 
-The PostgreSQL migration strategy will need to be defined when data actually needs to be preserved. This future migration is separate from the old SQLite test database, which can be recreated without preserving its contents.
+The collector network layer is still mostly synchronous. During the DB async
+migration, API routes run blocking collector work in a worker thread.
 
 ---
 
@@ -1205,7 +1213,7 @@ Pydantic
 
 Uvicorn
 
-SQLite
+PostgreSQL
 
 React 18
 
@@ -1245,7 +1253,7 @@ rate limiting
 
 retention policy
 
-production database
+background worker strategy
 
 ```
 
@@ -1265,7 +1273,7 @@ The main remaining decisions concern:
 
 4. determine the target volume;
 
-5. define when and how to transition from SQLite to PostgreSQL;
+5. define the production PostgreSQL operating model;
 
 6. decide whether FastAPI `BackgroundTasks` remain sufficient;
 
@@ -1311,7 +1319,7 @@ For someone joining the project, the easiest approach is to read the code in thi
 
        ↓
 
-8. backend/app/database.py
+8. backend/app/database.py + backend/app/db_*.py
 
        ↓
 
@@ -1407,4 +1415,6 @@ Is there actually a usable file or API?
 
 ```
 
-The current system is functional and tested as a local MVP. The development SQLite database is disposable and can be recreated when its schema changes. The next major developments include improving classification with an LLM and, eventually, transitioning to PostgreSQL for a persistent or shared environment.
+The current system is functional and tested as a local MVP backed by
+PostgreSQL. The next major developments include improving classification with an
+LLM and converting the collector network layer to native async.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -50,14 +51,16 @@ router = APIRouter(prefix="/collector", tags=["collector"])
 
 
 @router.post("/analyze-html")
-def analyze_html(payload: CollectorAnalyzeHTMLRequest) -> CollectorAnalyzeHTMLResponse:
+async def analyze_html(
+    payload: CollectorAnalyzeHTMLRequest,
+) -> CollectorAnalyzeHTMLResponse:
     return _analyze_html(str(payload.url), payload.html)
 
 
 @router.post("/analyze-url")
-def analyze_url(payload: CollectorURLRequest) -> CollectorAnalyzeHTMLResponse:
+async def analyze_url(payload: CollectorURLRequest) -> CollectorAnalyzeHTMLResponse:
     try:
-        fetched_page = fetch_public_html(str(payload.url))
+        fetched_page = await asyncio.to_thread(fetch_public_html, str(payload.url))
     except ValueError as exception:
         raise HTTPException(status_code=400, detail=str(exception)) from exception
 
@@ -65,9 +68,9 @@ def analyze_url(payload: CollectorURLRequest) -> CollectorAnalyzeHTMLResponse:
 
 
 @router.post("/discover-url")
-def discover_url(payload: CollectorURLRequest) -> CollectorDiscoveryResponse:
+async def discover_url(payload: CollectorURLRequest) -> CollectorDiscoveryResponse:
     try:
-        discovered_pages = discover_source(str(payload.url))
+        discovered_pages = await asyncio.to_thread(discover_source, str(payload.url))
     except ValueError as exception:
         raise HTTPException(status_code=400, detail=str(exception)) from exception
 
@@ -92,19 +95,19 @@ def discover_url(payload: CollectorURLRequest) -> CollectorDiscoveryResponse:
 
 
 @router.post("/collection-jobs", status_code=202)
-def start_collection_job(
+async def start_collection_job(
     payload: CollectorURLRequest,
     background_tasks: BackgroundTasks,
 ) -> CollectorCollectionJobResponse:
-    job = db_create_collection_job(str(payload.url))
+    job = await db_create_collection_job(str(payload.url))
     background_tasks.add_task(_run_collection_job, int(job["id"]), str(payload.url))
 
     return CollectorCollectionJobResponse(job=CollectorCollectionJob(**job))
 
 
 @router.get("/collection-jobs/{job_id}")
-def read_collection_job(job_id: int) -> CollectorCollectionJobResponse:
-    job = get_collection_job(job_id)
+async def read_collection_job(job_id: int) -> CollectorCollectionJobResponse:
+    job = await get_collection_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Collection job not found")
 
@@ -112,16 +115,19 @@ def read_collection_job(job_id: int) -> CollectorCollectionJobResponse:
 
 
 @router.post("/collect-url")
-def collect_url(payload: CollectorCollectURLRequest) -> CollectorCollectionResponse:
+async def collect_url(payload: CollectorCollectURLRequest) -> CollectorCollectionResponse:
     try:
-        collected_datasets = collect_source(str(payload.url))
+        collected_datasets = await asyncio.to_thread(collect_source, str(payload.url))
     except ValueError as exception:
         raise HTTPException(status_code=400, detail=str(exception)) from exception
     except PageClassificationError as exception:
         raise HTTPException(status_code=502, detail="Page classification failed.") from exception
 
     if payload.save:
-        collected_datasets = save_collected_datasets(str(payload.url), collected_datasets)
+        collected_datasets = await save_collected_datasets(
+            str(payload.url),
+            collected_datasets,
+        )
 
     return CollectorCollectionResponse(
         items=[_collector_collected_dataset(dataset) for dataset in collected_datasets],
@@ -131,11 +137,11 @@ def collect_url(payload: CollectorCollectURLRequest) -> CollectorCollectionRespo
 
 
 @router.get("/collected-datasets")
-def list_collected() -> CollectorCollectionResponse:
+async def list_collected() -> CollectorCollectionResponse:
     return CollectorCollectionResponse(
         items=[
             _collector_collected_dataset(dataset)
-            for dataset in list_collected_datasets()
+            for dataset in await list_collected_datasets()
         ],
         saved=False,
         saved_count=0,
@@ -143,7 +149,7 @@ def list_collected() -> CollectorCollectionResponse:
 
 
 @router.post("/search-repositories")
-def search_repositories(
+async def search_repositories(
     payload: CollectorRepositorySearchRequest,
 ) -> CollectorRepositorySearchResponse:
     query = payload.query.strip()
@@ -151,7 +157,7 @@ def search_repositories(
         raise HTTPException(status_code=400, detail="Search query is required")
 
     try:
-        search_response = search_repository_metadata(query)
+        search_response = await asyncio.to_thread(search_repository_metadata, query)
     except ValueError as exception:
         raise HTTPException(status_code=502, detail="Repository search failed.") from exception
 
@@ -168,18 +174,21 @@ def search_repositories(
     )
 
 
-def _run_collection_job(job_id: int, source_url: str) -> None:
+async def _run_collection_job(job_id: int, source_url: str) -> None:
     try:
-        mark_collection_job_running(job_id)
-        collection_result = collect_source_with_report(source_url)
-        saved_datasets = save_collected_datasets(
+        await mark_collection_job_running(job_id)
+        collection_result = await asyncio.to_thread(
+            collect_source_with_report,
+            source_url,
+        )
+        saved_datasets = await save_collected_datasets(
             source_url,
             collection_result.datasets,
             collection_job_id=job_id,
         )
-        mark_collection_job_done(job_id, len(saved_datasets), collection_result.report)
+        await mark_collection_job_done(job_id, len(saved_datasets), collection_result.report)
     except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
-        mark_collection_job_error(job_id, str(exception))
+        await mark_collection_job_error(job_id, str(exception))
 
 
 def _analyze_html(

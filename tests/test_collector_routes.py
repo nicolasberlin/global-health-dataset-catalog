@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from app.routes.collector import (
     _analyze_html,
     _run_collection_job,
@@ -38,6 +39,8 @@ from collector.storage.models import (
     ValidationResult,
 )
 
+pytestmark = pytest.mark.anyio
+
 
 def _use_heuristic_default_classifier(monkeypatch):
     monkeypatch.setattr(
@@ -46,7 +49,7 @@ def _use_heuristic_default_classifier(monkeypatch):
     )
 
 
-def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypatch):
+async def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypatch):
     _use_heuristic_default_classifier(monkeypatch)
     payload = CollectorAnalyzeHTMLRequest(
         url="https://example.org/datasets/mortality",
@@ -77,7 +80,7 @@ def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypat
         """,
     )
 
-    response = analyze_html(payload)
+    response = await analyze_html(payload)
 
     assert response.accepted is True
     assert response.publisher == "National Health Agency"
@@ -89,7 +92,7 @@ def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypat
     assert {distribution.format for distribution in response.distributions} == {"CSV", "XLSX"}
 
 
-def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
+async def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
     _use_heuristic_default_classifier(monkeypatch)
 
     def fake_fetch_public_html(url):
@@ -117,7 +120,7 @@ def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
 
     monkeypatch.setattr("app.routes.collector.fetch_public_html", fake_fetch_public_html)
 
-    response = analyze_url(CollectorURLRequest(url="https://example.org/catalog"))
+    response = await analyze_url(CollectorURLRequest(url="https://example.org/catalog"))
 
     assert response.accepted is True
     assert response.publisher == ""
@@ -161,7 +164,7 @@ def test_collector_analyze_html_route_uses_llm_default_classifier(monkeypatch):
         raise AssertionError("Expected HTTPException.")
 
 
-def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
+async def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
     def fake_discover_source(url):
         assert url == "https://catalog.example.org/"
         return [
@@ -187,7 +190,7 @@ def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
 
     monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
 
-    response = discover_url(CollectorURLRequest(url="https://catalog.example.org"))
+    response = await discover_url(CollectorURLRequest(url="https://catalog.example.org"))
 
     assert len(response.items) == 1
     item = response.items[0]
@@ -204,14 +207,16 @@ def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
     assert item.distributions[0].mime_type == "text/csv"
 
 
-def test_collector_discover_url_route_returns_bad_request_for_discovery_errors(monkeypatch):
+async def test_collector_discover_url_route_returns_bad_request_for_discovery_errors(
+    monkeypatch,
+):
     def fake_discover_source(url):
         raise ValueError(f"Could not discover {url}")
 
     monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
 
     try:
-        discover_url(CollectorURLRequest(url="https://catalog.example.org"))
+        await discover_url(CollectorURLRequest(url="https://catalog.example.org"))
     except HTTPException as exception:
         assert exception.status_code == 400
         assert exception.detail == "Could not discover https://catalog.example.org/"
@@ -219,7 +224,9 @@ def test_collector_discover_url_route_returns_bad_request_for_discovery_errors(m
         raise AssertionError("Expected HTTPException.")
 
 
-def test_collector_search_repositories_route_accepts_query_and_returns_results(monkeypatch):
+async def test_collector_search_repositories_route_accepts_query_and_returns_results(
+    monkeypatch,
+):
     def fake_search_repository_metadata(query):
         assert query == "malaria mortality"
         return RepositorySearchResponse(
@@ -250,7 +257,7 @@ def test_collector_search_repositories_route_accepts_query_and_returns_results(m
         fake_search_repository_metadata,
     )
 
-    response = search_repositories(
+    response = await search_repositories(
         CollectorRepositorySearchRequest(query=" malaria mortality ")
     )
 
@@ -269,7 +276,7 @@ def test_collector_search_repositories_route_accepts_query_and_returns_results(m
     assert response.warnings[0].message == "This source could not be searched."
 
 
-def test_collector_search_repositories_route_returns_bad_gateway_for_provider_errors(
+async def test_collector_search_repositories_route_returns_bad_gateway_for_provider_errors(
     monkeypatch,
 ):
     def fake_search_repository_metadata(query):
@@ -281,7 +288,9 @@ def test_collector_search_repositories_route_returns_bad_gateway_for_provider_er
     )
 
     try:
-        search_repositories(CollectorRepositorySearchRequest(query="malaria mortality"))
+        await search_repositories(
+            CollectorRepositorySearchRequest(query="malaria mortality")
+        )
     except HTTPException as exception:
         assert exception.status_code == 502
         assert exception.detail == "Repository search failed."
@@ -298,7 +307,7 @@ def test_collector_search_repositories_request_rejects_too_long_query():
         raise AssertionError("Expected validation error.")
 
 
-def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
+async def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
     saved_calls = []
 
     def fake_collect_source(url):
@@ -340,7 +349,7 @@ def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
             )
         ]
 
-    def fake_save_collected_datasets(source_url, datasets):
+    async def fake_save_collected_datasets(source_url, datasets):
         saved_calls.append((source_url, datasets))
         return datasets
 
@@ -350,7 +359,9 @@ def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
         fake_save_collected_datasets,
     )
 
-    response = collect_url(CollectorCollectURLRequest(url="https://catalog.example.org"))
+    response = await collect_url(
+        CollectorCollectURLRequest(url="https://catalog.example.org")
+    )
 
     assert len(saved_calls) == 1
     assert saved_calls[0][0] == "https://catalog.example.org/"
@@ -367,7 +378,7 @@ def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
     assert item.validation_results[0].size_bytes == 123
 
 
-def test_collector_collect_url_route_can_skip_saving(monkeypatch):
+async def test_collector_collect_url_route_can_skip_saving(monkeypatch):
     def fake_collect_source(url):
         return [
             CollectedDataset(
@@ -388,7 +399,7 @@ def test_collector_collect_url_route_can_skip_saving(monkeypatch):
             )
         ]
 
-    def fake_save_collected_datasets(source_url, datasets):
+    async def fake_save_collected_datasets(source_url, datasets):
         raise AssertionError("Should not save when save is false.")
 
     monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
@@ -397,7 +408,7 @@ def test_collector_collect_url_route_can_skip_saving(monkeypatch):
         fake_save_collected_datasets,
     )
 
-    response = collect_url(
+    response = await collect_url(
         CollectorCollectURLRequest(url="https://catalog.example.org", save=False)
     )
 
@@ -406,14 +417,16 @@ def test_collector_collect_url_route_can_skip_saving(monkeypatch):
     assert len(response.items) == 1
 
 
-def test_collector_collect_url_route_returns_502_when_classification_fails(monkeypatch):
+async def test_collector_collect_url_route_returns_502_when_classification_fails(
+    monkeypatch,
+):
     def fake_collect_source(url):
         raise PageClassificationError("LLM classification failed.")
 
     monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
 
     try:
-        collect_url(CollectorCollectURLRequest(url="https://catalog.example.org"))
+        await collect_url(CollectorCollectURLRequest(url="https://catalog.example.org"))
     except HTTPException as exception:
         assert exception.status_code == 502
         assert exception.detail == "Page classification failed."
@@ -421,8 +434,8 @@ def test_collector_collect_url_route_returns_502_when_classification_fails(monke
         raise AssertionError("Expected HTTPException.")
 
 
-def test_collector_start_collection_job_route_enqueues_background_task(monkeypatch):
-    def fake_create_collection_job(source_url):
+async def test_collector_start_collection_job_route_enqueues_background_task(monkeypatch):
+    async def fake_create_collection_job(source_url):
         assert source_url == "https://catalog.example.org/"
         return {
             "id": 12,
@@ -443,7 +456,7 @@ def test_collector_start_collection_job_route_enqueues_background_task(monkeypat
         fake_create_collection_job,
     )
 
-    response = start_collection_job(
+    response = await start_collection_job(
         CollectorURLRequest(url="https://catalog.example.org"),
         background_tasks,
     )
@@ -453,8 +466,8 @@ def test_collector_start_collection_job_route_enqueues_background_task(monkeypat
     assert len(background_tasks.tasks) == 1
 
 
-def test_collector_read_collection_job_route_returns_status(monkeypatch):
-    def fake_get_collection_job(job_id):
+async def test_collector_read_collection_job_route_returns_status(monkeypatch):
+    async def fake_get_collection_job(job_id):
         assert job_id == 12
         return {
             "id": 12,
@@ -476,7 +489,7 @@ def test_collector_read_collection_job_route_returns_status(monkeypatch):
 
     monkeypatch.setattr("app.routes.collector.get_collection_job", fake_get_collection_job)
 
-    response = read_collection_job(12)
+    response = await read_collection_job(12)
 
     assert response.job.id == 12
     assert response.job.status == "done"
@@ -485,11 +498,14 @@ def test_collector_read_collection_job_route_returns_status(monkeypatch):
     assert response.job.discovery_methods == ["sitemap"]
 
 
-def test_collector_read_collection_job_route_returns_not_found(monkeypatch):
-    monkeypatch.setattr("app.routes.collector.get_collection_job", lambda job_id: None)
+async def test_collector_read_collection_job_route_returns_not_found(monkeypatch):
+    async def fake_get_collection_job(job_id):
+        return None
+
+    monkeypatch.setattr("app.routes.collector.get_collection_job", fake_get_collection_job)
 
     try:
-        read_collection_job(404)
+        await read_collection_job(404)
     except HTTPException as exception:
         assert exception.status_code == 404
         assert exception.detail == "Collection job not found"
@@ -497,7 +513,7 @@ def test_collector_read_collection_job_route_returns_not_found(monkeypatch):
         raise AssertionError("Expected HTTPException.")
 
 
-def test_run_collection_job_marks_done(monkeypatch):
+async def test_run_collection_job_marks_done(monkeypatch):
     calls = []
 
     def fake_collect_source_with_report(source_url):
@@ -531,13 +547,21 @@ def test_run_collection_job_marks_done(monkeypatch):
             ),
         )
 
-    def fake_save_collected_datasets(source_url, datasets, collection_job_id=None):
+    async def fake_save_collected_datasets(source_url, datasets, collection_job_id=None):
         calls.append(("save", source_url, len(datasets), collection_job_id))
         return datasets
 
+    async def fake_mark_collection_job_running(job_id):
+        calls.append(("running", job_id))
+
+    async def fake_mark_collection_job_done(job_id, saved_count, report):
+        calls.append(
+            ("done", job_id, saved_count, report.discovered_count, report.discovery_methods)
+        )
+
     monkeypatch.setattr(
         "app.routes.collector.mark_collection_job_running",
-        lambda job_id: calls.append(("running", job_id)),
+        fake_mark_collection_job_running,
     )
     monkeypatch.setattr(
         "app.routes.collector.collect_source_with_report",
@@ -549,12 +573,10 @@ def test_run_collection_job_marks_done(monkeypatch):
     )
     monkeypatch.setattr(
         "app.routes.collector.mark_collection_job_done",
-        lambda job_id, saved_count, report: calls.append(
-            ("done", job_id, saved_count, report.discovered_count, report.discovery_methods)
-        ),
+        fake_mark_collection_job_done,
     )
 
-    _run_collection_job(12, "https://catalog.example.org/")
+    await _run_collection_job(12, "https://catalog.example.org/")
 
     assert calls == [
         ("running", 12),
@@ -564,15 +586,21 @@ def test_run_collection_job_marks_done(monkeypatch):
     ]
 
 
-def test_run_collection_job_marks_errors(monkeypatch):
+async def test_run_collection_job_marks_errors(monkeypatch):
     calls = []
 
     def fake_collect_source_with_report(source_url):
         raise ValueError("bad source")
 
+    async def fake_mark_collection_job_running(job_id):
+        calls.append(("running", job_id))
+
+    async def fake_mark_collection_job_error(job_id, error):
+        calls.append(("error", job_id, error))
+
     monkeypatch.setattr(
         "app.routes.collector.mark_collection_job_running",
-        lambda job_id: calls.append(("running", job_id)),
+        fake_mark_collection_job_running,
     )
     monkeypatch.setattr(
         "app.routes.collector.collect_source_with_report",
@@ -580,16 +608,16 @@ def test_run_collection_job_marks_errors(monkeypatch):
     )
     monkeypatch.setattr(
         "app.routes.collector.mark_collection_job_error",
-        lambda job_id, error: calls.append(("error", job_id, error)),
+        fake_mark_collection_job_error,
     )
 
-    _run_collection_job(12, "https://catalog.example.org/")
+    await _run_collection_job(12, "https://catalog.example.org/")
 
     assert calls == [("running", 12), ("error", 12, "bad source")]
 
 
-def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):
-    def fake_list_collected_datasets():
+async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):
+    async def fake_list_collected_datasets():
         return [
             CollectedDataset(
                 dataset_url="https://catalog.example.org/dataset/mortality",
@@ -617,7 +645,7 @@ def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):
         fake_list_collected_datasets,
     )
 
-    response = list_collected()
+    response = await list_collected()
 
     assert response.saved is False
     assert response.saved_count == 0

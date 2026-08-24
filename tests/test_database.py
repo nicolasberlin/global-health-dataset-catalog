@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import importlib
-import logging
-import sqlite3
+import uuid
 
+import psycopg
 import pytest
+from app import db_connection, db_schema, db_serialization
+from psycopg import sql as pg_sql
 
 from collector.storage.models import (
     CollectedDataset,
@@ -13,7 +14,10 @@ from collector.storage.models import (
     ValidationResult,
 )
 
+pytestmark = pytest.mark.anyio
+
 SCHEMA_TABLES = (
+    "schema_migrations",
     "data_sources",
     "collected_datasets",
     "collected_distributions",
@@ -22,37 +26,45 @@ SCHEMA_TABLES = (
 )
 
 
-def _load_database(monkeypatch, tmp_path, filename: str):
-    monkeypatch.setenv("GLOBAL_HEALTH_DB_PATH", str(tmp_path / filename))
-
-    from app import database
-
-    return importlib.reload(database)
+async def _schema_version(database) -> int:
+    async with db_connection._require_database_pool().connection() as connection:
+        return await db_schema._schema_version(connection)
 
 
-def _user_version(database) -> int:
-    with database.get_connection() as connection:
-        row = connection.execute("PRAGMA user_version").fetchone()
-    return int(row[0])
+async def _table_names(database) -> set[str]:
+    async with db_connection._require_database_pool().connection() as connection:
+        rows = await db_connection._fetchall(
+            connection,
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+            """,
+        )
+    return {str(row["table_name"]) for row in rows}
 
 
-def _table_names(database) -> set[str]:
-    with database.get_connection() as connection:
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    return {row["name"] for row in rows}
+async def _fetchall(database, sql: str, parameters=None):
+    async with db_connection._require_database_pool().connection() as connection:
+        return await db_connection._fetchall(connection, sql, parameters)
 
 
-def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
-    with database.get_connection() as connection:
-        dataset_id = connection.execute(
+async def _execute(database, sql: str, parameters=None) -> None:
+    async with db_connection._require_database_pool().connection() as connection:
+        await connection.execute(sql, parameters)
+
+
+async def _insert_minimal_dataset(database, suffix: str = "") -> int:
+    async with db_connection._require_database_pool().connection() as connection:
+        row = await db_connection._fetchone(
+            connection,
             """
             INSERT INTO collected_datasets (
                 dataset_url, title, dataset_probability, health_probability,
                 health_label
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (
                 f"https://catalog.example.org/dataset/valid{suffix}",
@@ -61,415 +73,136 @@ def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
                 0.7,
                 "HEALTH",
             ),
-        ).lastrowid
+        )
+    return int(row["id"])
 
-        invalid_statements = [
+
+async def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
+    dataset_id = await _insert_minimal_dataset(database, suffix)
+    invalid_statements = [
+        (
+            """
+            INSERT INTO data_sources (
+                source_key, name, description, theme, page_url
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            ("", "Empty source key", "", "General", "https://example.org/"),
+        ),
+        (
+            """
+            INSERT INTO data_sources (
+                source_key, name, description, theme, page_url
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """,
             (
-                """
-                INSERT INTO data_sources (
-                    source_key, name, description, theme, page_url
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                ("", "Empty source key", "", "General", "https://example.org/"),
+                "My HDX",
+                "Invalid source key",
+                "",
+                "General",
+                "https://example.org/",
             ),
-            (
-                """
-                INSERT INTO data_sources (
-                    source_key, name, description, theme, page_url
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                ("empty_page_url", "Empty page URL", "", "General", ""),
-            ),
-            (
-                """
-                INSERT INTO collected_datasets (
-                    dataset_url, title, dataset_probability, health_probability,
-                    health_label
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    f"https://catalog.example.org/dataset/bad-probability{suffix}",
-                    "Bad dataset probability",
-                    16.42,
-                    0.7,
-                    "HEALTH",
-                ),
-            ),
-            (
-                """
-                INSERT INTO collected_datasets (
-                    dataset_url, title, dataset_probability, health_probability,
-                    health_label
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    f"https://catalog.example.org/dataset/bad-label{suffix}",
-                    "Bad health label",
-                    0.8,
-                    0.7,
-                    "banana",
-                ),
-            ),
-            (
-                """
-                INSERT INTO collected_distributions (
-                    dataset_id, url, format, probability, same_domain
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    dataset_id,
-                    f"https://catalog.example.org/files/bad-domain{suffix}.csv",
-                    "CSV",
-                    0.9,
-                    -5,
-                ),
-            ),
-            (
-                """
-                INSERT INTO collected_distributions (
-                    dataset_id, url, format, probability, validation_ok
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    dataset_id,
-                    f"https://catalog.example.org/files/bad-validation{suffix}.csv",
-                    "CSV",
-                    0.9,
-                    784,
-                ),
-            ),
-            (
-                """
-                INSERT INTO collection_jobs (source_url)
-                VALUES (?)
-                """,
-                ("",),
-            ),
-            (
-                """
-                INSERT INTO collection_jobs (source_url, status)
-                VALUES (?, ?)
-                """,
-                (f"https://catalog.example.org/bad-status{suffix}", "banana"),
-            ),
-            (
-                """
-                INSERT INTO collection_jobs (source_url, saved_count)
-                VALUES (?, ?)
-                """,
-                (f"https://catalog.example.org/bad-saved-count{suffix}", -1),
-            ),
-            (
-                """
-                INSERT INTO collection_jobs (source_url, discovered_count)
-                VALUES (?, ?)
-                """,
-                (f"https://catalog.example.org/bad-discovered-count{suffix}", -1),
-            ),
-        ]
-
-        for sql, parameters in invalid_statements:
-            with pytest.raises(sqlite3.IntegrityError):
-                connection.execute(sql, parameters)
-
-
-def test_init_database_seeds_dataset_pages(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "catalog.db")
-
-    database.init_database()
-
-    sources = database.list_data_sources()
-    assert len(sources) == 2
-    assert {source["source_key"] for source in sources} == {
-        "who_gho_indicators",
-        "who_gho_life_expectancy",
-    }
-    assert all(source["page_url"].startswith("https://www.who.int/") for source in sources)
-    assert {source["theme"] for source in sources} == {"General", "Mortality"}
-    assert _user_version(database) == database.CURRENT_SCHEMA_VERSION
-
-    database.upsert_data_source(
-        "user_defined_source",
-        "User source",
-        "User description",
-        "Custom",
-        "https://example.org/user-source",
-    )
-    database.init_database()
-
-    sources = database.list_data_sources()
-    life_expectancy_source = next(
-        source
-        for source in sources
-        if source["source_key"] == "who_gho_life_expectancy"
-    )
-    assert (
-        life_expectancy_source["name"]
-        == "WHO Global Health Observatory - Life expectancy"
-    )
-    assert any(source["source_key"] == "user_defined_source" for source in sources)
-    assert len(sources) == 3
-
-
-def test_init_database_creates_current_schema_with_integrity(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "integrity.db")
-
-    database.init_database()
-
-    with database.get_connection() as connection:
-        foreign_key_violations = connection.execute("PRAGMA foreign_key_check").fetchall()
-
-    assert _user_version(database) == database.CURRENT_SCHEMA_VERSION
-    assert set(SCHEMA_TABLES).issubset(_table_names(database))
-    assert foreign_key_violations == []
-    _assert_schema_constraints_are_enforced(database, "-fresh")
-
-
-def test_seen_timestamps_default_to_current_timestamp(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "timestamp-defaults.db")
-    database.init_database()
-
-    with database.get_connection() as connection:
-        dataset_id = connection.execute(
+        ),
+        (
+            """
+            INSERT INTO data_sources (
+                source_key, name, description, theme, page_url
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            ("empty_page_url", "Empty page URL", "", "General", ""),
+        ),
+        (
             """
             INSERT INTO collected_datasets (
                 dataset_url, title, dataset_probability, health_probability,
                 health_label
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
             """,
             (
-                "https://catalog.example.org/dataset/default-timestamps",
-                "Dataset with default timestamps",
-                0.8,
+                f"https://catalog.example.org/dataset/bad-probability{suffix}",
+                "Bad dataset probability",
+                16.42,
                 0.7,
                 "HEALTH",
             ),
-        ).lastrowid
-        connection.execute(
+        ),
+        (
+            """
+            INSERT INTO collected_datasets (
+                dataset_url, title, dataset_probability, health_probability,
+                health_label
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                f"https://catalog.example.org/dataset/bad-label{suffix}",
+                "Bad health label",
+                0.8,
+                0.7,
+                "banana",
+            ),
+        ),
+        (
             """
             INSERT INTO collected_distributions (
                 dataset_id, url, format, probability
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             """,
             (
-                dataset_id,
-                "https://catalog.example.org/files/default-timestamps.csv",
+                999_999,
+                f"https://catalog.example.org/files/bad-fk{suffix}.csv",
                 "CSV",
                 0.9,
             ),
-        )
-        dataset_row = connection.execute(
+        ),
+        (
             """
-            SELECT first_seen_at, last_seen_at
-            FROM collected_datasets
-            WHERE id = ?
-            """,
-            (dataset_id,),
-        ).fetchone()
-        distribution_row = connection.execute(
-            """
-            SELECT first_seen_at, last_seen_at, last_checked_at
-            FROM collected_distributions
-            WHERE dataset_id = ?
-            """,
-            (dataset_id,),
-        ).fetchone()
-
-    assert dataset_row["first_seen_at"] != ""
-    assert dataset_row["last_seen_at"] != ""
-    assert distribution_row["first_seen_at"] != ""
-    assert distribution_row["last_seen_at"] != ""
-    assert distribution_row["last_checked_at"] == ""
-
-
-def test_init_database_preserves_unrelated_accounts_table(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "catalog-with-accounts.db")
-
-    with database.get_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE accounts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL
+            INSERT INTO collected_distributions (
+                dataset_id, url, format, probability
             )
-            """
-        )
-        connection.execute(
-            "INSERT INTO accounts (email) VALUES (?)",
-            ("admin@example.org",),
-        )
-
-    database.init_database()
-
-    with database.get_connection() as connection:
-        account_rows = connection.execute("SELECT email FROM accounts").fetchall()
-
-    assert [row["email"] for row in account_rows] == ["admin@example.org"]
-    assert set(SCHEMA_TABLES).issubset(_table_names(database))
-
-
-def test_init_database_rejects_unversioned_managed_tables_without_data_loss(
-    tmp_path,
-    monkeypatch,
-):
-    database = _load_database(monkeypatch, tmp_path, "unversioned-managed.db")
-
-    with database.get_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE data_sources (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute("INSERT INTO data_sources (name) VALUES (?)", ("Legacy",))
-
-    with pytest.raises(RuntimeError, match="Unversioned database already contains"):
-        database.init_database()
-
-    with database.get_connection() as connection:
-        rows = connection.execute("SELECT name FROM data_sources").fetchall()
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
-
-    assert [row["name"] for row in rows] == ["Legacy"]
-    assert "collected_datasets" not in _table_names(database)
-    assert version == 0
-
-
-def test_init_database_rejects_current_reserved_source_key_collision_before_seed(
-    tmp_path,
-    monkeypatch,
-):
-    database = _load_database(monkeypatch, tmp_path, "reserved-current.db")
-
-    with database.get_connection() as connection:
-        for schema in database.INITIAL_SCHEMA_STATEMENTS:
-            connection.execute(schema)
-        connection.execute(
-            """
-            INSERT INTO data_sources (source_key, name, description, theme, page_url)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             """,
             (
-                "who_gho_life_expectancy",
-                "Custom life expectancy source",
-                "Already at current schema.",
-                "Custom",
-                "https://example.org/current-collision",
+                dataset_id,
+                f"https://catalog.example.org/files/bad-probability{suffix}.csv",
+                "CSV",
+                4.2,
             ),
-        )
-        connection.execute(f"PRAGMA user_version = {database.CURRENT_SCHEMA_VERSION}")
-
-    with pytest.raises(RuntimeError, match="Cannot safely seed data_sources"):
-        database.init_database()
-
-    with database.get_connection() as connection:
-        row = connection.execute(
+        ),
+        (
             """
-            SELECT name, page_url
-            FROM data_sources
-            WHERE source_key = ?
+            INSERT INTO collection_jobs (source_url)
+            VALUES (%s)
             """,
-            ("who_gho_life_expectancy",),
-        ).fetchone()
+            ("",),
+        ),
+        (
+            """
+            INSERT INTO collection_jobs (source_url, status)
+            VALUES (%s, %s)
+            """,
+            (f"https://catalog.example.org/bad-status{suffix}", "banana"),
+        ),
+        (
+            """
+            INSERT INTO collection_jobs (source_url, saved_count)
+            VALUES (%s, %s)
+            """,
+            (f"https://catalog.example.org/bad-saved-count{suffix}", -1),
+        ),
+    ]
 
-    assert row["name"] == "Custom life expectancy source"
-    assert row["page_url"] == "https://example.org/current-collision"
-
-
-def test_future_seed_collision_fails_before_overwrite(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "future-seed.db")
-    database.init_database()
-    database.upsert_data_source(
-        "who_mortality_2027",
-        "User mortality source",
-        "Created before the key became a seed.",
-        "Custom",
-        "https://example.org/user-mortality",
-    )
-    future_seed = {
-        "source_key": "who_mortality_2027",
-        "name": "WHO mortality 2027",
-        "description": "Future application seed.",
-        "theme": "Mortality",
-        "page_url": "https://www.who.int/data/mortality-2027",
-    }
-    monkeypatch.setattr(
-        database,
-        "DATA_SOURCE_SEEDS",
-        [*database.DATA_SOURCE_SEEDS, future_seed],
-    )
-
-    with pytest.raises(RuntimeError, match="Cannot safely seed data_sources"):
-        database.init_database()
-
-    source = next(
-        source
-        for source in database.list_data_sources()
-        if source["source_key"] == "who_mortality_2027"
-    )
-    assert source["name"] == "User mortality source"
-    assert source["page_url"] == "https://example.org/user-mortality"
+    for sql, parameters in invalid_statements:
+        with pytest.raises(psycopg.Error):
+            await _execute(database, sql, parameters)
 
 
-def test_upsert_data_source_rejects_reserved_seed_key(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "reserved-key.db")
-    database.init_database()
-
-    with pytest.raises(database.ReservedDataSourceKeyError):
-        database.upsert_data_source(
-            "who_gho_indicators",
-            "User override",
-            "Should not be allowed.",
-            "Custom",
-            "https://example.org/override",
-        )
-
-    source = next(
-        source
-        for source in database.list_data_sources()
-        if source["source_key"] == "who_gho_indicators"
-    )
-    assert source["name"] == "WHO Global Health Observatory - Indicators"
-
-
-def test_business_operations_do_not_apply_schema_migrations(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "business-before-init.db")
-
-    with pytest.raises(RuntimeError, match="Run init_database"):
-        database.list_data_sources()
-
-    assert _table_names(database) == set()
-    assert _user_version(database) == 0
-
-
-def test_schema_migration_rechecks_version_after_acquiring_lock(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "stale-lock.db")
-    database.init_database()
-
-    def fail_if_called(_connection):
-        raise AssertionError("stale migration should not run")
-
-    with database.get_connection() as connection:
-        database._run_schema_migration(connection, 0, 1, fail_if_called)
-
-    assert _user_version(database) == database.CURRENT_SCHEMA_VERSION
-
-
-def test_save_and_list_collected_datasets(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "collected.db")
-    database.init_database()
-
-    dataset = CollectedDataset(
+def _mortality_dataset() -> CollectedDataset:
+    return CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/mortality",
         title="Mortality health dataset",
         description="Official mortality health data.",
@@ -505,13 +238,402 @@ def test_save_and_list_collected_datasets(tmp_path, monkeypatch):
         ],
     )
 
-    saved = database.save_collected_datasets("https://catalog.example.org/", [dataset])
+
+async def test_init_database_seeds_dataset_pages(database):
+    await database.init_database()
+
+    sources = await database.list_data_sources()
+    assert len(sources) == 2
+    assert {source["source_key"] for source in sources} == {
+        "who_gho_indicators",
+        "who_gho_life_expectancy",
+    }
+    assert all(source["page_url"].startswith("https://www.who.int/") for source in sources)
+    assert {source["theme"] for source in sources} == {"General", "Mortality"}
+    assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
+
+    await database.upsert_data_source(
+        "user_defined_source",
+        "User source",
+        "User description",
+        "Custom",
+        "https://example.org/user-source",
+    )
+    await database.init_database()
+
+    sources = await database.list_data_sources()
+    life_expectancy_source = next(
+        source
+        for source in sources
+        if source["source_key"] == "who_gho_life_expectancy"
+    )
+    assert (
+        life_expectancy_source["name"]
+        == "WHO Global Health Observatory - Life expectancy"
+    )
+    assert any(source["source_key"] == "user_defined_source" for source in sources)
+    assert len(sources) == 3
+
+
+async def test_init_database_creates_current_schema_with_integrity(database):
+    await database.init_database()
+
+    assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
+    assert set(SCHEMA_TABLES).issubset(await _table_names(database))
+    await _assert_schema_constraints_are_enforced(database, "-fresh")
+
+
+async def test_table_exists_checks_current_schema_only(database):
+    table_name = f"shadow_only_{uuid.uuid4().hex}"
+    shadow_schema = f"shadow_{uuid.uuid4().hex}"
+
+    async with db_connection._require_database_pool().connection() as connection:
+        current_schema_row = await db_connection._fetchone(
+            connection,
+            "SELECT current_schema() AS schema_name",
+        )
+        current_schema = str(current_schema_row["schema_name"])
+
+        try:
+            await connection.execute(
+                pg_sql.SQL("CREATE SCHEMA {}").format(pg_sql.Identifier(shadow_schema))
+            )
+            await connection.execute(
+                pg_sql.SQL("CREATE TABLE {}.{} (id integer)").format(
+                    pg_sql.Identifier(shadow_schema),
+                    pg_sql.Identifier(table_name),
+                )
+            )
+            await connection.execute(
+                pg_sql.SQL("SET LOCAL search_path TO {}, {}").format(
+                    pg_sql.Identifier(current_schema),
+                    pg_sql.Identifier(shadow_schema),
+                )
+            )
+
+            assert await db_schema._table_exists(connection, table_name) is False
+        finally:
+            await connection.execute(
+                pg_sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                    pg_sql.Identifier(shadow_schema)
+                )
+            )
+
+
+async def test_seen_timestamps_default_to_postgres_timestamps(database):
+    await database.init_database()
+
+    dataset_id = await _insert_minimal_dataset(database, "-timestamps")
+    await _execute(
+        database,
+        """
+        INSERT INTO collected_distributions (
+            dataset_id, url, format, probability
+        )
+        VALUES (%s, %s, %s, %s)
+        """,
+        (
+            dataset_id,
+            "https://catalog.example.org/files/default-timestamps.csv",
+            "CSV",
+            0.9,
+        ),
+    )
+    dataset_rows = await _fetchall(
+        database,
+        """
+        SELECT first_seen_at, last_seen_at
+        FROM collected_datasets
+        WHERE id = %s
+        """,
+        (dataset_id,),
+    )
+    distribution_rows = await _fetchall(
+        database,
+        """
+        SELECT first_seen_at, last_seen_at, last_checked_at
+        FROM collected_distributions
+        WHERE dataset_id = %s
+        """,
+        (dataset_id,),
+    )
+
+    assert dataset_rows[0]["first_seen_at"] is not None
+    assert dataset_rows[0]["last_seen_at"] is not None
+    assert distribution_rows[0]["first_seen_at"] is not None
+    assert distribution_rows[0]["last_seen_at"] is not None
+    assert distribution_rows[0]["last_checked_at"] is None
+
+
+async def test_init_database_preserves_unrelated_accounts_table(database):
+    await _execute(
+        database,
+        """
+        CREATE TABLE accounts (
+            id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            email TEXT NOT NULL
+        )
+        """,
+    )
+    await _execute(
+        database,
+        "INSERT INTO accounts (email) VALUES (%s)",
+        ("admin@example.org",),
+    )
+
+    await database.init_database()
+
+    account_rows = await _fetchall(database, "SELECT email FROM accounts")
+    assert [row["email"] for row in account_rows] == ["admin@example.org"]
+    assert set(SCHEMA_TABLES).issubset(await _table_names(database))
+
+
+async def test_init_database_rejects_unversioned_managed_tables_without_data_loss(
+    database,
+):
+    await _execute(
+        database,
+        """
+        CREATE TABLE data_sources (
+            id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            name TEXT NOT NULL
+        )
+        """,
+    )
+    await _execute(database, "INSERT INTO data_sources (name) VALUES (%s)", ("Legacy",))
+
+    with pytest.raises(RuntimeError, match="unmanaged application tables"):
+        await database.init_database()
+
+    rows = await _fetchall(database, "SELECT name FROM data_sources")
+    assert [row["name"] for row in rows] == ["Legacy"]
+    assert "schema_migrations" not in await _table_names(database)
+    assert "collected_datasets" not in await _table_names(database)
+    assert await _schema_version(database) == 0
+
+
+async def test_init_database_rejects_current_version_with_missing_managed_tables(
+    database,
+):
+    async with db_connection._require_database_pool().connection() as connection:
+        await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
+        await db_schema._set_schema_version(
+            connection,
+            db_schema.CURRENT_SCHEMA_VERSION,
+        )
+
+    with pytest.raises(RuntimeError, match="managed tables are missing") as error:
+        await database.init_database()
+
+    assert "data_sources" in str(error.value)
+    assert "collection_jobs" in str(error.value)
+
+
+async def test_init_database_rejects_current_reserved_source_key_collision_before_seed(
+    database,
+):
+    async with db_connection._require_database_pool().connection() as connection:
+        await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
+        for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
+            await connection.execute(schema)
+        await connection.execute(
+            """
+            INSERT INTO data_sources (source_key, name, description, theme, page_url)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                "who_gho_life_expectancy",
+                "Custom life expectancy source",
+                "Already at current schema.",
+                "Custom",
+                "https://example.org/current-collision",
+            ),
+        )
+        await db_schema._set_schema_version(
+            connection,
+            db_schema.CURRENT_SCHEMA_VERSION,
+        )
+
+    with pytest.raises(RuntimeError, match="Cannot safely seed data_sources"):
+        await database.init_database()
+
+    rows = await _fetchall(
+        database,
+        """
+        SELECT name, page_url
+        FROM data_sources
+        WHERE source_key = %s
+        """,
+        ("who_gho_life_expectancy",),
+    )
+    assert rows[0]["name"] == "Custom life expectancy source"
+    assert rows[0]["page_url"] == "https://example.org/current-collision"
+
+
+async def test_future_seed_collision_fails_before_overwrite(database, monkeypatch):
+    from app import db_schema
+
+    await database.init_database()
+    await database.upsert_data_source(
+        "who_mortality_2027",
+        "User mortality source",
+        "Created before the key became a seed.",
+        "Custom",
+        "https://example.org/user-mortality",
+    )
+    future_seed = {
+        "source_key": "who_mortality_2027",
+        "name": "WHO mortality 2027",
+        "description": "Future application seed.",
+        "theme": "Mortality",
+        "page_url": "https://www.who.int/data/mortality-2027",
+    }
+    monkeypatch.setattr(
+        db_schema,
+        "DATA_SOURCE_SEEDS",
+        [*db_schema.DATA_SOURCE_SEEDS, future_seed],
+    )
+
+    with pytest.raises(RuntimeError, match="Cannot safely seed data_sources"):
+        await database.init_database()
+
+    source = next(
+        source
+        for source in await database.list_data_sources()
+        if source["source_key"] == "who_mortality_2027"
+    )
+    assert source["name"] == "User mortality source"
+    assert source["page_url"] == "https://example.org/user-mortality"
+
+
+async def test_upsert_data_source_rejects_reserved_seed_key(database):
+    await database.init_database()
+
+    with pytest.raises(database.ReservedDataSourceKeyError):
+        await database.upsert_data_source(
+            "who_gho_indicators",
+            "User override",
+            "Should not be allowed.",
+            "Custom",
+            "https://example.org/override",
+        )
+
+    source = next(
+        source
+        for source in await database.list_data_sources()
+        if source["source_key"] == "who_gho_indicators"
+    )
+    assert source["name"] == "WHO Global Health Observatory - Indicators"
+
+
+async def test_create_data_source_rejects_reserved_seed_key_after_normalization(
+    database,
+):
+    await database.init_database()
+
+    with pytest.raises(database.ReservedDataSourceKeyError):
+        await database.create_data_source(
+            "who_gho_indicators ",
+            "User override",
+            "Should not be allowed.",
+            "Custom",
+            "https://example.org/override",
+        )
+
+    source = next(
+        source
+        for source in await database.list_data_sources()
+        if source["source_key"] == "who_gho_indicators"
+    )
+    assert source["name"] == "WHO Global Health Observatory - Indicators"
+
+
+async def test_upsert_data_source_rejects_invalid_source_key(database):
+    await database.init_database()
+
+    with pytest.raises(database.InvalidDataSourceKeyError):
+        await database.upsert_data_source(
+            "My HDX",
+            "Humanitarian Data Exchange",
+            "Global datasets.",
+            "Humanitarian",
+            "https://data.humdata.org/dataset",
+        )
+
+
+async def test_create_data_source_rejects_invalid_page_url_before_pool():
+    from app import database
+
+    with pytest.raises(database.InvalidDataSourceURLError):
+        await database.create_data_source(
+            "my_hdx",
+            "Humanitarian Data Exchange",
+            "Global datasets.",
+            "Humanitarian",
+            "not-a-url",
+        )
+
+
+async def test_create_data_source_rejects_duplicate_source_key(database):
+    await database.init_database()
+
+    created = await database.create_data_source(
+        "my_hdx",
+        "Humanitarian Data Exchange",
+        "Global datasets.",
+        "Humanitarian",
+        "https://data.humdata.org/dataset",
+    )
+
+    with pytest.raises(database.DuplicateDataSourceKeyError):
+        await database.create_data_source(
+            "my_hdx",
+            "Replacement",
+            "Should not overwrite the existing source.",
+            "Other",
+            "https://example.org/replacement",
+        )
+
+    source = await database.get_data_source(int(created["id"]))
+    assert source is not None
+    assert source["name"] == "Humanitarian Data Exchange"
+    assert source["page_url"] == "https://data.humdata.org/dataset"
+
+
+async def test_business_operations_do_not_apply_schema_migrations(database):
+    with pytest.raises(RuntimeError, match="Run init_database"):
+        await database.list_data_sources()
+
+    assert await _table_names(database) == set()
+    assert await _schema_version(database) == 0
+
+
+async def test_schema_migration_rechecks_version_after_acquiring_lock(database):
+    await database.init_database()
+
+    async def fail_if_called(_connection):
+        raise AssertionError("stale migration should not run")
+
+    async with db_connection._require_database_pool().connection() as connection:
+        await db_schema._run_schema_migration(connection, 0, 1, fail_if_called)
+
+    assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
+
+
+async def test_save_and_list_collected_datasets(database):
+    await database.init_database()
+
+    dataset = _mortality_dataset()
+    saved = await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [dataset],
+    )
 
     assert len(saved) == 1
     assert saved[0].database_id is not None
     assert saved[0].source_url == "https://catalog.example.org/"
 
-    collected = database.list_collected_datasets()
+    collected = await database.list_collected_datasets()
     assert len(collected) == 1
     assert collected[0].dataset_url == "https://catalog.example.org/dataset/mortality"
     assert collected[0].dataset_signals == {"schema_dataset": True}
@@ -554,9 +676,12 @@ def test_save_and_list_collected_datasets(tmp_path, monkeypatch):
         ],
     )
 
-    database.save_collected_datasets("https://catalog.example.org/", [updated_dataset])
+    await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [updated_dataset],
+    )
 
-    collected = database.list_collected_datasets()
+    collected = await database.list_collected_datasets()
     assert len(collected) == 1
     assert collected[0].title == "Updated mortality health dataset"
     assert {distribution.format for distribution in collected[0].distributions} == {
@@ -565,9 +690,8 @@ def test_save_and_list_collected_datasets(tmp_path, monkeypatch):
     }
 
 
-def test_save_preserves_every_dataset_discovery_observation(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "discovery-observations.db")
-    database.init_database()
+async def test_save_preserves_every_dataset_discovery_observation(database):
+    await database.init_database()
 
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/mortality",
@@ -585,8 +709,11 @@ def test_save_preserves_every_dataset_discovery_observation(tmp_path, monkeypatc
         discovery_method="ckan",
     )
 
-    saved = database.save_collected_datasets("https://catalog.example.org/", [dataset])
-    database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    saved = await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [dataset],
+    )
+    await database.save_collected_datasets("https://catalog.example.org/", [dataset])
     updated_dataset = CollectedDataset(
         dataset_url=dataset.dataset_url,
         title="Mortality health dataset from sitemap",
@@ -602,10 +729,15 @@ def test_save_preserves_every_dataset_discovery_observation(tmp_path, monkeypatc
         distributions=[],
         discovery_method="sitemap",
     )
-    database.save_collected_datasets("https://www.who.int/data/", [updated_dataset])
+    await database.save_collected_datasets(
+        "https://www.who.int/data/",
+        [updated_dataset],
+    )
 
-    collected = database.list_collected_datasets()[0]
-    observations = database.list_dataset_discovery_observations(saved[0].database_id)
+    collected = (await database.list_collected_datasets())[0]
+    observations = await database.list_dataset_discovery_observations(
+        saved[0].database_id
+    )
 
     assert collected.source_url == "https://www.who.int/data/"
     assert collected.discovery_method == "sitemap"
@@ -623,13 +755,9 @@ def test_save_preserves_every_dataset_discovery_observation(tmp_path, monkeypatc
     assert all(observation["observed_at"] for observation in observations)
 
 
-def test_save_links_dataset_discovery_observation_to_collection_job(
-    tmp_path,
-    monkeypatch,
-):
-    database = _load_database(monkeypatch, tmp_path, "job-discovery-observations.db")
-    database.init_database()
-    job = database.create_collection_job("https://catalog.example.org/")
+async def test_save_links_dataset_discovery_observation_to_collection_job(database):
+    await database.init_database()
+    job = await database.create_collection_job("https://catalog.example.org/")
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/mortality",
         title="Mortality health dataset",
@@ -646,13 +774,15 @@ def test_save_links_dataset_discovery_observation_to_collection_job(
         discovery_method="ckan",
     )
 
-    saved = database.save_collected_datasets(
+    saved = await database.save_collected_datasets(
         "https://catalog.example.org/",
         [dataset],
         collection_job_id=int(job["id"]),
     )
 
-    observations = database.list_dataset_discovery_observations(saved[0].database_id)
+    observations = await database.list_dataset_discovery_observations(
+        saved[0].database_id
+    )
 
     assert len(observations) == 1
     assert observations[0]["collection_job_id"] == job["id"]
@@ -660,12 +790,8 @@ def test_save_links_dataset_discovery_observation_to_collection_job(
     assert observations[0]["discovery_method"] == "ckan"
 
 
-def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(
-    tmp_path,
-    monkeypatch,
-):
-    database = _load_database(monkeypatch, tmp_path, "distribution-upsert.db")
-    database.init_database()
+async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(database):
+    await database.init_database()
 
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/upsert",
@@ -702,38 +828,40 @@ def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(
             )
         ],
     )
-    database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    with database.get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE collected_datasets
-            SET first_seen_at = '2000-01-01 00:00:00',
-                last_seen_at = '2000-01-01 00:00:00'
-            WHERE dataset_url = ?
-            """,
-            (dataset.dataset_url,),
-        )
-        connection.execute(
-            """
-            UPDATE collected_distributions
-            SET first_seen_at = '2000-01-01 00:00:00',
-                last_seen_at = '2000-01-01 00:00:00',
-                last_checked_at = '2000-01-01 00:00:00'
-            WHERE url = ?
-            """,
-            ("https://catalog.example.org/files/current.csv",),
-        )
-        connection.execute(
-            """
-            UPDATE collected_distributions
-            SET first_seen_at = '2001-01-01 00:00:00',
-                last_seen_at = '2001-01-01 00:00:00',
-                last_checked_at = ''
-            WHERE url = ?
-            """,
-            ("https://catalog.example.org/files/stale.csv",),
-        )
+    await _execute(
+        database,
+        """
+        UPDATE collected_datasets
+        SET first_seen_at = TIMESTAMPTZ '2000-01-01 00:00:00+00',
+            last_seen_at = TIMESTAMPTZ '2000-01-01 00:00:00+00'
+        WHERE dataset_url = %s
+        """,
+        (dataset.dataset_url,),
+    )
+    await _execute(
+        database,
+        """
+        UPDATE collected_distributions
+        SET first_seen_at = TIMESTAMPTZ '2000-01-01 00:00:00+00',
+            last_seen_at = TIMESTAMPTZ '2000-01-01 00:00:00+00',
+            last_checked_at = TIMESTAMPTZ '2000-01-01 00:00:00+00'
+        WHERE url = %s
+        """,
+        ("https://catalog.example.org/files/current.csv",),
+    )
+    await _execute(
+        database,
+        """
+        UPDATE collected_distributions
+        SET first_seen_at = TIMESTAMPTZ '2001-01-01 00:00:00+00',
+            last_seen_at = TIMESTAMPTZ '2001-01-01 00:00:00+00',
+            last_checked_at = NULL
+        WHERE url = %s
+        """,
+        ("https://catalog.example.org/files/stale.csv",),
+    )
 
     updated_dataset = CollectedDataset(
         dataset_url=dataset.dataset_url,
@@ -765,16 +893,18 @@ def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(
             )
         ],
     )
-    database.save_collected_datasets("https://catalog.example.org/", [updated_dataset])
+    await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [updated_dataset],
+    )
 
-    collected = database.list_collected_datasets()[0]
+    collected = (await database.list_collected_datasets())[0]
     distributions_by_url = {
-        distribution.url: distribution
-        for distribution in collected.distributions
+        distribution.url: distribution for distribution in collected.distributions
     }
 
-    assert collected.first_seen_at == "2000-01-01 00:00:00"
-    assert collected.last_seen_at != "2000-01-01 00:00:00"
+    assert collected.first_seen_at.startswith("2000-01-01T00:00:00")
+    assert not collected.last_seen_at.startswith("2000-01-01T00:00:00")
     assert set(distributions_by_url) == {
         "https://catalog.example.org/files/current.csv",
         "https://catalog.example.org/files/stale.csv",
@@ -786,15 +916,15 @@ def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(
         "https://catalog.example.org/files/stale.csv"
     ]
     assert current_distribution.probability == 0.95
-    assert current_distribution.first_seen_at == "2000-01-01 00:00:00"
-    assert current_distribution.last_seen_at != "2000-01-01 00:00:00"
-    assert current_distribution.last_checked_at != "2000-01-01 00:00:00"
-    assert stale_distribution.first_seen_at == "2001-01-01 00:00:00"
-    assert stale_distribution.last_seen_at == "2001-01-01 00:00:00"
+    assert current_distribution.first_seen_at.startswith("2000-01-01T00:00:00")
+    assert not current_distribution.last_seen_at.startswith("2000-01-01T00:00:00")
+    assert not current_distribution.last_checked_at.startswith("2000-01-01T00:00:00")
+    assert stale_distribution.first_seen_at.startswith("2001-01-01T00:00:00")
+    assert stale_distribution.last_seen_at.startswith("2001-01-01T00:00:00")
+    assert stale_distribution.last_checked_at == ""
 
     validation_by_url = {
-        validation.url: validation
-        for validation in collected.validation_results
+        validation.url: validation for validation in collected.validation_results
     }
     assert (
         validation_by_url["https://catalog.example.org/files/current.csv"].http_status
@@ -823,9 +953,12 @@ def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(
         ],
         validation_results=[],
     )
-    database.save_collected_datasets("https://catalog.example.org/", [unchecked_dataset])
+    await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [unchecked_dataset],
+    )
 
-    collected = database.list_collected_datasets()[0]
+    collected = (await database.list_collected_datasets())[0]
     current_distribution = next(
         distribution
         for distribution in collected.distributions
@@ -841,12 +974,8 @@ def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(
     assert validation.http_status == 204
 
 
-def test_validation_results_match_distribution_by_url_and_format(
-    tmp_path,
-    monkeypatch,
-):
-    database = _load_database(monkeypatch, tmp_path, "validation-key.db")
-    database.init_database()
+async def test_validation_results_match_distribution_by_url_and_format(database):
+    await database.init_database()
 
     shared_url = "https://catalog.example.org/files/shared"
     dataset = CollectedDataset(
@@ -883,11 +1012,11 @@ def test_validation_results_match_distribution_by_url_and_format(
         ],
     )
 
-    database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
     validation_by_format = {
         validation.format: validation
-        for validation in database.list_collected_datasets()[0].validation_results
+        for validation in (await database.list_collected_datasets())[0].validation_results
     }
     assert validation_by_format["CSV"].http_status == 201
     assert validation_by_format["CSV"].final_url == f"{shared_url}?format=csv"
@@ -895,9 +1024,8 @@ def test_validation_results_match_distribution_by_url_and_format(
     assert validation_by_format["JSON"].final_url == f"{shared_url}?format=json"
 
 
-def test_duplicate_validation_results_fail_clearly(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "duplicate-validation.db")
-    database.init_database()
+async def test_duplicate_validation_results_fail_clearly(database):
+    await database.init_database()
 
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/duplicate-validation",
@@ -937,14 +1065,52 @@ def test_duplicate_validation_results_fail_clearly(tmp_path, monkeypatch):
     )
 
     with pytest.raises(ValueError, match="Duplicate validation result"):
-        database.save_collected_datasets("https://catalog.example.org/", [dataset])
+        await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    assert database.list_collected_datasets() == []
+    assert await database.list_collected_datasets() == []
 
 
-def test_save_collected_distribution_without_validation_result(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "unvalidated.db")
-    database.init_database()
+async def test_orphan_validation_result_fails_clearly(database):
+    await database.init_database()
+
+    dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/orphan-validation",
+        title="Orphan validation health dataset",
+        description="Official health data.",
+        publisher="National Health Agency",
+        hosting_platform="",
+        uploader="",
+        dataset_probability=0.8,
+        dataset_signals={},
+        health_probability=0.7,
+        health_label="HEALTH",
+        health_signals={},
+        distributions=[
+            DistributionCandidate(
+                url="https://catalog.example.org/files/current.csv",
+                format="CSV",
+                probability=0.9,
+            )
+        ],
+        validation_results=[
+            ValidationResult(
+                url="https://catalog.example.org/files/orphan.csv",
+                final_url="https://catalog.example.org/files/orphan.csv",
+                format="CSV",
+                ok=True,
+                http_status=200,
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="does not match any distribution"):
+        await database.save_collected_datasets("https://catalog.example.org/", [dataset])
+
+    assert await database.list_collected_datasets() == []
+
+
+async def test_save_collected_distribution_without_validation_result(database):
+    await database.init_database()
 
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/unvalidated",
@@ -968,10 +1134,9 @@ def test_save_collected_distribution_without_validation_result(tmp_path, monkeyp
         validation_results=[],
     )
 
-    database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    collected = database.list_collected_datasets()
-
+    collected = await database.list_collected_datasets()
     assert len(collected) == 1
     assert [distribution.url for distribution in collected[0].distributions] == [
         "https://catalog.example.org/files/unvalidated.csv"
@@ -979,64 +1144,28 @@ def test_save_collected_distribution_without_validation_result(tmp_path, monkeyp
     assert collected[0].validation_results == []
 
 
-def test_new_collected_schema_rejects_invalid_values(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "constraints.db")
-    database.init_database()
-
-    with database.get_connection() as connection:
-        with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                """
-                INSERT INTO collected_datasets (
-                    dataset_url, title, dataset_probability, health_probability,
-                    health_label
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    "https://catalog.example.org/dataset/bad-probability",
-                    "Bad probability",
-                    16.42,
-                    0.7,
-                    "HEALTH",
-                ),
-            )
-
-        with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                """
-                INSERT INTO collection_jobs (source_url, status)
-                VALUES (?, ?)
-                """,
-                ("https://catalog.example.org/", "banana"),
-            )
-
-
-def test_signal_json_errors_are_explicit(monkeypatch, tmp_path):
-    database = _load_database(monkeypatch, tmp_path, "json-errors.db")
-
+async def test_signal_json_errors_are_explicit(database):
     with pytest.raises(
-        database.StoredJSONError,
+        db_serialization.StoredJSONError,
         match="Invalid JSON in stored signals field collected_datasets.dataset_signals",
     ):
-        database._deserialize_signals(
+        db_serialization._deserialize_signals(
             "{malformed",
             "collected_datasets.dataset_signals",
         )
 
     with pytest.raises(
-        database.StoredJSONError,
+        db_serialization.StoredJSONError,
         match="Invalid JSON type in stored signals field collected_datasets.dataset_signals",
     ):
-        database._deserialize_signals(
-            "[]",
+        db_serialization._deserialize_signals(
+            [],
             "collected_datasets.dataset_signals",
         )
 
 
-def test_corrupted_stored_signals_fail_when_listing_datasets(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "corrupted-signals.db")
-    database.init_database()
+async def test_corrupted_stored_signals_fail_when_listing_datasets(database):
+    await database.init_database()
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/corrupted-signals",
         title="Corrupted signals health dataset",
@@ -1051,47 +1180,48 @@ def test_corrupted_stored_signals_fail_when_listing_datasets(tmp_path, monkeypat
         health_signals={},
         distributions=[],
     )
-    database.save_collected_datasets("https://catalog.example.org/", [dataset])
-    with database.get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE collected_datasets
-            SET dataset_signals = ?
-            WHERE dataset_url = ?
-            """,
-            ("{malformed", dataset.dataset_url),
-        )
+    await database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    await _execute(
+        database,
+        """
+        UPDATE collected_datasets
+        SET dataset_signals = '[]'::jsonb
+        WHERE dataset_url = %s
+        """,
+        (dataset.dataset_url,),
+    )
 
     with pytest.raises(
-        database.StoredJSONError,
+        db_serialization.StoredJSONError,
         match="collected_datasets.dataset_signals",
     ):
-        database.list_collected_datasets()
+        await database.list_collected_datasets()
 
 
-def test_discovery_methods_json_errors_are_visible(monkeypatch, tmp_path, caplog):
-    database = _load_database(monkeypatch, tmp_path, "discovery-method-json-errors.db")
+async def test_discovery_methods_json_errors_are_explicit(database):
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid JSON type in stored discovery methods field",
+    ):
+        db_serialization._deserialize_discovery_methods('"bonjour"')
 
-    with caplog.at_level(logging.WARNING, logger="app.database"):
-        assert database._deserialize_discovery_methods('"bonjour"') == []
-        assert database._deserialize_discovery_methods('["google", 42, "bing"]') == [
-            "google",
-            "bing",
-        ]
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid JSON items in stored discovery methods field",
+    ):
+        db_serialization._deserialize_discovery_methods(["google", 42, "bing"])
 
-    assert "Invalid discovery methods JSON type" in caplog.text
-    assert "Invalid discovery methods JSON items ignored at indexes: [1]" in caplog.text
+    assert db_serialization._deserialize_discovery_methods(["google", "bing"]) == [
+        "google",
+        "bing",
+    ]
 
     with pytest.raises(TypeError):
-        database._serialize_signals({"bad": object()})
+        db_serialization._serialize_signals({"bad": object()})
 
 
-def test_non_json_serializable_signals_do_not_leave_partial_rows(
-    tmp_path,
-    monkeypatch,
-):
-    database = _load_database(monkeypatch, tmp_path, "bad-signals-write.db")
-    database.init_database()
+async def test_non_json_serializable_signals_do_not_leave_partial_rows(database):
+    await database.init_database()
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/bad-signals",
         title="Bad signals health dataset",
@@ -1115,17 +1245,16 @@ def test_non_json_serializable_signals_do_not_leave_partial_rows(
     )
 
     with pytest.raises(TypeError):
-        database.save_collected_datasets("https://catalog.example.org/", [dataset])
+        await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    assert database.list_collected_datasets() == []
-    assert database.list_dataset_discovery_observations() == []
+    assert await database.list_collected_datasets() == []
+    assert await database.list_dataset_discovery_observations() == []
 
 
-def test_collection_job_lifecycle(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "jobs.db")
-    database.init_database()
+async def test_collection_job_lifecycle(database):
+    await database.init_database()
 
-    job = database.create_collection_job("https://catalog.example.org/")
+    job = await database.create_collection_job("https://catalog.example.org/")
 
     assert job["id"] == 1
     assert job["source_url"] == "https://catalog.example.org/"
@@ -1135,11 +1264,11 @@ def test_collection_job_lifecycle(tmp_path, monkeypatch):
     assert job["discovery_methods"] == []
     assert job["message"] == "Collecte en attente."
 
-    running = database.mark_collection_job_running(int(job["id"]))
+    running = await database.mark_collection_job_running(int(job["id"]))
     assert running["status"] == "running"
     assert running["message"] == "Collecte en cours."
 
-    done = database.mark_collection_job_done(
+    done = await database.mark_collection_job_done(
         int(job["id"]),
         3,
         CollectionReport(
@@ -1162,16 +1291,15 @@ def test_collection_job_lifecycle(tmp_path, monkeypatch):
     assert done["message"] == "3 dataset(s) sauvegardé(s)."
     assert done["finished_at"] != ""
 
-    fetched = database.get_collection_job(int(job["id"]))
+    fetched = await database.get_collection_job(int(job["id"]))
     assert fetched == done
 
 
-def test_collection_job_records_errors(tmp_path, monkeypatch):
-    database = _load_database(monkeypatch, tmp_path, "job-error.db")
-    database.init_database()
+async def test_collection_job_records_errors(database):
+    await database.init_database()
 
-    job = database.create_collection_job("https://catalog.example.org/")
-    failed = database.mark_collection_job_error(int(job["id"]), "network timeout")
+    job = await database.create_collection_job("https://catalog.example.org/")
+    failed = await database.mark_collection_job_error(int(job["id"]), "network timeout")
 
     assert failed["status"] == "error"
     assert failed["message"] == "Collecte échouée."

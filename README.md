@@ -11,9 +11,9 @@ finds possible data distributions, and validates download/API links lightly.
 ## Structure
 
 - `backend/app/main.py`: FastAPI app setup, CORS, startup, and router registration
-- `backend/app/database.py`: SQLite schema, migrations, seed data, and queries
+- `backend/app/database.py`: compatibility facade for the async PostgreSQL DB layer
+- `backend/app/db_*.py`: DB connection, schema, sources, collected datasets, jobs, and JSON serialization
 - `backend/app/routes/sources.py`: `/sources` API routes for dataset page links
-- `backend/global_health.db`: local SQLite database created by the backend
 - `collector/`: generic collector modules for extraction, classification, validation, and discovery
 - `frontend/src/App.jsx`: React UI that reads and displays dataset links
 - `tests/test_database.py`: database structure and seed test
@@ -62,11 +62,30 @@ cd backend
 ../.venv/bin/pip install -r requirements.txt
 ```
 
+Start PostgreSQL locally:
+
+```bash
+export POSTGRES_PASSWORD='change-me-locally'
+docker compose up -d postgres
+```
+
+Configure the API database URL:
+
+```bash
+export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
+```
+
+The PostgreSQL database is managed by the application. It must be empty on
+first startup; the backend creates schema version 1, stores it in
+`schema_migrations`, and applies the default system seeds. Existing SQLite data,
+partial PostgreSQL schemas, or hand-modified application tables are not migrated
+automatically.
+
 Run the API:
 
 ```bash
 cd backend
-PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app --reload --reload-dir . --reload-dir ../collector --port 8001
+DATABASE_URL="$DATABASE_URL" PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app --reload --reload-dir . --reload-dir ../collector --port 8001
 ```
 
 Useful endpoints:
@@ -164,6 +183,11 @@ a public URL, then inspect dataset/health scores plus detected distributions.
 
 ```bash
 .venv/bin/python -m ruff check .
-.venv/bin/python -m pytest
+TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/python -m pytest
 npm --prefix frontend run build
 ```
+
+Database tests create and drop an isolated PostgreSQL schema per test. If
+`TEST_DATABASE_URL` is not set, PostgreSQL-specific tests are skipped. If
+`TEST_DATABASE_URL` is set but PostgreSQL is unreachable, tests fail so a broken
+CI database setup cannot pass silently.

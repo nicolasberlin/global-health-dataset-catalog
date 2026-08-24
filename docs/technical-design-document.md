@@ -1,5 +1,19 @@
 # Technical Design Document - Global Health Dataset Catalog
 
+> Etat 2026-08-23 : les sections d'analyse SQLite de ce TDD sont historiques.
+> Toute mention de SQLite, `GLOBAL_HEALTH_DB_PATH`, `backend/global_health.db`,
+> `sqlite3`, `PRAGMA user_version` ou migration de donnees SQLite doit etre lue
+> comme non applicable au code courant.
+
+## Statut courant depuis la migration PostgreSQL
+
+- Le backend est PostgreSQL-only via `DATABASE_URL`.
+- La couche DB est async avec `psycopg` et `psycopg_pool.AsyncConnectionPool`.
+- Il n'y a ni fallback SQLite, ni migration des anciennes donnees SQLite.
+- La base PostgreSQL est geree par l'application et doit etre vide au premier
+  demarrage. Le schema courant est initialise par `schema_migrations`.
+- Le README et `docs/ONBOARDING.md` refletent le setup local courant.
+
 ## Analyse de la documentation existante
 
 ### Documents analyses
@@ -7,17 +21,17 @@
 | Document | Type | Sujet | Informations importantes | Fiabilite / actualite |
 | --- | --- | --- | --- | --- |
 | Consignes utilisateur jointes | Specification de livrable | Structure attendue du TDD | Demande une analyse complete avant redaction, une separation entre confirme, deduction, hypothese et information manquante, et un TDD utilisable par responsables et equipes techniques. | Haute. Source de cadrage du document. |
-| `README.md` | Documentation projet | Vue globale, lancement, endpoints, checks | Projet React + FastAPI pour cataloguer des pages officielles de datasets sante. Le tag `v0.1.0-no-collector` est le baseline catalogue, la branche `collector-update` introduit le collecteur. Liste des endpoints et controles. | Haute, mais a croiser avec la base SQLite locale. |
+| `README.md` | Documentation projet | Vue globale, lancement, endpoints, checks | Projet React + FastAPI pour cataloguer des pages officielles de datasets sante. Le README courant documente PostgreSQL local, `DATABASE_URL`, `TEST_DATABASE_URL`, les endpoints et les controles. | Haute pour le setup courant. |
 | `pyproject.toml` | Configuration Python | Packaging et outillage | Projet `global-health-dataset-catalog` version 0.1.0, Python >= 3.9, packages `backend/app` et `collector`, ruff et pytest en dependances de dev. | Haute pour le code Python. |
-| `backend/requirements.txt` | Configuration backend | Dependances runtime backend | Dependances minimales : FastAPI >= 0.115 et Uvicorn standard >= 0.30. | Haute pour les contraintes minimales. |
+| `backend/requirements.txt` | Configuration backend | Dependances runtime backend | Dependances runtime : FastAPI, Uvicorn, `psycopg` et `psycopg-pool`. | Haute pour les contraintes minimales. |
 | `frontend/package.json` et `frontend/package-lock.json` | Configuration frontend | React/Vite et versions verrouillees | React 18.3.1, React DOM 18.3.1, Vite 5.4.21, plugin React Vite 4.7.0. Scripts `dev`, `build`, `preview`. | Haute pour l'environnement frontend local. |
 | `backend/app/main.py` | Code source backend | Application FastAPI | Initialisation de la base au demarrage, CORS limite a `localhost`/`127.0.0.1:5173`, routes `/sources`, `/collector`, `/health`. | Haute. |
-| `backend/app/database.py` | Code source backend | Schema SQLite, migrations, queries | Schema courant version 1, seeds WHO reserves, tables sources, datasets collectes, distributions, observations de decouverte, jobs de collecte, contraintes et upserts. | Haute pour l'intention applicative actuelle. |
+| `backend/app/database.py` et `backend/app/db_*.py` | Code source backend | Couche DB PostgreSQL async | `database.py` garde l'interface historique ; les modules `db_connection`, `db_schema`, `db_sources`, `db_collected_datasets`, `db_collection_jobs` et `db_serialization` portent l'implementation. | Haute pour l'intention applicative actuelle. |
 | `backend/app/routes/*.py` | Code source backend | API HTTP | Routes de catalogue, analyse HTML/URL, decouverte, collecte synchrone, jobs asynchrones, recherche repositories, liste des datasets collectes. | Haute. |
 | `collector/**/*.py` | Code source collecteur | Extraction, classification, decouverte, validation, recherche repositories | Collecteur generique, adaptateurs CKAN/Socrata/data.json/site generique, scoring dataset/sante, detection de distributions, validation HEAD puis GET partiel, recherche DataCite normalisee. | Haute. |
 | `frontend/src/App.jsx`, `frontend/src/styles.css` | Code source frontend | Interface utilisateur | Catalogue des sources, filtres, lancement et polling de jobs, liste des datasets collectes, panneau de test collecteur. | Haute. |
-| `tests/*.py` | Tests automatises | Comportement attendu | 76 tests couvrent base, routes, pipeline collecteur, discovery adapters et sitemaps. Ils confirment les regles metier et les erreurs attendues. | Haute. Tests executes localement avec succes le 2026-08-19. |
-| `backend/global_health.db` | Base SQLite locale | Donnees locales existantes | 4 sources, 10 datasets collectes, 10 distributions validees, 3 jobs. Schema historique non versionne (`PRAGMA user_version = 0`) et incomplet par rapport au code actuel. | Moyenne. Donnees utiles, mais schema incompatible avec l'application actuelle. |
+| `tests/*.py` | Tests automatises | Comportement attendu | Tests base, routes, pipeline collecteur, discovery adapters et sitemaps. Les tests DB PostgreSQL utilisent `TEST_DATABASE_URL` et un schema isole par test. | Haute si executes avec PostgreSQL reel ; sinon les tests DB sont skippes. |
+| `backend/global_health.db` | Archive historique SQLite | Anciennes donnees locales | Ancienne base SQLite locale, non utilisee par le code courant et non migree. | Historique seulement. Non applicable au runtime courant. |
 | `.gitignore` et metadonnees Git | Configuration depot | Etat projet | Branche courante `collector-update`, tag `v0.1.0-no-collector`, dernier commit local observe `e32eca2 Make stored JSON errors explicit`. | Haute pour le contexte local. |
 
 Fichiers exclus de l'analyse fonctionnelle : `.venv`, `frontend/node_modules`, `frontend/dist`, caches pytest/ruff, `__pycache__`, artefacts Git internes. Ils sont generes ou vendorises et ne constituent pas des specifications projet.
@@ -26,7 +40,7 @@ Fichiers exclus de l'analyse fonctionnelle : `.venv`, `frontend/node_modules`, `
 
 Le projet **Global Health Dataset Catalog** vise a maintenir un catalogue local de pages officielles de datasets de sante mondiale. L'application permet de referencer des sources, de consulter les pages externes, de decouvrir des pages candidates depuis des catalogues publics, de classifier ces pages comme datasets et comme contenus sante, puis de sauvegarder uniquement les metadonnees et les liens de distributions valides. Le projet ne stocke pas les fichiers de donnees eux-memes.
 
-L'architecture actuelle est une application locale ou MVP : un frontend React/Vite consomme une API FastAPI, laquelle persiste dans une base SQLite locale et orchestre un package Python `collector`. Le collecteur est volontairement generique : il privilegie d'abord les catalogues structures CKAN, Socrata et `data.json`/DCAT, puis bascule vers une decouverte par `robots.txt`/`sitemap.xml` et analyse HTML.
+L'architecture actuelle est une application locale ou MVP : un frontend React/Vite consomme une API FastAPI, laquelle persiste dans PostgreSQL via une couche DB async et orchestre un package Python `collector`. Le collecteur est volontairement generique : il privilegie d'abord les catalogues structures CKAN, Socrata et `data.json`/DCAT, puis bascule vers une decouverte par `robots.txt`/`sitemap.xml` et analyse HTML.
 
 Les utilisateurs identifies sont principalement des personnes techniques ou data qui veulent inventorier des sources de datasets sante, tester la detection du collecteur, lancer des collectes et inspecter les resultats. Aucun role metier, administrateur, equipe de production ou utilisateur final externe n'est documente.
 
@@ -35,20 +49,20 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 - **CONFIRME** - Le projet est nomme `global-health-dataset-catalog` et versionne `0.1.0` dans `pyproject.toml` et `frontend/package.json`.
 - **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/analyze-html`, `/collector/analyze-url`, `/collector/discover-url`, `/collector/collect-url`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}`, `/collector/search-repositories` et `/collector/collected-datasets`.
 - **CONFIRME** - Le frontend utilise React/Vite et pointe par defaut vers `http://127.0.0.1:8001`.
-- **CONFIRME** - La base cible du code est SQLite, configuree par `GLOBAL_HEALTH_DB_PATH` ou par defaut `backend/global_health.db`.
+- **CONFIRME** - La base cible du code courant est PostgreSQL, configuree par `DATABASE_URL`. L'application echoue au demarrage si cette variable est absente.
 - **CONFIRME** - Les seeds applicatifs reserves sont `who_gho_indicators` et `who_gho_life_expectancy`.
 - **CONFIRME** - Les seuils par defaut du collecteur sont `min_dataset_probability = 0.6`, `min_health_probability = 0.35`, `max_pages_per_source = 5`, `max_distributions_per_dataset = 1`.
 - **CONFIRME** - Les adaptateurs de decouverte sont executes dans l'ordre CKAN, Socrata, `data_json`, puis site generique.
 - **CONFIRME** - Les liens PDF et formats image/HTML sont exclus des distributions de donnees par defaut.
 - **CONFIRME** - Les URLs fetchables par l'API d'analyse URL sont limitees aux schemes HTTP/HTTPS et les IP privees/locales sont rejetees.
-- **CONFIRME** - Les tests Python passent : `76 passed in 0.39s`. Le build frontend passe avec Vite 5.4.21.
+- **CONFIRME** - Les controles courants passent hors serveur PostgreSQL local : `ruff check .`, `pytest` avec tests DB skippes sans `TEST_DATABASE_URL`, et build frontend Vite. Les tests DB doivent etre executes avec PostgreSQL reel avant merge.
 
 ### Deductions
 
 - **DEDUCTION** - L'architecture actuelle est un MVP local/interne plutot qu'une solution production : les fichiers analyses documentent le lancement local, mais pas d'authentification, d'hebergement, de CI/CD, de monitoring ou de sauvegardes.
 - **DEDUCTION** - Les utilisateurs cibles actuels sont des profils techniques/data : l'interface expose des scores, signaux, URLs, compteurs de jobs et validations HTTP plutot qu'un parcours grand public.
-- **DEDUCTION** - Le collecteur est concu pour stocker des metadonnees et des validations de liens, pas les donnees dataset elles-memes : le README le dit explicitement et le schema SQLite ne contient pas de stockage de fichiers.
-- **DEDUCTION** - Une migration de donnees est necessaire avant de considerer `backend/global_health.db` comme utilisable avec le code courant : le code refuse les schemas non versionnes avec tables gerees, et la base locale est precisement dans cet etat.
+- **DEDUCTION** - Le collecteur est concu pour stocker des metadonnees et des validations de liens, pas les donnees dataset elles-memes : le README le dit explicitement et le schema PostgreSQL ne contient pas de stockage de fichiers.
+- **DEDUCTION** - L'ancienne base SQLite `backend/global_health.db` est une archive historique non applicable au runtime courant. Aucune migration de ces donnees n'est prevue dans la migration PostgreSQL.
 - **DEDUCTION** - Les sources institutionnelles sont le coeur du cas d'usage : les seeds sont WHO et la base locale contient HDX/CDC, mais la politique d'acceptation des sources reste a valider.
 - **DEDUCTION** - La recherche repositories doit etre etendue par famille d'API et non par site individuel : DataCite est implemente, CKAN/Dataverse/WHO/World Bank restent des adapters cibles a ajouter.
 
@@ -60,7 +74,7 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 - **INFORMATION MANQUANTE** - Volumetrie attendue : nombre de sources, frequence de collecte, taille des sitemaps, nombre d'utilisateurs.
 - **INFORMATION MANQUANTE** - Politique de conservation des metadonnees, des jobs et des resultats de validation.
 - **INFORMATION MANQUANTE** - Liste officielle des repositories interroges par defaut et politique de degradation si un provider externe echoue.
-- **INFORMATION MANQUANTE** - Strategie de migration de la base SQLite locale historique vers le schema versionne courant.
+- **INFORMATION MANQUANTE** - Strategie de validation PostgreSQL en CI/staging avec `TEST_DATABASE_URL` et donnees de test realistes.
 - **INFORMATION MANQUANTE** - CI/CD, environnements de test/QA/staging/production, monitoring et alerting.
 - **INFORMATION MANQUANTE** - Politique d'acceptation pour les sources non officielles comme Kaggle, HDX ou portails gouvernementaux externes.
 
@@ -68,8 +82,7 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 
 | Sujet | Source A | Source B | Impact | Decision necessaire |
 | --- | --- | --- | --- | --- |
-| Schema SQLite courant vs base locale | `backend/app/database.py` definit `CURRENT_SCHEMA_VERSION = 1`, une table `dataset_discovery_observations`, des contraintes et des champs `first_seen_at`, `last_seen_at`, `last_checked_at`, `validation_attempted`. | `backend/global_health.db` a `user_version = 0`, ne contient pas `dataset_discovery_observations` et conserve un ancien schema. | Elevé. Le demarrage sur la base locale echoue : le code refuse les tables gerees non versionnees. | Creer une migration historique explicite ou regenerer la base apres export/import controle. |
-| README indique une base locale creee par le backend | `README.md` liste `backend/global_health.db` comme base SQLite locale creee par le backend. | L'initialisation du code actuel refuse cette base car elle contient deja des tables gerees non versionnees. | Elevé. Risque de confusion au lancement local. | Mettre a jour le README et fournir une procedure de migration ou de recreation. |
+| Historique SQLite pre-migration | Les anciennes analyses mentionnent `backend/global_health.db`, `GLOBAL_HEALTH_DB_PATH`, `sqlite3` et `PRAGMA user_version`. | Le code courant est PostgreSQL-only via `DATABASE_URL`. | Moyen. Risque de confusion si le lecteur ignore la note de statut courant. | Conserver ces mentions comme historique seulement ; utiliser README/ONBOARDING pour le setup courant. |
 | Formats de distributions affiches dans l'UI | `frontend/src/App.jsx` affiche "Aucun lien CSV/XLSX/API trouve" dans le panneau collecteur. | `collector/extraction/distributions.py` supporte aussi TSV, XLS, JSON, JSONL, XML, PARQUET, ZIP, GZ, SAV, DTA, SAS7BDAT, GEOJSON et API. | Faible a moyen. L'UI sous-decrit les capacites reelles. | Ajuster le libelle UI ou limiter officiellement les formats acceptes. |
 
 ### Hypotheses de travail
@@ -78,7 +91,7 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 | --- | --- | --- | --- |
 | Le projet cible d'abord un MVP local/interne avant production. | Aucune configuration prod, auth, CI/CD ou deploiement n'est documentee. | Sous-dimensionnement de la securite et de l'exploitation si exposition publique. | Responsables projet, equipe infra/securite. |
 | Les donnees stockees sont des metadonnees publiques, pas des donnees personnelles de sante. | Le collecteur stocke URLs, titres, descriptions, publishers, signaux et validations, pas les fichiers dataset. | Risque legal/confidentialite si des sources contiennent des donnees sensibles ou non publiques. | DPO/securite, owner data. |
-| SQLite convient au MVP mais devra etre reevalue pour un usage multi-utilisateur ou planifie. | Le code persiste dans SQLite et utilise des background tasks FastAPI simples. | Blocages de concurrence, sauvegarde et scalabilite limitees. | Architecture, exploitation. |
+| PostgreSQL convient au MVP local mais son exploitation doit etre definie pour un usage multi-utilisateur ou planifie. | Le code persiste dans PostgreSQL et utilise des background tasks FastAPI simples. | Pool sizing, sauvegarde, supervision et jobs longs restent a cadrer. | Architecture, exploitation. |
 | Les portails officiels ou institutionnels sont prioritaires. | README parle de pages officielles de datasets sante, seeds WHO, base locale HDX/CDC. | Mauvaise qualite catalogue si des sources communautaires/non officielles sont acceptees sans gouvernance. | Responsable metier/data governance. |
 | Les jobs de collecte peuvent rester courts et bornes. | `max_pages_per_source = 5` et `max_distributions_per_dataset = 1`. | Timeouts ou resultats incomplets si les sources sont grandes. | Product owner, equipe data. |
 
@@ -103,9 +116,9 @@ Historique des versions :
 
 Le projet repond a un besoin d'inventaire et de qualification de pages de datasets de sante mondiale. Il fournit un catalogue local de sources, un collecteur capable de decouvrir des pages candidates sur des portails publics, un scoring pour determiner si une page est un dataset et si elle est liee a la sante, puis une validation legere des liens de fichiers ou d'API.
 
-La solution actuelle est une application MVP composee d'un frontend React/Vite, d'une API FastAPI, d'un package collecteur Python et d'une base SQLite. L'architecture est simple, testee et adaptee au developpement local. Elle n'est pas encore documentee comme une architecture de production.
+La solution actuelle est une application MVP composee d'un frontend React/Vite, d'une API FastAPI, d'un package collecteur Python et d'une base PostgreSQL. L'architecture est simple, testee et adaptee au developpement local. Elle n'est pas encore documentee comme une architecture de production.
 
-Le principal risque technique identifie est la divergence entre le schema SQLite attendu par le code actuel et la base locale existante. Avant tout usage fiable, il faut decider si la base locale doit etre migree, recreee ou remplacee par une base cible plus robuste.
+Le principal risque technique restant est l'absence de validation systematique contre un serveur PostgreSQL reel en CI/staging. Avant tout usage fiable, les tests DB doivent etre executes avec `TEST_DATABASE_URL` et une politique d'exploitation PostgreSQL doit etre definie.
 
 Les decisions importantes a valider concernent le perimetre des sources officielles, la strategie de migration, l'authentification, l'hebergement, l'observabilite et la frequence des collectes.
 
@@ -129,7 +142,7 @@ Les organisations qui travaillent avec des datasets sante doivent retrouver les 
 ### Limitations existantes
 
 - L'architecture de production n'est pas definie.
-- La base SQLite locale presente un schema historique incompatible avec le code actuel.
+- L'ancienne base SQLite locale presente un schema historique incompatible avec le code actuel et n'est plus utilisee.
 - Les criteres metier d'officialite et de qualite des sources ne sont pas formalises.
 - L'authentification, les roles et la protection de l'API ne sont pas implementes.
 - L'observabilite est limitee aux messages de jobs et a quelques exceptions/logs.
@@ -173,7 +186,7 @@ Les organisations qui travaillent avec des datasets sante doivent retrouver les 
 - Extraction de distributions probables.
 - Validation HEAD puis GET partiel des liens.
 - Jobs de collecte asynchrones via FastAPI background tasks.
-- Persistance SQLite des metadonnees collectees.
+- Persistance PostgreSQL des metadonnees collectees.
 - Frontend React de consultation, filtrage, test collecteur et suivi de jobs.
 
 ### Hors perimetre
@@ -199,23 +212,23 @@ Elements non clairement definis : gouvernance des sources, SLA, volumetrie, poli
 | Portails Socrata | Source de metadonnees et exports. | `https://api.us.socrata.com/api/catalog/v1` et exports `/resource/{id}.csv/json`. |
 | Catalogues `data.json`/DCAT | Source de datasets structures. | Fichier `data.json` a la racine du site ou URL donnee. |
 | Sites generiques | Fallback de decouverte. | `robots.txt`, `sitemap.xml`, pages HTML. |
-| Base SQLite | Persistance locale. | Acces direct par backend via `sqlite3`. |
+| Base PostgreSQL | Persistance applicative. | Acces async par backend via `psycopg` et pool `psycopg_pool`. |
 
 ## 7. Exigences fonctionnelles principales
 
 | Fonctionnalite | Objectif | Entree | Traitement | Resultat | Erreurs possibles | Dependances |
 | --- | --- | --- | --- | --- | --- | --- |
-| Lister les sources | Afficher les sources cataloguees. | GET `/sources` | Lecture SQLite et tri par theme/nom. | Liste `DataSource`. | Schema non initialise, base indisponible. | SQLite. |
-| Ajouter une source | Ajouter ou mettre a jour une source utilisateur. | `source_key`, `name`, `description`, `theme`, `page_url`. | Validation Pydantic, refus des keys reservees, upsert SQLite. | Source sauvegardee. | 400 key reservee, URL invalide. | FastAPI, SQLite. |
-| Ouvrir une source | Rediriger vers la page externe. | `source_id`. | Recherche source par id. | Redirect HTTP. | 404 source inconnue. | SQLite. |
+| Lister les sources | Afficher les sources cataloguees. | GET `/sources` | Lecture PostgreSQL async et tri par theme/nom. | Liste `DataSource`. | Schema non initialise, base indisponible. | PostgreSQL. |
+| Ajouter une source | Creer une source utilisateur. | `source_key`, `name`, `description`, `theme`, `page_url`. | Validation Pydantic, refus des keys reservees, insertion PostgreSQL. | Source sauvegardee. | 400 key reservee ou URL invalide, 409 key deja existante. | FastAPI, PostgreSQL. |
+| Ouvrir une source | Rediriger vers la page externe. | `source_id`. | Recherche source par id. | Redirect HTTP. | 404 source inconnue. | PostgreSQL. |
 | Analyser du HTML | Tester le collecteur sans fetch reseau. | URL + HTML. | Extraction page, distributions, scoring dataset/sante. | Scores, signaux, distributions, acceptation. | HTML vide refuse par modele. | Collecteur. |
 | Analyser une URL | Tester une page publique. | URL HTTP/HTTPS. | Controle URL publique, fetch HTML, analyse. | Meme reponse qu'analyse HTML. | 400 fetch impossible, URL locale/privee, page trop grosse. | Reseau externe. |
 | Rechercher des repositories | Trouver des datasets dans des catalogues externes sans ajouter une source manuellement. | Query texte. | Orchestrateur `search_repository_metadata`, providers configures par defaut, normalisation en `RepositorySearchResult`. | Liste de resultats normalises. | 400 query vide, 502 erreur provider actuelle. | APIs externes, adapters repository. |
 | Decouvrir une URL | Identifier des pages candidates. | URL source. | Adaptateur CKAN/Socrata/data.json/generic. | Liste `DiscoveredPage`. | 400 erreur de decouverte. | APIs externes, sitemaps. |
-| Collecter une URL | Decouvrir, classifier, valider et optionnellement sauvegarder. | URL + `save`. | Pipeline `collect_source`, validation, persistance si `save=true`. | Datasets collectes, compteur sauvegarde. | 400 source invalide. | Collecteur, reseau, SQLite. |
-| Lancer un job de collecte | Executer la collecte en arriere-plan. | URL source. | Creation job `pending`, tache FastAPI background, mise a jour statut. | 202 + job. | Erreur persistee dans job. | FastAPI background tasks, SQLite. |
-| Suivre un job | Afficher statut et compteurs. | `job_id`. | Lecture SQLite. | Job avec status/counters/message. | 404 job inconnu. | SQLite. |
-| Afficher datasets collectes | Consulter les resultats persistants. | GET `/collector/collected-datasets`. | Jointure logique datasets/distributions. | Datasets, distributions, validations. | JSON signaux corrompu, schema incompatible. | SQLite. |
+| Collecter une URL | Decouvrir, classifier, valider et optionnellement sauvegarder. | URL + `save`. | Pipeline `collect_source`, validation, persistance si `save=true`. | Datasets collectes, compteur sauvegarde. | 400 source invalide. | Collecteur, reseau, PostgreSQL. |
+| Lancer un job de collecte | Executer la collecte en arriere-plan. | URL source. | Creation job `pending`, tache FastAPI background, mise a jour statut. | 202 + job. | Erreur persistee dans job. | FastAPI background tasks, PostgreSQL. |
+| Suivre un job | Afficher statut et compteurs. | `job_id`. | Lecture PostgreSQL. | Job avec status/counters/message. | 404 job inconnu. | PostgreSQL. |
+| Afficher datasets collectes | Consulter les resultats persistants. | GET `/collector/collected-datasets`. | Jointure logique datasets/distributions. | Datasets, distributions, validations. | JSON signaux corrompu, schema incompatible. | PostgreSQL. |
 
 ## 8. Exigences non fonctionnelles
 
@@ -223,14 +236,14 @@ Elements non clairement definis : gouvernance des sources, SLA, volumetrie, poli
 | --- | --- | --- |
 | Performance | Limites par defaut : 5 pages analysees par source, 1 distribution validee par dataset, timeout 10 s. | Volumetrie cible et temps de reponse attendus non documentes. |
 | Disponibilite | Aucune architecture HA documentee. | SLA, redemarrage, supervision et sauvegardes a definir. |
-| Scalabilite | SQLite et background tasks FastAPI conviennent au MVP. | Pour production, evaluer queue de jobs et base serveur. |
+| Scalabilite | PostgreSQL et background tasks FastAPI conviennent au MVP local. | Pour production, evaluer queue de jobs, pool sizing et exploitation DB. |
 | Securite | Controle anti-URL privee pour fetch public, CORS local limite. | Auth, authorization, rate limiting, secrets, HTTPS, audit a definir. |
 | Confidentialite | Le code stocke des metadonnees et URLs, pas les fichiers dataset. | Confirmer absence de donnees personnelles/sensibles. |
 | Resilience | Validation fallback HEAD vers GET partiel. Erreurs de job persistantes. | Retries, backoff, reprise apres incident non documentes. |
 | Observabilite | Messages et compteurs de jobs, logging minimal en base. | Logs structures, metriques, dashboards, alertes non definis. |
 | Maintenabilite | Modules separes, tests nombreux, ruff configure. | Procedure ADR/revue architecture a formaliser. |
 | Accessibilite | UI responsive, labels de formulaires presents. | Audit accessibilite non documente. |
-| Sauvegarde | Non documentee. | Politique backup/restore SQLite ou DB cible requise. |
+| Sauvegarde | Non documentee. | Politique backup/restore PostgreSQL requise. |
 
 ## 9. Architecture actuelle - AS-IS
 
@@ -238,7 +251,7 @@ Elements non clairement definis : gouvernance des sources, SLA, volumetrie, poli
 flowchart LR
     User["Utilisateur"] --> UI["Frontend React/Vite"]
     UI --> API["Backend FastAPI"]
-    API --> DB[("SQLite backend/global_health.db")]
+    API --> DB[("PostgreSQL DATABASE_URL")]
     API --> Collector["Package collector"]
     Collector --> External["Portails publics: CKAN, Socrata, data.json, sitemaps, HTML"]
     Collector --> API
@@ -247,12 +260,11 @@ flowchart LR
 Composants confirmes :
 
 - `frontend/` : application React mono-page.
-- `backend/app/` : API FastAPI, initialisation SQLite, routes.
+- `backend/app/` : API FastAPI, pool PostgreSQL async, routes.
 - `collector/` : modules d'extraction, classification, decouverte, validation.
-- `backend/global_health.db` : base SQLite locale existante, mais schema historique.
 - `tests/` : tests unitaires et d'integration legere.
 
-Limite AS-IS majeure : la base fournie ne peut pas etre consideree comme compatible avec le code actuel sans migration.
+Limite AS-IS majeure : les tests DB PostgreSQL doivent etre executes avec un serveur reel via `TEST_DATABASE_URL` avant merge ou deploiement.
 
 ## 10. Architecture cible - TO-BE
 
@@ -261,10 +273,10 @@ La cible proposee conserve l'architecture modulaire actuelle et ajoute les capac
 | Composant | Responsabilite | Technologie | Entrees | Sorties | Dependances |
 | --- | --- | --- | --- | --- | --- |
 | Frontend | Consultation, filtres, test collecteur, lancement et suivi de jobs. | React 18, Vite 5 | API JSON | Interface utilisateur | Backend API |
-| API backend | Validation HTTP, orchestration, exposition des routes. | FastAPI, Pydantic | Requetes HTTP | JSON, redirects | SQLite/DB cible, collecteur |
 | Recherche repositories | Recherche federee dans des catalogues externes configures. | Python, providers JSON | Query utilisateur | `RepositorySearchResult[]` | APIs DataCite/CKAN/Dataverse/WHO/World Bank |
+| API backend | Validation HTTP, orchestration, exposition des routes. | FastAPI, Pydantic | Requetes HTTP | JSON, redirects | PostgreSQL, collecteur |
 | Collecteur | Decouverte, extraction, scoring, validation des distributions. | Python stdlib + modules projet | URLs, HTML, metadonnees externes | `CollectedDataset`, rapports | Reseau public |
-| Stockage | Persistance des sources, datasets, distributions, observations, jobs. | SQLite MVP ; HYPOTHESE PostgreSQL si production multi-user | Donnees applicatives | Resultats consultables | Migrations, sauvegardes |
+| Stockage | Persistance des sources, datasets, distributions, observations, jobs. | PostgreSQL async | Donnees applicatives | Resultats consultables | Migrations, sauvegardes |
 | Worker jobs | Execution des collectes longues. | CONFIRME FastAPI BackgroundTasks ; HYPOTHESE queue dediee | Jobs de collecte | Statuts et resultats | API, collecteur, stockage |
 | Observabilite | Suivi erreurs, performances, volumes. | A definir | Logs, metriques | Alertes, dashboards | Infra cible |
 
@@ -275,7 +287,7 @@ flowchart TB
     Api --> Auth["Auth / rate limiting\nA CONFIRMER"]
     Api --> RepoSearch["Recherche repositories\nConfig + adapters"]
     Api --> JobRunner["Runner de jobs\nBackgroundTasks MVP / Queue cible"]
-    Api --> Store[("Base applicative\nSQLite MVP / DB cible")]
+    Api --> Store[("PostgreSQL\nDATABASE_URL")]
     RepoSearch --> DataCite["DataCite API"]
     RepoSearch --> RepoCKAN["CKAN repositories"]
     RepoSearch --> Dataverse["Dataverse APIs"]
@@ -529,7 +541,7 @@ sequenceDiagram
     actor User as Utilisateur
     participant UI as Frontend
     participant API as FastAPI
-    participant DB as SQLite
+    participant DB as PostgreSQL
     participant Collector as Collector
     participant External as Source externe
 
@@ -569,8 +581,8 @@ sequenceDiagram
 
 1. Acteur : utilisateur ou administrateur catalogue.
 2. Action : POST `/sources` avec `source_key`, `name`, `theme`, `page_url`.
-3. Traitement : validation Pydantic, controle key reservee, upsert SQLite.
-4. Reponse : source sauvegardee ou erreur 400.
+3. Traitement : validation Pydantic, controle key reservee, insertion PostgreSQL.
+4. Reponse : source creee, erreur 400, ou erreur 409 si `source_key` existe deja.
 5. Acces donnees : table `data_sources`.
 
 ## 12. Logique metier
@@ -648,7 +660,7 @@ erDiagram
     COLLECTION_JOBS ||--o{ DATASET_DISCOVERY_OBSERVATIONS : records
 ```
 
-Note critique : ce modele correspond au code courant. La base locale `backend/global_health.db` ne contient pas encore ce modele complet.
+Note critique : ce modele correspond au schema applicatif courant, maintenant porte par PostgreSQL. L'ancienne base SQLite locale est historique et non migree.
 
 ## 14. APIs et interfaces
 
@@ -658,7 +670,7 @@ Note critique : ce modele correspond au code courant. La base locale `backend/gl
 | --- | --- | --- | --- | --- | --- |
 | GET | `/health` | Health check applicatif. | Non documentee | Aucune | `{status: "ok"}` |
 | GET | `/sources` | Lister les sources. | Non documentee | Aucune | `{items: DataSource[]}` |
-| POST | `/sources` | Creer/upsert une source utilisateur. | Non documentee | `DataSourceCreate` | `DataSource`, status 201 |
+| POST | `/sources` | Creer une source utilisateur ; doublon `source_key` refuse en 409. | Non documentee | `DataSourceCreate` | `DataSource`, status 201 |
 | GET | `/sources/{id}/page` | Rediriger vers la page externe. | Non documentee | Path `source_id` | Redirect ou 404 |
 | POST | `/collector/analyze-html` | Analyser du HTML fourni. | Non documentee | `{url, html}` | Scores, signaux, distributions |
 | POST | `/collector/analyze-url` | Fetcher et analyser une URL publique. | Non documentee | `{url}` | Scores, signaux, distributions |
@@ -691,11 +703,16 @@ project/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── database.py
+│   │   ├── db_connection.py
+│   │   ├── db_schema.py
+│   │   ├── db_sources.py
+│   │   ├── db_collected_datasets.py
+│   │   ├── db_collection_jobs.py
+│   │   ├── db_serialization.py
 │   │   └── routes/
 │   │       ├── sources.py
 │   │       └── collector.py
 │   ├── requirements.txt
-│   └── global_health.db
 ├── collector/
 │   ├── classification/
 │   ├── discovery/
@@ -735,10 +752,10 @@ Separation des responsabilites :
 | API | FastAPI | Requirement >= 0.115 ; installe localement 0.128.8 | API REST rapide, validation Pydantic, background tasks. |
 | Validation modele | Pydantic | Installe localement 2.13.4 | Modeles request/response FastAPI. |
 | Serveur local | Uvicorn standard | Requirement >= 0.30 ; installe localement 0.39.0 | Execution ASGI locale. |
-| Base | SQLite | SQLite 3.x | Simple, locale, adaptee MVP. |
+| Base | PostgreSQL | 16 en Docker Compose local | Stockage serveur, contraintes natives, JSONB et acces async. |
 | Frontend | React | 18.3.1 | UI reactive mono-page. |
 | Build frontend | Vite | 5.4.21 | Dev server et build rapides. |
-| Tests Python | pytest | >= 8.3 | 76 tests confirmes. |
+| Tests Python | pytest | >= 8.3 | Tests unitaires et tests DB PostgreSQL via `TEST_DATABASE_URL`. |
 | Lint Python | ruff | >= 0.6 | Configure avec `E`, `F`, `I`, `B`, `UP`. |
 | Packaging | hatchling | >= 1.25 | Build backend/collector. |
 | CI/CD | Non documente | A confirmer | Aucun workflow CI observe. |
@@ -755,13 +772,13 @@ Separation des responsabilites :
 - Inconvenients : auth, rate limiting et production hardening non couverts.
 - Consequences : conserver FastAPI et ajouter les couches manquantes plutot que replateformer.
 
-### Decision 2 - SQLite pour le MVP
+### Decision 2 - PostgreSQL pour le MVP
 
-- Contexte : catalogue local et persistance simple.
-- Solution retenue : SQLite.
-- Avantages : zero infrastructure, facile a tester, adapte au developpement local.
-- Inconvenients : migration de schema indispensable, limites multi-utilisateur et exploitation.
-- Consequences : garder SQLite pour MVP, mais definir un plan DB cible avant production.
+- Contexte : catalogue local qui doit pouvoir evoluer vers un environnement partage.
+- Solution retenue : PostgreSQL via `DATABASE_URL`.
+- Avantages : contraintes serveur, `JSONB`, transactions robustes, meilleur chemin vers un usage multi-utilisateur.
+- Inconvenients : dependance a une base locale ou distante pour les tests DB reels.
+- Consequences : garder PostgreSQL, documenter l'exploitation et executer les tests avec `TEST_DATABASE_URL`.
 
 ### Decision 3 - Collecteur generique avec adaptateurs
 
@@ -779,13 +796,13 @@ Separation des responsabilites :
 - Inconvenients : precision non mesuree, vocabulaire sante limite.
 - Consequences : documenter les signaux et mesurer les faux positifs/faux negatifs.
 
-### Decision 5 - Rejet des bases historiques non versionnees
+### Decision 5 - Base PostgreSQL geree par l'application
 
 - Contexte : eviter une migration implicite destructrice.
-- Solution retenue : si une base `user_version=0` contient des tables gerees, l'application refuse de migrer automatiquement.
-- Avantages : protege les donnees existantes.
-- Inconvenients : bloque le demarrage local avec la base actuelle.
-- Consequences : une migration historique explicite est prioritaire.
+- Solution retenue : la base doit etre vide au premier demarrage. Si des tables applicatives non versionnees existent, l'application refuse de migrer automatiquement. Si `schema_migrations` indique une version supportee, le schema est considere comme gere par l'application.
+- Avantages : protege les donnees existantes sans maintenir un verificateur exhaustif de schemas modifies a la main.
+- Inconvenients : exige une initialisation PostgreSQL propre et ne supporte pas les schemas partiels ou modifies manuellement.
+- Consequences : toute evolution future doit ajouter une migration explicite ; les bases restaurees ou modifiees hors application doivent etre controlees par des procedures d'exploitation separees.
 
 ### Decision 6 - Recherche repositories par config et adapters
 
@@ -838,7 +855,7 @@ Manques :
 
 Etat actuel :
 
-- Logger Python utilise dans `database.py` pour warnings de JSON `discovery_methods` invalide.
+- Erreurs JSON stockees remontees via `StoredJSONError` dans la couche DB.
 - Jobs de collecte stockent status, message, error, compteurs et dates.
 - Endpoint `/health` disponible.
 
@@ -865,7 +882,7 @@ Analyse :
 
 - Ces bornes protegent le MVP contre les collectes trop longues.
 - Les jobs FastAPI background tasks conviennent a une execution simple mais ne garantissent pas la reprise apres crash.
-- SQLite peut devenir limitant avec collectes concurrentes et ecritures frequentes.
+- PostgreSQL apporte un stockage serveur plus robuste, mais les jobs longs restent a separer du process API si le volume augmente.
 
 A confirmer :
 
@@ -927,7 +944,7 @@ Etat confirme : aucun workflow CI/CD n'a ete observe dans les fichiers analyses.
 
 | Environnement | Usage | Infrastructure | Donnees | Acces |
 | --- | --- | --- | --- | --- |
-| Local | Developpement et tests. | `.venv`, FastAPI Uvicorn port 8001, Vite port 5173, SQLite locale. | Seeds WHO + donnees locales si DB presente. | Developpeur local. |
+| Local | Developpement et tests. | `.venv`, PostgreSQL local via Docker Compose, FastAPI Uvicorn port 8001, Vite port 5173. | Seeds WHO initialisees au startup. | Developpeur local. |
 | Development | A confirmer. | Non documente. | Non documente. | Non documente. |
 | Test / QA | A confirmer. | Non documente. | Non documente. | Non documente. |
 | Staging | A confirmer. | Non documente. | Non documente. | Non documente. |
@@ -958,38 +975,32 @@ Etat confirme : aucun workflow CI/CD n'a ete observe dans les fichiers analyses.
 
 ## 26. Migration
 
-La migration est le sujet prioritaire.
+La migration SQLite vers PostgreSQL a ete decidee sans preservation des anciennes donnees SQLite.
 
 Etat confirme :
 
 - Le code courant attend `CURRENT_SCHEMA_VERSION = 1`.
-- La base locale a `PRAGMA user_version = 0`.
-- La base locale contient deja des tables gerees : `data_sources`, `collected_datasets`, `collected_distributions`, `collection_jobs`.
-- L'application refuse explicitement de migrer une base non versionnee contenant des tables gerees.
+- Le code courant utilise PostgreSQL via `DATABASE_URL`.
+- La version de schema est stockee dans `schema_migrations`.
+- L'application refuse les tables applicatives non versionnees au lieu de deviner ou ecraser des donnees.
+- Une base versionnee est consideree comme geree par l'application ; les schemas partiels ou modifies a la main ne sont pas migres automatiquement.
 
 Plan recommande :
 
-1. Sauvegarder `backend/global_health.db`.
-2. Documenter le schema historique exact.
-3. Ecrire une migration `0 historique -> 1` qui :
-   - cree `dataset_discovery_observations` ;
-   - ajoute les champs timestamps manquants ;
-   - ajoute `validation_attempted`, `last_checked_at` et les contraintes compatibles ;
-   - initialise `first_seen_at`/`last_seen_at` depuis `created_at`/`updated_at` quand possible ;
-   - renseigne une observation de decouverte initiale par dataset existant si source/discovery_method disponibles ;
-   - preserve les donnees existantes HDX/CDC.
-4. Tester la migration sur copie.
-5. Mettre `PRAGMA user_version = 1`.
-6. Mettre a jour README avec procedure.
+1. Lancer PostgreSQL localement ou en CI.
+2. Definir `DATABASE_URL`.
+3. Laisser le startup FastAPI executer `init_database()`.
+4. Executer les tests DB avec `TEST_DATABASE_URL`.
+5. Pour les futures versions, ajouter une migration explicite vers `schema_migrations`.
 
-Alternative : exporter les donnees utiles, supprimer/regenerer la base, reimporter via API ou script controle.
+Les anciennes donnees SQLite ne sont pas migrees. Si une preservation devenait necessaire plus tard, elle devrait etre traitee comme un import/export separe et controle.
 
 ## 27. Dependances
 
 | Dependance | Type | Responsable | Criticite | Impact si indisponible |
 | --- | --- | --- | --- | --- |
 | FastAPI / Pydantic / Uvicorn | Bibliotheques backend | Equipe dev | Haute | API indisponible. |
-| SQLite | Stockage | Equipe dev/infra | Haute | Donnees catalogue et jobs indisponibles. |
+| PostgreSQL | Stockage | Equipe dev/infra | Haute | Donnees catalogue et jobs indisponibles. |
 | React / Vite | Frontend | Equipe dev | Moyenne | UI indisponible, API utilisable manuellement. |
 | CKAN APIs | Source externe | Fournisseurs catalogues | Moyenne/haute | Decouverte structuree CKAN impossible. |
 | Socrata Catalog API | Source externe | Socrata / fournisseurs | Moyenne/haute | Decouverte Socrata impossible. |
@@ -1002,7 +1013,8 @@ Alternative : exporter les donnees utiles, supprimer/regenerer la base, reimport
 
 | Risque | Probabilite | Impact | Criticite | Mitigation | Responsable |
 | --- | --- | --- | --- | --- | --- |
-| Base SQLite locale incompatible avec le code actuel | Elevee | Eleve | Critique | Migration historique ou recreation controlee. | Lead dev / architecte |
+| Tests DB PostgreSQL non executes avec serveur reel | Moyenne | Eleve | Elevee | Executer `TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/python -m pytest` avant merge/deploiement. | Lead dev / backend |
+| Schema PostgreSQL versionne mais incomplet ou modifie hors application | Faible/moyenne | Eleve | Moyenne | Contrat d'exploitation : base vide au premier demarrage, migrations explicites ensuite, pas de support pour schemas modifies a la main. | Backend / infra |
 | Absence d'auth si exposition hors local | Moyenne | Eleve | Elevee | Ajouter auth, roles, rate limiting avant production. | Securite / backend |
 | Heuristiques faux positifs/faux negatifs | Moyenne | Moyen | Moyenne | Jeu d'evaluation, revue humaine, enrichissement vocabulaire/adaptateurs. | Data owner / collecteur |
 | BackgroundTasks insuffisant pour jobs longs | Moyenne | Moyen/eleve | Moyenne | Queue dediee, retries, reprise apres crash. | Architecture |
@@ -1018,7 +1030,7 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 
 | Sujet | Option A | Option B | Recommandation |
 | --- | --- | --- | --- |
-| Stockage | SQLite conserve | PostgreSQL ou DB serveur | SQLite pour MVP ; DB serveur si multi-user, scheduler ou production. |
+| Stockage | PostgreSQL courant | Service PostgreSQL manage | Garder PostgreSQL ; choisir le mode d'exploitation selon l'environnement cible. |
 | Jobs | FastAPI BackgroundTasks | Queue dediee type Celery/RQ/worker | BackgroundTasks pour MVP ; queue si jobs longs/retries requis. |
 | Classification | Heuristiques deterministes | Modele ML/LLM | Conserver heuristiques jusqu'a mesure de performance ; envisager ML seulement avec dataset d'evaluation. |
 | Discovery | Adaptateurs generiques | Scrapers par site | Garder adaptateurs generiques ; ajouter adaptateurs specifiques uniquement si necessaire. |
@@ -1029,9 +1041,9 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 
 ### Phase 1 - Stabilisation donnees
 
-- Objectif : rendre la base locale compatible.
-- Taches : backup, migration historique, tests migration, update README.
-- Livrable : base `user_version=1` compatible.
+- Objectif : rendre PostgreSQL async fiable localement et en CI.
+- Taches : `DATABASE_URL`, pool async, `schema_migrations`, refus des tables applicatives non versionnees, tests avec `TEST_DATABASE_URL`, update README.
+- Livrable : backend PostgreSQL-only initialise au startup.
 
 ### Phase 2 - Hardening backend
 
@@ -1073,11 +1085,11 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 
 | ID | Question | Impact | Personne / equipe a consulter | Priorite |
 | --- | --- | --- | --- | --- |
-| Q1 | Faut-il migrer la base SQLite existante ou la recreer ? | Bloque le demarrage fiable avec la DB locale. | Lead dev / responsable data | Haute |
+| Q1 | Quel environnement PostgreSQL cible utiliser pour CI/staging/prod ? | Conditionne secrets, backups, pooling et tests reels. | Lead dev / infra | Haute |
 | Q2 | Quel est l'environnement cible : local interne, serveur partage, production publique ? | Dimensionne securite, infra et CI/CD. | Responsables projet / infra | Haute |
 | Q3 | Quelles sources sont considerees officielles ou acceptables ? | Qualite du catalogue. | Product owner / data governance | Haute |
 | Q4 | Faut-il une authentification et des roles ? | Securite API et ajout de sources. | Securite / product owner | Haute |
-| Q5 | Quelle volumetrie et frequence de collecte viser ? | Choix SQLite vs DB serveur, background task vs queue. | Data owner / architecture | Haute |
+| Q5 | Quelle volumetrie et frequence de collecte viser ? | Dimensionne pool PostgreSQL, background task vs queue et retention. | Data owner / architecture | Haute |
 | Q6 | Quelle politique de retention pour jobs, observations et validations ? | Taille DB, audit, conformite. | DPO / infra / data owner | Moyenne |
 | Q7 | Quels indicateurs de qualite pour les heuristiques ? | Mesure faux positifs/faux negatifs. | Data owner / dev collecteur | Moyenne |
 | Q8 | Faut-il exposer une API d'administration complete ? | Périmètre frontend/backend. | Product owner | Moyenne |
@@ -1087,11 +1099,11 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 
 ## 32. Decisions necessaires des responsables
 
-- **DECISION NECESSAIRE** - Strategie de migration de `backend/global_health.db`.
+- **DECISION NECESSAIRE** - Environnement PostgreSQL cible et execution des tests DB reels.
 - **DECISION NECESSAIRE** - Environnement cible et niveau de production attendu.
 - **DECISION NECESSAIRE** - Politique d'authentification, roles et exposition reseau.
 - **DECISION NECESSAIRE** - Perimetre des sources officielles et non officielles.
-- **DECISION NECESSAIRE** - Base cible pour usage partage : SQLite conservee ou migration vers DB serveur.
+- **DECISION NECESSAIRE** - Strategie backup/restore PostgreSQL.
 - **DECISION NECESSAIRE** - Strategie jobs : background tasks MVP ou worker/queue.
 - **DECISION NECESSAIRE** - Liste des repositories par defaut et politique de resultats partiels.
 - **DECISION NECESSAIRE** - CI/CD minimal obligatoire avant livraison.
