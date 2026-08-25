@@ -599,6 +599,18 @@ sequenceDiagram
 - Les source keys WHO seed sont reservees et ne peuvent pas etre ecrasees par l'utilisateur.
 - Les signaux JSON stockes doivent etre des objets JSON valides ; les erreurs sont explicites.
 
+### Seed des sources par defaut
+
+L'application insere les sources par defaut pendant l'initialisation de la base.
+Ces lignes sont creees seulement si leur `source_key` n'existe pas deja. Une
+ligne existante n'est jamais mise a jour automatiquement par le seed de startup.
+
+Ce choix est intentionnel : le demarrage applicatif ne doit pas ecraser
+silencieusement des metadonnees de source modifiees par le collecteur ou par un
+administrateur. Si un seed par defaut doit changer pour des bases existantes, ce
+changement doit passer par une migration de donnees explicite ou une operation
+admin controlee, pas par le seed implicite du startup.
+
 ## 13. Modele de donnees
 
 ### Entites principales

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 import psycopg
 import pytest
@@ -252,7 +253,7 @@ async def test_init_database_seeds_dataset_pages(database):
     assert {source["theme"] for source in sources} == {"General", "Mortality"}
     assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
 
-    await database.upsert_data_source(
+    await database.upsert_collector_data_source(
         "user_defined_source",
         "User source",
         "User description",
@@ -429,7 +430,7 @@ async def test_init_database_rejects_current_version_with_missing_managed_tables
     assert "collection_jobs" in str(error.value)
 
 
-async def test_init_database_rejects_current_reserved_source_key_collision_before_seed(
+async def test_init_database_does_not_overwrite_current_reserved_source_key_collision(
     database,
 ):
     async with db_connection._require_database_pool().connection() as connection:
@@ -454,8 +455,7 @@ async def test_init_database_rejects_current_reserved_source_key_collision_befor
             db_schema.CURRENT_SCHEMA_VERSION,
         )
 
-    with pytest.raises(RuntimeError, match="Cannot safely seed data_sources"):
-        await database.init_database()
+    await database.init_database()
 
     rows = await _fetchall(
         database,
@@ -470,11 +470,11 @@ async def test_init_database_rejects_current_reserved_source_key_collision_befor
     assert rows[0]["page_url"] == "https://example.org/current-collision"
 
 
-async def test_future_seed_collision_fails_before_overwrite(database, monkeypatch):
+async def test_future_seed_collision_preserves_existing_source(database, monkeypatch):
     from app import db_schema
 
     await database.init_database()
-    await database.upsert_data_source(
+    await database.upsert_collector_data_source(
         "who_mortality_2027",
         "User mortality source",
         "Created before the key became a seed.",
@@ -494,8 +494,7 @@ async def test_future_seed_collision_fails_before_overwrite(database, monkeypatc
         [*db_schema.DATA_SOURCE_SEEDS, future_seed],
     )
 
-    with pytest.raises(RuntimeError, match="Cannot safely seed data_sources"):
-        await database.init_database()
+    await database.init_database()
 
     source = next(
         source
@@ -506,11 +505,11 @@ async def test_future_seed_collision_fails_before_overwrite(database, monkeypatc
     assert source["page_url"] == "https://example.org/user-mortality"
 
 
-async def test_upsert_data_source_rejects_reserved_seed_key(database):
+async def test_upsert_collector_data_source_rejects_reserved_seed_key(database):
     await database.init_database()
 
     with pytest.raises(database.ReservedDataSourceKeyError):
-        await database.upsert_data_source(
+        await database.upsert_collector_data_source(
             "who_gho_indicators",
             "User override",
             "Should not be allowed.",
@@ -548,11 +547,11 @@ async def test_create_data_source_rejects_reserved_seed_key_after_normalization(
     assert source["name"] == "WHO Global Health Observatory - Indicators"
 
 
-async def test_upsert_data_source_rejects_invalid_source_key(database):
+async def test_upsert_collector_data_source_rejects_invalid_source_key(database):
     await database.init_database()
 
     with pytest.raises(database.InvalidDataSourceKeyError):
-        await database.upsert_data_source(
+        await database.upsert_collector_data_source(
             "My HDX",
             "Humanitarian Data Exchange",
             "Global datasets.",
@@ -1144,7 +1143,7 @@ async def test_save_collected_distribution_without_validation_result(database):
     assert collected[0].validation_results == []
 
 
-async def test_signal_json_errors_are_explicit(database):
+async def test_signal_json_errors_are_explicit():
     with pytest.raises(
         db_serialization.StoredJSONError,
         match="Invalid JSON in stored signals field collected_datasets.dataset_signals",
@@ -1198,7 +1197,13 @@ async def test_corrupted_stored_signals_fail_when_listing_datasets(database):
         await database.list_collected_datasets()
 
 
-async def test_discovery_methods_json_errors_are_explicit(database):
+async def test_discovery_methods_json_errors_are_explicit():
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid JSON in stored discovery methods field",
+    ):
+        db_serialization._deserialize_discovery_methods("{malformed")
+
     with pytest.raises(
         db_serialization.StoredJSONError,
         match="Invalid JSON type in stored discovery methods field",
@@ -1211,6 +1216,12 @@ async def test_discovery_methods_json_errors_are_explicit(database):
     ):
         db_serialization._deserialize_discovery_methods(["google", 42, "bing"])
 
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="expected list, got dict",
+    ):
+        db_serialization._deserialize_discovery_methods({"method": "api"})
+
     assert db_serialization._deserialize_discovery_methods(["google", "bing"]) == [
         "google",
         "bing",
@@ -1218,6 +1229,28 @@ async def test_discovery_methods_json_errors_are_explicit(database):
 
     with pytest.raises(TypeError):
         db_serialization._serialize_signals({"bad": object()})
+
+
+async def test_timestamp_formatting_errors_are_explicit():
+    assert (
+        db_serialization._format_timestamp(
+            datetime(2026, 8, 25, 12, 30, tzinfo=timezone.utc)
+        )
+        == "2026-08-25T12:30:00+00:00"
+    )
+    assert db_serialization._format_optional_timestamp(None) == ""
+
+    with pytest.raises(
+        db_serialization.StoredTimestampError,
+        match="expected datetime, got str",
+    ):
+        db_serialization._format_timestamp("2026-08-25T12:30:00+00:00")
+
+    with pytest.raises(
+        db_serialization.StoredTimestampError,
+        match="expected timezone-aware datetime",
+    ):
+        db_serialization._format_timestamp(datetime(2026, 8, 25, 12, 30))
 
 
 async def test_non_json_serializable_signals_do_not_leave_partial_rows(database):

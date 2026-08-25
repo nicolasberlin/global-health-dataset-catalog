@@ -11,9 +11,6 @@ from .db_schema import _require_current_schema
 
 DATA_SOURCE_KEY_PATTERN_TEXT = db_schema.DATA_SOURCE_KEY_PATTERN_TEXT
 DATA_SOURCE_KEY_PATTERN = re.compile(DATA_SOURCE_KEY_PATTERN_TEXT)
-RESERVED_DATA_SOURCE_KEYS = frozenset(
-    source["source_key"] for source in db_schema.DATA_SOURCE_SEEDS
-)
 
 
 class ReservedDataSourceKeyError(ValueError):
@@ -32,7 +29,7 @@ class InvalidDataSourceURLError(ValueError):
     pass
 
 
-def _reserved_data_source_keys() -> frozenset[str]:
+def reserved_data_source_keys() -> frozenset[str]:
     return frozenset(source["source_key"] for source in db_schema.DATA_SOURCE_SEEDS)
 
 
@@ -137,7 +134,7 @@ async def create_data_source(
         theme,
         page_url,
     )
-    if source_key in _reserved_data_source_keys():
+    if source_key in reserved_data_source_keys():
         raise ReservedDataSourceKeyError(
             f"Data source key {source_key!r} is reserved by the application."
         )
@@ -165,15 +162,15 @@ async def create_data_source(
         raise RuntimeError("Data source creation did not return a row.")
     return dict(row)
 
-"""Create or update a data source discovered by the collector."""
+
 async def upsert_collector_data_source(
-        
     source_key: str,
     name: str,
     description: str,
     theme: str,
     page_url: str,
 ) -> dict[str, int | str]:
+    """Create or update a data source discovered by the collector."""
     source_key, name, description, theme, page_url = _normalize_data_source_values(
         source_key,
         name,
@@ -181,7 +178,7 @@ async def upsert_collector_data_source(
         theme,
         page_url,
     )
-    if source_key in _reserved_data_source_keys():
+    if source_key in reserved_data_source_keys():
         raise ReservedDataSourceKeyError(
             f"Data source key {source_key!r} is reserved by the application."
         )
@@ -206,3 +203,6 @@ async def upsert_collector_data_source(
     if row is None:
         raise RuntimeError("Data source upsert did not return a row.")
     return dict(row)
+
+
+upsert_data_source = upsert_collector_data_source

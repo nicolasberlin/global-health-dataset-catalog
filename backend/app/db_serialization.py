@@ -10,6 +10,10 @@ class StoredJSONError(ValueError):
     pass
 
 
+class StoredTimestampError(ValueError):
+    pass
+
+
 def _serialize_discovery_methods(discovery_methods: tuple[str, ...]) -> Jsonb:
     return _jsonb(list(discovery_methods))
 
@@ -17,14 +21,16 @@ def _serialize_discovery_methods(discovery_methods: tuple[str, ...]) -> Jsonb:
 def _deserialize_discovery_methods(value: object) -> list[str]:
     if isinstance(value, list):
         data = value
-    else:
+    elif isinstance(value, str):
         try:
-            data = json.loads(str(value))
+            data = json.loads(value)
         except json.JSONDecodeError as exception:
             raise StoredJSONError(
                 "Invalid JSON in stored discovery methods field "
                 "collection_jobs.discovery_methods."
             ) from exception
+    else:
+        data = value
 
     if not isinstance(data, list):
         raise StoredJSONError(
@@ -87,8 +93,17 @@ def _json_dumps(value: object) -> str:
 
 def _format_timestamp(value: object) -> str:
     if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise StoredTimestampError(
+                "Invalid timestamp value from database: expected timezone-aware "
+                "datetime, got naive datetime."
+            )
         return value.isoformat()
-    return str(value)
+
+    raise StoredTimestampError(
+        "Invalid timestamp value from database: expected datetime, "
+        f"got {type(value).__name__}."
+    )
 
 
 def _format_optional_timestamp(value: object) -> str:

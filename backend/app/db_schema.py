@@ -3,7 +3,7 @@ from __future__ import annotations
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from .db_connection import Row, _fetchall, _fetchone, _require_database_pool
+from .db_connection import _fetchone, _require_database_pool
 
 CURRENT_SCHEMA_VERSION = 1
 
@@ -176,12 +176,9 @@ async def init_database() -> None:
     async with _require_database_pool().connection() as connection:
         await _apply_schema_migrations(connection)
         async with connection.transaction():
-            await _assert_seed_sources_can_be_applied(connection)
             await _seed_data_sources(connection)
 
 
-# Version 1 is the initial PostgreSQL application schema. Existing SQLite data
-# is intentionally not migrated.
 async def _apply_schema_migrations(connection: AsyncConnection[DictRow]) -> None:
     version = await _schema_version(connection)
     if version > CURRENT_SCHEMA_VERSION:
@@ -289,63 +286,9 @@ async def _assert_current_schema_tables_exist(
         )
 
 
-async def _assert_seed_sources_can_be_applied(
-    connection: AsyncConnection[DictRow],
-) -> None:
-    seed_sources_by_key = {source["source_key"]: source for source in DATA_SOURCE_SEEDS}
-    if not seed_sources_by_key or not await _table_exists(connection, "data_sources"):
-        return
-
-    rows = await _fetchall(
-        connection,
-        """
-        SELECT id, source_key, name, description, theme, page_url
-        FROM data_sources
-        WHERE source_key = ANY(%s)
-        """,
-        (list(seed_sources_by_key),),
-    )
-    for row in rows:
-        seed = seed_sources_by_key[str(row["source_key"])]
-        if _data_source_row_matches_seed(row, seed):
-            continue
-
-        raise RuntimeError(
-            "Cannot safely seed data_sources. "
-            f"Row id={row['id']} uses reserved source_key "
-            f"{str(row['source_key'])!r} but does not match the application "
-            "seed. Seeding would overwrite existing data."
-        )
-
-
-def _data_source_row_matches_seed(row: Row, seed: dict[str, str]) -> bool:
-    return _data_source_values_match_seed(
-        str(row["name"]),
-        str(row["description"]),
-        str(row["theme"]),
-        str(row["page_url"]),
-        seed,
-    )
-
-
-def _data_source_values_match_seed(
-    name: str,
-    description: str,
-    theme: str,
-    page_url: str,
-    seed: dict[str, str],
-) -> bool:
-    return (
-        name == seed["name"]
-        and description == seed["description"]
-        and theme == seed["theme"]
-        and page_url == seed["page_url"]
-    )
-
-
 async def _seed_data_sources(connection: AsyncConnection[DictRow]) -> None:
-    # Seed source keys are application-owned identifiers. User-created sources
-    # must use distinct source_key values; matching seed keys may be refreshed.
+    # Seeds only create missing default sources. Existing rows are left untouched
+    # so startup never rewrites collector/admin data implicitly.
     for source in DATA_SOURCE_SEEDS:
         await connection.execute(
             """
@@ -357,11 +300,7 @@ async def _seed_data_sources(connection: AsyncConnection[DictRow]) -> None:
                 %(theme)s,
                 %(page_url)s
             )
-            ON CONFLICT(source_key) DO UPDATE SET
-                name = excluded.name,
-                description = excluded.description,
-                theme = excluded.theme,
-                page_url = excluded.page_url
+            ON CONFLICT(source_key) DO NOTHING
             """,
             source,
         )
