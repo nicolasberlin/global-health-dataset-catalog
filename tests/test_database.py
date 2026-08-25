@@ -1328,6 +1328,36 @@ async def test_collection_job_lifecycle(database):
     assert fetched == done
 
 
+async def test_collection_job_status_transitions_are_guarded(database):
+    await database.init_database()
+
+    job = await database.create_collection_job("https://catalog.example.org/")
+    job_id = int(job["id"])
+
+    assert await database.mark_collection_job_done(job_id, 1) is None
+    assert (await database.get_collection_job(job_id))["status"] == "pending"
+
+    running = await database.mark_collection_job_running(job_id)
+    assert running["status"] == "running"
+
+    done = await database.mark_collection_job_done(job_id, 1)
+    assert done["status"] == "done"
+
+    assert await database.mark_collection_job_running(job_id) is None
+    assert await database.mark_collection_job_error(job_id, "late failure") is None
+    assert (await database.get_collection_job(job_id))["status"] == "done"
+
+    failed_job = await database.create_collection_job("https://catalog.example.org/fail")
+    failed_job_id = int(failed_job["id"])
+
+    failed = await database.mark_collection_job_error(failed_job_id, "startup failure")
+    assert failed["status"] == "error"
+
+    assert await database.mark_collection_job_running(failed_job_id) is None
+    assert await database.mark_collection_job_done(failed_job_id, 1) is None
+    assert (await database.get_collection_job(failed_job_id))["status"] == "error"
+
+
 async def test_collection_job_records_errors(database):
     await database.init_database()
 

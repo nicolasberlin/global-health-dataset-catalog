@@ -553,6 +553,7 @@ async def test_run_collection_job_marks_done(monkeypatch):
 
     async def fake_mark_collection_job_running(job_id):
         calls.append(("running", job_id))
+        return {"id": job_id, "status": "running"}
 
     async def fake_mark_collection_job_done(job_id, saved_count, report):
         calls.append(
@@ -586,6 +587,31 @@ async def test_run_collection_job_marks_done(monkeypatch):
     ]
 
 
+async def test_run_collection_job_stops_when_job_cannot_be_started(monkeypatch):
+    calls = []
+
+    async def fake_mark_collection_job_running(job_id):
+        calls.append(("running", job_id))
+        return None
+
+    def fake_collect_source_with_report(source_url):
+        calls.append(("collect", source_url))
+        raise AssertionError("Collection should not run for a stale job.")
+
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_running",
+        fake_mark_collection_job_running,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.collect_source_with_report",
+        fake_collect_source_with_report,
+    )
+
+    await _run_collection_job(12, "https://catalog.example.org/")
+
+    assert calls == [("running", 12)]
+
+
 async def test_run_collection_job_marks_errors(monkeypatch):
     calls = []
 
@@ -594,6 +620,7 @@ async def test_run_collection_job_marks_errors(monkeypatch):
 
     async def fake_mark_collection_job_running(job_id):
         calls.append(("running", job_id))
+        return {"id": job_id, "status": "running"}
 
     async def fake_mark_collection_job_error(job_id, error):
         calls.append(("error", job_id, error))

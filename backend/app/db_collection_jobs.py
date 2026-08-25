@@ -60,7 +60,7 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
                 error = '',
                 updated_at = NOW(),
                 finished_at = NULL
-            WHERE id = %s
+            WHERE id = %s AND status = 'pending'
             RETURNING id, source_url, status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
                       invalid_distribution_count, discovery_methods, message,
@@ -97,7 +97,7 @@ async def mark_collection_job_done(
                 error = '',
                 updated_at = NOW(),
                 finished_at = NOW()
-            WHERE id = %s
+            WHERE id = %s AND status = 'running'
             RETURNING id, source_url, status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
                       invalid_distribution_count, discovery_methods, message,
@@ -134,7 +134,7 @@ async def mark_collection_job_error(
                 error = %s,
                 updated_at = NOW(),
                 finished_at = NOW()
-            WHERE id = %s
+            WHERE id = %s AND status IN ('pending', 'running')
             RETURNING id, source_url, status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
                       invalid_distribution_count, discovery_methods, message,

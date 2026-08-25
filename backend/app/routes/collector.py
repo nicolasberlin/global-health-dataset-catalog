@@ -176,7 +176,10 @@ async def search_repositories(
 
 async def _run_collection_job(job_id: int, source_url: str) -> None:
     try:
-        await mark_collection_job_running(job_id)
+        running_job = await mark_collection_job_running(job_id)
+        if running_job is None:
+            return
+
         collection_result = await asyncio.to_thread(
             collect_source_with_report,
             source_url,
