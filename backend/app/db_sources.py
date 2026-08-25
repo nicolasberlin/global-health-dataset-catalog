@@ -170,7 +170,12 @@ async def upsert_collector_data_source(
     theme: str,
     page_url: str,
 ) -> dict[str, int | str]:
-    """Create or update a data source discovered by the collector."""
+    """Create or update a source from an authorized internal sync.
+
+    This upsert is intentionally allowed to refresh existing source metadata,
+    including default seed sources. Startup seeding itself still never updates
+    existing rows implicitly.
+    """
     source_key, name, description, theme, page_url = _normalize_data_source_values(
         source_key,
         name,
@@ -178,10 +183,6 @@ async def upsert_collector_data_source(
         theme,
         page_url,
     )
-    if source_key in reserved_data_source_keys():
-        raise ReservedDataSourceKeyError(
-            f"Data source key {source_key!r} is reserved by the application."
-        )
 
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)

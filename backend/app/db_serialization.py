@@ -15,7 +15,17 @@ class StoredTimestampError(ValueError):
 
 
 def _serialize_discovery_methods(discovery_methods: tuple[str, ...]) -> Jsonb:
-    return _jsonb(list(discovery_methods))
+    data = list(discovery_methods)
+    invalid_indexes = [
+        index for index, item in enumerate(data) if not isinstance(item, str)
+    ]
+    if invalid_indexes:
+        raise StoredJSONError(
+            "Invalid discovery method items before storage at indexes: "
+            f"{invalid_indexes}."
+        )
+
+    return _jsonb(data)
 
 
 def _deserialize_discovery_methods(value: object) -> list[str]:
@@ -53,6 +63,19 @@ def _deserialize_discovery_methods(value: object) -> list[str]:
 
 
 def _serialize_signals(signals: dict[str, object]) -> Jsonb:
+    if not isinstance(signals, dict):
+        raise StoredJSONError(
+            "Invalid signals before storage: expected object, "
+            f"got {type(signals).__name__}."
+        )
+
+    invalid_keys = [key for key in signals if not isinstance(key, str)]
+    if invalid_keys:
+        raise StoredJSONError(
+            "Invalid signal keys before storage: expected string keys, "
+            f"got {invalid_keys!r}."
+        )
+
     return _jsonb(signals)
 
 
@@ -83,7 +106,11 @@ def _deserialize_signals(
 
 
 def _jsonb(value: object) -> Jsonb:
-    json.dumps(value, sort_keys=True)
+    try:
+        json.dumps(value, sort_keys=True)
+    except (TypeError, ValueError) as exception:
+        raise StoredJSONError("Value is not JSON serializable for storage.") from exception
+
     return Jsonb(value, dumps=_json_dumps)
 
 

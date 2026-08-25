@@ -596,7 +596,8 @@ sequenceDiagram
 - Labels sante : `HEALTH` si probabilite >= 0.75, `PARTIALLY_HEALTH` si >= 0.35, sinon `NON_HEALTH`.
 - Les distributions PDF, HTML et images sont exclues.
 - La validation tente `HEAD`, puis un `GET` partiel si HEAD est interdit, sans content-type utile ou retourne HTML.
-- Les source keys WHO seed sont reservees et ne peuvent pas etre ecrasees par l'utilisateur.
+- Les source keys WHO seed sont reservees pour la creation utilisateur publique ;
+  les synchronisations internes autorisees peuvent les rafraichir explicitement.
 - Les signaux JSON stockes doivent etre des objets JSON valides ; les erreurs sont explicites.
 
 ### Seed des sources par defaut
@@ -610,6 +611,19 @@ silencieusement des metadonnees de source modifiees par le collecteur ou par un
 administrateur. Si un seed par defaut doit changer pour des bases existantes, ce
 changement doit passer par une migration de donnees explicite ou une operation
 admin controlee, pas par le seed implicite du startup.
+
+### Upsert interne des sources
+
+Les sources sont identifiees par leur `source_key`.
+`upsert_collector_data_source()` est reserve aux synchronisations internes
+autorisees et peut creer ou mettre a jour une source existante, y compris une
+source seed systeme.
+
+Ce comportement est volontaire : dans le modele actuel, le collecteur et
+l'administrateur sont des acteurs autorises a rafraichir les metadonnees d'une
+source. Les sources seed systeme restent protegees contre la creation publique
+directe et contre le seed implicite de startup, mais pas contre un upsert interne
+explicite.
 
 ## 13. Modele de donnees
 

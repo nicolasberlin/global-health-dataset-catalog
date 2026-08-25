@@ -123,6 +123,54 @@ async def _assert_schema_constraints_are_enforced(database, suffix: str = "") ->
             VALUES (%s, %s, %s, %s, %s)
             """,
             (
+                "   ",
+                "Blank dataset URL",
+                0.8,
+                0.7,
+                "HEALTH",
+            ),
+        ),
+        (
+            """
+            INSERT INTO collected_datasets (
+                dataset_url, title, dataset_probability, dataset_signals,
+                health_probability, health_label
+            )
+            VALUES (%s, %s, %s, '[]'::jsonb, %s, %s)
+            """,
+            (
+                f"https://catalog.example.org/dataset/bad-dataset-signals{suffix}",
+                "Bad dataset signals",
+                0.8,
+                0.7,
+                "HEALTH",
+            ),
+        ),
+        (
+            """
+            INSERT INTO collected_datasets (
+                dataset_url, title, dataset_probability, health_probability,
+                health_label, health_signals
+            )
+            VALUES (%s, %s, %s, %s, %s, '[]'::jsonb)
+            """,
+            (
+                f"https://catalog.example.org/dataset/bad-health-signals{suffix}",
+                "Bad health signals",
+                0.8,
+                0.7,
+                "HEALTH",
+            ),
+        ),
+        (
+            """
+            INSERT INTO collected_datasets (
+                dataset_url, title, dataset_probability, health_probability,
+                health_label
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
                 f"https://catalog.example.org/dataset/bad-probability{suffix}",
                 "Bad dataset probability",
                 16.42,
@@ -144,6 +192,48 @@ async def _assert_schema_constraints_are_enforced(database, suffix: str = "") ->
                 0.8,
                 0.7,
                 "banana",
+            ),
+        ),
+        (
+            """
+            INSERT INTO collected_distributions (
+                dataset_id, url, format, probability
+            )
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                dataset_id,
+                "   ",
+                "CSV",
+                0.9,
+            ),
+        ),
+        (
+            """
+            INSERT INTO collected_distributions (
+                dataset_id, url, format, probability
+            )
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                dataset_id,
+                f"https://catalog.example.org/files/blank-format{suffix}.csv",
+                "   ",
+                0.9,
+            ),
+        ),
+        (
+            """
+            INSERT INTO collected_distributions (
+                dataset_id, url, format, probability, signals
+            )
+            VALUES (%s, %s, %s, %s, '[]'::jsonb)
+            """,
+            (
+                dataset_id,
+                f"https://catalog.example.org/files/bad-signals{suffix}.csv",
+                "CSV",
+                0.9,
             ),
         ),
         (
@@ -505,24 +595,29 @@ async def test_future_seed_collision_preserves_existing_source(database, monkeyp
     assert source["page_url"] == "https://example.org/user-mortality"
 
 
-async def test_upsert_collector_data_source_rejects_reserved_seed_key(database):
+async def test_upsert_collector_data_source_can_update_seed_key(database):
     await database.init_database()
 
-    with pytest.raises(database.ReservedDataSourceKeyError):
-        await database.upsert_collector_data_source(
-            "who_gho_indicators",
-            "User override",
-            "Should not be allowed.",
-            "Custom",
-            "https://example.org/override",
-        )
+    updated_source = await database.upsert_collector_data_source(
+        "who_gho_indicators",
+        "WHO GHO refreshed",
+        "Updated by authorized internal sync.",
+        "Custom",
+        "https://example.org/override",
+    )
+
+    assert updated_source["source_key"] == "who_gho_indicators"
+    assert updated_source["name"] == "WHO GHO refreshed"
+
+    await database.init_database()
 
     source = next(
         source
         for source in await database.list_data_sources()
         if source["source_key"] == "who_gho_indicators"
     )
-    assert source["name"] == "WHO Global Health Observatory - Indicators"
+    assert source["name"] == "WHO GHO refreshed"
+    assert source["page_url"] == "https://example.org/override"
 
 
 async def test_create_data_source_rejects_reserved_seed_key_after_normalization(
@@ -1227,7 +1322,28 @@ async def test_discovery_methods_json_errors_are_explicit():
         "bing",
     ]
 
-    with pytest.raises(TypeError):
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid discovery method items before storage",
+    ):
+        db_serialization._serialize_discovery_methods(("google", 42, "bing"))
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid signal keys before storage",
+    ):
+        db_serialization._serialize_signals({1: "score"})
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid signals before storage",
+    ):
+        db_serialization._serialize_signals([])
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Value is not JSON serializable for storage",
+    ):
         db_serialization._serialize_signals({"bad": object()})
 
 
