@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -19,6 +20,61 @@ JsonFetcher = Callable[[str], dict[str, object]]
 
 EXCLUDED_RESOURCE_FORMATS = {"HTML", "HTM", "PDF", "PNG", "JPG", "JPEG", "GIF", "SVG"}
 
+DISEASE_TERMS = (
+    "aids",
+    "cancer",
+    "cholera",
+    "coronavirus",
+    "covid",
+    "dengue",
+    "diabetes",
+    "ebola",
+    "hepatitis",
+    "hiv",
+    "influenza",
+    "malaria",
+    "measles",
+    "polio",
+    "smallpox",
+    "tuberculosis",
+    "zika",
+)
+DEMOGRAPHIC_TERMS = (
+    "age",
+    "sex",
+    "gender",
+    "race",
+    "ethnicity",
+    "pregnancy",
+    "maternal",
+    "children",
+    "adolescent",
+    "adult",
+    "elderly",
+)
+FORMAT_MODALITIES = {
+    "CSV": "tabular",
+    "TSV": "tabular",
+    "XLS": "tabular",
+    "XLSX": "tabular",
+    "PARQUET": "tabular",
+    "JSON": "structured data",
+    "JSONL": "structured data",
+    "XML": "structured data",
+    "TXT": "text",
+    "TEXT": "text",
+    "DICOM": "images",
+    "JPEG": "images",
+    "JPG": "images",
+    "PNG": "images",
+    "TIFF": "images",
+    "MP3": "speech/audio",
+    "WAV": "speech/audio",
+    "MP4": "video",
+    "FASTA": "genomic sequence",
+    "FASTQ": "genomic sequence",
+}
+
 
 @dataclass(frozen=True)
 class DiscoveredPage:
@@ -28,8 +84,15 @@ class DiscoveredPage:
     title: str = ""
     description: str = ""
     publisher: str = ""
+    geography: tuple[str, ...] = ()
+    date_of_publication: str = ""
+    diseases: tuple[str, ...] = ()
+    size_of_dataset: str = ""
+    demographic_information: tuple[str, ...] = ()
+    sharing_license: str = ""
+    modality_of_data: tuple[str, ...] = ()
     distributions: tuple[DistributionCandidate, ...] = ()
-    metadata: dict[str, object] = field(default_factory=dict)
+    discovery_metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -76,7 +139,7 @@ class GenericWebsiteAdapter:
                     url=entry.url,
                     discovery_method="sitemap",
                     priority=entry.priority,
-                    metadata={
+                    discovery_metadata={
                         **entry.metadata,
                         "source_sitemap_url": entry.source_sitemap_url,
                     },
@@ -146,8 +209,22 @@ class CKANAdapter:
                     title=_text(package.get("title")),
                     description=_text(package.get("notes")),
                     publisher=_publisher(package),
+                    geography=tuple(_geography_from_mapping(package)),
+                    date_of_publication=_publication_date_from_mapping(package),
+                    diseases=_diseases_from_mapping(package),
+                    size_of_dataset=_size_from_ckan_package(package),
+                    demographic_information=_demographics_from_mapping(package),
+                    sharing_license=_first_mapping_value(
+                        package,
+                        "license_title",
+                        "license_id",
+                        "license_url",
+                        "license",
+                        "rights",
+                    ),
+                    modality_of_data=_modalities_from_distributions(distributions),
                     distributions=distributions,
-                    metadata={
+                    discovery_metadata={
                         "ckan_id": _text(package.get("id")),
                         "ckan_name": _text(package.get("name")),
                     },
@@ -203,8 +280,48 @@ class SocrataAdapter:
                     title=_text(resource.get("name")),
                     description=_text(resource.get("description")),
                     publisher=_text(resource.get("attribution")),
+                    geography=tuple(
+                        _dedupe(
+                            [
+                                *_geography_from_mapping(resource),
+                                *_geography_from_mapping(result.metadata),
+                            ]
+                        )
+                    ),
+                    date_of_publication=(
+                        _publication_date_from_mapping(resource)
+                        or _publication_date_from_mapping(result.metadata)
+                    ),
+                    diseases=_diseases_from_mapping(resource, result.metadata),
+                    size_of_dataset=(
+                        _first_mapping_value(resource, "size", "content_size", "rows")
+                        or _first_mapping_value(result.metadata, "size", "content_size", "rows")
+                    ),
+                    demographic_information=_demographics_from_mapping(
+                        resource,
+                        result.metadata,
+                    ),
+                    sharing_license=(
+                        _first_mapping_value(
+                            resource,
+                            "license_title",
+                            "license",
+                            "license_id",
+                            "license_url",
+                            "rights",
+                        )
+                        or _first_mapping_value(
+                            result.metadata,
+                            "license_title",
+                            "license",
+                            "license_id",
+                            "license_url",
+                            "rights",
+                        )
+                    ),
+                    modality_of_data=_modalities_from_distributions(distributions),
                     distributions=distributions,
-                    metadata={
+                    discovery_metadata={
                         "socrata_id": socrata_id,
                         "socrata_type": _text(resource.get("type")),
                         "socrata_domain": _socrata_domain(source_url),
@@ -257,8 +374,24 @@ class DataJsonAdapter:
                     title=_first_text(dataset, "title", "dct:title", "name"),
                     description=_first_text(dataset, "description", "dct:description"),
                     publisher=_data_json_publisher(dataset),
+                    geography=tuple(_geography_from_mapping(dataset)),
+                    date_of_publication=_publication_date_from_mapping(dataset),
+                    diseases=_diseases_from_mapping(dataset),
+                    size_of_dataset=_size_from_data_json_dataset(dataset),
+                    demographic_information=_demographics_from_mapping(dataset),
+                    sharing_license=_first_mapping_value(
+                        dataset,
+                        "license",
+                        "dct:license",
+                        "rights",
+                        "dct:rights",
+                    ),
+                    modality_of_data=_modalities_from_data_json_dataset(
+                        dataset,
+                        distributions,
+                    ),
                     distributions=distributions,
-                    metadata={
+                    discovery_metadata={
                         "data_json_url": data_json_url,
                         "identifier": _first_text(dataset, "identifier", "@id"),
                         "keywords": _text_values(dataset.get("keyword")),
@@ -691,6 +824,265 @@ def _data_json_publisher(dataset: dict[object, object]) -> str:
     return _first_text_value(publisher)
 
 
+def _geography_from_mapping(mapping: dict[object, object]) -> list[str]:
+    geography: list[str] = []
+    for key in (
+        "country",
+        "countries",
+        "coverage",
+        "dct:coverage",
+        "spatial",
+        "dct:spatial",
+        "spatialCoverage",
+        "spatial_coverage",
+        "geographic_coverage",
+        "geographical_coverage",
+    ):
+        geography.extend(_country_values(mapping.get(key)))
+
+    extras = mapping.get("extras")
+    if isinstance(extras, list):
+        for extra in extras:
+            if not isinstance(extra, dict):
+                continue
+
+            extra_key = _text(extra.get("key") or extra.get("name")).lower()
+            if extra_key in {
+                "country",
+                "countries",
+                "coverage",
+                "spatial",
+                "geographic_coverage",
+                "geographical_coverage",
+            }:
+                geography.extend(_country_values(extra.get("value")))
+
+    return _dedupe(geography)
+
+
+def _publication_date_from_mapping(mapping: dict[object, object]) -> str:
+    return _first_mapping_value(
+        mapping,
+        "date_published",
+        "datePublished",
+        "publication_date",
+        "publicationDate",
+        "issued",
+        "dct:issued",
+        "release_date",
+        "releaseDate",
+        "createdAt",
+        "created_at",
+    )
+
+
+def _diseases_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]:
+    values: list[str] = []
+    for mapping in mappings:
+        values.extend(
+            _mapping_values(
+                mapping,
+                "disease",
+                "diseases",
+                "condition",
+                "conditions",
+                "keyword",
+                "keywords",
+                "tags",
+                "theme",
+                "category",
+                "categories",
+            )
+        )
+        values.extend(
+            [
+                _first_text(mapping, "title", "name", "dct:title"),
+                _first_text(mapping, "description", "notes", "dct:description"),
+            ]
+        )
+
+    searchable_text = " ".join(values).casefold()
+    return tuple(
+        term
+        for term in DISEASE_TERMS
+        if re.search(rf"\b{re.escape(term)}\b", searchable_text)
+    )
+
+
+def _demographics_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]:
+    values: list[str] = []
+    for mapping in mappings:
+        values.extend(
+            _mapping_values(
+                mapping,
+                "demographic_information",
+                "demographics",
+                "population",
+                "population_coverage",
+                "keyword",
+                "keywords",
+                "tags",
+            )
+        )
+        values.extend(
+            [
+                _first_text(mapping, "title", "name", "dct:title"),
+                _first_text(mapping, "description", "notes", "dct:description"),
+            ]
+        )
+
+    searchable_text = " ".join(values).casefold()
+    return tuple(
+        term
+        for term in DEMOGRAPHIC_TERMS
+        if re.search(rf"\b{re.escape(term)}\b", searchable_text)
+    )
+
+
+def _size_from_ckan_package(package: dict[object, object]) -> str:
+    direct_size = _first_mapping_value(
+        package,
+        "size",
+        "content_size",
+        "dataset_size",
+        "record_count",
+    )
+    if direct_size:
+        return direct_size
+
+    sizes = [
+        _value_text(resource.get("size"))
+        for resource in _mapping_dicts(package.get("resources"))
+        if _value_text(resource.get("size"))
+    ]
+    return ", ".join(_dedupe(sizes))
+
+
+def _size_from_data_json_dataset(dataset: dict[object, object]) -> str:
+    direct_size = _first_mapping_value(
+        dataset,
+        "size",
+        "contentSize",
+        "content_size",
+        "dcat:byteSize",
+        "byteSize",
+    )
+    if direct_size:
+        return direct_size
+
+    sizes: list[str] = []
+    for distribution in _data_json_distribution_items(dataset):
+        for key in ("byteSize", "dcat:byteSize", "contentSize", "size"):
+            value = _value_text(distribution.get(key))
+            if value:
+                sizes.append(value)
+    return ", ".join(_dedupe(sizes))
+
+
+def _modalities_from_distributions(
+    distributions: tuple[DistributionCandidate, ...],
+) -> tuple[str, ...]:
+    values = [
+        modality
+        for distribution in distributions
+        if (modality := FORMAT_MODALITIES.get(distribution.format.upper()))
+    ]
+    return tuple(_dedupe(values))
+
+
+def _modalities_from_data_json_dataset(
+    dataset: dict[object, object],
+    distributions: tuple[DistributionCandidate, ...],
+) -> tuple[str, ...]:
+    values = list(_modalities_from_distributions(distributions))
+    for distribution in _data_json_distribution_items(dataset):
+        for key in ("format", "dct:format", "mediaType", "dcat:mediaType"):
+            for format_value in _text_values(distribution.get(key)):
+                values.extend(_modalities_from_format(format_value))
+    return tuple(_dedupe(values))
+
+
+def _modalities_from_format(value: str) -> list[str]:
+    tokens = re.sub(r"[^A-Z0-9]+", " ", value.upper()).split()
+    tabular_tokens = {"CSV", "TSV", "XLS", "XLSX", "PARQUET"}
+    values = [
+        FORMAT_MODALITIES[token]
+        for token in tokens
+        if token in FORMAT_MODALITIES
+        and not (token == "TEXT" and any(item in tabular_tokens for item in tokens))
+    ]
+    if "IMAGE" in tokens:
+        values.append("images")
+    if "AUDIO" in tokens:
+        values.append("speech/audio")
+    if "VIDEO" in tokens:
+        values.append("video")
+    return values
+
+
+def _first_mapping_value(mapping: dict[object, object], *keys: str) -> str:
+    values = _mapping_values(mapping, *keys)
+    return values[0] if values else ""
+
+
+def _mapping_values(mapping: dict[object, object], *keys: str) -> list[str]:
+    normalized_keys = {key.casefold() for key in keys}
+    values: list[str] = []
+    for key, value in mapping.items():
+        if isinstance(key, str) and key.casefold() in normalized_keys:
+            values.extend(_text_values(value))
+
+    extras = mapping.get("extras")
+    for extra in _mapping_dicts(extras):
+        extra_key = _text(extra.get("key") or extra.get("name")).casefold()
+        if extra_key in normalized_keys:
+            values.extend(_text_values(extra.get("value")))
+
+    return _dedupe(values)
+
+
+def _mapping_dicts(value: object) -> list[dict[object, object]]:
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _data_json_distribution_items(dataset: dict[object, object]) -> list[dict[object, object]]:
+    return _mapping_dicts(dataset.get("distribution") or dataset.get("dcat:distribution"))
+
+
+def _value_text(value: object) -> str:
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, (int, float)):
+        return str(value)
+    return _first_text_value(value)
+
+
+def _country_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [
+            country
+            for country in (_text(part) for part in re.split(r"[;|]", value))
+            if country
+        ]
+    if isinstance(value, dict):
+        countries: list[str] = []
+        for key in ("name", "addressCountry", "country", "address", "@value", "value"):
+            countries.extend(_country_values(value.get(key)))
+        return countries
+    if isinstance(value, list):
+        return [
+            country
+            for item in value
+            for country in _country_values(item)
+        ]
+
+    return []
+
+
 def _data_json_dataset_matches_query(dataset: dict[object, object], query: str) -> bool:
     searchable_text = " ".join(
         [
@@ -746,6 +1138,10 @@ def _text_values(value: object) -> list[str]:
         ]
 
     return []
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
 
 
 def _first_url(*values: object) -> str:

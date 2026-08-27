@@ -41,12 +41,13 @@ def analyze_html_page(
         return None
 
     return CollectedDataset(
-        dataset_url=page.canonical_url,
+        dataset_url=page.dataset_url,
         title=page.title or page.h1 or page.canonical_url,
         description=page.meta_description or page.og_description,
         publisher=page.publisher,
         hosting_platform=page.hosting_platform,
         uploader=page.uploader,
+        geography=page.geography,
         dataset_probability=classification.dataset_probability,
         dataset_signals=classification.dataset_signals,
         health_probability=classification.health_probability,
@@ -164,7 +165,13 @@ def _collect_discovered_page_with_report(
             page_classifier,
         )
         if dataset is not None:
-            dataset = replace(dataset, discovery_method=discovered_page.discovery_method)
+            dataset = replace(
+                dataset,
+                discovery_method=discovered_page.discovery_method,
+                geography=(
+                    dataset.geography or discovered_page.geography
+                ),
+            )
 
     if dataset is None:
         return None, 0
@@ -184,6 +191,15 @@ def analyze_discovered_page(
         h1=discovered_page.title,
         meta_description=discovered_page.description,
         publisher=discovered_page.publisher,
+        geography=discovered_page.geography,
+        date_of_publication=discovered_page.date_of_publication,
+        dataset_url=discovered_page.url,
+        diseases=discovered_page.diseases,
+        size_of_dataset=discovered_page.size_of_dataset,
+        demographic_information=discovered_page.demographic_information,
+        sharing_license=discovered_page.sharing_license,
+        modality_of_data=discovered_page.modality_of_data,
+        description_of_dataset=discovered_page.description,
         text=" ".join(
             [
                 discovered_page.title,
@@ -201,12 +217,13 @@ def analyze_discovered_page(
         return None
 
     return CollectedDataset(
-        dataset_url=page.canonical_url,
+        dataset_url=page.dataset_url,
         title=page.title or page.canonical_url,
         description=page.meta_description,
         publisher=page.publisher,
         hosting_platform="",
         uploader="",
+        geography=page.geography,
         dataset_probability=classification.dataset_probability,
         dataset_signals=classification.dataset_signals,
         health_probability=classification.health_probability,
@@ -222,8 +239,6 @@ def _classifier_or_default(
     classifier: PageClassifier | None,
 ) -> PageClassifier:
     return classifier if classifier is not None else build_default_page_classifier(config)
-
-
 def _has_structured_discovery_metadata(discovered_page: DiscoveredPage) -> bool:
     return bool(
         discovered_page.title

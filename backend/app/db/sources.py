@@ -5,9 +5,9 @@ from urllib.parse import urlsplit
 
 from psycopg import errors
 
-from . import db_schema
-from .db_connection import _fetchall, _fetchone, _require_database_pool
-from .db_schema import _require_current_schema
+from . import schema as db_schema
+from .connection import _fetchall, _fetchone, _require_database_pool
+from .schema import _require_current_schema
 
 DATA_SOURCE_KEY_PATTERN_TEXT = db_schema.DATA_SOURCE_KEY_PATTERN_TEXT
 DATA_SOURCE_KEY_PATTERN = re.compile(DATA_SOURCE_KEY_PATTERN_TEXT)

@@ -12,6 +12,7 @@ const SAMPLE_COLLECTOR_HTML = `<html>
       "@type": "Dataset",
       "name": "Mortality by age and sex",
       "publisher": {"@type": "Organization", "name": "National Health Agency"},
+      "spatialCoverage": {"@type": "Country", "name": "France"},
       "distribution": [
         {
           "@type": "DataDownload",
@@ -58,6 +59,11 @@ function wait(milliseconds) {
 function formatCollectionMethods(methods) {
     const values = Array.isArray(methods) ? methods.filter(Boolean) : [];
     return values.length > 0 ? values.join(', ') : 'n/a';
+}
+
+function formatCountries(countries) {
+    const values = Array.isArray(countries) ? countries.filter(Boolean) : [];
+    return values.length > 0 ? values.join(', ') : 'pays non detecte';
 }
 
 export default function App() {
@@ -563,7 +569,10 @@ export default function App() {
                                 </div>
 
                                 <div className="dataset-card__source">
-                                    <span>{dataset.publisher || getHostname(dataset.dataset_url)}</span>
+                                    <div className="dataset-card__source-text">
+                                        <span>{dataset.publisher || getHostname(dataset.dataset_url)}</span>
+                                        <small>{formatCountries(dataset.geography)}</small>
+                                    </div>
                                     <a href={dataset.dataset_url} target="_blank" rel="noreferrer">
                                         Page dataset
                                     </a>
@@ -696,6 +705,10 @@ export default function App() {
                                 <p>
                                     Uploader:{' '}
                                     <strong>{collectorResult.uploader || 'non detecte'}</strong>
+                                </p>
+                                <p>
+                                    Pays:{' '}
+                                    <strong>{formatCountries(collectorResult.geography)}</strong>
                                 </p>
                             </div>
                             <div>

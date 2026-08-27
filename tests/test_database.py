@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 
 import psycopg
 import pytest
-from app import db_connection, db_schema, db_serialization
+from app.db import connection as db_connection
+from app.db import schema as db_schema
+from app.db import serialization as db_serialization
 from psycopg import sql as pg_sql
 
 from collector.storage.models import (
@@ -141,6 +143,22 @@ async def _assert_schema_constraints_are_enforced(database, suffix: str = "") ->
             (
                 f"https://catalog.example.org/dataset/bad-dataset-signals{suffix}",
                 "Bad dataset signals",
+                0.8,
+                0.7,
+                "HEALTH",
+            ),
+        ),
+        (
+            """
+            INSERT INTO collected_datasets (
+                dataset_url, title, dataset_probability, geography,
+                health_probability, health_label
+            )
+            VALUES (%s, %s, %s, '{}'::jsonb, %s, %s)
+            """,
+            (
+                f"https://catalog.example.org/dataset/bad-origin-countries{suffix}",
+                "Bad origin countries",
                 0.8,
                 0.7,
                 "HEALTH",
@@ -300,6 +318,7 @@ def _mortality_dataset() -> CollectedDataset:
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
+        geography=("France",),
         dataset_probability=0.92,
         dataset_signals={"schema_dataset": True},
         health_probability=0.8,
@@ -561,7 +580,7 @@ async def test_init_database_does_not_overwrite_current_reserved_source_key_coll
 
 
 async def test_future_seed_collision_preserves_existing_source(database, monkeypatch):
-    from app import db_schema
+    from app.db import schema as db_schema
 
     await database.init_database()
     await database.upsert_collector_data_source(
@@ -730,6 +749,7 @@ async def test_save_and_list_collected_datasets(database):
     collected = await database.list_collected_datasets()
     assert len(collected) == 1
     assert collected[0].dataset_url == "https://catalog.example.org/dataset/mortality"
+    assert collected[0].geography == ("France",)
     assert collected[0].dataset_signals == {"schema_dataset": True}
     assert collected[0].health_signals == {"matched_keywords": ["mortality"]}
     assert collected[0].distributions[0].format == "CSV"
@@ -744,6 +764,7 @@ async def test_save_and_list_collected_datasets(database):
         publisher=dataset.publisher,
         hosting_platform="",
         uploader="",
+        geography=("Germany", "France"),
         dataset_probability=0.94,
         dataset_signals=dataset.dataset_signals,
         health_probability=0.85,
@@ -778,6 +799,7 @@ async def test_save_and_list_collected_datasets(database):
     collected = await database.list_collected_datasets()
     assert len(collected) == 1
     assert collected[0].title == "Updated mortality health dataset"
+    assert collected[0].geography == ("Germany", "France")
     assert {distribution.format for distribution in collected[0].distributions} == {
         "CSV",
         "JSON",
@@ -1328,6 +1350,28 @@ async def test_discovery_methods_json_errors_are_explicit():
     ):
         db_serialization._serialize_discovery_methods(("google", 42, "bing"))
 
+    assert db_serialization._deserialize_geography(
+        [" France ", "Germany", "France"]
+    ) == ["France", "Germany"]
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid JSON type in stored geography field",
+    ):
+        db_serialization._deserialize_geography({"country": "France"})
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid JSON items in stored geography field",
+    ):
+        db_serialization._deserialize_geography(["France", 42])
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid geography items before storage",
+    ):
+        db_serialization._serialize_geography(("France", " "))
+
     with pytest.raises(
         db_serialization.StoredJSONError,
         match="Invalid signal keys before storage",
@@ -1345,6 +1389,18 @@ async def test_discovery_methods_json_errors_are_explicit():
         match="Value is not JSON serializable for storage",
     ):
         db_serialization._serialize_signals({"bad": object()})
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Invalid signal keys before storage",
+    ):
+        db_serialization._serialize_signals({"nested": {1: "score"}})
+
+    with pytest.raises(
+        db_serialization.StoredJSONError,
+        match="Value is not JSON serializable for storage",
+    ):
+        db_serialization._serialize_signals({"bad": float("nan")})
 
 
 async def test_timestamp_formatting_errors_are_explicit():
@@ -1393,7 +1449,7 @@ async def test_non_json_serializable_signals_do_not_leave_partial_rows(database)
         ],
     )
 
-    with pytest.raises(TypeError):
+    with pytest.raises(db_serialization.StoredJSONError):
         await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
     assert await database.list_collected_datasets() == []

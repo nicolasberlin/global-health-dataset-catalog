@@ -157,6 +157,7 @@ def _build_llm_payload(
             "publisher": page.publisher,
             "hosting_platform": page.hosting_platform,
             "uploader": page.uploader,
+            "metadata": page.dataset_metadata(),
             "text": page.text[:MAX_PAGE_TEXT_CHARS],
         },
         "distributions": [
@@ -301,13 +302,17 @@ def _extract_openai_output_text(response_payload: object) -> str:
     raise PageClassificationError("OpenAI response did not include classification text.")
 
 
-def openai_responses_provider_config() -> LLMProviderConfig:
+def openai_responses_provider_config(
+    name: str = "OpenAI",
+    model_env_var: str = "OPENAI_MODEL",
+    default_model: str = DEFAULT_OPENAI_MODEL,
+) -> LLMProviderConfig:
     return LLMProviderConfig(
-        name="OpenAI",
+        name=name,
         endpoint_url=OPENAI_RESPONSES_API_URL,
         api_key_env_var="OPENAI_API_KEY",
-        model_env_var="OPENAI_MODEL",
-        default_model=DEFAULT_OPENAI_MODEL,
+        model_env_var=model_env_var,
+        default_model=default_model,
         request_body_builder=_build_openai_responses_request_body,
         response_text_extractor=_extract_openai_output_text,
     )
@@ -353,6 +358,9 @@ def _build_openai_responses_request_body(
 def _system_prompt() -> str:
     return (
         "Classify whether this page describes an individual global health dataset. "
+        "Treat the normalized metadata object as the primary evidence: it contains "
+        "the ten extracted dataset fields. Use page content and distributions only "
+        "to corroborate or qualify that metadata. "
         "Return calibrated probabilities from 0 to 1 for dataset relevance and health "
         "relevance. The backend derives the final accepted decision from configured "
         "thresholds, so do not encode the final decision in the response. Dataset-relevant "

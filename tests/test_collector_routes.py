@@ -51,6 +51,13 @@ def _use_heuristic_default_classifier(monkeypatch):
 
 async def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypatch):
     _use_heuristic_default_classifier(monkeypatch)
+    threaded_calls = []
+
+    async def fake_to_thread(function, *args, **kwargs):
+        threaded_calls.append((function, args))
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr("app.routes.collector.asyncio.to_thread", fake_to_thread)
     payload = CollectorAnalyzeHTMLRequest(
         url="https://example.org/datasets/mortality",
         html="""
@@ -63,6 +70,7 @@ async def test_collector_analyze_html_route_returns_scores_and_distributions(mon
                     "@context": "https://schema.org",
                     "@type": "Dataset",
                     "publisher": {"name": "National Health Agency"},
+                    "spatialCoverage": {"@type": "Country", "name": "France"},
                     "distribution": {
                         "@type": "DataDownload",
                         "contentUrl": "https://example.org/files/mortality.csv",
@@ -86,14 +94,26 @@ async def test_collector_analyze_html_route_returns_scores_and_distributions(mon
     assert response.publisher == "National Health Agency"
     assert response.hosting_platform == ""
     assert response.uploader == ""
+    assert response.geography == ["France"]
     assert response.dataset_probability >= 0.9
     assert response.health_probability >= 0.35
     assert response.health_label in {"HEALTH", "PARTIALLY_HEALTH"}
     assert {distribution.format for distribution in response.distributions} == {"CSV", "XLSX"}
+    assert threaded_calls == [
+        (
+            _analyze_html,
+            ("https://example.org/datasets/mortality", payload.html),
+        )
+    ]
 
 
 async def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
     _use_heuristic_default_classifier(monkeypatch)
+    threaded_calls = []
+
+    async def fake_to_thread(function, *args, **kwargs):
+        threaded_calls.append((function, args))
+        return function(*args, **kwargs)
 
     def fake_fetch_public_html(url):
         return FetchedPage(
@@ -119,6 +139,7 @@ async def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch
         )
 
     monkeypatch.setattr("app.routes.collector.fetch_public_html", fake_fetch_public_html)
+    monkeypatch.setattr("app.routes.collector.asyncio.to_thread", fake_to_thread)
 
     response = await analyze_url(CollectorURLRequest(url="https://example.org/catalog"))
 
@@ -129,6 +150,10 @@ async def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch
     assert response.dataset_probability >= 0.6
     assert response.health_probability >= 0.35
     assert {distribution.format for distribution in response.distributions} == {"CSV"}
+    assert [function for function, _args in threaded_calls] == [
+        fake_fetch_public_html,
+        _analyze_html,
+    ]
 
 
 def test_collector_analyze_html_route_returns_502_when_classification_fails():
@@ -150,6 +175,9 @@ def test_collector_analyze_html_route_returns_502_when_classification_fails():
 
 
 def test_collector_analyze_html_route_uses_llm_default_classifier(monkeypatch):
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_1", "model-a")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_2", "model-b")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_3", "model-c")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     try:
@@ -175,7 +203,8 @@ async def test_collector_discover_url_route_returns_discovered_pages(monkeypatch
                 title="Mortality dataset",
                 description="Official mortality health data.",
                 publisher="National Health Agency",
-                metadata={"ckan_name": "mortality"},
+                geography=("France",),
+                discovery_metadata={"ckan_name": "mortality"},
                 distributions=(
                     DistributionCandidate(
                         url="https://catalog.example.org/files/mortality.csv",
@@ -200,7 +229,8 @@ async def test_collector_discover_url_route_returns_discovered_pages(monkeypatch
     assert item.title == "Mortality dataset"
     assert item.description == "Official mortality health data."
     assert item.publisher == "National Health Agency"
-    assert item.metadata == {"ckan_name": "mortality"}
+    assert item.geography == ["France"]
+    assert item.discovery_metadata == {"ckan_name": "mortality"}
     assert len(item.distributions) == 1
     assert item.distributions[0].url == "https://catalog.example.org/files/mortality.csv"
     assert item.distributions[0].format == "CSV"
@@ -227,6 +257,8 @@ async def test_collector_discover_url_route_returns_bad_request_for_discovery_er
 async def test_collector_search_repositories_route_accepts_query_and_returns_results(
     monkeypatch,
 ):
+    _use_heuristic_default_classifier(monkeypatch)
+
     def fake_search_repository_metadata(query):
         assert query == "malaria mortality"
         return RepositorySearchResponse(
@@ -241,7 +273,18 @@ async def test_collector_search_repositories_route_accepts_query_and_returns_res
                     doi="10.1234/example",
                     keywords=["malaria", "mortality"],
                     relevance_score=0.93,
-                    metadata={"provider": "datacite"},
+                    metadata={
+                        "Title": "Malaria mortality estimates",
+                        "Geography": "France",
+                        "Date of publication": "2025",
+                        "Dataset URL": "https://example.org/datasets/malaria-mortality",
+                        "Disease(s)": "malaria",
+                        "Size of dataset": "NA",
+                        "Demographic information": "NA",
+                        "Sharing license": "CC-BY-4.0",
+                        "Modality of data": "tabular",
+                        "Description of dataset": "Annual mortality estimates by country.",
+                    },
                 )
             ],
             warnings=[
@@ -271,6 +314,8 @@ async def test_collector_search_repositories_route_accepts_query_and_returns_res
     assert item.doi == "10.1234/example"
     assert item.keywords == ["malaria", "mortality"]
     assert item.relevance_score == 0.93
+    assert item.classification is not None
+    assert item.classification["health_label"] in {"HEALTH", "PARTIALLY_HEALTH"}
     assert len(response.warnings) == 1
     assert response.warnings[0].provider == "HDX"
     assert response.warnings[0].message == "This source could not be searched."
@@ -320,6 +365,7 @@ async def test_collector_collect_url_route_returns_collected_datasets(monkeypatc
                 publisher="National Health Agency",
                 hosting_platform="",
                 uploader="",
+                geography=("France",),
                 dataset_probability=0.92,
                 dataset_signals={"schema_dataset": True},
                 health_probability=0.8,
@@ -371,6 +417,7 @@ async def test_collector_collect_url_route_returns_collected_datasets(monkeypatc
     item = response.items[0]
     assert item.dataset_url == "https://catalog.example.org/dataset/mortality"
     assert item.discovery_method == "ckan"
+    assert item.geography == ["France"]
     assert item.dataset_probability == 0.92
     assert item.health_label == "HEALTH"
     assert item.distributions[0].format == "CSV"
@@ -388,6 +435,7 @@ async def test_collector_collect_url_route_can_skip_saving(monkeypatch):
                 publisher="National Health Agency",
                 hosting_platform="",
                 uploader="",
+                geography=("France",),
                 dataset_probability=0.92,
                 dataset_signals={},
                 health_probability=0.8,
@@ -415,6 +463,7 @@ async def test_collector_collect_url_route_can_skip_saving(monkeypatch):
     assert response.saved is False
     assert response.saved_count == 0
     assert len(response.items) == 1
+    assert response.items[0].geography == ["France"]
 
 
 async def test_collector_collect_url_route_returns_502_when_classification_fails(
@@ -653,6 +702,7 @@ async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch
                 publisher="National Health Agency",
                 hosting_platform="",
                 uploader="",
+                geography=("France",),
                 dataset_probability=0.92,
                 dataset_signals={},
                 health_probability=0.8,
@@ -679,4 +729,5 @@ async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch
     assert len(response.items) == 1
     assert response.items[0].id == 7
     assert response.items[0].source_url == "https://catalog.example.org/"
+    assert response.items[0].geography == ["France"]
     assert response.items[0].updated_at == "2026-08-16 12:00:00"

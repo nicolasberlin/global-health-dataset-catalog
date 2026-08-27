@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collector.storage.models import CollectionReport
 
-from .db_connection import Row, _fetchone, _require_database_pool
-from .db_schema import _require_current_schema
-from .db_serialization import (
+from .connection import Row, _fetchone, _require_database_pool
+from .schema import _require_current_schema
+from .serialization import (
     _deserialize_discovery_methods,
     _format_optional_timestamp,
     _format_timestamp,

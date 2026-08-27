@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from .db_collected_datasets import (
+from .db.collected_datasets import (
     list_collected_datasets,
     list_dataset_discovery_observations,
     save_collected_datasets,
 )
-from .db_collection_jobs import (
+from .db.collection_jobs import (
     create_collection_job,
     get_collection_job,
     mark_collection_job_done,
     mark_collection_job_error,
     mark_collection_job_running,
 )
-from .db_connection import close_database_pool, open_database_pool
-from .db_schema import DATA_SOURCE_KEY_PATTERN_TEXT, init_database
-from .db_serialization import StoredJSONError, StoredTimestampError
-from .db_sources import (
+from .db.connection import close_database_pool, open_database_pool
+from .db.schema import DATA_SOURCE_KEY_PATTERN_TEXT, init_database
+from .db.serialization import StoredJSONError, StoredTimestampError
+from .db.sources import (
     DuplicateDataSourceKeyError,
     InvalidDataSourceKeyError,
     InvalidDataSourceURLError,

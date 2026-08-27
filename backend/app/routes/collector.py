@@ -43,6 +43,7 @@ from collector.main import collect_source, collect_source_with_report
 from collector.repository_search import (
     RepositorySearchResult,
     RepositorySearchWarning,
+    classify_repository_results,
     search_repository_metadata,
 )
 from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
@@ -54,7 +55,7 @@ router = APIRouter(prefix="/collector", tags=["collector"])
 async def analyze_html(
     payload: CollectorAnalyzeHTMLRequest,
 ) -> CollectorAnalyzeHTMLResponse:
-    return _analyze_html(str(payload.url), payload.html)
+    return await asyncio.to_thread(_analyze_html, str(payload.url), payload.html)
 
 
 @router.post("/analyze-url")
@@ -64,7 +65,7 @@ async def analyze_url(payload: CollectorURLRequest) -> CollectorAnalyzeHTMLRespo
     except ValueError as exception:
         raise HTTPException(status_code=400, detail=str(exception)) from exception
 
-    return _analyze_html(fetched_page.final_url, fetched_page.html)
+    return await asyncio.to_thread(_analyze_html, fetched_page.final_url, fetched_page.html)
 
 
 @router.post("/discover-url")
@@ -83,7 +84,8 @@ async def discover_url(payload: CollectorURLRequest) -> CollectorDiscoveryRespon
                 title=page.title,
                 description=page.description,
                 publisher=page.publisher,
-                metadata=page.metadata,
+                geography=list(page.geography),
+                discovery_metadata=page.discovery_metadata,
                 distributions=[
                     _collector_distribution(distribution)
                     for distribution in page.distributions
@@ -161,15 +163,24 @@ async def search_repositories(
     except ValueError as exception:
         raise HTTPException(status_code=502, detail="Repository search failed.") from exception
 
+    try:
+        classified_results, classification_warnings = await asyncio.to_thread(
+            classify_repository_results,
+            search_response.results,
+            build_default_page_classifier(DEFAULT_CONFIG),
+        )
+    except PageClassificationError as exception:
+        raise HTTPException(status_code=502, detail="Page classification failed.") from exception
+
     return CollectorRepositorySearchResponse(
         query=query,
         items=[
             _collector_repository_search_item(item)
-            for item in search_response.results
+            for item in classified_results
         ],
         warnings=[
             _collector_repository_search_warning(warning)
-            for warning in search_response.warnings
+            for warning in [*search_response.warnings, *classification_warnings]
         ],
     )
 
@@ -201,13 +212,12 @@ def _analyze_html(
 ) -> CollectorAnalyzeHTMLResponse:
     page = extract_page(url, html)
     distributions = extract_distributions(page)
-    page_classifier = (
-        classifier
-        if classifier is not None
-        else build_default_page_classifier(DEFAULT_CONFIG)
-    )
-
     try:
+        page_classifier = (
+            classifier
+            if classifier is not None
+            else build_default_page_classifier(DEFAULT_CONFIG)
+        )
         classification = page_classifier.classify(page, distributions)
     except PageClassificationError as exception:
         raise HTTPException(status_code=502, detail="Page classification failed.") from exception
@@ -220,6 +230,7 @@ def _analyze_html(
         publisher=page.publisher,
         hosting_platform=page.hosting_platform,
         uploader=page.uploader,
+        geography=list(page.geography),
         dataset_probability=classification.dataset_probability,
         dataset_signals=classification.dataset_signals,
         health_probability=classification.health_probability,
@@ -283,6 +294,7 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
         publisher=dataset.publisher,
         hosting_platform=dataset.hosting_platform,
         uploader=dataset.uploader,
+        geography=list(dataset.geography),
         discovery_method=dataset.discovery_method,
         dataset_probability=dataset.dataset_probability,
         dataset_signals=dataset.dataset_signals,

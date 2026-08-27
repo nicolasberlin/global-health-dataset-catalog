@@ -20,6 +20,17 @@ class PageClassification:
     health_signals: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class PageClassificationVote:
+    voter_id: str
+    accepted: bool
+    dataset_probability: float
+    health_probability: float
+    health_label: HealthLabel
+    dataset_signals: dict[str, object] = field(default_factory=dict)
+    health_signals: dict[str, object] = field(default_factory=dict)
+
+
 class PageClassifier(Protocol):
     def classify(
         self,

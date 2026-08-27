@@ -26,7 +26,7 @@
 | `backend/requirements.txt` | Configuration backend | Dependances runtime backend | Dependances runtime : FastAPI, Uvicorn, `psycopg` et `psycopg-pool`. | Haute pour les contraintes minimales. |
 | `frontend/package.json` et `frontend/package-lock.json` | Configuration frontend | React/Vite et versions verrouillees | React 18.3.1, React DOM 18.3.1, Vite 5.4.21, plugin React Vite 4.7.0. Scripts `dev`, `build`, `preview`. | Haute pour l'environnement frontend local. |
 | `backend/app/main.py` | Code source backend | Application FastAPI | Initialisation de la base au demarrage, CORS limite a `localhost`/`127.0.0.1:5173`, routes `/sources`, `/collector`, `/health`. | Haute. |
-| `backend/app/database.py` et `backend/app/db_*.py` | Code source backend | Couche DB PostgreSQL async | `database.py` garde l'interface historique ; les modules `db_connection`, `db_schema`, `db_sources`, `db_collected_datasets`, `db_collection_jobs` et `db_serialization` portent l'implementation. | Haute pour l'intention applicative actuelle. |
+| `backend/app/database.py` et `backend/app/db/*.py` | Code source backend | Couche DB PostgreSQL async | `database.py` garde l'interface historique ; les modules `db/connection.py`, `db/schema.py`, `db/sources.py`, `db/collected_datasets.py`, `db/collection_jobs.py` et `db/serialization.py` portent l'implementation. | Haute pour l'intention applicative actuelle. |
 | `backend/app/routes/*.py` | Code source backend | API HTTP | Routes de catalogue, analyse HTML/URL, decouverte, collecte synchrone, jobs asynchrones, recherche repositories, liste des datasets collectes. | Haute. |
 | `collector/**/*.py` | Code source collecteur | Extraction, classification, decouverte, validation, recherche repositories | Collecteur generique, adaptateurs CKAN/Socrata/data.json/site generique, scoring dataset/sante, detection de distributions, validation HEAD puis GET partiel, recherche DataCite normalisee. | Haute. |
 | `frontend/src/App.jsx`, `frontend/src/styles.css` | Code source frontend | Interface utilisateur | Catalogue des sources, filtres, lancement et polling de jobs, liste des datasets collectes, panneau de test collecteur. | Haute. |
@@ -632,7 +632,7 @@ explicite.
 | Entite | Description | Champs principaux | Relations |
 | --- | --- | --- | --- |
 | `data_sources` | Sources configurees du catalogue. | `id`, `source_key`, `name`, `description`, `theme`, `page_url`. | Source logique de collectes. |
-| `collected_datasets` | Metadonnees de datasets acceptes. | `dataset_url`, `title`, `publisher`, `discovery_method`, scores, signaux, timestamps. | 1-n vers distributions et observations. |
+| `collected_datasets` | Metadonnees de datasets acceptes. | `dataset_url`, `title`, `publisher`, `geography`, `discovery_method`, scores, signaux, timestamps. | 1-n vers distributions et observations. |
 | `collected_distributions` | Liens de fichiers/API detectes et valides. | `url`, `format`, `probability`, signaux, validation HTTP, timestamps. | n-1 vers dataset. |
 | `dataset_discovery_observations` | Historique des observations d'un dataset. | `collection_job_id`, `dataset_id`, `source_url`, `discovery_method`, `observed_at`. | n-1 vers dataset, optionnellement job. |
 | `collection_jobs` | Jobs de collecte et compteurs. | `source_url`, `status`, compteurs, `discovery_methods`, message, error, timestamps. | Lie les observations quand collecte asynchrone. |
@@ -651,6 +651,7 @@ erDiagram
         text dataset_url UK
         text source_url
         text title
+        jsonb geography
         text discovery_method
         real dataset_probability
         real health_probability
@@ -687,6 +688,20 @@ erDiagram
 ```
 
 Note critique : ce modele correspond au schema applicatif courant, maintenant porte par PostgreSQL. L'ancienne base SQLite locale est historique et non migree.
+
+### Database schema policy before stable release
+
+Before the first stable release, the database schema may change without
+preserving old local development databases.
+
+Local development databases created with an older schema are considered
+disposable and are not guaranteed to be migrated.
+
+If the schema changes before the first stable release, developers should recreate
+the local PostgreSQL database/schema from scratch.
+
+After the first stable release, every schema change must include an explicit
+migration that preserves existing data.
 
 ## 14. APIs et interfaces
 
@@ -729,12 +744,13 @@ project/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── database.py
-│   │   ├── db_connection.py
-│   │   ├── db_schema.py
-│   │   ├── db_sources.py
-│   │   ├── db_collected_datasets.py
-│   │   ├── db_collection_jobs.py
-│   │   ├── db_serialization.py
+│   │   ├── db/
+│   │   │   ├── connection.py
+│   │   │   ├── schema.py
+│   │   │   ├── sources.py
+│   │   │   ├── collected_datasets.py
+│   │   │   ├── collection_jobs.py
+│   │   │   └── serialization.py
 │   │   └── routes/
 │   │       ├── sources.py
 │   │       └── collector.py

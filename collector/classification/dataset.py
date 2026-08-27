@@ -4,6 +4,7 @@ import json
 import re
 import unicodedata
 
+from collector.extraction.dataset_metadata import dataset_metadata_text
 from collector.extraction.distributions import extract_distributions
 from collector.storage.models import ClassificationResult, DistributionCandidate, PageSnapshot
 
@@ -110,19 +111,18 @@ def score_dataset_page(
 
 
 def _page_surfaces(page: PageSnapshot) -> dict[str, str]:
+    extracted_metadata = dataset_metadata_text(page.dataset_metadata())
     return {
         "title": _normalize_surface(
             " ".join([page.title, page.h1, page.og_title])
         ),
         "metadata": _normalize_surface(
-            " ".join([page.meta_description, page.og_description])
+            " ".join([extracted_metadata, page.meta_description, page.og_description])
         ),
         "body": _normalize_surface(
             " ".join([page.url, page.canonical_url, " ".join(page.headings), page.text[:5000]])
         ),
     }
-
-
 def _has_jsonld_type(json_ld: tuple[object, ...], expected_type: str) -> bool:
     for node in _iter_json_objects(json_ld):
         type_value = node.get("@type") or node.get("type")

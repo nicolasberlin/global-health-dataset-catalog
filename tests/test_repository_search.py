@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
+from collector.classification.page import PageClassification, PageClassificationError
+from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.repository_search import (
+    CLASSIFICATION_UNAVAILABLE_MESSAGE,
     INVALID_METADATA_MESSAGE,
     PROVIDER_UNAVAILABLE_MESSAGE,
     DataCiteRepositorySearchProvider,
     RepositorySearchResult,
     _number,
+    classify_repository_results,
     search_repository_metadata,
 )
 
@@ -26,17 +30,33 @@ def test_datacite_provider_builds_query_url_and_normalizes_results():
                         "titles": [{"title": "Malaria mortality estimates"}],
                         "descriptions": [
                             {
-                                "description": "<p>Annual mortality estimates by country.</p>",
+                                "description": (
+                                    "<p>Annual mortality estimates by age and sex.</p>"
+                                ),
                                 "descriptionType": "Abstract",
                             }
                         ],
                         "url": "https://example.org/datasets/malaria-mortality",
                         "publisher": {"name": "Global Health Repository"},
                         "publicationYear": 2025,
+                        "geoLocations": [
+                            {
+                                "geoLocationPlace": "Burkina Faso",
+                                "geoLocationCountry": "BF",
+                            }
+                        ],
                         "subjects": [
                             {"subject": "malaria"},
                             {"subject": "mortality"},
                         ],
+                        "sizes": ["12,000 records"],
+                        "rightsList": [
+                            {
+                                "rights": "Creative Commons Attribution 4.0",
+                                "rightsIdentifier": "CC-BY-4.0",
+                            }
+                        ],
+                        "formats": ["CSV"],
                         "types": {
                             "resourceTypeGeneral": "Dataset",
                             "resourceType": "Epidemiological dataset",
@@ -67,7 +87,7 @@ def test_datacite_provider_builds_query_url_and_normalizes_results():
     assert len(results) == 1
     result = results[0]
     assert result.title == "Malaria mortality estimates"
-    assert result.description == "Annual mortality estimates by country."
+    assert result.description == "Annual mortality estimates by age and sex."
     assert result.url == "https://example.org/datasets/malaria-mortality"
     assert result.source == "DataCite"
     assert result.publisher == "Global Health Repository"
@@ -75,12 +95,51 @@ def test_datacite_provider_builds_query_url_and_normalizes_results():
     assert result.doi == "10.1234/malaria"
     assert result.keywords == ["malaria", "mortality"]
     assert result.relevance_score == 0.93
+    assert tuple(result.metadata) == DATASET_METADATA_KEYS
     assert result.metadata == {
-        "provider": "datacite",
-        "datacite_id": "10.1234/malaria",
-        "resource_type": "Dataset",
-        "resource_subtype": "Epidemiological dataset",
-        "native_score": 0.93,
+        "Title": "Malaria mortality estimates",
+        "Geography": "Burkina Faso, BF",
+        "Date of publication": "2025",
+        "Dataset URL": "https://example.org/datasets/malaria-mortality",
+        "Disease(s)": "malaria",
+        "Size of dataset": "12,000 records",
+        "Demographic information": "age, sex",
+        "Sharing license": "Creative Commons Attribution 4.0, CC-BY-4.0",
+        "Modality of data": "tabular",
+        "Description of dataset": "Annual mortality estimates by age and sex.",
+    }
+
+
+def test_datacite_provider_uses_na_for_missing_search_result_metadata():
+    def fake_fetch_json(url):
+        return {
+            "data": [
+                {
+                    "id": "10.1234/minimal",
+                    "attributes": {
+                        "doi": "10.1234/minimal",
+                    },
+                }
+            ]
+        }
+
+    results = DataCiteRepositorySearchProvider(fetch_json=fake_fetch_json).search(
+        "minimal"
+    )
+
+    assert len(results) == 1
+    assert tuple(results[0].metadata) == DATASET_METADATA_KEYS
+    assert results[0].metadata == {
+        "Title": "NA",
+        "Geography": "NA",
+        "Date of publication": "NA",
+        "Dataset URL": "https://doi.org/10.1234/minimal",
+        "Disease(s)": "NA",
+        "Size of dataset": "NA",
+        "Demographic information": "NA",
+        "Sharing license": "NA",
+        "Modality of data": "NA",
+        "Description of dataset": "NA",
     }
 
 
@@ -314,3 +373,43 @@ def test_search_repository_metadata_raises_only_when_all_providers_fail():
         assert str(exception) == "All repository providers failed."
     else:
         raise AssertionError("Expected ValueError.")
+
+
+def test_classify_repository_results_keeps_items_when_one_classification_fails():
+    class MixedClassifier:
+        def classify(self, page, distributions):
+            if page.url == "https://example.org/failing":
+                raise PageClassificationError("bad LLM response")
+            return PageClassification(
+                accepted=True,
+                dataset_probability=0.9,
+                health_probability=0.8,
+                health_label="HEALTH",
+                dataset_signals={"reason": "dataset"},
+                health_signals={"reason": "health"},
+            )
+
+    results, warnings = classify_repository_results(
+        [
+            RepositorySearchResult(
+                title="Classified",
+                url="https://example.org/classified",
+                source="DataCite",
+                relevance_score=0.9,
+            ),
+            RepositorySearchResult(
+                title="Failing",
+                url="https://example.org/failing",
+                source="DataCite",
+                relevance_score=0.8,
+            ),
+        ],
+        MixedClassifier(),
+    )
+
+    assert len(results) == 2
+    assert results[0].classification is not None
+    assert results[0].classification.health_label == "HEALTH"
+    assert results[1].classification is None
+    assert len(warnings) == 1
+    assert warnings[0].message == CLASSIFICATION_UNAVAILABLE_MESSAGE

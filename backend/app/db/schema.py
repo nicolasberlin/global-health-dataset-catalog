@@ -3,8 +3,10 @@ from __future__ import annotations
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from .db_connection import _fetchone, _require_database_pool
+from .connection import _fetchone, _require_database_pool
 
+# Pre-stable policy: old local dev schemas are disposable. Recreate the DB
+# when the schema changes; data-preserving migrations start at stable release.
 CURRENT_SCHEMA_VERSION = 1
 
 DATA_SOURCE_SEEDS = [
@@ -59,6 +61,8 @@ CREATE TABLE collected_datasets (
     publisher TEXT NOT NULL DEFAULT '',
     hosting_platform TEXT NOT NULL DEFAULT '',
     uploader TEXT NOT NULL DEFAULT '',
+    geography JSONB NOT NULL DEFAULT '[]'::jsonb
+        CHECK(jsonb_typeof(geography) = 'array'),
     discovery_method TEXT NOT NULL DEFAULT '',
     dataset_probability DOUBLE PRECISION NOT NULL
         CHECK(dataset_probability >= 0 AND dataset_probability <= 1),

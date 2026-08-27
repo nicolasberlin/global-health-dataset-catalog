@@ -190,9 +190,8 @@ PostgreSQL
 
 ```
 
-PostgreSQL stores application metadata. The backend uses `DATABASE_URL` and
-fails at startup if that variable is missing. Historical SQLite data is not
-migrated.
+PostgreSQL stores application metadata. The backend uses `DATABASE_URL`, fails
+at startup if that variable is missing, and manages its own schema versions.
 
 ---
 
@@ -212,17 +211,19 @@ project/
 
 │   │   ├── database.py
 
-│   │   ├── db_connection.py
+│   │   ├── db/
 
-│   │   ├── db_schema.py
+│   │   │   ├── connection.py
 
-│   │   ├── db_sources.py
+│   │   │   ├── schema.py
 
-│   │   ├── db_collected_datasets.py
+│   │   │   ├── sources.py
 
-│   │   ├── db_collection_jobs.py
+│   │   │   ├── collected_datasets.py
 
-│   │   ├── db_serialization.py
+│   │   │   ├── collection_jobs.py
+
+│   │   │   └── serialization.py
 
 │   │   └── routes/
 
@@ -857,7 +858,7 @@ title
 
 publisher
 
-origin_countries
+geography
 
 discovery_method
 
@@ -1074,9 +1075,12 @@ export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5
 
 The PostgreSQL database is managed by the application and must be empty on first
 startup. The backend creates the current schema, records it in
-`schema_migrations`, and applies the default system seeds. Old SQLite data,
-partial PostgreSQL schemas, and hand-modified application tables are not
-migrated automatically.
+`schema_migrations`, and applies the default system seeds. Partial PostgreSQL
+schemas and hand-modified application tables are not migrated automatically.
+
+If startup fails because the local database schema is outdated, recreate the
+local development database. Pre-stable local databases are disposable and are not
+migrated.
 
 ---
 

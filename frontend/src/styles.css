@@ -639,13 +639,27 @@ p {
     padding-top: 12px;
 }
 
-.dataset-card__source span {
+.dataset-card__source-text {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.dataset-card__source span,
+.dataset-card__source small {
     min-width: 0;
     overflow: hidden;
     color: #68766f;
-    font-size: 0.86rem;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.dataset-card__source span {
+    font-size: 0.86rem;
+}
+
+.dataset-card__source small {
+    font-size: 0.76rem;
 }
 
 .dataset-card__source a {

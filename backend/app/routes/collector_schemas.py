@@ -35,6 +35,7 @@ class CollectorRepositorySearchItem(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     relevance_score: float = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
+    classification: Optional[dict[str, Any]] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
 
 
 class CollectorRepositorySearchWarning(BaseModel):
@@ -66,7 +67,8 @@ class CollectorDiscoveredPage(BaseModel):
     title: str = ""
     description: str = ""
     publisher: str = ""
-    metadata: dict[str, Any]
+    geography: list[str] = Field(default_factory=list)
+    discovery_metadata: dict[str, Any] = Field(default_factory=dict)
     distributions: list[CollectorDistribution]
 
 
@@ -96,6 +98,7 @@ class CollectorAnalyzeHTMLResponse(BaseModel):
     publisher: str
     hosting_platform: str
     uploader: str
+    geography: list[str] = Field(default_factory=list)
     dataset_probability: float
     dataset_signals: dict[str, Any]
     health_probability: float
@@ -113,6 +116,7 @@ class CollectorCollectedDataset(BaseModel):
     publisher: str
     hosting_platform: str
     uploader: str
+    geography: list[str] = Field(default_factory=list)
     discovery_method: str
     dataset_probability: float
     dataset_signals: dict[str, Any]

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from collector.classification.ensemble import EnsemblePageClassifier
 from collector.classification.factory import build_default_page_classifier
 from collector.classification.llm import (
     HTTPJSONLLMClient,
@@ -13,6 +14,7 @@ from collector.classification.llm import (
 )
 from collector.classification.page import PageClassificationError
 from collector.config import CollectorConfig
+from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 
@@ -31,6 +33,22 @@ def test_llm_page_classifier_returns_validated_classification():
     classification = classifier.classify(_page(), [_distribution()])
 
     assert client.payload["page"]["canonical_url"] == "https://example.org/datasets/mortality"
+    assert "geography" not in client.payload["page"]
+    assert "date_of_publication" not in client.payload["page"]
+    assert "dataset_url" not in client.payload["page"]
+    assert tuple(client.payload["page"]["metadata"]) == DATASET_METADATA_KEYS
+    assert client.payload["page"]["metadata"] == {
+        "Title": "Mortality health dataset",
+        "Geography": "France",
+        "Date of publication": "2025",
+        "Dataset URL": "https://example.org/datasets/mortality",
+        "Disease(s)": "malaria",
+        "Size of dataset": "12,000 records",
+        "Demographic information": "age, sex",
+        "Sharing license": "CC-BY-4.0",
+        "Modality of data": "tabular",
+        "Description of dataset": "Official mortality and epidemiology data.",
+    }
     assert client.payload["distributions"][0]["format"] == "CSV"
     assert classification.accepted is True
     assert classification.dataset_probability == 0.91
@@ -42,8 +60,35 @@ def test_llm_page_classifier_returns_validated_classification():
     }
 
 
-def test_default_page_classifier_is_llm_page_classifier():
-    assert isinstance(build_default_page_classifier(), LLMPageClassifier)
+def test_default_page_classifier_is_ensemble_page_classifier(monkeypatch):
+    _configure_classifier_models(monkeypatch)
+
+    classifier = build_default_page_classifier()
+
+    assert isinstance(classifier, EnsemblePageClassifier)
+    assert classifier.voter_ids == (
+        "openai_primary",
+        "openai_secondary",
+        "openai_tertiary",
+    )
+    assert classifier.votes_required == 2
+    assert classifier.minimum_successful_votes == 2
+
+
+def test_default_page_classifier_requires_three_distinct_models(monkeypatch):
+    monkeypatch.delenv("OPENAI_CLASSIFIER_MODEL_1", raising=False)
+    monkeypatch.delenv("OPENAI_CLASSIFIER_MODEL_2", raising=False)
+    monkeypatch.delenv("OPENAI_CLASSIFIER_MODEL_3", raising=False)
+
+    with pytest.raises(PageClassificationError, match="must be configured"):
+        build_default_page_classifier()
+
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_1", "same-model")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_2", "same-model")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_3", "other-model")
+
+    with pytest.raises(PageClassificationError, match="must be distinct"):
+        build_default_page_classifier()
 
 
 def test_llm_page_classifier_derives_accepted_from_config_thresholds():
@@ -170,6 +215,7 @@ def test_openai_provider_config_builds_structured_output_request():
     assert body["text"]["format"]["strict"] is True
     assert "accepted" not in body["text"]["format"]["schema"]["properties"]
     assert "accepted" not in body["text"]["format"]["schema"]["required"]
+    assert "metadata object as the primary evidence" in body["input"][0]["content"][0]["text"]
 
 
 def test_http_json_llm_client_requires_configured_api_key(monkeypatch):
@@ -200,6 +246,15 @@ def _page() -> PageSnapshot:
         meta_description="Official mortality and epidemiology data.",
         publisher="National Health Agency",
         text="Download CSV data for mortality indicators.",
+        geography=("France",),
+        date_of_publication="2025",
+        dataset_url="https://example.org/datasets/mortality",
+        diseases=("malaria",),
+        size_of_dataset="12,000 records",
+        demographic_information=("age", "sex"),
+        sharing_license="CC-BY-4.0",
+        modality_of_data=("tabular",),
+        description_of_dataset="Official mortality and epidemiology data.",
     )
 
 
@@ -243,3 +298,9 @@ def _fake_response_text(response_payload: object) -> str:
     if not isinstance(output_text, str):
         raise PageClassificationError("FakeProvider response did not include output_text.")
     return output_text
+
+
+def _configure_classifier_models(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_1", "model-a")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_2", "model-b")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_3", "model-c")

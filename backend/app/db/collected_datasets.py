@@ -9,12 +9,14 @@ from collector.storage.models import (
     ValidationResult,
 )
 
-from .db_connection import Row, _fetchall, _fetchone, _require_database_pool
-from .db_schema import _require_current_schema
-from .db_serialization import (
+from .connection import Row, _fetchall, _fetchone, _require_database_pool
+from .schema import _require_current_schema
+from .serialization import (
+    _deserialize_geography,
     _deserialize_signals,
     _format_optional_timestamp,
     _format_timestamp,
+    _serialize_geography,
     _serialize_signals,
 )
 
@@ -45,7 +47,7 @@ async def list_collected_datasets() -> list[CollectedDataset]:
             connection,
             """
             SELECT id, source_url, dataset_url, title, description, publisher,
-                   hosting_platform, uploader, discovery_method,
+                   hosting_platform, uploader, geography, discovery_method,
                    dataset_probability, dataset_signals, health_probability,
                    health_label, health_signals, first_seen_at, last_seen_at,
                    updated_at
@@ -118,11 +120,13 @@ async def _upsert_collected_dataset(
         """
         INSERT INTO collected_datasets (
             source_url, dataset_url, title, description, publisher,
-            hosting_platform, uploader, discovery_method, dataset_probability,
-            dataset_signals, health_probability, health_label, health_signals,
-            first_seen_at, last_seen_at
+            hosting_platform, uploader, geography, discovery_method,
+            dataset_probability, dataset_signals, health_probability, health_label,
+            health_signals, first_seen_at, last_seen_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+        )
         ON CONFLICT(dataset_url) DO UPDATE SET
             source_url = excluded.source_url,
             title = excluded.title,
@@ -130,6 +134,7 @@ async def _upsert_collected_dataset(
             publisher = excluded.publisher,
             hosting_platform = excluded.hosting_platform,
             uploader = excluded.uploader,
+            geography = excluded.geography,
             discovery_method = excluded.discovery_method,
             dataset_probability = excluded.dataset_probability,
             dataset_signals = excluded.dataset_signals,
@@ -139,7 +144,7 @@ async def _upsert_collected_dataset(
             last_seen_at = NOW(),
             updated_at = NOW()
         RETURNING id, source_url, dataset_url, title, description, publisher,
-                  hosting_platform, uploader, discovery_method,
+                  hosting_platform, uploader, geography, discovery_method,
                   dataset_probability, dataset_signals, health_probability,
                   health_label, health_signals, first_seen_at, last_seen_at,
                   updated_at
@@ -152,6 +157,7 @@ async def _upsert_collected_dataset(
             dataset.publisher,
             dataset.hosting_platform,
             dataset.uploader,
+            _serialize_geography(dataset.geography),
             dataset.discovery_method,
             dataset.dataset_probability,
             _serialize_signals(dataset.dataset_signals),
@@ -458,6 +464,9 @@ def _collected_dataset_from_rows(
         publisher=str(dataset_row["publisher"]),
         hosting_platform=str(dataset_row["hosting_platform"]),
         uploader=str(dataset_row["uploader"]),
+        geography=tuple(
+            _deserialize_geography(dataset_row["geography"])
+        ),
         dataset_probability=float(dataset_row["dataset_probability"]),
         dataset_signals=_deserialize_signals(
             dataset_row["dataset_signals"],

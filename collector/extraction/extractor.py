@@ -30,6 +30,7 @@ class _PageHTMLParser(HTMLParser):
         self.og_title = ""
         self.og_description = ""
         self.publisher = ""
+        self.geography: list[str] = []
         self._active_link: dict[str, object] | None = None
         self._active_json_ld_parts: list[str] | None = None
 
@@ -114,6 +115,7 @@ class _PageHTMLParser(HTMLParser):
     def _handle_meta(self, attributes: dict[str, str]) -> None:
         name = attributes.get("name", "").lower()
         property_name = attributes.get("property", "").lower()
+        itemprop = attributes.get("itemprop", "").lower()
         content = html_to_text(attributes.get("content", ""))
 
         if not content:
@@ -127,6 +129,33 @@ class _PageHTMLParser(HTMLParser):
             self.og_description = content
         elif name in {"publisher", "author", "citation_publisher"} and not self.publisher:
             self.publisher = content
+        elif (
+            name
+            in {
+                "citation_country",
+                "country",
+                "countries",
+                "coverage",
+                "dc.coverage",
+                "dcterms.coverage",
+                "dcterms.spatial",
+                "geo.country",
+            }
+            or property_name
+            in {
+                "country",
+                "countries",
+                "coverage",
+                "dc:coverage",
+                "dc.coverage",
+                "dcterms:coverage",
+                "dcterms.coverage",
+                "dcterms:spatial",
+                "dcterms.spatial",
+            }
+            or itemprop in {"country", "spatialcoverage", "contentlocation"}
+        ):
+            self.geography.extend(_country_values(content))
 
     def _parse_json_ld(self, script_text: str) -> None:
         try:
@@ -150,20 +179,41 @@ def extract_page(url: str, html: str) -> PageSnapshot:
         or _publisher_from_json_ld(parser.json_ld)
         or source_identity.publisher
     )
+    geography = _dedupe(
+        [
+            *parser.geography,
+            *_geography_from_json_ld(parser.json_ld),
+        ]
+    )
 
+    title = _normalize_text(" ".join(parser.title_parts))
+    h1 = _normalize_text(" ".join(parser.h1_parts))
+    description = parser.meta_description or parser.og_description
+    text = _normalize_text(" ".join(parser.text_parts))
     return PageSnapshot(
         url=url,
         canonical_url=canonical_url,
-        title=_normalize_text(" ".join(parser.title_parts)),
-        h1=_normalize_text(" ".join(parser.h1_parts)),
+        title=title,
+        h1=h1,
         meta_description=parser.meta_description,
         og_title=parser.og_title,
         og_description=parser.og_description,
         headings=tuple(dict.fromkeys(parser.heading_parts)),
-        text=_normalize_text(" ".join(parser.text_parts)),
+        text=text,
         publisher=publisher,
         hosting_platform=source_identity.hosting_platform,
         uploader=source_identity.uploader,
+        geography=tuple(geography),
+        date_of_publication=_date_from_json_ld(parser.json_ld),
+        dataset_url=canonical_url,
+        diseases=tuple(_diseases_from_text(" ".join([title, h1, description, text]))),
+        size_of_dataset=_size_from_json_ld(parser.json_ld),
+        demographic_information=tuple(
+            _demographics_from_text(" ".join([title, h1, description, text]))
+        ),
+        sharing_license=_license_from_json_ld(parser.json_ld),
+        modality_of_data=tuple(_modalities_from_json_ld(parser.json_ld)),
+        description_of_dataset=description,
         links=tuple(parser.links),
         json_ld=tuple(parser.json_ld),
     )
@@ -182,6 +232,158 @@ def _publisher_from_json_ld(json_ld_items: list[object]) -> str:
     return ""
 
 
+def _geography_from_json_ld(json_ld_items: list[object]) -> list[str]:
+    geography: list[str] = []
+    for item in _iter_json_objects(json_ld_items):
+        for key in (
+            "spatialCoverage",
+            "spatial",
+            "areaServed",
+            "contentLocation",
+            "locationCreated",
+            "countryOfOrigin",
+            "coverage",
+            "dct:coverage",
+            "dct:spatial",
+        ):
+            geography.extend(_country_values(item.get(key)))
+
+    return _dedupe(geography)
+
+
+def _date_from_json_ld(json_ld_items: list[object]) -> str:
+    for item in _iter_json_objects(json_ld_items):
+        for key in ("datePublished", "publicationDate", "dct:issued", "issued"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return _normalize_text(value)
+
+    return ""
+
+
+def _license_from_json_ld(json_ld_items: list[object]) -> str:
+    for item in _iter_json_objects(json_ld_items):
+        value = item.get("license")
+        if isinstance(value, str) and value.strip():
+            return _normalize_text(value)
+        if isinstance(value, dict):
+            for key in ("name", "url", "@id"):
+                nested_value = value.get(key)
+                if isinstance(nested_value, str) and nested_value.strip():
+                    return _normalize_text(nested_value)
+
+    return ""
+
+
+def _size_from_json_ld(json_ld_items: list[object]) -> str:
+    for item in _iter_json_objects(json_ld_items):
+        for key in ("size", "contentSize", "content_size"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return _normalize_text(value)
+
+    return ""
+
+
+def _modalities_from_json_ld(json_ld_items: list[object]) -> list[str]:
+    values: list[str] = []
+    for item in _iter_json_objects(json_ld_items):
+        for key in ("encodingFormat", "fileFormat", "format"):
+            value = item.get(key)
+            if isinstance(value, str):
+                values.extend(_modalities_from_text(value))
+        distribution = item.get("distribution")
+        if isinstance(distribution, (dict, list)):
+            for distribution_item in _iter_json_objects(distribution):
+                for key in ("encodingFormat", "fileFormat", "contentUrl"):
+                    value = distribution_item.get(key)
+                    if isinstance(value, str):
+                        values.extend(_modalities_from_text(value))
+
+    return _dedupe(values)
+
+
+def _diseases_from_text(value: str) -> list[str]:
+    disease_terms = (
+        "aids",
+        "cancer",
+        "cholera",
+        "coronavirus",
+        "covid",
+        "dengue",
+        "diabetes",
+        "ebola",
+        "hepatitis",
+        "hiv",
+        "influenza",
+        "malaria",
+        "measles",
+        "polio",
+        "smallpox",
+        "tuberculosis",
+        "zika",
+    )
+    normalized = value.lower()
+    return [term for term in disease_terms if re.search(rf"\b{re.escape(term)}\b", normalized)]
+
+
+def _demographics_from_text(value: str) -> list[str]:
+    demographic_terms = ("age", "sex", "gender", "height", "weight")
+    normalized = value.lower()
+    return [
+        term
+        for term in demographic_terms
+        if re.search(rf"\b{re.escape(term)}\b", normalized)
+    ]
+
+
+def _modalities_from_text(value: str) -> list[str]:
+    normalized = value.lower()
+    modality_by_term = {
+        "csv": "tabular",
+        "xlsx": "tabular",
+        "xls": "tabular",
+        "json": "structured data",
+        "text": "text",
+        "image": "images",
+        "audio": "speech/audio",
+        "speech": "speech",
+    }
+    return [
+        modality
+        for term, modality in modality_by_term.items()
+        if re.search(rf"\b{re.escape(term)}\b", normalized)
+        and not (
+            term == "text"
+            and re.search(r"\btext/(?:csv|tab-separated-values)\b", normalized)
+        )
+    ]
+
+
+def _country_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [
+            country
+            for country in (
+                _normalize_text(part) for part in re.split(r"[;|]", html_to_text(value))
+            )
+            if country
+        ]
+    if isinstance(value, dict):
+        countries: list[str] = []
+        for key in ("name", "addressCountry", "country", "address", "@value", "value"):
+            countries.extend(_country_values(value.get(key)))
+        return countries
+    if isinstance(value, list):
+        return [
+            country
+            for item in value
+            for country in _country_values(item)
+        ]
+
+    return []
+
+
 def _iter_json_objects(value: object) -> list[dict[str, object]]:
     objects: list[dict[str, object]] = []
 
@@ -198,6 +400,10 @@ def _iter_json_objects(value: object) -> list[dict[str, object]]:
 
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
 
 
 def html_to_text(value: str) -> str:

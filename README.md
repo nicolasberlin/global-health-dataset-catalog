@@ -76,10 +76,9 @@ export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5
 ```
 
 The PostgreSQL database is managed by the application. It must be empty on
-first startup; the backend creates schema version 1, stores it in
-`schema_migrations`, and applies the default system seeds. Existing SQLite data,
-partial PostgreSQL schemas, or hand-modified application tables are not migrated
-automatically.
+first startup; the backend creates the current schema, stores its version in
+`schema_migrations`, and applies the default system seeds. Partial PostgreSQL
+schemas or hand-modified application tables are not migrated automatically.
 
 Run the API:
 

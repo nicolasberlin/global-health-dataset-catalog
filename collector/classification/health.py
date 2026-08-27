@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from collector.extraction.dataset_metadata import dataset_metadata_text
 from collector.storage.models import HealthClassification, HealthLabel, PageSnapshot
 
 HEALTH_KEYWORDS = {
@@ -13,6 +14,7 @@ HEALTH_KEYWORDS = {
     "health",
     "healthcare",
     "hospital",
+    "malaria",
     "maladie",
     "medical",
     "mental health",
@@ -28,8 +30,13 @@ HEALTH_KEYWORDS = {
 
 
 def score_health_page(page: PageSnapshot) -> HealthClassification:
-    title_surface = _normalize(" ".join([page.title, page.h1, page.meta_description]))
-    body_surface = _normalize(" ".join([page.publisher, page.text[:8000], page.canonical_url]))
+    extracted_metadata = dataset_metadata_text(page.dataset_metadata())
+    title_surface = _normalize(
+        " ".join([page.title, page.h1, page.meta_description])
+    )
+    body_surface = _normalize(
+        " ".join([extracted_metadata, page.publisher, page.text[:8000], page.canonical_url])
+    )
 
     title_hits = _matched_keywords(title_surface)
     body_hits = _matched_keywords(body_surface)
@@ -54,8 +61,6 @@ def score_health_page(page: PageSnapshot) -> HealthClassification:
             "publisher_health_signal": _publisher_health_signal(page.publisher),
         },
     )
-
-
 def _matched_keywords(surface: str) -> list[str]:
     matches: list[str] = []
     for keyword in HEALTH_KEYWORDS:

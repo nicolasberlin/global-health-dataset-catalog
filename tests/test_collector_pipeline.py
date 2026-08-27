@@ -7,6 +7,10 @@ from collector.classification.health import score_health_page
 from collector.classification.heuristic import HeuristicPageClassifier
 from collector.classification.page import PageClassification, PageClassificationError
 from collector.discovery.adapters import DiscoveredPage
+from collector.extraction.dataset_metadata import (
+    DATASET_METADATA_KEYS,
+    MISSING_DATASET_METADATA_VALUE,
+)
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
 from collector.fetch import FetchedPage
@@ -32,6 +36,10 @@ DATASET_HTML = """
             "@type": "Dataset",
             "name": "Mortality by age and sex",
             "publisher": {"@type": "Organization", "name": "National Health Agency"},
+            "spatialCoverage": {"@type": "Country", "name": "France"},
+            "datePublished": "2025-05-01",
+            "license": "CC-BY-4.0",
+            "contentSize": "12,000 records",
             "distribution": [
                 {
                     "@type": "DataDownload",
@@ -63,6 +71,7 @@ def test_collector_extracts_and_scores_health_dataset_page():
     assert page.title == "Mortality by age and sex dataset"
     assert page.h1 == "Mortality by age and sex"
     assert page.publisher == "National Health Agency"
+    assert page.geography == ("France",)
     assert len(page.links) == 3
 
     distributions = extract_distributions(page)
@@ -79,6 +88,130 @@ def test_collector_extracts_and_scores_health_dataset_page():
     assert dataset_score.signals["schema_dataset"] is True
     assert health_score.probability >= 0.75
     assert health_score.label == "HEALTH"
+
+
+def test_extract_page_builds_normalized_business_metadata():
+    page = extract_page("https://example.org/data/catalog", DATASET_HTML)
+
+    assert page.geography == ("France",)
+    assert page.date_of_publication == "2025-05-01"
+    assert page.dataset_url == "https://example.org/datasets/mortality"
+    assert page.diseases == ()
+    assert page.size_of_dataset == "12,000 records"
+    assert page.demographic_information == ("age", "sex")
+    assert page.sharing_license == "CC-BY-4.0"
+    assert page.modality_of_data == ("tabular",)
+    assert page.description_of_dataset == "Official mortality health dataset."
+    assert page.dataset_metadata() == {
+        "Title": "Mortality by age and sex dataset",
+        "Geography": "France",
+        "Date of publication": "2025-05-01",
+        "Dataset URL": "https://example.org/datasets/mortality",
+        "Disease(s)": MISSING_DATASET_METADATA_VALUE,
+        "Size of dataset": "12,000 records",
+        "Demographic information": "age, sex",
+        "Sharing license": "CC-BY-4.0",
+        "Modality of data": "tabular",
+        "Description of dataset": "Official mortality health dataset.",
+    }
+
+
+def test_extract_page_uses_na_for_missing_business_metadata():
+    page = extract_page(
+        "https://example.org/minimal",
+        "<html><body><p>No dataset metadata here.</p></body></html>",
+    )
+
+    assert page.geography == ()
+    assert page.date_of_publication == ""
+    assert page.diseases == ()
+    assert page.size_of_dataset == ""
+    assert page.demographic_information == ()
+    assert page.sharing_license == ""
+    assert page.modality_of_data == ()
+    assert page.description_of_dataset == ""
+    assert page.dataset_metadata()["Dataset URL"] == "https://example.org/minimal"
+    assert all(
+        value == MISSING_DATASET_METADATA_VALUE
+        for key, value in page.dataset_metadata().items()
+        if key != "Dataset URL"
+    )
+
+
+def test_extract_page_does_not_substitute_modified_or_method_for_publication_or_size():
+    page = extract_page(
+        "https://example.org/dataset",
+        """
+        <html>
+            <head>
+                <script type="application/ld+json">
+                {
+                    "@type": "Dataset",
+                    "dateModified": "2026-01-01",
+                    "measurementTechnique": "Household survey",
+                    "description": "Mortality and vaccination statistics."
+                }
+                </script>
+            </head>
+            <body><p>Mortality and vaccination statistics.</p></body>
+        </html>
+        """,
+    )
+
+    assert page.date_of_publication == ""
+    assert page.size_of_dataset == ""
+    assert page.diseases == ()
+    assert page.dataset_metadata()["Date of publication"] == MISSING_DATASET_METADATA_VALUE
+    assert page.dataset_metadata()["Size of dataset"] == MISSING_DATASET_METADATA_VALUE
+    assert page.dataset_metadata()["Disease(s)"] == MISSING_DATASET_METADATA_VALUE
+
+
+def test_page_snapshot_exports_business_metadata_contract_without_storing_a_copy():
+    page = PageSnapshot(
+        url="https://example.org/record",
+        canonical_url="https://example.org/record",
+        title="Mortality dataset",
+        geography=(" France ", "France"),
+    )
+
+    assert not hasattr(page, "metadata")
+    assert tuple(page.dataset_metadata()) == DATASET_METADATA_KEYS
+    assert page.dataset_metadata()["Title"] == "Mortality dataset"
+    assert page.title == "Mortality dataset"
+    assert page.dataset_metadata()["Geography"] == "France"
+    assert page.geography == ("France",)
+
+
+def test_heuristic_classification_uses_business_metadata():
+    page = PageSnapshot(
+        url="https://example.org/record",
+        canonical_url="https://example.org/record",
+        title="Malaria health dataset",
+        diseases=("malaria",),
+        modality_of_data=("tabular",),
+        description_of_dataset="Download CSV data for malaria surveillance.",
+    )
+    distributions = [
+        DistributionCandidate(
+            url="https://example.org/files/malaria.csv",
+            format="CSV",
+            probability=0.9,
+        ),
+        DistributionCandidate(
+            url="https://example.org/api/malaria",
+            format="API",
+            probability=0.9,
+        ),
+    ]
+
+    dataset_score = score_dataset_page(page, distributions)
+    health_score = score_health_page(page)
+
+    assert dataset_score.probability >= 0.6
+    assert dataset_score.signals["accepted_by_heuristics"] is True
+    assert "title_dataset_concepts" in dataset_score.signals
+    assert health_score.probability >= 0.35
+    assert "malaria" in health_score.signals["matched_keywords"]
 
 
 def test_dataset_score_rejects_catalog_page_with_only_weak_access_signals():
@@ -256,6 +389,9 @@ def test_collector_rejects_non_health_non_dataset_page():
 
 
 def test_analyze_html_page_uses_llm_default_classifier(monkeypatch):
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_1", "model-a")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_2", "model-b")
+    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_3", "model-c")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(PageClassificationError, match="OPENAI_API_KEY"):
@@ -304,6 +440,7 @@ def test_analyze_html_page_uses_injected_page_classifier():
 
     assert result is not None
     assert result.dataset_probability == 0.81
+    assert result.geography == ("France",)
     assert result.dataset_signals == {"source": "fake"}
     assert result.health_probability == 0.77
     assert result.health_label == "HEALTH"
@@ -412,6 +549,7 @@ def test_collect_source_uses_structured_discovery_metadata_without_fetching_html
         title="Mortality health dataset",
         description="Official epidemiology indicators.",
         publisher="National Health Agency",
+        geography=("France",),
         distributions=(csv_distribution, json_distribution),
     )
 
@@ -445,6 +583,7 @@ def test_collect_source_uses_structured_discovery_metadata_without_fetching_html
     assert dataset.dataset_url == "https://catalog.example.org/dataset/mortality"
     assert dataset.title == "Mortality health dataset"
     assert dataset.publisher == "National Health Agency"
+    assert dataset.geography == ("France",)
     assert dataset.discovery_method == "ckan"
     assert dataset.dataset_probability >= 0.6
     assert dataset.health_probability >= 0.35
@@ -459,6 +598,7 @@ def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():
         url="https://example.org/datasets/vaccination",
         discovery_method="generic_website",
         priority=0.1,
+        geography=("Germany",),
     )
 
     def fake_discover(url):
@@ -511,6 +651,7 @@ def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():
     dataset = datasets[0]
     assert dataset.discovery_method == "generic_website"
     assert dataset.title == "Vaccination health dataset"
+    assert dataset.geography == ("Germany",)
     assert [distribution.format for distribution in dataset.distributions] == ["CSV"]
     assert dataset.validation_results[0].ok is True
 
