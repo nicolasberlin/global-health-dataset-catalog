@@ -21,8 +21,8 @@ class HeuristicPageClassifier:
         dataset_score = score_dataset_page(page, distributions)
         health_score = score_health_page(page)
         accepted = (
-            dataset_score.probability >= self._config.min_dataset_probability
-            and health_score.probability >= self._config.min_health_probability
+            dataset_score.probability >= self._config.heuristic_min_dataset_probability
+            and health_score.probability >= self._config.heuristic_min_health_probability
         )
 
         return PageClassification(

@@ -351,7 +351,15 @@ Repository providers
 
     ↓
 
-Normalized results + controlled warnings
+Normalized candidate results + controlled warnings
+
+    ↓
+
+POST /collector/classify-repository-result
+
+    ↓
+
+One classified result JSON
 
 ```
 
@@ -361,6 +369,13 @@ Current implementation:
 - `backend/app/routes/collector.py` keeps the route functions;
 - `collector/repository_search.py` contains the provider interface, DataCite provider, normalization, filtering, sorting, and partial-failure warnings;
 - DataCite is the first active provider.
+
+Repository classification is limited to two candidates at a time per FastAPI
+process. Input fields and metadata size are bounded by Pydantic, and the payload
+is truncated again immediately before it is sent to the LLM voters. Repository
+metadata is untrusted input: classifiers must treat embedded instructions as
+data, never as commands. Detailed classification failures are logged on the
+server while the API keeps a generic public error message.
 
 The public response shape is:
 
@@ -435,57 +450,32 @@ If none of these methods works, the collector uses a generic method: it checks `
 
 A discovered page is not automatically considered a dataset.
 
-It receives two main scores.
+The default classifier asks three LLM voters for an explicit decision. Each voter
+returns `accepted=true` or `accepted=false`. The page is accepted only when at
+least two successful voters accept it.
 
-## Dataset probability
+The decision is not derived from percentage thresholds.
 
-Probability that the page actually represents **an individual dataset**.
+The response still includes two compatibility scores for audit and display:
 
-Current threshold:
+- `dataset_probability`: confidence that the page represents an individual dataset;
+- `health_probability`: confidence that the page is health-related.
 
-```text
-
-dataset_probability >= 0.60
-
-```
-
----
-
-## Health probability
-
-Probability that the content is health-related.
-
-Minimum threshold:
-
-```text
-
-health_probability >= 0.35
-
-```
+These scores are not the acceptance rule.
 
 Labels currently used:
 
 ```text
-
->= 0.75 → HEALTH
-
->= 0.35 → PARTIALLY_HEALTH
-
-< 0.35 → NON_HEALTH
-
+HEALTH
+PARTIALLY_HEALTH
+NON_HEALTH
 ```
 
-### Planned Evolution: LLM-Assisted Classification
-
-This part will be further explored by **David** using an LLM, in addition to the current heuristics. The goal is to add a more precise semantic check when deterministic signals are not sufficient.
-
-Examples of questions that the prompt could check:
+The LLM voters must check:
 
 - Does the content actually concern health?
 - Does this page correspond to an individual dataset rather than a general catalog?
 - Does the link provide access to the dataset, or to a page from which the dataset can actually be accessed?
-
-> **Important:** the LLM component is a planned evolution. It does not yet describe the collector's current behavior.
 
 ---
 
@@ -528,14 +518,15 @@ dataset metadata detected
 And produce:
 
 ```text
-
+llm_a.accepted = true
+llm_b.accepted = true
+llm_c.accepted = false
 dataset_probability = 0.90
-
 health_probability = 0.95
-
 ```
 
-The page therefore passes the thresholds.
+The page is accepted because 2 of 3 LLM voters accepted it. The probabilities
+are kept as explanatory scores only.
 
 
 
@@ -562,7 +553,9 @@ These indicate that a file or API is probably available: `CSV`, `XLSX`, `JSON`, 
 
 The collector looks for these clues in the title, metadata, text, URL, and publisher. Examples include: `malaria`, `mortality`, `hospital`, `vaccination`, or `WHO`.
 
-The more consistent signals a page contains, the more its probability of being a health dataset increases. Conversely, a page that only contains the word "data" without a file, metadata, or health-related content will receive a low score.
+The more consistent signals a page contains, the stronger the evidence available
+to the LLM voters. Conversely, a page that only contains the word "data" without
+a file, metadata, or health-related content should be rejected by the voters.
 
 ---
 
@@ -967,6 +960,8 @@ POST /collector/discover-url
 POST /collector/collect-url
 
 POST /collector/search-repositories
+
+POST /collector/classify-repository-result
 
 ```
 

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
+
 import pytest
 from app.routes.collector import (
     _analyze_html,
     _run_collection_job,
     analyze_html,
     analyze_url,
+    classify_repository_result,
     collect_url,
     discover_url,
     list_collected,
@@ -16,6 +21,7 @@ from app.routes.collector import (
 from app.routes.collector_schemas import (
     CollectorAnalyzeHTMLRequest,
     CollectorCollectURLRequest,
+    CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorURLRequest,
 )
@@ -23,6 +29,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from collector.classification.heuristic import HeuristicPageClassifier
 from collector.classification.page import PageClassificationError
+from collector.classification.repository import RepositoryClassification
 from collector.config import DEFAULT_CONFIG
 from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage
@@ -47,6 +54,48 @@ def _use_heuristic_default_classifier(monkeypatch):
         "app.routes.collector.build_default_page_classifier",
         lambda config=DEFAULT_CONFIG: HeuristicPageClassifier(config),
     )
+
+
+def _use_accepting_repository_classifier(monkeypatch):
+    class AcceptingRepositoryClassifier:
+        def classify(self, page):
+            return RepositoryClassification(
+                relevance_label="relevant",
+                reason=f"{page.title} matches the search query.",
+                ensemble=_accepted_repository_ensemble(
+                    reason=f"{page.title} matches the search query."
+                ),
+            )
+
+    monkeypatch.setattr(
+        "app.routes.collector.build_default_repository_result_classifier",
+        lambda config=DEFAULT_CONFIG: AcceptingRepositoryClassifier(),
+    )
+
+
+def _accepted_repository_ensemble(*, reason: str) -> dict[str, object]:
+    voters = [
+        {
+            "voter_id": voter_id,
+            "accepted": True,
+            "relevance_label": "relevant",
+            "reason": reason,
+            "missing_information": [],
+        }
+        for voter_id in ("llm_a", "llm_b", "llm_c")
+    ]
+    return {
+        "votes_required": 2,
+        "minimum_successful_votes": 2,
+        "successful_votes": 3,
+        "failed_votes": 0,
+        "accepted_votes": 3,
+        "decision": "accepted",
+        "decision_reason": "enough_accept_votes",
+        "decision_voter_ids": ["llm_a", "llm_b", "llm_c"],
+        "voters": voters,
+        "failures": [],
+    }
 
 
 async def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypatch):
@@ -257,8 +306,6 @@ async def test_collector_discover_url_route_returns_bad_request_for_discovery_er
 async def test_collector_search_repositories_route_accepts_query_and_returns_results(
     monkeypatch,
 ):
-    _use_heuristic_default_classifier(monkeypatch)
-
     def fake_search_repository_metadata(query):
         assert query == "malaria mortality"
         return RepositorySearchResponse(
@@ -309,16 +356,153 @@ async def test_collector_search_repositories_route_accepts_query_and_returns_res
     item = response.items[0]
     assert item.title == "Malaria mortality estimates"
     assert item.source == "DataCite"
+    assert item.search_query == "malaria mortality"
     assert item.publisher == "Global Health Repository"
     assert item.date == "2025"
     assert item.doi == "10.1234/example"
     assert item.keywords == ["malaria", "mortality"]
     assert item.relevance_score == 0.93
-    assert item.classification is not None
-    assert item.classification["health_label"] in {"HEALTH", "PARTIALLY_HEALTH"}
+    assert item.classification is None
     assert len(response.warnings) == 1
     assert response.warnings[0].provider == "HDX"
     assert response.warnings[0].message == "This source could not be searched."
+
+
+async def test_collector_classify_repository_result_route_returns_classification(
+    monkeypatch,
+):
+    _use_accepting_repository_classifier(monkeypatch)
+
+    response = await classify_repository_result(
+        CollectorRepositorySearchItem(
+            title="Malaria mortality estimates",
+            description="Annual mortality estimates by country.",
+            url="https://example.org/datasets/malaria-mortality",
+            source="DataCite",
+            search_query="malaria mortality",
+            publisher="Global Health Repository",
+            date="2025",
+            doi="10.1234/example",
+            keywords=["malaria", "mortality"],
+            relevance_score=0.93,
+            metadata={
+                "Title": "Malaria mortality estimates",
+                "Geography": "France",
+                "Date of publication": "2025",
+                "Dataset URL": "https://example.org/datasets/malaria-mortality",
+                "Disease(s)": "malaria",
+                "Size of dataset": "NA",
+                "Demographic information": "NA",
+                "Sharing license": "CC-BY-4.0",
+                "Modality of data": "tabular",
+                "Description of dataset": "Annual mortality estimates by country.",
+            },
+        )
+    )
+
+    assert response.title == "Malaria mortality estimates"
+    assert response.classification is not None
+    assert response.classification.accepted is True
+    assert response.classification.relevance_label == "relevant"
+    assert response.classification.reason == (
+        "Malaria mortality estimates matches the search query."
+    )
+    classification_data = response.classification.model_dump()
+    assert "health_label" not in classification_data
+    assert "dataset_probability" not in classification_data
+    assert "health_probability" not in classification_data
+
+
+async def test_collector_classify_repository_result_route_returns_502_when_classification_fails(
+    monkeypatch,
+    caplog,
+):
+    class FailingClassifier:
+        def classify(self, page):
+            raise PageClassificationError("LLM classification failed.")
+
+    monkeypatch.setattr(
+        "app.routes.collector.build_default_repository_result_classifier",
+        lambda config=DEFAULT_CONFIG: FailingClassifier(),
+    )
+    caplog.set_level("ERROR", logger="app.routes.collector")
+
+    try:
+        await classify_repository_result(
+            CollectorRepositorySearchItem(
+                title="Malaria mortality estimates",
+                url="https://example.org/datasets/malaria-mortality",
+                source="DataCite",
+                search_query="malaria mortality",
+            )
+        )
+    except HTTPException as exception:
+        assert exception.status_code == 502
+        assert exception.detail == "Page classification failed."
+        assert "DataCite" in caplog.text
+        assert "https://example.org/datasets/malaria-mortality" in caplog.text
+        assert "LLM classification failed." in caplog.text
+    else:
+        raise AssertionError("Expected HTTPException.")
+
+
+async def test_collector_repository_classification_limits_backend_concurrency(
+    monkeypatch,
+):
+    active_calls = 0
+    maximum_active_calls = 0
+    counter_lock = threading.Lock()
+    worker_pair = threading.Barrier(2)
+
+    def fake_classify_one_repository_result(result, classifier):
+        nonlocal active_calls, maximum_active_calls
+        with counter_lock:
+            active_calls += 1
+            maximum_active_calls = max(maximum_active_calls, active_calls)
+
+        worker_pair.wait(timeout=1)
+        time.sleep(0.02)
+
+        with counter_lock:
+            active_calls -= 1
+        return result
+
+    monkeypatch.setattr(
+        "app.routes.collector.classify_one_repository_result",
+        fake_classify_one_repository_result,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.build_default_repository_result_classifier",
+        lambda config=DEFAULT_CONFIG: object(),
+    )
+    payload = CollectorRepositorySearchItem(
+        title="Malaria mortality estimates",
+        url="https://example.org/datasets/malaria-mortality",
+        source="DataCite",
+        search_query="malaria mortality",
+    )
+
+    await asyncio.gather(
+        *(classify_repository_result(payload) for _request in range(4))
+    )
+
+    assert maximum_active_calls == 2
+
+
+async def test_collector_classify_repository_result_route_requires_search_query():
+    try:
+        await classify_repository_result(
+            CollectorRepositorySearchItem(
+                title="Malaria mortality estimates",
+                url="https://example.org/datasets/malaria-mortality",
+                source="DataCite",
+            )
+        )
+    except HTTPException as exception:
+        assert exception.status_code == 400
+        assert exception.detail == "Search query is required"
+    else:
+        raise AssertionError("Expected HTTPException.")
 
 
 async def test_collector_search_repositories_route_returns_bad_gateway_for_provider_errors(
@@ -350,6 +534,40 @@ def test_collector_search_repositories_request_rejects_too_long_query():
         pass
     else:
         raise AssertionError("Expected validation error.")
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("title", "x" * 501),
+        ("description", "x" * 20_001),
+        ("keywords", ["x" * 201]),
+        ("metadata", {"blob": "x" * 100_001}),
+    ],
+)
+def test_collector_repository_item_rejects_oversized_llm_input(
+    field_name,
+    value,
+):
+    item_data = {
+        "title": "Malaria mortality estimates",
+        "url": "https://example.org/datasets/malaria-mortality",
+        "source": "DataCite",
+        field_name: value,
+    }
+
+    with pytest.raises(ValueError):
+        CollectorRepositorySearchItem(**item_data)
+
+
+def test_collector_repository_item_rejects_incomplete_classification_contract():
+    with pytest.raises(ValueError):
+        CollectorRepositorySearchItem(
+            title="Malaria mortality estimates",
+            url="https://example.org/datasets/malaria-mortality",
+            source="DataCite",
+            classification={"accepted": True},
+        )
 
 
 async def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):

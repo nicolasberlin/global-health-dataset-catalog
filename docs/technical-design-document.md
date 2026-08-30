@@ -47,11 +47,12 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 ### Informations confirmees
 
 - **CONFIRME** - Le projet est nomme `global-health-dataset-catalog` et versionne `0.1.0` dans `pyproject.toml` et `frontend/package.json`.
-- **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/analyze-html`, `/collector/analyze-url`, `/collector/discover-url`, `/collector/collect-url`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}`, `/collector/search-repositories` et `/collector/collected-datasets`.
+- **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/analyze-html`, `/collector/analyze-url`, `/collector/discover-url`, `/collector/collect-url`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}`, `/collector/search-repositories`, `/collector/classify-repository-result` et `/collector/collected-datasets`.
 - **CONFIRME** - Le frontend utilise React/Vite et pointe par defaut vers `http://127.0.0.1:8001`.
 - **CONFIRME** - La base cible du code courant est PostgreSQL, configuree par `DATABASE_URL`. L'application echoue au demarrage si cette variable est absente.
 - **CONFIRME** - Les seeds applicatifs reserves sont `who_gho_indicators` et `who_gho_life_expectancy`.
-- **CONFIRME** - Les seuils par defaut du collecteur sont `min_dataset_probability = 0.6`, `min_health_probability = 0.35`, `max_pages_per_source = 5`, `max_distributions_per_dataset = 1`.
+- **CONFIRME** - La classification par defaut utilise un `EnsemblePageClassifier` avec trois votes LLM et accepte une page quand au moins deux votes LLM l'acceptent. Les probabilites restent des scores d'audit/compatibilite et ne pilotent plus la decision.
+- **CONFIRME** - Les limites par defaut du collecteur sont `max_pages_per_source = 5`, `max_distributions_per_dataset = 1`.
 - **CONFIRME** - Les adaptateurs de decouverte sont executes dans l'ordre CKAN, Socrata, `data_json`, puis site generique.
 - **CONFIRME** - Les liens PDF et formats image/HTML sont exclus des distributions de donnees par defaut.
 - **CONFIRME** - Les URLs fetchables par l'API d'analyse URL sont limitees aux schemes HTTP/HTTPS et les IP privees/locales sont rejetees.
@@ -223,7 +224,8 @@ Elements non clairement definis : gouvernance des sources, SLA, volumetrie, poli
 | Ouvrir une source | Rediriger vers la page externe. | `source_id`. | Recherche source par id. | Redirect HTTP. | 404 source inconnue. | PostgreSQL. |
 | Analyser du HTML | Tester le collecteur sans fetch reseau. | URL + HTML. | Extraction page, distributions, scoring dataset/sante. | Scores, signaux, distributions, acceptation. | HTML vide refuse par modele. | Collecteur. |
 | Analyser une URL | Tester une page publique. | URL HTTP/HTTPS. | Controle URL publique, fetch HTML, analyse. | Meme reponse qu'analyse HTML. | 400 fetch impossible, URL locale/privee, page trop grosse. | Reseau externe. |
-| Rechercher des repositories | Trouver des datasets dans des catalogues externes sans ajouter une source manuellement. | Query texte. | Orchestrateur `search_repository_metadata`, providers configures par defaut, normalisation en `RepositorySearchResult`. | Liste de resultats normalises. | 400 query vide, 502 erreur provider actuelle. | APIs externes, adapters repository. |
+| Rechercher des repositories | Trouver des datasets dans des catalogues externes sans ajouter une source manuellement. | Query texte. | Orchestrateur `search_repository_metadata`, providers configures par defaut, normalisation en `RepositorySearchResult`. | Liste de resultats normalises non classifies. | 400 query vide, 502 erreur provider actuelle. | APIs externes, adapters repository. |
+| Classifier un resultat repository | Juger un candidat repository avec les 3 LLM sans attendre la classification de toute la liste. | `RepositorySearchResult` normalise. | Conversion en `PageSnapshot`, ensemble LLM, decision `accepted`. | Resultat normalise avec `classification`. | 502 erreur classification. | LLM provider. |
 | Decouvrir une URL | Identifier des pages candidates. | URL source. | Adaptateur CKAN/Socrata/data.json/generic. | Liste `DiscoveredPage`. | 400 erreur de decouverte. | APIs externes, sitemaps. |
 | Collecter une URL | Decouvrir, classifier, valider et optionnellement sauvegarder. | URL + `save`. | Pipeline `collect_source`, validation, persistance si `save=true`. | Datasets collectes, compteur sauvegarde. | 400 source invalide. | Collecteur, reseau, PostgreSQL. |
 | Lancer un job de collecte | Executer la collecte en arriere-plan. | URL source. | Creation job `pending`, tache FastAPI background, mise a jour statut. | 202 + job. | Erreur persistee dans job. | FastAPI background tasks, PostgreSQL. |
@@ -530,8 +532,14 @@ sequenceDiagram
         Provider-->>Search: RepositorySearchResult[]
     end
     Search->>Search: Valider, dedoublonner, trier
-    Search-->>API: Resultats normalises
+    Search-->>API: Resultats normalises non classifies
     API-->>UI: items[]
+    loop Pour chaque candidat a afficher progressivement
+        UI->>API: POST /collector/classify-repository-result
+        API->>Search: classify_repository_result(result)
+        Search-->>API: Resultat avec classification
+        API-->>UI: JSON pour un candidat
+    end
 ```
 
 ### Collecte asynchrone depuis une source
@@ -587,13 +595,14 @@ sequenceDiagram
 
 ## 12. Logique metier
 
-- Une page est acceptee comme dataset collectable si `dataset_probability >= 0.6` et `health_probability >= 0.35`.
+- Une page est acceptee comme dataset collectable si le classificateur par defaut obtient au moins deux votes LLM `accepted=true` sur trois votes. La decision ne depend plus de seuils sur `dataset_probability` ou `health_probability`.
 - Une collecte persistante ne conserve un dataset que s'il possede au moins une distribution validee `ok=True`.
-- Le scoring dataset distingue les preuves de dataset individuel des simples signaux de catalogue. Sans preuve de dataset individuel, le score est plafonne a `0.5`.
+- Les probabilites `dataset_probability` et `health_probability` sont conservees comme signaux d'audit, d'affichage et de compatibilite schema.
+- Le scoring heuristique historique distingue les preuves de dataset individuel des simples signaux de catalogue. Sans preuve de dataset individuel, le score est plafonne a `0.5`. Il reste utile pour tests/comparaison, mais ne pilote plus la classification par defaut.
 - Les preuves fortes incluent Schema.org `Dataset` et `dcat:Dataset`.
 - Les signaux d'acces incluent API, CSV, XLSX, export, downloads et distributions directes.
-- Le scoring sante s'appuie sur mots cles en titre, metadonnees, corps, URL et publisher.
-- Labels sante : `HEALTH` si probabilite >= 0.75, `PARTIALLY_HEALTH` si >= 0.35, sinon `NON_HEALTH`.
+- Les classificateurs LLM doivent juger explicitement si la page est un dataset individuel et si elle concerne la sante globale/publique, clinique, epidemiologique, healthcare, disease, mortality, morbidity, vaccination ou sujet similaire.
+- Labels sante : `HEALTH`, `PARTIALLY_HEALTH`, `NON_HEALTH`.
 - Les distributions PDF, HTML et images sont exclues.
 - La validation tente `HEAD`, puis un `GET` partiel si HEAD est interdit, sans content-type utile ou retourne HTML.
 - Les source keys WHO seed sont reservees pour la creation utilisateur publique ;
@@ -719,7 +728,8 @@ migration that preserves existing data.
 | POST | `/collector/collect-url` | Collecte synchrone, option save. | Non documentee | `{url, save=true}` | `{items, saved, saved_count}` |
 | POST | `/collector/collection-jobs` | Lancer une collecte async. | Non documentee | `{url}` | `{job}`, status 202 |
 | GET | `/collector/collection-jobs/{job_id}` | Lire un job. | Non documentee | Path `job_id` | `{job}` ou 404 |
-| POST | `/collector/search-repositories` | Rechercher des datasets dans les repositories externes configures. | Non documentee | `{query}` | `{query, items: RepositorySearchResult[], warnings: RepositorySearchWarning[]}` |
+| POST | `/collector/search-repositories` | Rechercher des datasets dans les repositories externes configures, sans classification LLM. | Non documentee | `{query}` | `{query, items: RepositorySearchResult[], warnings: RepositorySearchWarning[]}` |
+| POST | `/collector/classify-repository-result` | Classifier un seul resultat repository pour permettre l'affichage progressif. | Non documentee | `RepositorySearchResult` | `RepositorySearchResult` avec `classification` |
 | GET | `/collector/collected-datasets` | Lister les datasets sauvegardes. | Non documentee | Aucune | `{items, saved=false, saved_count=0}` |
 
 ### Interfaces externes
@@ -862,6 +872,9 @@ Controles confirmes :
 - Les endpoints d'analyse URL acceptent seulement HTTP/HTTPS.
 - Les IP privees, loopback, link-local, multicast et reservees sont bloquees avant fetch.
 - Les payloads HTTP sont valides via Pydantic.
+- La classification repository est limitee a deux candidats simultanes par processus FastAPI.
+- Les champs repository sont bornes, les metadonnees sont tronquees avant les LLM et le prompt les declare explicitement non fiables.
+- Les erreurs detaillees de classification repository sont journalisees cote serveur sans etre exposees dans la reponse publique.
 - Les requetes SQL utilisent des parametres, pas de concatenation utilisateur directe sauf placeholders controles.
 
 Points a valider :

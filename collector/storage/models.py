@@ -24,6 +24,7 @@ class LinkCandidate:
 class PageSnapshot:
     url: str
     canonical_url: str
+    search_query: str = ""
     title: str = ""
     geography: tuple[str, ...] = ()
     date_of_publication: str = ""
@@ -47,6 +48,7 @@ class PageSnapshot:
     json_ld: tuple[object, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "search_query", self.search_query.strip())
         object.__setattr__(self, "title", _first_text(self.title, self.h1, self.og_title))
         object.__setattr__(self, "geography", _normalized_values(self.geography))
         object.__setattr__(self, "date_of_publication", self.date_of_publication.strip())

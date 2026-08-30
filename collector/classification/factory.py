@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import os
 
-from collector.classification.ensemble import EnsemblePageClassifier
+from collector.classification.ensemble import (
+    EnsemblePageClassifier,
+    EnsembleRepositoryRelevanceClassifier,
+)
 from collector.classification.llm import (
     HTTPJSONLLMClient,
     LLMPageClassifier,
+    LLMRepositoryRelevanceClassifier,
+    openai_repository_relevance_provider_config,
     openai_responses_provider_config,
 )
 from collector.classification.page import PageClassificationError, PageClassifier
+from collector.classification.repository import RepositoryResultClassifier
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 
 OPENAI_CLASSIFIER_VOTERS: tuple[tuple[str, str], ...] = (
@@ -21,6 +27,7 @@ OPENAI_CLASSIFIER_VOTERS: tuple[tuple[str, str], ...] = (
 def build_default_page_classifier(
     config: CollectorConfig = DEFAULT_CONFIG,
 ) -> PageClassifier:
+    del config
     return EnsemblePageClassifier(
         [
             (
@@ -34,7 +41,32 @@ def build_default_page_classifier(
                         ),
                         model=model,
                     ),
-                    config=config,
+                ),
+            )
+            for voter_id, model_env_var, model in _openai_classifier_models()
+        ],
+        votes_required=2,
+        minimum_successful_votes=2,
+    )
+
+
+def build_default_repository_result_classifier(
+    config: CollectorConfig = DEFAULT_CONFIG,
+) -> RepositoryResultClassifier:
+    del config
+    return EnsembleRepositoryRelevanceClassifier(
+        [
+            (
+                voter_id,
+                LLMRepositoryRelevanceClassifier(
+                    client=HTTPJSONLLMClient(
+                        provider=openai_repository_relevance_provider_config(
+                            name=f"OpenAI {voter_id}",
+                            model_env_var=model_env_var,
+                            default_model=model,
+                        ),
+                        model=model,
+                    ),
                 ),
             )
             for voter_id, model_env_var, model in _openai_classifier_models()

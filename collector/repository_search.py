@@ -7,10 +7,10 @@ from dataclasses import dataclass, field, replace
 from typing import Optional, Protocol
 from urllib.parse import urlencode, urlsplit
 
-from collector.classification.page import (
-    PageClassification,
-    PageClassificationError,
-    PageClassifier,
+from collector.classification.page import PageClassificationError
+from collector.classification.repository import (
+    RepositoryClassification,
+    RepositoryResultClassifier,
 )
 from collector.discovery.adapters import fetch_json_url
 from collector.extraction.dataset_metadata import (
@@ -123,6 +123,7 @@ class RepositorySearchResult:
     title: str
     url: str
     source: str
+    search_query: str = ""
     description: str = ""
     publisher: str = ""
     date: str = ""
@@ -130,7 +131,7 @@ class RepositorySearchResult:
     keywords: list[str] = field(default_factory=list)
     relevance_score: float = 0.0
     metadata: dict[str, object] = field(default_factory=dict)
-    classification: PageClassification | None = None
+    classification: RepositoryClassification | None = None
 
 
 @dataclass(frozen=True)
@@ -218,7 +219,10 @@ def search_repository_metadata(
             continue
 
         successful_provider_count += 1
-        results.extend(provider_results)
+        results.extend(
+            replace(result, search_query=normalized_query)
+            for result in provider_results
+        )
 
     if successful_provider_count == 0 and errors:
         raise ValueError("All repository providers failed.")
@@ -270,7 +274,7 @@ def filter_repository_results(
 
 def classify_repository_results(
     results: Iterable[RepositorySearchResult],
-    classifier: PageClassifier,
+    classifier: RepositoryResultClassifier,
 ) -> tuple[list[RepositorySearchResult], list[RepositorySearchWarning]]:
     """Classify repository results from their normalized metadata contract."""
     classified_results: list[RepositorySearchResult] = []
@@ -278,7 +282,7 @@ def classify_repository_results(
 
     for result in results:
         try:
-            classification = classifier.classify(_repository_result_page(result), [])
+            classified_result = classify_repository_result(result, classifier)
         except PageClassificationError as exception:
             failed_count += 1
             logger.warning(
@@ -289,9 +293,7 @@ def classify_repository_results(
             classified_results.append(result)
             continue
 
-        classified_results.append(
-            replace(result, classification=classification)
-        )
+        classified_results.append(classified_result)
 
     warnings = (
         [RepositorySearchWarning(message=CLASSIFICATION_UNAVAILABLE_MESSAGE)]
@@ -299,6 +301,15 @@ def classify_repository_results(
         else []
     )
     return classified_results, warnings
+
+
+def classify_repository_result(
+    result: RepositorySearchResult,
+    classifier: RepositoryResultClassifier,
+) -> RepositorySearchResult:
+    """Classify one repository result from its normalized metadata contract."""
+    classification = classifier.classify(_repository_result_page(result))
+    return replace(result, classification=classification)
 
 
 def _repository_result_page(result: RepositorySearchResult) -> PageSnapshot:
@@ -311,6 +322,7 @@ def _repository_result_page(result: RepositorySearchResult) -> PageSnapshot:
     return PageSnapshot(
         url=result.url,
         canonical_url=result.url,
+        search_query=result.search_query,
         title=title,
         meta_description=description,
         publisher=result.publisher,

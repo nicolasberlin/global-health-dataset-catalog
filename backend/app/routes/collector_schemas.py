@@ -1,8 +1,27 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+import json
+from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+
+from collector.classification.repository import (
+    MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
+    MAX_REPOSITORY_DATE_CHARS,
+    MAX_REPOSITORY_DESCRIPTION_CHARS,
+    MAX_REPOSITORY_DOI_CHARS,
+    MAX_REPOSITORY_KEYWORD_CHARS,
+    MAX_REPOSITORY_KEYWORDS,
+    MAX_REPOSITORY_METADATA_BYTES,
+    MAX_REPOSITORY_MISSING_INFORMATION_CHARS,
+    MAX_REPOSITORY_MISSING_INFORMATION_ITEMS,
+    MAX_REPOSITORY_PUBLISHER_CHARS,
+    MAX_REPOSITORY_SEARCH_QUERY_CHARS,
+    MAX_REPOSITORY_SOURCE_CHARS,
+    MAX_REPOSITORY_TITLE_CHARS,
+    REPOSITORY_ACCEPTED_RELEVANCE_LABELS,
+    RepositoryRelevanceLabel,
+)
 
 
 # Manual collector test endpoints: analyze pasted HTML or fetch one URL maybe refator later.
@@ -21,21 +40,162 @@ class CollectorCollectURLRequest(CollectorURLRequest):
 
 # Query-driven repository search endpoint, separate from the collector test flow.
 class CollectorRepositorySearchRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=300)
+    query: str = Field(min_length=1, max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS)
+
+
+RepositoryKeyword = Annotated[str, Field(max_length=MAX_REPOSITORY_KEYWORD_CHARS)]
+RepositoryMissingInformation = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_REPOSITORY_MISSING_INFORMATION_CHARS),
+]
+RepositoryVoterId = Annotated[str, Field(min_length=1, max_length=100)]
+
+
+class CollectorRepositoryClassificationVote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voter_id: RepositoryVoterId
+    accepted: bool
+    relevance_label: RepositoryRelevanceLabel
+    reason: str = Field(
+        min_length=1,
+        max_length=MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
+    )
+    missing_information: list[RepositoryMissingInformation] = Field(
+        default_factory=list,
+        max_length=MAX_REPOSITORY_MISSING_INFORMATION_ITEMS,
+    )
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> CollectorRepositoryClassificationVote:
+        expected_accepted = (
+            self.relevance_label in REPOSITORY_ACCEPTED_RELEVANCE_LABELS
+        )
+        if self.accepted is not expected_accepted:
+            raise ValueError("accepted must match relevance_label")
+        if self.relevance_label == "insufficient_information":
+            if not self.missing_information:
+                raise ValueError(
+                    "insufficient_information must identify missing information"
+                )
+        elif self.missing_information:
+            raise ValueError(
+                "missing_information must be empty for this relevance_label"
+            )
+        return self
+
+
+class CollectorRepositoryClassificationFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voter_id: RepositoryVoterId
+    error: str = Field(min_length=1, max_length=2_000)
+
+
+class CollectorRepositoryClassificationEnsemble(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    votes_required: int = Field(ge=1, le=10)
+    minimum_successful_votes: int = Field(ge=1, le=10)
+    successful_votes: int = Field(ge=0, le=10)
+    failed_votes: int = Field(ge=0, le=10)
+    accepted_votes: int = Field(ge=0, le=10)
+    decision: Literal["accepted", "rejected"]
+    decision_reason: Literal[
+        "enough_accept_votes",
+        "rejected_by_majority",
+        "insufficient_accept_votes",
+    ]
+    decision_voter_ids: list[RepositoryVoterId] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    voters: list[CollectorRepositoryClassificationVote] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    failures: list[CollectorRepositoryClassificationFailure] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+
+
+class CollectorRepositoryClassification(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    accepted: bool
+    relevance_label: RepositoryRelevanceLabel
+    reason: str = Field(
+        min_length=1,
+        max_length=MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
+    )
+    missing_information: list[RepositoryMissingInformation] = Field(
+        default_factory=list,
+        max_length=MAX_REPOSITORY_MISSING_INFORMATION_ITEMS,
+    )
+    ensemble: CollectorRepositoryClassificationEnsemble
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> CollectorRepositoryClassification:
+        expected_accepted = (
+            self.relevance_label in REPOSITORY_ACCEPTED_RELEVANCE_LABELS
+        )
+        if self.accepted is not expected_accepted:
+            raise ValueError("accepted must match relevance_label")
+        if self.relevance_label == "insufficient_information":
+            if not self.missing_information:
+                raise ValueError(
+                    "insufficient_information must identify missing information"
+                )
+        elif self.missing_information:
+            raise ValueError(
+                "missing_information must be empty for this relevance_label"
+            )
+        if self.accepted is not (self.ensemble.decision == "accepted"):
+            raise ValueError("accepted must match the ensemble decision")
+        return self
 
 
 class CollectorRepositorySearchItem(BaseModel):
-    title: str
-    description: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(max_length=MAX_REPOSITORY_TITLE_CHARS)
+    description: str = Field(default="", max_length=MAX_REPOSITORY_DESCRIPTION_CHARS)
     url: HttpUrl
-    source: str
-    publisher: str = ""
-    date: str = ""
-    doi: str = ""
-    keywords: list[str] = Field(default_factory=list)
+    source: str = Field(max_length=MAX_REPOSITORY_SOURCE_CHARS)
+    search_query: str = Field(
+        default="",
+        max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS,
+    )
+    publisher: str = Field(default="", max_length=MAX_REPOSITORY_PUBLISHER_CHARS)
+    date: str = Field(default="", max_length=MAX_REPOSITORY_DATE_CHARS)
+    doi: str = Field(default="", max_length=MAX_REPOSITORY_DOI_CHARS)
+    keywords: list[RepositoryKeyword] = Field(
+        default_factory=list,
+        max_length=MAX_REPOSITORY_KEYWORDS,
+    )
     relevance_score: float = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
-    classification: Optional[dict[str, Any]] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            encoded_metadata = json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exception:
+            raise ValueError("metadata must be JSON-safe") from exception
+
+        if len(encoded_metadata) > MAX_REPOSITORY_METADATA_BYTES:
+            raise ValueError(
+                f"metadata must not exceed {MAX_REPOSITORY_METADATA_BYTES} bytes"
+            )
+        return value
 
 
 class CollectorRepositorySearchWarning(BaseModel):

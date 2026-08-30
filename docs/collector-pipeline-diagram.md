@@ -3,6 +3,114 @@
 This document is a compact visual reference for the collector data flow and
 repository-search metadata.
 
+## HTTP API Call Flow
+
+Legend:
+
+- Solid arrows are calls already made by `frontend/src/App.jsx`.
+- Dotted arrows are backend routes that exist but are currently API/manual or
+  future-UI flows.
+- Background collection jobs run inside FastAPI `BackgroundTasks`; the frontend
+  only polls their status.
+
+```mermaid
+flowchart TD
+    UI["React frontend<br/>frontend/src/App.jsx"]
+    DB[("PostgreSQL")]
+    External["External websites<br/>and repository APIs"]
+    Classifier["EnsemblePageClassifier<br/>3 LLM votes, >= 2 accept"]
+
+    UI -->|"GET /sources<br/>loadSources()"| SourcesList["list_sources()"]
+    SourcesList --> DB
+
+    UI -->|"GET /collector/collected-datasets<br/>loadCollectedDatasets()"| CollectedList["list_collected()"]
+    CollectedList --> DB
+
+    UI -->|"GET /sources/{source_id}/page<br/>source card link"| SourceRedirect["open_source_page()"]
+    SourceRedirect --> DB
+    SourceRedirect -->|"HTTP redirect"| External
+
+    UI -->|"POST /collector/collection-jobs<br/>Collecter button"| StartJob["start_collection_job()"]
+    StartJob --> DB
+    StartJob --> BackgroundJob["collect_source_with_report()<br/>background task"]
+    BackgroundJob --> External
+    BackgroundJob --> Classifier
+    BackgroundJob --> SaveJobResults["save_collected_datasets()"]
+    SaveJobResults --> DB
+
+    UI -->|"GET /collector/collection-jobs/{job_id}<br/>pollCollectionJob()"| JobStatus["read_collection_job()"]
+    JobStatus --> DB
+    JobStatus -->|"when done"| ReloadCollected["reload collected datasets"]
+    ReloadCollected --> CollectedList
+
+    UI -->|"POST /collector/analyze-html<br/>manual collector form"| AnalyzeHTML["_analyze_html()<br/>extract + classify"]
+    AnalyzeHTML --> Classifier
+    AnalyzeHTML -->|"no DB write"| AnalyzeResponse["analysis response"]
+
+    UI -->|"POST /collector/analyze-url<br/>manual collector button"| AnalyzeURL["fetch_public_html()<br/>then _analyze_html()"]
+    AnalyzeURL --> External
+    AnalyzeURL --> Classifier
+    AnalyzeURL -->|"no DB write"| AnalyzeResponse
+
+    ApiClient["Frontend<br/>or API client"]
+    ApiClient -.->|"GET /health"| Health["health()"]
+    ApiClient -.->|"POST /sources"| CreateSource["create_source()"]
+    CreateSource -.-> DB
+    ApiClient -.->|"POST /collector/discover-url"| DiscoverURL["discover_source()<br/>candidate pages only"]
+    DiscoverURL -.-> External
+    ApiClient -.->|"POST /collector/collect-url"| CollectURL["collect_source()<br/>sync collection"]
+    CollectURL -.-> External
+    CollectURL -.-> Classifier
+    CollectURL -.->|"save=true"| DB
+    ApiClient -.->|"POST /collector/search-repositories"| RepoSearch["search_repository_metadata()<br/>normalized candidates"]
+    RepoSearch -.-> External
+    ApiClient -.->|"POST /collector/classify-repository-result"| RepoClassify["classify one repository result"]
+    RepoClassify -.-> Classifier
+```
+
+| Caller today | Method | Endpoint | Main backend work | DB write? | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| Frontend | `GET` | `/sources` | Reads saved source definitions. | No | Populate the source catalogue cards. |
+| API/manual | `POST` | `/sources` | Validates and creates a source definition. | Yes | Add a new source to the catalogue. There is no current React form for this. |
+| Frontend | `GET` | `/sources/{source_id}/page` | Reads the source, then redirects to `page_url`. | No | Open the official source page from a source card. |
+| API/manual | `GET` | `/health` | Returns `{"status": "ok"}`. | No | Health check for backend availability. |
+| Frontend | `GET` | `/collector/collected-datasets` | Reads accepted/saved collected datasets. | No | Display datasets already written to PostgreSQL. |
+| Frontend | `POST` | `/collector/collection-jobs` | Creates a job and starts `collect_source_with_report()` in the background. | Yes | Main source collection flow from the `Collecter` button. |
+| Frontend | `GET` | `/collector/collection-jobs/{job_id}` | Reads job status and counters. | No | Poll until the background collection is `done` or `error`. |
+| Frontend | `POST` | `/collector/analyze-html` | Parses pasted HTML, extracts distributions, runs ensemble classification. | No | Manual/debug analysis of pasted HTML. |
+| Frontend | `POST` | `/collector/analyze-url` | Fetches one URL, parses HTML, extracts distributions, runs ensemble classification. | No | Manual/debug analysis of one live URL. |
+| API/manual | `POST` | `/collector/discover-url` | Runs discovery adapters only. | No | Inspect candidate pages without classification or storage. |
+| API/manual | `POST` | `/collector/collect-url` | Runs synchronous collection and optionally saves accepted datasets. | Optional | Direct API collection path; current frontend uses async jobs instead. |
+| Frontend or API/manual | `POST` | `/collector/search-repositories` | Searches repository APIs and normalizes candidate metadata. | No | Query-first repository search. Returns candidates, not final accepted datasets. |
+| Frontend or API/manual | `POST` | `/collector/classify-repository-result` | Converts one candidate to a `PageSnapshot`, then runs the ensemble classifier. Backend concurrency is limited to two candidates per process. | No | Progressive per-result classification; frontend shows only accepted results. |
+
+Current runtime summary:
+
+```text
+App mount
+  -> GET /sources
+  -> GET /collector/collected-datasets
+
+Click "Ouvrir"
+  -> GET /sources/{source_id}/page
+  -> redirect to external page_url
+
+Click "Collecter"
+  -> POST /collector/collection-jobs
+  -> background collect_source_with_report()
+  -> repeated GET /collector/collection-jobs/{job_id}
+  -> GET /collector/collected-datasets after success
+
+Manual collector panel
+  -> POST /collector/analyze-html
+  -> POST /collector/analyze-url
+
+Repository search flow
+  -> POST /collector/search-repositories
+  -> POST /collector/classify-repository-result for each candidate
+  -> frontend filters/display accepted candidates
+```
+
 ## Repository Search Metadata
 
 Repository search results expose a business-facing `metadata` object. Each key is
@@ -21,6 +129,70 @@ always present; missing values are represented as `"NA"`.
     "Modality of data": "...",
     "Description of dataset": "..."
 }
+```
+
+## Main User Query Pipeline
+
+This is the current interactive user flow. The main user enters a query. The
+manual URL/HTML collector flow is an admin/debug flow, not the main user flow.
+
+`POST /collector/search-repositories` returns repository candidates without LLM
+classification. `POST /collector/classify-repository-result` classifies one
+candidate at a time, so the frontend displays accepted results progressively.
+
+### Simple Flow
+
+```mermaid
+flowchart TD
+    Query["1. User query"]
+    Search["2. Search repository APIs"]
+    Normalize["3. Normalize raw JSON"]
+    Candidates["4. Return candidate results"]
+    Classify["5. Classify candidates"]
+    Filter{"6. Accepted?"}
+    Display["Display accepted result"]
+    Hide["Hide rejected result"]
+    Save["Optional save to PostgreSQL"]
+
+    Query --> Search --> Normalize --> Candidates --> Classify --> Filter
+    Filter -- "yes" --> Display --> Save
+    Filter -- "no" --> Hide
+```
+
+### Progressive Classification
+
+`search-repositories` returns candidate metadata quickly. Then the frontend should
+send one classification request per candidate. Each request returns one JSON
+decision, so accepted results can appear as soon as their own classification
+finishes.
+
+```mermaid
+flowchart TD
+    SearchRoute["POST /collector/search-repositories"]
+    CandidateList["Candidate list<br/>not classified yet"]
+    Candidate["One candidate result"]
+    ClassifyRoute["POST /collector/classify-repository-result"]
+    Voters["3 LLM voters"]
+    Ensemble["Ensemble decision<br/>2 accept votes required"]
+    RepositoryClassification["RepositoryClassification<br/>accepted, relevance_label, reason"]
+    Decision{"accepted?"}
+    Display["Display this result"]
+    Hide["Do not display this result"]
+    More{"More candidates?"}
+
+    SearchRoute --> CandidateList --> Candidate --> ClassifyRoute
+    ClassifyRoute --> Voters --> Ensemble --> RepositoryClassification --> Decision
+    Decision -- "yes" --> Display --> More
+    Decision -- "no" --> Hide --> More
+    More -- "yes" --> Candidate
+    More -- "no" --> Done["Search display complete"]
+```
+
+Short version:
+
+```text
+query -> repository APIs -> normalized candidates -> one LLM classification per
+candidate -> frontend displays accepted candidates
 ```
 
 ## Repository Search Pipeline
@@ -54,7 +226,15 @@ classDiagram
         +list keywords
         +float relevance_score
         +dict metadata
-        +PageClassification classification
+        +RepositoryClassification classification
+    }
+
+    class RepositoryClassification {
+        +bool accepted
+        +str relevance_label
+        +str reason
+        +list missing_information
+        +dict ensemble
     }
 
     class RepositorySearchMetadata {
@@ -85,6 +265,7 @@ classDiagram
     DataCiteJSONResult --> RepositorySearchResult : _datacite_result()
     DataCiteJSONResult --> RepositorySearchMetadata : _search_result_metadata()
     RepositorySearchResult "1" o-- "1" RepositorySearchMetadata : metadata
+    RepositorySearchResult "1" o-- "0..1" RepositoryClassification : classification
     RepositorySearchResponse "1" o-- "*" RepositorySearchResult : results
     RepositorySearchResponse "1" o-- "*" RepositorySearchWarning : warnings
 ```
@@ -171,9 +352,9 @@ reads the normalized `PageSnapshot` business fields plus distributions.
 The default classifier is an `EnsemblePageClassifier`: it requires three distinct
 OpenAI model names in `OPENAI_CLASSIFIER_MODEL_1`, `OPENAI_CLASSIFIER_MODEL_2`,
 and `OPENAI_CLASSIFIER_MODEL_3`. A page is accepted when at least two successful
-votes accept it. Final probabilities are averaged from the votes that carry the
-majority decision, so an accepted page does not get dragged below threshold by a
-rejected minority vote.
+votes return `accepted=true`. Final probabilities are averaged from the votes
+that carry the majority decision for audit/display only; they do not decide
+acceptance.
 
 ## Collector Pipeline
 

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
-from collector.classification.page import PageClassification, PageClassificationError
+from collector.classification.page import PageClassificationError
+from collector.classification.repository import RepositoryClassification
 from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.repository_search import (
     CLASSIFICATION_UNAVAILABLE_MESSAGE,
@@ -238,6 +239,10 @@ def test_search_repository_metadata_sorts_provider_results_by_relevance():
 
     results = response.results
     assert [result.title for result in results] == ["Higher", "Lower"]
+    assert [result.search_query for result in results] == [
+        "malaria mortality",
+        "malaria mortality",
+    ]
     assert response.warnings == []
 
 
@@ -377,16 +382,12 @@ def test_search_repository_metadata_raises_only_when_all_providers_fail():
 
 def test_classify_repository_results_keeps_items_when_one_classification_fails():
     class MixedClassifier:
-        def classify(self, page, distributions):
+        def classify(self, page):
             if page.url == "https://example.org/failing":
                 raise PageClassificationError("bad LLM response")
-            return PageClassification(
-                accepted=True,
-                dataset_probability=0.9,
-                health_probability=0.8,
-                health_label="HEALTH",
-                dataset_signals={"reason": "dataset"},
-                health_signals={"reason": "health"},
+            return RepositoryClassification(
+                relevance_label="relevant",
+                reason="The metadata matches the query.",
             )
 
     results, warnings = classify_repository_results(
@@ -409,7 +410,8 @@ def test_classify_repository_results_keeps_items_when_one_classification_fails()
 
     assert len(results) == 2
     assert results[0].classification is not None
-    assert results[0].classification.health_label == "HEALTH"
+    assert results[0].classification.relevance_label == "relevant"
+    assert not hasattr(results[0].classification, "health_label")
     assert results[1].classification is None
     assert len(warnings) == 1
     assert warnings[0].message == CLASSIFICATION_UNAVAILABLE_MESSAGE

@@ -40,6 +40,24 @@ def test_ensemble_classifier_accepts_when_two_of_three_voters_accept():
     ]
 
 
+def test_ensemble_classifier_uses_votes_not_probability_thresholds():
+    classifier = EnsemblePageClassifier(
+        [
+            ("llm_a", _StaticClassifier(_classification(True, 0.1, 0.1, "HEALTH"))),
+            ("llm_b", _StaticClassifier(_classification(True, 0.2, 0.2, "HEALTH"))),
+            ("llm_c", _StaticClassifier(_classification(False, 0.95, 0.95, "HEALTH"))),
+        ]
+    )
+
+    result = classifier.classify(_page(), [_distribution()])
+
+    assert result.accepted is True
+    assert result.dataset_signals["ensemble"]["accepted_votes"] == 2
+    assert result.dataset_signals["ensemble"]["decision_reason"] == "enough_accept_votes"
+    assert result.dataset_probability == pytest.approx(0.15)
+    assert result.health_probability == pytest.approx(0.15)
+
+
 def test_ensemble_classifier_rejects_when_only_one_of_three_voters_accepts():
     classifier = EnsemblePageClassifier(
         [
