@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from psycopg import AsyncConnection
+from psycopg.rows import DictRow
+
 from collector.storage.models import CollectionReport
 
 from .connection import Row, _fetchone, _require_database_pool
@@ -78,44 +81,51 @@ async def mark_collection_job_done(
     report: CollectionReport | None = None,
 ) -> dict[str, object] | None:
     report = report or CollectionReport()
-    message = _collection_job_done_message(saved_count, report)
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
-        row = await _fetchone(
-            connection,
-            """
-            UPDATE collection_jobs
-            SET status = 'done',
-                saved_count = %s,
-                discovered_count = %s,
-                analyzed_count = %s,
-                accepted_count = %s,
-                rejected_count = %s,
-                invalid_distribution_count = %s,
-                discovery_methods = %s,
-                message = %s,
-                error = '',
-                updated_at = NOW(),
-                finished_at = NOW()
-            WHERE id = %s AND status = 'running'
-            RETURNING id, source_url, status, saved_count, discovered_count,
-                      analyzed_count, accepted_count, rejected_count,
-                      invalid_distribution_count, discovery_methods, message,
-                      error, created_at, updated_at, finished_at
-            """,
-            (
-                saved_count,
-                report.discovered_count,
-                report.analyzed_count,
-                report.accepted_count,
-                report.rejected_count,
-                report.invalid_distribution_count,
-                _serialize_discovery_methods(report.discovery_methods),
-                message,
-                job_id,
-            ),
-        )
+        return await _mark_collection_job_done(connection, job_id, saved_count, report)
 
+
+async def _mark_collection_job_done(
+    connection: AsyncConnection[DictRow],
+    job_id: int,
+    saved_count: int,
+    report: CollectionReport,
+) -> dict[str, object] | None:
+    row = await _fetchone(
+        connection,
+        """
+        UPDATE collection_jobs
+        SET status = 'done',
+            saved_count = %s,
+            discovered_count = %s,
+            analyzed_count = %s,
+            accepted_count = %s,
+            rejected_count = %s,
+            invalid_distribution_count = %s,
+            discovery_methods = %s,
+            message = %s,
+            error = '',
+            updated_at = NOW(),
+            finished_at = NOW()
+        WHERE id = %s AND status = 'running'
+        RETURNING id, source_url, status, saved_count, discovered_count,
+                  analyzed_count, accepted_count, rejected_count,
+                  invalid_distribution_count, discovery_methods, message,
+                  error, created_at, updated_at, finished_at
+        """,
+        (
+            saved_count,
+            report.discovered_count,
+            report.analyzed_count,
+            report.accepted_count,
+            report.rejected_count,
+            report.invalid_distribution_count,
+            _serialize_discovery_methods(report.discovery_methods),
+            _collection_job_done_message(saved_count, report),
+            job_id,
+        ),
+    )
     return _collection_job_to_dict(row) if row else None
 
 
@@ -156,6 +166,22 @@ async def _get_collection_job_row(connection, job_id: int) -> Row | None:
                created_at, updated_at, finished_at
         FROM collection_jobs
         WHERE id = %s
+        """,
+        (job_id,),
+    )
+
+
+async def _lock_running_collection_job(
+    connection: AsyncConnection[DictRow],
+    job_id: int,
+) -> Row | None:
+    return await _fetchone(
+        connection,
+        """
+        SELECT id, source_url
+        FROM collection_jobs
+        WHERE id = %s AND status = 'running'
+        FOR UPDATE
         """,
         (job_id,),
     )

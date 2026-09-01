@@ -8,15 +8,14 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from app.database import create_collection_job as db_create_collection_job
 from app.database import (
+    complete_collection_job,
     get_collection_job,
     list_collected_datasets,
-    mark_collection_job_done,
     mark_collection_job_error,
     mark_collection_job_running,
-    save_collected_datasets,
 )
+from app.database import create_collection_job as db_create_collection_job
 from app.routes.collector_schemas import (
     CollectorCollectedDataset,
     CollectorCollectionJob,
@@ -165,12 +164,7 @@ async def _run_collection_job(job_id: int, source_url: str) -> None:
             collect_source_with_report,
             source_url,
         )
-        saved_datasets = await save_collected_datasets(
-            source_url,
-            collection_result.datasets,
-            collection_job_id=job_id,
-        )
-        await mark_collection_job_done(job_id, len(saved_datasets), collection_result.report)
+        await complete_collection_job(job_id, collection_result)
     except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
         await mark_collection_job_error(job_id, str(exception))
 

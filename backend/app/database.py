@@ -5,6 +5,7 @@ from .db.collected_datasets import (
     list_dataset_discovery_observations,
     save_collected_datasets,
 )
+from .db.collection_completion import complete_collection_job
 from .db.collection_jobs import (
     create_collection_job,
     get_collection_job,
@@ -38,6 +39,7 @@ __all__ = (
     "StoredJSONError",
     "StoredTimestampError",
     "close_database_pool",
+    "complete_collection_job",
     "create_collection_job",
     "create_data_source",
     "get_collection_job",

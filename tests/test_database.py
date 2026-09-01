@@ -13,6 +13,7 @@ from psycopg import sql as pg_sql
 from collector.storage.models import (
     CollectedDataset,
     CollectionReport,
+    CollectionResult,
     DistributionCandidate,
     ValidationResult,
 )
@@ -840,6 +841,59 @@ async def test_save_preserves_every_dataset_discovery_observation(database):
     assert all(observation["observed_at"] for observation in observations)
 
 
+async def test_save_does_not_replace_known_metadata_with_empty_values(database):
+    await database.init_database()
+
+    dataset_url = "https://catalog.example.org/dataset/mortality"
+    complete_dataset = CollectedDataset(
+        dataset_url=dataset_url,
+        title="Mortality health dataset",
+        description="Official mortality health data.",
+        publisher="National Health Agency",
+        hosting_platform="CKAN",
+        uploader="Health team",
+        geography=("France",),
+        dataset_signals={"source": "first crawl"},
+        health_signals={"source": "first crawl"},
+        distributions=[],
+        discovery_method="ckan",
+    )
+    incomplete_dataset = CollectedDataset(
+        dataset_url=dataset_url,
+        title="",
+        description="",
+        publisher="",
+        hosting_platform="",
+        uploader="",
+        geography=(),
+        dataset_signals={"source": "second crawl"},
+        health_signals={"source": "second crawl"},
+        distributions=[],
+        discovery_method="",
+    )
+
+    await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [complete_dataset],
+    )
+    await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [incomplete_dataset],
+    )
+
+    collected = (await database.list_collected_datasets())[0]
+
+    assert collected.title == "Mortality health dataset"
+    assert collected.description == "Official mortality health data."
+    assert collected.publisher == "National Health Agency"
+    assert collected.hosting_platform == "CKAN"
+    assert collected.uploader == "Health team"
+    assert collected.geography == ("France",)
+    assert collected.discovery_method == "ckan"
+    assert collected.dataset_signals == {"source": "second crawl"}
+    assert collected.health_signals == {"source": "second crawl"}
+
+
 async def test_save_links_dataset_discovery_observation_to_collection_job(database):
     await database.init_database()
     job = await database.create_collection_job("https://catalog.example.org/")
@@ -1437,6 +1491,63 @@ async def test_collection_job_lifecycle(database):
 
     fetched = await database.get_collection_job(int(job["id"]))
     assert fetched == done
+
+
+async def test_complete_collection_job_rolls_back_datasets_when_one_save_fails(database):
+    await database.init_database()
+
+    source_url = "https://catalog.example.org/"
+    job = await database.create_collection_job(source_url)
+    job_id = int(job["id"])
+    await database.mark_collection_job_running(job_id)
+
+    valid_dataset = _mortality_dataset()
+    invalid_dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/invalid-signals",
+        title="Invalid signals dataset",
+        description="Dataset with non-serializable signals.",
+        publisher="National Health Agency",
+        hosting_platform="",
+        uploader="",
+        dataset_signals={"invalid": object()},
+        health_signals={},
+        distributions=[],
+    )
+
+    with pytest.raises(db_serialization.StoredJSONError):
+        await database.complete_collection_job(
+            job_id,
+            CollectionResult(
+                datasets=[valid_dataset, invalid_dataset],
+                report=CollectionReport(discovered_count=2, analyzed_count=2),
+            ),
+        )
+
+    assert await database.list_collected_datasets() == []
+    assert (await database.get_collection_job(job_id))["status"] == "running"
+
+
+async def test_complete_collection_job_uses_source_url_from_job(database):
+    await database.init_database()
+
+    source_url = "https://job-source.example.org/"
+    job = await database.create_collection_job(source_url)
+    job_id = int(job["id"])
+    await database.mark_collection_job_running(job_id)
+
+    completed = await database.complete_collection_job(
+        job_id,
+        CollectionResult(datasets=[_mortality_dataset()]),
+    )
+
+    collected = (await database.list_collected_datasets())[0]
+    observations = await database.list_dataset_discovery_observations(
+        collected.database_id
+    )
+    assert completed["status"] == "done"
+    assert collected.source_url == source_url
+    assert observations[0]["source_url"] == source_url
+    assert observations[0]["collection_job_id"] == job_id
 
 
 async def test_collection_job_status_transitions_are_guarded(database):

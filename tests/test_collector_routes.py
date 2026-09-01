@@ -449,17 +449,19 @@ async def test_run_collection_job_marks_done(monkeypatch):
             ),
         )
 
-    async def fake_save_collected_datasets(source_url, datasets, collection_job_id=None):
-        calls.append(("save", source_url, len(datasets), collection_job_id))
-        return datasets
-
     async def fake_mark_collection_job_running(job_id):
         calls.append(("running", job_id))
         return {"id": job_id, "status": "running"}
 
-    async def fake_mark_collection_job_done(job_id, saved_count, report):
+    async def fake_complete_collection_job(job_id, collection_result):
         calls.append(
-            ("done", job_id, saved_count, report.discovered_count, report.discovery_methods)
+            (
+                "complete",
+                job_id,
+                len(collection_result.datasets),
+                collection_result.report.discovered_count,
+                collection_result.report.discovery_methods,
+            )
         )
 
     monkeypatch.setattr(
@@ -471,12 +473,8 @@ async def test_run_collection_job_marks_done(monkeypatch):
         fake_collect_source_with_report,
     )
     monkeypatch.setattr(
-        "app.routes.collector.save_collected_datasets",
-        fake_save_collected_datasets,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_done",
-        fake_mark_collection_job_done,
+        "app.routes.collector.complete_collection_job",
+        fake_complete_collection_job,
     )
 
     await _run_collection_job(12, "https://catalog.example.org/")
@@ -484,8 +482,7 @@ async def test_run_collection_job_marks_done(monkeypatch):
     assert calls == [
         ("running", 12),
         ("collect", "https://catalog.example.org/"),
-        ("save", "https://catalog.example.org/", 1, 12),
-        ("done", 12, 1, 5, ("ckan",)),
+        ("complete", 12, 1, 5, ("ckan",)),
     ]
 
 
@@ -543,6 +540,51 @@ async def test_run_collection_job_marks_errors(monkeypatch):
     await _run_collection_job(12, "https://catalog.example.org/")
 
     assert calls == [("running", 12), ("error", 12, "bad source")]
+
+
+async def test_run_collection_job_marks_error_when_completion_fails(monkeypatch):
+    calls = []
+
+    def fake_collect_source_with_report(source_url):
+        calls.append(("collect", source_url))
+        return CollectionResult()
+
+    async def fake_mark_collection_job_running(job_id):
+        calls.append(("running", job_id))
+        return {"id": job_id, "status": "running"}
+
+    async def fake_complete_collection_job(job_id, collection_result):
+        calls.append(("complete", job_id, len(collection_result.datasets)))
+        raise RuntimeError("database write failed")
+
+    async def fake_mark_collection_job_error(job_id, error):
+        calls.append(("error", job_id, error))
+
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_running",
+        fake_mark_collection_job_running,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.collect_source_with_report",
+        fake_collect_source_with_report,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.complete_collection_job",
+        fake_complete_collection_job,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_error",
+        fake_mark_collection_job_error,
+    )
+
+    await _run_collection_job(12, "https://catalog.example.org/")
+
+    assert calls == [
+        ("running", 12),
+        ("collect", "https://catalog.example.org/"),
+        ("complete", 12, 0),
+        ("error", 12, "database write failed"),
+    ]
 
 
 async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):

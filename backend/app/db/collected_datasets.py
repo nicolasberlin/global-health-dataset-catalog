@@ -127,13 +127,32 @@ async def _upsert_collected_dataset(
         )
         ON CONFLICT(dataset_url) DO UPDATE SET
             source_url = excluded.source_url,
-            title = excluded.title,
-            description = excluded.description,
-            publisher = excluded.publisher,
-            hosting_platform = excluded.hosting_platform,
-            uploader = excluded.uploader,
-            geography = excluded.geography,
-            discovery_method = excluded.discovery_method,
+            title = COALESCE(NULLIF(excluded.title, ''), collected_datasets.title),
+            description = COALESCE(
+                NULLIF(excluded.description, ''),
+                collected_datasets.description
+            ),
+            publisher = COALESCE(
+                NULLIF(excluded.publisher, ''),
+                collected_datasets.publisher
+            ),
+            hosting_platform = COALESCE(
+                NULLIF(excluded.hosting_platform, ''),
+                collected_datasets.hosting_platform
+            ),
+            uploader = COALESCE(
+                NULLIF(excluded.uploader, ''),
+                collected_datasets.uploader
+            ),
+            geography = CASE
+                WHEN excluded.geography <> '[]'::jsonb
+                    THEN excluded.geography
+                ELSE collected_datasets.geography
+            END,
+            discovery_method = COALESCE(
+                NULLIF(excluded.discovery_method, ''),
+                collected_datasets.discovery_method
+            ),
             dataset_signals = excluded.dataset_signals,
             health_signals = excluded.health_signals,
             last_seen_at = NOW(),
