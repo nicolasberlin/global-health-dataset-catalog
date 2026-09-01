@@ -47,11 +47,11 @@ Les utilisateurs identifies sont principalement des personnes techniques ou data
 ### Informations confirmees
 
 - **CONFIRME** - Le projet est nomme `global-health-dataset-catalog` et versionne `0.1.0` dans `pyproject.toml` et `frontend/package.json`.
-- **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/analyze-html`, `/collector/analyze-url`, `/collector/discover-url`, `/collector/collect-url`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}`, `/collector/search-repositories`, `/collector/classify-repository-result` et `/collector/collected-datasets`.
+- **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}`, `/collector/search-repositories`, `/collector/classify-repository-result` et `/collector/collected-datasets`.
 - **CONFIRME** - Le frontend utilise React/Vite et pointe par defaut vers `http://127.0.0.1:8001`.
 - **CONFIRME** - La base cible du code courant est PostgreSQL, configuree par `DATABASE_URL`. L'application echoue au demarrage si cette variable est absente.
 - **CONFIRME** - Les seeds applicatifs reserves sont `who_gho_indicators` et `who_gho_life_expectancy`.
-- **CONFIRME** - La classification par defaut utilise un `EnsemblePageClassifier` avec trois votes LLM et accepte une page quand au moins deux votes LLM l'acceptent. Les probabilites restent des scores d'audit/compatibilite et ne pilotent plus la decision.
+- **CONFIRME** - La classification par defaut utilise un `EnsemblePageClassifier` avec trois votes LLM et accepte une page quand au moins deux votes LLM l'acceptent. Les raisons et preuves dataset/sante sont conservees comme signaux d'audit.
 - **CONFIRME** - Les limites par defaut du collecteur sont `max_pages_per_source = 5`, `max_distributions_per_dataset = 1`.
 - **CONFIRME** - Les adaptateurs de decouverte sont executes dans l'ordre CKAN, Socrata, `data_json`, puis site generique.
 - **CONFIRME** - Les liens PDF et formats image/HTML sont exclus des distributions de donnees par defaut.
@@ -155,7 +155,7 @@ Les organisations qui travaillent avec des datasets sante doivent retrouver les 
 - Centraliser des pages de datasets sante dans un catalogue consultable.
 - Reduire le travail manuel de detection de datasets pertinents.
 - Identifier les distributions de donnees exploitables, sans telecharger ni stocker les datasets eux-memes.
-- Fournir des signaux de confiance : source, publisher, methode de decouverte, score dataset, score sante, validation HTTP.
+- Fournir des signaux d'audit : source, publisher, methode de decouverte, preuves dataset/sante des votants LLM et validation HTTP.
 
 ### Objectifs techniques
 
@@ -169,10 +169,10 @@ Les organisations qui travaillent avec des datasets sante doivent retrouver les 
 
 | Critere | Mesure actuelle ou cible |
 | --- | --- |
-| Tests backend/collecteur | CONFIRME : 76 tests passent localement. |
+| Tests backend/collecteur | CONFIRME : 110 tests passent localement, dont 30 skips sans PostgreSQL de test. |
 | Build frontend | CONFIRME : `npm --prefix frontend run build` passe localement. |
 | Base demarrable | A confirmer : actuellement bloque par la base locale historique. |
-| Qualite des resultats | A definir : precision/recall des heuristiques non documentees. |
+| Qualite des resultats | A definir : precision/recall de la classification LLM. |
 | Exploitation | A definir : health checks, logs structures, alertes et sauvegardes. |
 
 ## 5. Perimetre
@@ -181,7 +181,7 @@ Les organisations qui travaillent avec des datasets sante doivent retrouver les 
 
 - Catalogue local de sources de datasets.
 - API CRUD partielle pour creation/listing de sources et redirection page.
-- Analyse HTML/URL publique.
+- Collecte asynchrone depuis une URL de source publique.
 - Decouverte CKAN, Socrata, `data.json`/DCAT et sitemaps.
 - Scoring dataset et scoring sante.
 - Extraction de distributions probables.
@@ -306,7 +306,7 @@ flowchart TB
 
 Objectif : permettre une recherche federee dans plusieurs catalogues externes sans ecrire une classe par repository individuel. La generalisation se fait par famille d'API : un adapter CKAN peut servir HDX, `data.gov.uk` ou un autre portail CKAN ; un adapter Dataverse peut servir Harvard Dataverse ou LSHTM Data Compass.
 
-Etat courant confirme : `collector/repository_search.py` contient un `DataCiteRepositorySearchProvider`, un protocole `RepositorySearchProvider`, un modele `RepositorySearchResult` et l'orchestrateur `search_repository_metadata`. La structure ci-dessous est la cible recommandee pour etendre cette approche.
+Etat courant confirme : `collector/repository_search/` contient un `DataCiteRepositorySearchProvider`, un protocole `RepositorySearchProvider`, un modele `RepositorySearchResult` et l'orchestrateur `search_repository_metadata`. La structure ci-dessous est la cible recommandee pour etendre cette approche.
 
 Schema global :
 
@@ -458,7 +458,6 @@ class RepositorySearchResult:
     date: str = ""
     doi: str = ""
     keywords: list[str] = field(default_factory=list)
-    relevance_score: float = 0.0
     metadata: dict[str, object] = field(default_factory=dict)
 ```
 
@@ -568,23 +567,6 @@ sequenceDiagram
     API-->>UI: Statut et compteurs
 ```
 
-### Analyse HTML locale
-
-```mermaid
-sequenceDiagram
-    actor User as Utilisateur
-    participant UI as Frontend
-    participant API as FastAPI
-    participant Collector as Collector
-
-    User->>UI: Coller HTML et URL
-    UI->>API: POST /collector/analyze-html
-    API->>Collector: extract_page
-    API->>Collector: extract_distributions
-    API->>Collector: score_dataset_page + score_health_page
-    API-->>UI: Scores, signaux, distributions, accepted
-```
-
 ### Ajout d'une source
 
 1. Acteur : utilisateur ou administrateur catalogue.
@@ -595,14 +577,12 @@ sequenceDiagram
 
 ## 12. Logique metier
 
-- Une page est acceptee comme dataset collectable si le classificateur par defaut obtient au moins deux votes LLM `accepted=true` sur trois votes. La decision ne depend plus de seuils sur `dataset_probability` ou `health_probability`.
+- Une page est acceptee comme dataset collectable si le classificateur par defaut obtient au moins deux votes LLM `accepted=true` sur trois votes.
 - Une collecte persistante ne conserve un dataset que s'il possede au moins une distribution validee `ok=True`.
-- Les probabilites `dataset_probability` et `health_probability` sont conservees comme signaux d'audit, d'affichage et de compatibilite schema.
-- Le scoring heuristique historique distingue les preuves de dataset individuel des simples signaux de catalogue. Sans preuve de dataset individuel, le score est plafonne a `0.5`. Il reste utile pour tests/comparaison, mais ne pilote plus la classification par defaut.
+- Chaque votant fournit des raisons et preuves separees dans `dataset_signals` et `health_signals`; ces signaux sont conserves pour l'audit.
 - Les preuves fortes incluent Schema.org `Dataset` et `dcat:Dataset`.
 - Les signaux d'acces incluent API, CSV, XLSX, export, downloads et distributions directes.
 - Les classificateurs LLM doivent juger explicitement si la page est un dataset individuel et si elle concerne la sante globale/publique, clinique, epidemiologique, healthcare, disease, mortality, morbidity, vaccination ou sujet similaire.
-- Labels sante : `HEALTH`, `PARTIALLY_HEALTH`, `NON_HEALTH`.
 - Les distributions PDF, HTML et images sont exclues.
 - La validation tente `HEAD`, puis un `GET` partiel si HEAD est interdit, sans content-type utile ou retourne HTML.
 - Les source keys WHO seed sont reservees pour la creation utilisateur publique ;
@@ -662,9 +642,8 @@ erDiagram
         text title
         jsonb geography
         text discovery_method
-        real dataset_probability
-        real health_probability
-        text health_label
+        jsonb dataset_signals
+        jsonb health_signals
     }
     COLLECTED_DISTRIBUTIONS {
         integer id PK
@@ -722,15 +701,11 @@ migration that preserves existing data.
 | GET | `/sources` | Lister les sources. | Non documentee | Aucune | `{items: DataSource[]}` |
 | POST | `/sources` | Creer une source utilisateur ; doublon `source_key` refuse en 409. | Non documentee | `DataSourceCreate` | `DataSource`, status 201 |
 | GET | `/sources/{id}/page` | Rediriger vers la page externe. | Non documentee | Path `source_id` | Redirect ou 404 |
-| POST | `/collector/analyze-html` | Analyser du HTML fourni. | Non documentee | `{url, html}` | Scores, signaux, distributions |
-| POST | `/collector/analyze-url` | Fetcher et analyser une URL publique. | Non documentee | `{url}` | Scores, signaux, distributions |
-| POST | `/collector/discover-url` | Decouvrir des pages candidates. | Non documentee | `{url}` | `{items: DiscoveredPage[]}` |
-| POST | `/collector/collect-url` | Collecte synchrone, option save. | Non documentee | `{url, save=true}` | `{items, saved, saved_count}` |
 | POST | `/collector/collection-jobs` | Lancer une collecte async. | Non documentee | `{url}` | `{job}`, status 202 |
 | GET | `/collector/collection-jobs/{job_id}` | Lire un job. | Non documentee | Path `job_id` | `{job}` ou 404 |
 | POST | `/collector/search-repositories` | Rechercher des datasets dans les repositories externes configures, sans classification LLM. | Non documentee | `{query}` | `{query, items: RepositorySearchResult[], warnings: RepositorySearchWarning[]}` |
 | POST | `/collector/classify-repository-result` | Classifier un seul resultat repository pour permettre l'affichage progressif. | Non documentee | `RepositorySearchResult` | `RepositorySearchResult` avec `classification` |
-| GET | `/collector/collected-datasets` | Lister les datasets sauvegardes. | Non documentee | Aucune | `{items, saved=false, saved_count=0}` |
+| GET | `/collector/collected-datasets` | Lister les datasets sauvegardes. | Non documentee | Aucune | `{items: CollectorCollectedDataset[]}` |
 
 ### Interfaces externes
 
@@ -837,16 +812,16 @@ Separation des responsabilites :
 - Contexte : sources variees, besoin d'eviter du code specifique dans le coeur.
 - Solution retenue : adaptateurs CKAN, Socrata, `data_json`, fallback generique.
 - Avantages : extensible, testable, priorise les metadonnees structurees.
-- Inconvenients : heuristiques imparfaites, couverture dependante des portails.
+- Inconvenients : couverture dependante des portails et de leurs metadonnees.
 - Consequences : ajouter les futures sources via adaptateurs, pas dans le classifier.
 
-### Decision 4 - Heuristiques deterministes
+### Decision 4 - Ensemble de trois classificateurs LLM
 
-- Contexte : besoin d'un MVP explicable.
-- Solution retenue : scoring par signaux explicites.
-- Avantages : transparent, testable, pas de dependance ML.
-- Inconvenients : precision non mesuree, vocabulaire sante limite.
-- Consequences : documenter les signaux et mesurer les faux positifs/faux negatifs.
+- Contexte : juger conjointement si une page decrit un dataset individuel et si elle concerne la sante.
+- Solution retenue : trois votants LLM distincts, decision a la majorite de deux votes.
+- Avantages : decision explicite et raisons dataset/sante conservees par votant.
+- Inconvenients : cout, latence et dependance aux providers LLM.
+- Consequences : mesurer les faux positifs/faux negatifs et surveiller les echecs de providers.
 
 ### Decision 5 - Base PostgreSQL geree par l'application
 
@@ -861,7 +836,7 @@ Separation des responsabilites :
 - Contexte : besoin d'interroger plusieurs catalogues externes sans multiplier les classes par site.
 - Solution retenue : separer `RepositoryConfig` (quoi interroger), adapter par famille d'API (comment interroger), orchestrateur `search_repository_metadata` (regrouper, valider, dedoublonner, trier).
 - Avantages : ajout d'un nouveau repository CKAN/Dataverse par simple configuration, contrat unique `search(query)`, frontend decouple des JSON externes.
-- Inconvenients : chaque nouvelle famille d'API necessite un adapter dedie ; les scores de relevance doivent etre normalises pour rester comparables.
+- Inconvenients : chaque nouvelle famille d'API necessite un adapter dedie.
 - Consequences : ajouter CKAN/Dataverse/WHO/World Bank via adapters de famille d'API, pas via `HDXProvider` ou `HarvardProvider` individuels. Pour le MVP DataCite-only, limiter le filtrage a la qualite minimale d'affichage ; reserver les regles strictes a la collecte et a l'ecriture DB.
 
 ## 18. Securite
@@ -869,8 +844,8 @@ Separation des responsabilites :
 Controles confirmes :
 
 - CORS autorise seulement `http://localhost:5173` et `http://127.0.0.1:5173`.
-- Les endpoints d'analyse URL acceptent seulement HTTP/HTTPS.
-- Les IP privees, loopback, link-local, multicast et reservees sont bloquees avant fetch.
+- Les URLs collectees acceptent seulement HTTP/HTTPS.
+- Les IP privees, loopback, link-local, multicast et reservees sont bloquees avant les fetchs publics.
 - Les payloads HTTP sont valides via Pydantic.
 - La classification repository est limitee a deux candidats simultanes par processus FastAPI.
 - Les champs repository sont bornes, les metadonnees sont tronquees avant les LLM et le prompt les declare explicitement non fiables.
@@ -1071,7 +1046,7 @@ Les anciennes donnees SQLite ne sont pas migrees. Si une preservation devenait n
 | Tests DB PostgreSQL non executes avec serveur reel | Moyenne | Eleve | Elevee | Executer `TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/python -m pytest` avant merge/deploiement. | Lead dev / backend |
 | Schema PostgreSQL versionne mais incomplet ou modifie hors application | Faible/moyenne | Eleve | Moyenne | Contrat d'exploitation : base vide au premier demarrage, migrations explicites ensuite, pas de support pour schemas modifies a la main. | Backend / infra |
 | Absence d'auth si exposition hors local | Moyenne | Eleve | Elevee | Ajouter auth, roles, rate limiting avant production. | Securite / backend |
-| Heuristiques faux positifs/faux negatifs | Moyenne | Moyen | Moyenne | Jeu d'evaluation, revue humaine, enrichissement vocabulaire/adaptateurs. | Data owner / collecteur |
+| Classification LLM avec faux positifs/faux negatifs | Moyenne | Moyen | Moyenne | Jeu d'evaluation, revue humaine et suivi des votes/signaux. | Data owner / collecteur |
 | BackgroundTasks insuffisant pour jobs longs | Moyenne | Moyen/eleve | Moyenne | Queue dediee, retries, reprise apres crash. | Architecture |
 | Dependances externes indisponibles ou lentes | Elevee | Moyen | Moyenne | Timeouts, retries, cache, degradation controlee. | Backend / infra |
 | Recherche repositories bloquee par un provider indisponible | Moyenne | Moyen | Moyenne | Resultats partiels avec warning/logs, timeout par provider, tests d'erreur. | Backend / collecteur |
@@ -1087,7 +1062,7 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 | --- | --- | --- | --- |
 | Stockage | PostgreSQL courant | Service PostgreSQL manage | Garder PostgreSQL ; choisir le mode d'exploitation selon l'environnement cible. |
 | Jobs | FastAPI BackgroundTasks | Queue dediee type Celery/RQ/worker | BackgroundTasks pour MVP ; queue si jobs longs/retries requis. |
-| Classification | Heuristiques deterministes | Modele ML/LLM | Conserver heuristiques jusqu'a mesure de performance ; envisager ML seulement avec dataset d'evaluation. |
+| Classification | Ensemble LLM courant | Modele specialise | Conserver l'ensemble jusqu'a disposer d'un jeu d'evaluation permettant une comparaison fiable. |
 | Discovery | Adaptateurs generiques | Scrapers par site | Garder adaptateurs generiques ; ajouter adaptateurs specifiques uniquement si necessaire. |
 | Recherche repositories | Adapter par famille d'API + config | Provider par repository individuel | Retenir adapter par famille d'API ; nouveau site CKAN/Dataverse par config seulement. |
 | Migration | Migration in-place | Export/recreation/import | Migration in-place si preservation complete requise ; export/recreation si base locale non critique. |
@@ -1146,7 +1121,7 @@ Les alternatives ne sont pas documentees dans le projet. Les options suivantes s
 | Q4 | Faut-il une authentification et des roles ? | Securite API et ajout de sources. | Securite / product owner | Haute |
 | Q5 | Quelle volumetrie et frequence de collecte viser ? | Dimensionne pool PostgreSQL, background task vs queue et retention. | Data owner / architecture | Haute |
 | Q6 | Quelle politique de retention pour jobs, observations et validations ? | Taille DB, audit, conformite. | DPO / infra / data owner | Moyenne |
-| Q7 | Quels indicateurs de qualite pour les heuristiques ? | Mesure faux positifs/faux negatifs. | Data owner / dev collecteur | Moyenne |
+| Q7 | Quels indicateurs de qualite pour la classification LLM ? | Mesure faux positifs/faux negatifs. | Data owner / dev collecteur | Moyenne |
 | Q8 | Faut-il exposer une API d'administration complete ? | Périmètre frontend/backend. | Product owner | Moyenne |
 | Q9 | Quel monitoring minimum avant usage partage ? | Support et exploitation. | Infra / backend | Moyenne |
 | Q10 | Quels repositories doivent etre interroges par defaut et lesquels doivent etre optionnels ? | Cout reseau, qualite resultats, bruit et latence. | Product owner / data owner | Haute |

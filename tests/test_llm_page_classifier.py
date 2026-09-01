@@ -58,9 +58,6 @@ def test_llm_page_classifier_returns_validated_classification():
     }
     assert client.payload["distributions"][0]["format"] == "CSV"
     assert classification.accepted is True
-    assert classification.dataset_probability == 0.91
-    assert classification.health_probability == 0.84
-    assert classification.health_label == "HEALTH"
     assert classification.dataset_signals == {
         "reason": "The page describes an individual downloadable dataset.",
         "evidence": "The title and CSV distribution indicate dataset access.",
@@ -118,8 +115,6 @@ def test_llm_page_classifier_uses_llm_accepted_decision_not_probability_threshol
         def classify_page(self, payload):
             response = _valid_llm_response()
             response["accepted"] = True
-            response["dataset_probability"] = 0.59
-            response["health_probability"] = 0.34
             return response
 
     classifier = LLMPageClassifier(FakeClient())
@@ -127,8 +122,6 @@ def test_llm_page_classifier_uses_llm_accepted_decision_not_probability_threshol
     classification = classifier.classify(_page(), [_distribution()])
 
     assert classification.accepted is True
-    assert classification.dataset_probability == 0.59
-    assert classification.health_probability == 0.34
 
 
 def test_llm_page_classifier_rejects_missing_accepted_decision():
@@ -144,29 +137,28 @@ def test_llm_page_classifier_rejects_missing_accepted_decision():
         classifier.classify(_page(), [_distribution()])
 
 
-def test_llm_page_classifier_rejects_bool_probability():
+@pytest.mark.parametrize(
+    ("field_name", "invalid_signals", "expected_error"),
+    [
+        ("dataset_signals", {"reason": 12, "evidence": "title"}, "reason"),
+        ("health_signals", {"reason": "health", "evidence": []}, "evidence"),
+        ("dataset_signals", {"reason": "dataset"}, "exactly reason and evidence"),
+    ],
+)
+def test_llm_page_classifier_rejects_invalid_signal_contract(
+    field_name,
+    invalid_signals,
+    expected_error,
+):
     class FakeClient:
         def classify_page(self, payload):
             response = _valid_llm_response()
-            response["dataset_probability"] = True
+            response[field_name] = invalid_signals
             return response
 
     classifier = LLMPageClassifier(FakeClient())
 
-    with pytest.raises(PageClassificationError, match="dataset_probability"):
-        classifier.classify(_page(), [_distribution()])
-
-
-def test_llm_page_classifier_rejects_invalid_health_label():
-    class FakeClient:
-        def classify_page(self, payload):
-            response = _valid_llm_response()
-            response["health_label"] = "MAYBE_HEALTH"
-            return response
-
-    classifier = LLMPageClassifier(FakeClient())
-
-    with pytest.raises(PageClassificationError, match="health_label"):
+    with pytest.raises(PageClassificationError, match=expected_error):
         classifier.classify(_page(), [_distribution()])
 
 
@@ -223,7 +215,7 @@ def test_http_json_llm_client_uses_provider_config():
     result = client.classify_page({"page": {"title": "Mortality dataset"}})
 
     body = json.loads(captured["request"].data.decode("utf-8"))
-    assert result["dataset_probability"] == 0.91
+    assert result["accepted"] is True
     assert captured["timeout"] == 12.0
     assert captured["request"].get_header("Authorization") == "Bearer test-key"
     assert captured["request"].full_url == "https://llm.example.org/classify"
@@ -280,9 +272,6 @@ def test_repository_relevance_classifier_returns_repository_classification():
         "The metadata matches the topic but not every query constraint."
     )
     assert classification.missing_information == []
-    assert not hasattr(classification, "health_label")
-    assert not hasattr(classification, "dataset_probability")
-    assert not hasattr(classification, "health_probability")
 
 
 def test_repository_relevance_classifier_rejects_non_health_query_result():
@@ -474,9 +463,6 @@ def _distribution() -> DistributionCandidate:
 def _valid_llm_response() -> dict[str, object]:
     return {
         "accepted": True,
-        "dataset_probability": 0.91,
-        "health_probability": 0.84,
-        "health_label": "HEALTH",
         "dataset_signals": {
             "reason": "The page describes an individual downloadable dataset.",
             "evidence": "The title and CSV distribution indicate dataset access.",

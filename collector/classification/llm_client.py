@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from collector.classification.page import PageClassificationError
+from collector.classification.prompts import (
+    _build_openai_repository_relevance_request_body,
+    _build_openai_responses_request_body,
+)
+
+OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
+DEFAULT_OPENAI_MODEL = "gpt-5"
+
+RequestBodyBuilder = Callable[[dict[str, object], str], dict[str, object]]
+ResponseTextExtractor = Callable[[object], str]
+
+
+class LLMPageClassificationClient(Protocol):
+    def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
+        ...
+
+
+@dataclass(frozen=True)
+class LLMProviderConfig:
+    name: str
+    endpoint_url: str
+    api_key_env_var: str
+    model_env_var: str
+    default_model: str
+    request_body_builder: RequestBodyBuilder
+    response_text_extractor: ResponseTextExtractor
+    auth_header: str = "Authorization"
+    auth_prefix: str = "Bearer "
+
+
+class HTTPJSONLLMClient:
+    def __init__(
+        self,
+        provider: LLMProviderConfig,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout_seconds: float = 20.0,
+        request: Callable[..., object] = urlopen,
+    ) -> None:
+        self._provider = provider
+        self._api_key = api_key
+        self._model = model
+        self._timeout_seconds = timeout_seconds
+        self._request = request
+
+    def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
+        api_key = self._api_key or os.getenv(self._provider.api_key_env_var, "")
+        if not api_key:
+            raise PageClassificationError(
+                f"{self._provider.api_key_env_var} is required for LLM page classification."
+            )
+
+        request = Request(
+            self._provider.endpoint_url,
+            data=json.dumps(self._request_body(payload)).encode("utf-8"),
+            headers={
+                self._provider.auth_header: f"{self._provider.auth_prefix}{api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with self._request(request, timeout=self._timeout_seconds) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exception:
+            raise PageClassificationError(
+                f"{self._provider.name} classification request failed with HTTP {exception.code}."
+            ) from exception
+        except (TimeoutError, URLError) as exception:
+            raise PageClassificationError(
+                f"{self._provider.name} classification request failed."
+            ) from exception
+        except (json.JSONDecodeError, UnicodeDecodeError) as exception:
+            raise PageClassificationError(
+                f"{self._provider.name} classification response was not valid JSON."
+            ) from exception
+
+        output_text = self._provider.response_text_extractor(response_payload)
+
+        try:
+            raw_classification = json.loads(output_text)
+        except json.JSONDecodeError as exception:
+            raise PageClassificationError(
+                f"{self._provider.name} classification output was not valid JSON."
+            ) from exception
+
+        if not isinstance(raw_classification, dict):
+            raise PageClassificationError(
+                f"{self._provider.name} classification output must be a JSON object."
+            )
+
+        return raw_classification
+
+    def _request_body(self, payload: dict[str, object]) -> dict[str, object]:
+        model = self._model or os.getenv(
+            self._provider.model_env_var,
+            self._provider.default_model,
+        )
+        return self._provider.request_body_builder(payload, model)
+
+
+def openai_responses_provider_config(
+    name: str = "OpenAI",
+    model_env_var: str = "OPENAI_MODEL",
+    default_model: str = DEFAULT_OPENAI_MODEL,
+) -> LLMProviderConfig:
+    return LLMProviderConfig(
+        name=name,
+        endpoint_url=OPENAI_RESPONSES_API_URL,
+        api_key_env_var="OPENAI_API_KEY",
+        model_env_var=model_env_var,
+        default_model=default_model,
+        request_body_builder=_build_openai_responses_request_body,
+        response_text_extractor=_extract_openai_output_text,
+    )
+
+
+def openai_repository_relevance_provider_config(
+    name: str = "OpenAI",
+    model_env_var: str = "OPENAI_MODEL",
+    default_model: str = DEFAULT_OPENAI_MODEL,
+) -> LLMProviderConfig:
+    return LLMProviderConfig(
+        name=name,
+        endpoint_url=OPENAI_RESPONSES_API_URL,
+        api_key_env_var="OPENAI_API_KEY",
+        model_env_var=model_env_var,
+        default_model=default_model,
+        request_body_builder=_build_openai_repository_relevance_request_body,
+        response_text_extractor=_extract_openai_output_text,
+    )
+
+
+def _extract_openai_output_text(response_payload: object) -> str:
+    if not isinstance(response_payload, dict):
+        raise PageClassificationError("OpenAI response must be a JSON object.")
+
+    output_text = response_payload.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+
+    output = response_payload.get("output")
+    if isinstance(output, list):
+        for output_item in output:
+            if not isinstance(output_item, dict):
+                continue
+
+            content = output_item.get("content")
+            if not isinstance(content, list):
+                continue
+
+            for content_item in content:
+                if not isinstance(content_item, dict):
+                    continue
+
+                text = content_item.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text
+
+    raise PageClassificationError("OpenAI response did not include classification text.")

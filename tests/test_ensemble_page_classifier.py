@@ -10,21 +10,19 @@ from collector.storage.models import DistributionCandidate, PageSnapshot
 def test_ensemble_classifier_accepts_when_two_of_three_voters_accept():
     classifier = EnsemblePageClassifier(
         [
-            ("llm_a", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
-            ("llm_b", _StaticClassifier(_classification(False, 0.2, 0.2, "NON_HEALTH"))),
-            ("llm_c", _StaticClassifier(_classification(True, 0.7, 0.6, "HEALTH"))),
+            ("llm_a", _StaticClassifier(_classification(True))),
+            ("llm_b", _StaticClassifier(_classification(False))),
+            ("llm_c", _StaticClassifier(_classification(True))),
         ]
     )
 
     result = classifier.classify(_page(), [_distribution()])
 
     assert result.accepted is True
-    assert result.dataset_probability == pytest.approx(0.8)
-    assert result.health_probability == pytest.approx(0.7)
-    assert result.health_label == "HEALTH"
 
     ensemble = result.dataset_signals["ensemble"]
-    assert result.health_signals["ensemble"] == ensemble
+    health_ensemble = result.health_signals["ensemble"]
+    assert health_ensemble != ensemble
     assert ensemble["votes_required"] == 2
     assert ensemble["minimum_successful_votes"] == 2
     assert ensemble["successful_votes"] == 3
@@ -38,14 +36,16 @@ def test_ensemble_classifier_accepts_when_two_of_three_voters_accept():
         "llm_b",
         "llm_c",
     ]
+    assert ensemble["voters"][0]["signals"] == {"reason": "dataset signal"}
+    assert health_ensemble["voters"][0]["signals"] == {"reason": "health signal"}
 
 
 def test_ensemble_classifier_uses_votes_not_probability_thresholds():
     classifier = EnsemblePageClassifier(
         [
-            ("llm_a", _StaticClassifier(_classification(True, 0.1, 0.1, "HEALTH"))),
-            ("llm_b", _StaticClassifier(_classification(True, 0.2, 0.2, "HEALTH"))),
-            ("llm_c", _StaticClassifier(_classification(False, 0.95, 0.95, "HEALTH"))),
+            ("llm_a", _StaticClassifier(_classification(True))),
+            ("llm_b", _StaticClassifier(_classification(True))),
+            ("llm_c", _StaticClassifier(_classification(False))),
         ]
     )
 
@@ -54,24 +54,20 @@ def test_ensemble_classifier_uses_votes_not_probability_thresholds():
     assert result.accepted is True
     assert result.dataset_signals["ensemble"]["accepted_votes"] == 2
     assert result.dataset_signals["ensemble"]["decision_reason"] == "enough_accept_votes"
-    assert result.dataset_probability == pytest.approx(0.15)
-    assert result.health_probability == pytest.approx(0.15)
 
 
 def test_ensemble_classifier_rejects_when_only_one_of_three_voters_accepts():
     classifier = EnsemblePageClassifier(
         [
-            ("llm_a", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
-            ("llm_b", _StaticClassifier(_classification(False, 0.4, 0.4, "PARTIALLY_HEALTH"))),
-            ("llm_c", _StaticClassifier(_classification(False, 0.2, 0.2, "NON_HEALTH"))),
+            ("llm_a", _StaticClassifier(_classification(True))),
+            ("llm_b", _StaticClassifier(_classification(False))),
+            ("llm_c", _StaticClassifier(_classification(False))),
         ]
     )
 
     result = classifier.classify(_page(), [_distribution()])
 
     assert result.accepted is False
-    assert result.dataset_probability == pytest.approx(0.3)
-    assert result.health_probability == pytest.approx(0.3)
     assert result.dataset_signals["ensemble"]["accepted_votes"] == 1
     assert result.dataset_signals["ensemble"]["successful_votes"] == 3
     assert result.dataset_signals["ensemble"]["decision_reason"] == "rejected_by_majority"
@@ -80,9 +76,9 @@ def test_ensemble_classifier_rejects_when_only_one_of_three_voters_accepts():
 def test_ensemble_classifier_accepts_when_all_voters_accept():
     classifier = EnsemblePageClassifier(
         [
-            ("llm_a", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
-            ("llm_b", _StaticClassifier(_classification(True, 0.8, 0.7, "HEALTH"))),
-            ("llm_c", _StaticClassifier(_classification(True, 0.7, 0.6, "PARTIALLY_HEALTH"))),
+            ("llm_a", _StaticClassifier(_classification(True))),
+            ("llm_b", _StaticClassifier(_classification(True))),
+            ("llm_c", _StaticClassifier(_classification(True))),
         ]
     )
 
@@ -96,8 +92,8 @@ def test_ensemble_classifier_accepts_with_one_failure_and_two_accepting_votes():
     classifier = EnsemblePageClassifier(
         [
             ("llm_a", _FailingClassifier("timeout")),
-            ("llm_b", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
-            ("llm_c", _StaticClassifier(_classification(True, 0.7, 0.6, "HEALTH"))),
+            ("llm_b", _StaticClassifier(_classification(True))),
+            ("llm_c", _StaticClassifier(_classification(True))),
         ]
     )
 
@@ -116,15 +112,14 @@ def test_ensemble_classifier_rejects_with_one_failure_one_accept_and_one_reject(
     classifier = EnsemblePageClassifier(
         [
             ("llm_a", _FailingClassifier("timeout")),
-            ("llm_b", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
-            ("llm_c", _StaticClassifier(_classification(False, 0.2, 0.2, "NON_HEALTH"))),
+            ("llm_b", _StaticClassifier(_classification(True))),
+            ("llm_c", _StaticClassifier(_classification(False))),
         ]
     )
 
     result = classifier.classify(_page(), [_distribution()])
 
     assert result.accepted is False
-    assert result.health_label == "NON_HEALTH"
     ensemble = result.dataset_signals["ensemble"]
     assert ensemble["successful_votes"] == 2
     assert ensemble["failed_votes"] == 1
@@ -139,7 +134,7 @@ def test_ensemble_classifier_raises_when_fewer_than_two_voters_succeed():
         [
             ("llm_a", _FailingClassifier("timeout")),
             ("llm_b", _FailingClassifier("bad response")),
-            ("llm_c", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
+            ("llm_c", _StaticClassifier(_classification(True))),
         ]
     )
 
@@ -151,8 +146,8 @@ def test_ensemble_classifier_rejects_duplicate_voter_ids():
     with pytest.raises(ValueError, match="voter ids must be unique"):
         EnsemblePageClassifier(
             [
-                ("llm_a", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
-                ("llm_a", _StaticClassifier(_classification(True, 0.9, 0.8, "HEALTH"))),
+                ("llm_a", _StaticClassifier(_classification(True))),
+                ("llm_a", _StaticClassifier(_classification(True))),
             ]
         )
 
@@ -173,17 +168,9 @@ class _FailingClassifier:
         raise PageClassificationError(self._error)
 
 
-def _classification(
-    accepted: bool,
-    dataset_probability: float,
-    health_probability: float,
-    health_label,
-) -> PageClassification:
+def _classification(accepted: bool) -> PageClassification:
     return PageClassification(
         accepted=accepted,
-        dataset_probability=dataset_probability,
-        health_probability=health_probability,
-        health_label=health_label,
         dataset_signals={"reason": "dataset signal"},
         health_signals={"reason": "health signal"},
     )

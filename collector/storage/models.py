@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 from collector.extraction.dataset_metadata import (
     build_dataset_metadata,
 )
-
-HealthLabel = Literal["HEALTH", "PARTIALLY_HEALTH", "NON_HEALTH"]
 
 
 @dataclass(frozen=True)
@@ -104,19 +101,6 @@ def _normalized_values(values: tuple[str, ...]) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
-class ClassificationResult:
-    probability: float
-    signals: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class HealthClassification:
-    probability: float
-    label: HealthLabel
-    signals: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class DistributionCandidate:
     url: str
     format: str
@@ -166,10 +150,7 @@ class CollectedDataset:
     publisher: str
     hosting_platform: str
     uploader: str
-    dataset_probability: float
     dataset_signals: dict[str, object]
-    health_probability: float
-    health_label: HealthLabel
     health_signals: dict[str, object]
     geography: tuple[str, ...] = ()
     distributions: list[DistributionCandidate] = field(default_factory=list)

@@ -51,10 +51,7 @@ erDiagram
         string uploader
         jsonb geography
         string discovery_method
-        float dataset_probability
         jsonb dataset_signals
-        float health_probability
-        string health_label
         jsonb health_signals
         timestamptz first_seen_at
         timestamptz last_seen_at

@@ -22,9 +22,7 @@ It mainly stores:
 
 - how it was discovered;
 
-- its probability score of being a dataset;
-
-- its health relevance score;
+- the dataset and health evidence returned by the LLM voters;
 
 - links to its files/APIs;
 
@@ -50,13 +48,13 @@ https://data.example.org/dataset/life-expectancy
 
 ```
 
-It then analyzes this page and determines:
+It then analyzes this page and obtains:
 
 ```text
 
-Dataset probability: 0.92
+LLM votes: 2 accepted, 1 rejected
 
-Health probability: 0.85
+Decision: accepted
 
 ```
 
@@ -367,7 +365,7 @@ Current implementation:
 
 - `backend/app/routes/collector_schemas.py` contains the FastAPI/Pydantic request and response schemas;
 - `backend/app/routes/collector.py` keeps the route functions;
-- `collector/repository_search.py` contains the provider interface, DataCite provider, normalization, filtering, sorting, and partial-failure warnings;
+- `collector/repository_search/` contains the provider interface, DataCite provider, normalization, filtering, and partial-failure warnings;
 - DataCite is the first active provider.
 
 Repository classification is limited to two candidates at a time per FastAPI
@@ -391,7 +389,6 @@ The public response shape is:
       "date": "2025",
       "doi": "10.1234/example",
       "keywords": ["malaria", "mortality"],
-      "relevance_score": 0.93,
       "metadata": {}
     }
   ],
@@ -410,8 +407,6 @@ Search results are filtered before being returned:
 
 - title must not be empty;
 - URL must be valid `http` or `https` with a hostname;
-- relevance score must be numeric and inside `[0, 1]`;
-- boolean scores such as `true` and `false` are rejected.
 
 Important distinction:
 
@@ -456,20 +451,9 @@ least two successful voters accept it.
 
 The decision is not derived from percentage thresholds.
 
-The response still includes two compatibility scores for audit and display:
-
-- `dataset_probability`: confidence that the page represents an individual dataset;
-- `health_probability`: confidence that the page is health-related.
-
-These scores are not the acceptance rule.
-
-Labels currently used:
-
-```text
-HEALTH
-PARTIALLY_HEALTH
-NON_HEALTH
-```
+Each voter returns concise `dataset_signals` and `health_signals` containing a
+reason and supporting evidence. These signals are retained for audit, while the
+boolean vote is the only input to the ensemble decision.
 
 The LLM voters must check:
 
@@ -521,12 +505,10 @@ And produce:
 llm_a.accepted = true
 llm_b.accepted = true
 llm_c.accepted = false
-dataset_probability = 0.90
-health_probability = 0.95
 ```
 
-The page is accepted because 2 of 3 LLM voters accepted it. The probabilities
-are kept as explanatory scores only.
+The page is accepted because 2 of 3 LLM voters accepted it. The dataset and
+health evidence returned by each voter is stored with the ensemble summary.
 
 
 
@@ -534,7 +516,8 @@ are kept as explanatory scores only.
 
 # 9. Important Signals
 
-Signals are the clues used by the collector to evaluate a page. A single signal is not enough: several clues are combined to calculate the scores.
+Signals are the reasons and evidence returned by each LLM voter. The ensemble
+keeps dataset evidence separate from health evidence.
 
 This part can be further developed with the LLM.
 
@@ -687,11 +670,7 @@ Dataset discovered
 
       ↓
 
-Dataset score >= 0.6 ?
-
-      ↓
-
-Health score >= 0.35 ?
+At least 2 of 3 LLM voters accepted ?
 
       ↓
 
@@ -855,11 +834,9 @@ geography
 
 discovery_method
 
-dataset_probability
+dataset_signals
 
-health_probability
-
-health_label
+health_signals
 
 timestamps
 
@@ -950,14 +927,6 @@ GET /sources/{id}/page
 ## Collector
 
 ```text
-
-POST /collector/analyze-html
-
-POST /collector/analyze-url
-
-POST /collector/discover-url
-
-POST /collector/collect-url
 
 POST /collector/search-repositories
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from collector.storage.models import DistributionCandidate, HealthLabel, PageSnapshot
+from collector.storage.models import DistributionCandidate, PageSnapshot
 
 
 class PageClassificationError(RuntimeError):
@@ -13,9 +13,6 @@ class PageClassificationError(RuntimeError):
 @dataclass(frozen=True)
 class PageClassification:
     accepted: bool
-    dataset_probability: float
-    health_probability: float
-    health_label: HealthLabel
     dataset_signals: dict[str, object] = field(default_factory=dict)
     health_signals: dict[str, object] = field(default_factory=dict)
 
@@ -24,9 +21,6 @@ class PageClassification:
 class PageClassificationVote:
     voter_id: str
     accepted: bool
-    dataset_probability: float
-    health_probability: float
-    health_label: HealthLabel
     dataset_signals: dict[str, object] = field(default_factory=dict)
     health_signals: dict[str, object] = field(default_factory=dict)
 

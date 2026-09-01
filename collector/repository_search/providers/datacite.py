@@ -1,32 +1,19 @@
 from __future__ import annotations
 
-import logging
 import re
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field, replace
-from typing import Optional, Protocol
-from urllib.parse import urlencode, urlsplit
+from collections.abc import Iterable
+from urllib.parse import urlencode
 
-from collector.classification.page import PageClassificationError
-from collector.classification.repository import (
-    RepositoryClassification,
-    RepositoryResultClassifier,
-)
 from collector.discovery.adapters import fetch_json_url
-from collector.extraction.dataset_metadata import (
-    MISSING_DATASET_METADATA_VALUE,
-    build_dataset_metadata,
-    normalize_dataset_metadata,
-)
+from collector.extraction.dataset_metadata import build_dataset_metadata
 from collector.extraction.extractor import html_to_text
-from collector.storage.models import PageSnapshot
+from collector.repository_search.filtering import _http_url, _text
+from collector.repository_search.models import (
+    MISSING_METADATA_VALUE,
+    JsonFetcher,
+    RepositorySearchResult,
+)
 
-JsonFetcher = Callable[[str], dict[str, object]]
-logger = logging.getLogger(__name__)
-PROVIDER_UNAVAILABLE_MESSAGE = "This source could not be searched."
-INVALID_METADATA_MESSAGE = "Some results were omitted because their metadata was invalid."
-CLASSIFICATION_UNAVAILABLE_MESSAGE = "Some results could not be classified."
-MISSING_METADATA_VALUE = MISSING_DATASET_METADATA_VALUE
 DISEASE_TERMS = (
     "aids",
     "cancer",
@@ -118,41 +105,6 @@ TEXT_MODALITY_TERMS = {
 }
 
 
-@dataclass(frozen=True)
-class RepositorySearchResult:
-    title: str
-    url: str
-    source: str
-    search_query: str = ""
-    description: str = ""
-    publisher: str = ""
-    date: str = ""
-    doi: str = ""
-    keywords: list[str] = field(default_factory=list)
-    relevance_score: float = 0.0
-    metadata: dict[str, object] = field(default_factory=dict)
-    classification: RepositoryClassification | None = None
-
-
-@dataclass(frozen=True)
-class RepositorySearchWarning:
-    message: str = PROVIDER_UNAVAILABLE_MESSAGE
-    provider: Optional[str] = None  # noqa: UP045 - Keep Python 3.9-compatible typing.
-
-
-@dataclass(frozen=True)
-class RepositorySearchResponse:
-    results: list[RepositorySearchResult] = field(default_factory=list)
-    warnings: list[RepositorySearchWarning] = field(default_factory=list)
-
-
-class RepositorySearchProvider(Protocol):
-    name: str
-
-    def search(self, query: str) -> list[RepositorySearchResult]:
-        ...
-
-
 class DataCiteRepositorySearchProvider:
     name = "DataCite"
     _base_url = "https://api.datacite.org/dois"
@@ -172,11 +124,11 @@ class DataCiteRepositorySearchProvider:
             raise ValueError("Invalid DataCite response shape: expected data list.")
 
         results: list[RepositorySearchResult] = []
-        for rank, item in enumerate(items):
+        for item in items:
             if not isinstance(item, dict):
                 continue
 
-            result = _datacite_result(item, rank)
+            result = _datacite_result(item)
             if result is not None:
                 results.append(result)
 
@@ -192,176 +144,7 @@ class DataCiteRepositorySearchProvider:
         return f"{self._base_url}?{urlencode(params)}"
 
 
-def search_repository_metadata(
-    query: str,
-    providers: Iterable[RepositorySearchProvider] | None = None,
-) -> RepositorySearchResponse:
-    normalized_query = query.strip()
-    if not normalized_query:
-        raise ValueError("Search query is required")
-
-    active_providers = (
-        list(providers) if providers is not None else [DataCiteRepositorySearchProvider()]
-    )
-    results: list[RepositorySearchResult] = []
-    errors: list[str] = []
-    warnings: list[RepositorySearchWarning] = []
-    successful_provider_count = 0
-
-    for provider in active_providers:
-        try:
-            provider_results = provider.search(normalized_query)
-        except ValueError as exception:
-            error = f"{provider.name}: {exception}"
-            errors.append(error)
-            logger.warning("Repository search provider failed: %s", error)
-            warnings.append(RepositorySearchWarning(provider=provider.name))
-            continue
-
-        successful_provider_count += 1
-        results.extend(
-            replace(result, search_query=normalized_query)
-            for result in provider_results
-        )
-
-    if successful_provider_count == 0 and errors:
-        raise ValueError("All repository providers failed.")
-
-    filtered_results, rejected_result_count = filter_repository_results(results)
-    if rejected_result_count:
-        warnings.append(RepositorySearchWarning(message=INVALID_METADATA_MESSAGE))
-
-    return RepositorySearchResponse(
-        results=sorted(
-            filtered_results,
-            key=lambda result: result.relevance_score,
-            reverse=True,
-        ),
-        warnings=warnings,
-    )
-
-
-def filter_repository_results(
-    results: Iterable[RepositorySearchResult],
-) -> tuple[list[RepositorySearchResult], int]:
-    filtered_results: list[RepositorySearchResult] = []
-    rejected_result_count = 0
-    for result in results:
-        title = _text(result.title)
-        url = _http_url(_text(result.url))
-        relevance_score = _number(result.relevance_score)
-        if (
-            not title
-            or not url
-            or relevance_score is None
-            or relevance_score < 0
-            or relevance_score > 1
-        ):
-            rejected_result_count += 1
-            continue
-
-        filtered_results.append(
-            replace(
-                result,
-                title=title,
-                url=url,
-                relevance_score=round(relevance_score, 4),
-            )
-        )
-
-    return filtered_results, rejected_result_count
-
-
-def classify_repository_results(
-    results: Iterable[RepositorySearchResult],
-    classifier: RepositoryResultClassifier,
-) -> tuple[list[RepositorySearchResult], list[RepositorySearchWarning]]:
-    """Classify repository results from their normalized metadata contract."""
-    classified_results: list[RepositorySearchResult] = []
-    failed_count = 0
-
-    for result in results:
-        try:
-            classified_result = classify_repository_result(result, classifier)
-        except PageClassificationError as exception:
-            failed_count += 1
-            logger.warning(
-                "Repository result classification failed for %s: %s",
-                result.url,
-                exception,
-            )
-            classified_results.append(result)
-            continue
-
-        classified_results.append(classified_result)
-
-    warnings = (
-        [RepositorySearchWarning(message=CLASSIFICATION_UNAVAILABLE_MESSAGE)]
-        if failed_count
-        else []
-    )
-    return classified_results, warnings
-
-
-def classify_repository_result(
-    result: RepositorySearchResult,
-    classifier: RepositoryResultClassifier,
-) -> RepositorySearchResult:
-    """Classify one repository result from its normalized metadata contract."""
-    classification = classifier.classify(_repository_result_page(result))
-    return replace(result, classification=classification)
-
-
-def _repository_result_page(result: RepositorySearchResult) -> PageSnapshot:
-    metadata = normalize_dataset_metadata(result.metadata)
-    title = _metadata_text(metadata["Title"], fallback=result.title)
-    description = _metadata_text(
-        metadata["Description of dataset"],
-        fallback=result.description,
-    )
-    return PageSnapshot(
-        url=result.url,
-        canonical_url=result.url,
-        search_query=result.search_query,
-        title=title,
-        meta_description=description,
-        publisher=result.publisher,
-        geography=_metadata_items(metadata["Geography"]),
-        date_of_publication=_metadata_text(
-            metadata["Date of publication"],
-            fallback=result.date,
-        ),
-        dataset_url=_metadata_text(metadata["Dataset URL"], fallback=result.url),
-        diseases=_metadata_items(metadata["Disease(s)"]),
-        size_of_dataset=_metadata_text(metadata["Size of dataset"]),
-        demographic_information=_metadata_items(
-            metadata["Demographic information"]
-        ),
-        sharing_license=_metadata_text(metadata["Sharing license"]),
-        modality_of_data=_metadata_items(metadata["Modality of data"]),
-        description_of_dataset=description,
-        text=" ".join(
-            value
-            for value in (result.title, result.description, " ".join(result.keywords))
-            if value
-        ),
-    )
-
-
-def _metadata_text(value: str, *, fallback: str = "") -> str:
-    return fallback if value == MISSING_METADATA_VALUE else value
-
-
-def _metadata_items(value: str) -> tuple[str, ...]:
-    if value == MISSING_METADATA_VALUE:
-        return ()
-    return tuple(item.strip() for item in value.split(",") if item.strip())
-
-
-def _datacite_result(
-    item: dict[object, object],
-    rank: int,
-) -> RepositorySearchResult | None:
+def _datacite_result(item: dict[object, object]) -> RepositorySearchResult | None:
     attributes = item.get("attributes")
     if not isinstance(attributes, dict):
         return None
@@ -376,9 +159,6 @@ def _datacite_result(
     description = _description(attributes)
     date = _date(attributes)
     keywords = _subjects(attributes)
-    native_score = _number(attributes.get("score"))
-    if native_score is None:
-        native_score = _number(item.get("score"))
 
     return RepositorySearchResult(
         title=title,
@@ -389,7 +169,6 @@ def _datacite_result(
         date=date,
         doi=doi,
         keywords=keywords,
-        relevance_score=_relevance_score(native_score, rank),
         metadata=_search_result_metadata(
             attributes,
             title=extracted_title,
@@ -731,13 +510,6 @@ def _doi_url(doi: str) -> str:
     return f"https://doi.org/{doi}" if doi else ""
 
 
-def _http_url(value: str) -> str:
-    parts = urlsplit(value)
-    if parts.scheme in {"http", "https"} and parts.hostname:
-        return value
-    return ""
-
-
 def _subjects(attributes: dict[object, object]) -> list[str]:
     subjects = attributes.get("subjects")
     if not isinstance(subjects, list):
@@ -753,28 +525,3 @@ def _subjects(attributes: dict[object, object]) -> list[str]:
             values.append(text)
 
     return values
-
-
-def _relevance_score(native_score: float | None, rank: int) -> float:
-    if native_score is not None and 0 <= native_score <= 1:
-        return round(native_score, 4)
-
-    return max(0.0, round(1.0 - (rank * 0.05), 4))
-
-
-def _number(value: object) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-
-    return None
-
-
-def _text(value: object) -> str:
-    return value.strip() if isinstance(value, str) else ""

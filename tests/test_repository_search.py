@@ -2,17 +2,12 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
-from collector.classification.page import PageClassificationError
-from collector.classification.repository import RepositoryClassification
 from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.repository_search import (
-    CLASSIFICATION_UNAVAILABLE_MESSAGE,
     INVALID_METADATA_MESSAGE,
     PROVIDER_UNAVAILABLE_MESSAGE,
     DataCiteRepositorySearchProvider,
     RepositorySearchResult,
-    _number,
-    classify_repository_results,
     search_repository_metadata,
 )
 
@@ -62,7 +57,6 @@ def test_datacite_provider_builds_query_url_and_normalizes_results():
                             "resourceTypeGeneral": "Dataset",
                             "resourceType": "Epidemiological dataset",
                         },
-                        "score": 0.93,
                     },
                 }
             ]
@@ -95,7 +89,6 @@ def test_datacite_provider_builds_query_url_and_normalizes_results():
     assert result.date == "2025"
     assert result.doi == "10.1234/malaria"
     assert result.keywords == ["malaria", "mortality"]
-    assert result.relevance_score == 0.93
     assert tuple(result.metadata) == DATASET_METADATA_KEYS
     assert result.metadata == {
         "Title": "Malaria mortality estimates",
@@ -168,7 +161,6 @@ def test_datacite_provider_uses_doi_resolver_when_landing_url_is_missing():
     assert results[0].doi == "10.1234/missing-url"
     assert results[0].publisher == "Repository Publisher"
     assert results[0].date == "2024-06-30"
-    assert results[0].relevance_score == 1.0
 
 
 def test_datacite_provider_uses_doi_resolver_when_landing_url_is_invalid():
@@ -211,7 +203,7 @@ def test_datacite_provider_fails_clearly_for_invalid_top_level_response():
         raise AssertionError("Expected ValueError.")
 
 
-def test_search_repository_metadata_sorts_provider_results_by_relevance():
+def test_search_repository_metadata_preserves_provider_result_order():
     class FakeProvider:
         name = "fake"
 
@@ -222,13 +214,11 @@ def test_search_repository_metadata_sorts_provider_results_by_relevance():
                     title="Lower",
                     url="https://example.org/lower",
                     source="Fake",
-                    relevance_score=0.4,
                 ),
                 RepositorySearchResult(
                     title="Higher",
                     url="https://example.org/higher",
                     source="Fake",
-                    relevance_score=0.9,
                 ),
             ]
 
@@ -238,17 +228,12 @@ def test_search_repository_metadata_sorts_provider_results_by_relevance():
     )
 
     results = response.results
-    assert [result.title for result in results] == ["Higher", "Lower"]
+    assert [result.title for result in results] == ["Lower", "Higher"]
     assert [result.search_query for result in results] == [
         "malaria mortality",
         "malaria mortality",
     ]
     assert response.warnings == []
-
-
-def test_number_rejects_boolean_values():
-    assert _number(True) is None
-    assert _number(False) is None
 
 
 def test_search_repository_metadata_filters_invalid_results_before_returning():
@@ -261,39 +246,38 @@ def test_search_repository_metadata_filters_invalid_results_before_returning():
                     title="Valid result",
                     url="https://example.org/valid",
                     source="Mixed",
-                    relevance_score=0.8,
                 ),
                 RepositorySearchResult(
                     title="",
                     url="https://example.org/missing-title",
                     source="Mixed",
-                    relevance_score=0.7,
                 ),
                 RepositorySearchResult(
                     title="Invalid URL",
                     url="javascript:alert(1)",
                     source="Mixed",
-                    relevance_score=0.7,
                 ),
                 RepositorySearchResult(
-                    title="Boolean score",
-                    url="https://example.org/boolean-score",
+                    title="Second valid result",
+                    url="https://example.org/second-valid",
                     source="Mixed",
-                    relevance_score=True,
                 ),
                 RepositorySearchResult(
-                    title="Out of range score",
-                    url="https://example.org/out-of-range-score",
+                    title="Third valid result",
+                    url="https://example.org/third-valid",
                     source="Mixed",
-                    relevance_score=1.2,
                 ),
             ]
 
     response = search_repository_metadata("malaria mortality", providers=[MixedProvider()])
     results = response.results
 
-    assert len(results) == 1
-    assert results[0].title == "Valid result"
+    assert len(results) == 3
+    assert [result.title for result in results] == [
+        "Valid result",
+        "Second valid result",
+        "Third valid result",
+    ]
     assert len(response.warnings) == 1
     assert response.warnings[0].provider is None
     assert response.warnings[0].message == INVALID_METADATA_MESSAGE
@@ -310,7 +294,6 @@ def test_search_repository_metadata_returns_partial_results_when_one_provider_fa
                     title="Available result",
                     url="https://example.org/available",
                     source="Successful",
-                    relevance_score=0.8,
                 )
             ]
 
@@ -378,40 +361,3 @@ def test_search_repository_metadata_raises_only_when_all_providers_fail():
         assert str(exception) == "All repository providers failed."
     else:
         raise AssertionError("Expected ValueError.")
-
-
-def test_classify_repository_results_keeps_items_when_one_classification_fails():
-    class MixedClassifier:
-        def classify(self, page):
-            if page.url == "https://example.org/failing":
-                raise PageClassificationError("bad LLM response")
-            return RepositoryClassification(
-                relevance_label="relevant",
-                reason="The metadata matches the query.",
-            )
-
-    results, warnings = classify_repository_results(
-        [
-            RepositorySearchResult(
-                title="Classified",
-                url="https://example.org/classified",
-                source="DataCite",
-                relevance_score=0.9,
-            ),
-            RepositorySearchResult(
-                title="Failing",
-                url="https://example.org/failing",
-                source="DataCite",
-                relevance_score=0.8,
-            ),
-        ],
-        MixedClassifier(),
-    )
-
-    assert len(results) == 2
-    assert results[0].classification is not None
-    assert results[0].classification.relevance_label == "relevant"
-    assert not hasattr(results[0].classification, "health_label")
-    assert results[1].classification is None
-    assert len(warnings) == 1
-    assert warnings[0].message == CLASSIFICATION_UNAVAILABLE_MESSAGE

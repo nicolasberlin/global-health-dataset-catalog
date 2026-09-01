@@ -62,19 +62,13 @@ async def _insert_minimal_dataset(database, suffix: str = "") -> int:
         row = await db_connection._fetchone(
             connection,
             """
-            INSERT INTO collected_datasets (
-                dataset_url, title, dataset_probability, health_probability,
-                health_label
-            )
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO collected_datasets (dataset_url, title)
+            VALUES (%s, %s)
             RETURNING id
             """,
             (
                 f"https://catalog.example.org/dataset/valid{suffix}",
                 "Valid dataset",
-                0.8,
-                0.7,
-                "HEALTH",
             ),
         )
     return int(row["id"])
@@ -118,98 +112,45 @@ async def _assert_schema_constraints_are_enforced(database, suffix: str = "") ->
         ),
         (
             """
-            INSERT INTO collected_datasets (
-                dataset_url, title, dataset_probability, health_probability,
-                health_label
-            )
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO collected_datasets (dataset_url, title)
+            VALUES (%s, %s)
             """,
-            (
-                "   ",
-                "Blank dataset URL",
-                0.8,
-                0.7,
-                "HEALTH",
-            ),
+            ("   ", "Blank dataset URL"),
         ),
         (
             """
             INSERT INTO collected_datasets (
-                dataset_url, title, dataset_probability, dataset_signals,
-                health_probability, health_label
+                dataset_url, title, dataset_signals
             )
-            VALUES (%s, %s, %s, '[]'::jsonb, %s, %s)
+            VALUES (%s, %s, '[]'::jsonb)
             """,
             (
                 f"https://catalog.example.org/dataset/bad-dataset-signals{suffix}",
                 "Bad dataset signals",
-                0.8,
-                0.7,
-                "HEALTH",
             ),
         ),
         (
             """
             INSERT INTO collected_datasets (
-                dataset_url, title, dataset_probability, geography,
-                health_probability, health_label
+                dataset_url, title, geography
             )
-            VALUES (%s, %s, %s, '{}'::jsonb, %s, %s)
+            VALUES (%s, %s, '{}'::jsonb)
             """,
             (
                 f"https://catalog.example.org/dataset/bad-origin-countries{suffix}",
                 "Bad origin countries",
-                0.8,
-                0.7,
-                "HEALTH",
             ),
         ),
         (
             """
             INSERT INTO collected_datasets (
-                dataset_url, title, dataset_probability, health_probability,
-                health_label, health_signals
+                dataset_url, title, health_signals
             )
-            VALUES (%s, %s, %s, %s, %s, '[]'::jsonb)
+            VALUES (%s, %s, '[]'::jsonb)
             """,
             (
                 f"https://catalog.example.org/dataset/bad-health-signals{suffix}",
                 "Bad health signals",
-                0.8,
-                0.7,
-                "HEALTH",
-            ),
-        ),
-        (
-            """
-            INSERT INTO collected_datasets (
-                dataset_url, title, dataset_probability, health_probability,
-                health_label
-            )
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (
-                f"https://catalog.example.org/dataset/bad-probability{suffix}",
-                "Bad dataset probability",
-                16.42,
-                0.7,
-                "HEALTH",
-            ),
-        ),
-        (
-            """
-            INSERT INTO collected_datasets (
-                dataset_url, title, dataset_probability, health_probability,
-                health_label
-            )
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (
-                f"https://catalog.example.org/dataset/bad-label{suffix}",
-                "Bad health label",
-                0.8,
-                0.7,
-                "banana",
             ),
         ),
         (
@@ -310,6 +251,23 @@ async def _assert_schema_constraints_are_enforced(database, suffix: str = "") ->
             await _execute(database, sql, parameters)
 
 
+async def test_current_schema_rejects_obsolete_collected_dataset_columns(monkeypatch):
+    async def fake_fetchall(connection, sql, parameters=None):
+        assert "information_schema.columns" in sql
+        return [
+            {"column_name": "title"},
+            {"column_name": "health_label"},
+            {"column_name": "dataset_probability"},
+        ]
+
+    monkeypatch.setattr(db_schema, "_fetchall", fake_fetchall)
+
+    with pytest.raises(RuntimeError, match="Recreate the local database") as error:
+        await db_schema._assert_current_schema_has_no_obsolete_columns(object())
+
+    assert "dataset_probability, health_label" in str(error.value)
+
+
 def _mortality_dataset() -> CollectedDataset:
     return CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/mortality",
@@ -319,10 +277,7 @@ def _mortality_dataset() -> CollectedDataset:
         hosting_platform="",
         uploader="",
         geography=("France",),
-        dataset_probability=0.92,
         dataset_signals={"schema_dataset": True},
-        health_probability=0.8,
-        health_label="HEALTH",
         health_signals={"matched_keywords": ["mortality"]},
         distributions=[
             DistributionCandidate(
@@ -537,6 +492,29 @@ async def test_init_database_rejects_current_version_with_missing_managed_tables
 
     assert "data_sources" in str(error.value)
     assert "collection_jobs" in str(error.value)
+
+
+async def test_init_database_rejects_current_version_with_obsolete_columns(database):
+    async with db_connection._require_database_pool().connection() as connection:
+        await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
+        for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
+            await connection.execute(schema)
+        await connection.execute(
+            """
+            ALTER TABLE collected_datasets
+            ADD COLUMN dataset_probability DOUBLE PRECISION NOT NULL DEFAULT 0
+            """
+        )
+        await db_schema._set_schema_version(
+            connection,
+            db_schema.CURRENT_SCHEMA_VERSION,
+        )
+
+    with pytest.raises(RuntimeError, match="Recreate the local database") as error:
+        await database.init_database()
+
+    assert "dataset_probability" in str(error.value)
+    assert "collected_datasets" in await _table_names(database)
 
 
 async def test_init_database_does_not_overwrite_current_reserved_source_key_collision(
@@ -765,10 +743,7 @@ async def test_save_and_list_collected_datasets(database):
         hosting_platform="",
         uploader="",
         geography=("Germany", "France"),
-        dataset_probability=0.94,
         dataset_signals=dataset.dataset_signals,
-        health_probability=0.85,
-        health_label="HEALTH",
         health_signals=dataset.health_signals,
         distributions=[
             DistributionCandidate(
@@ -816,10 +791,7 @@ async def test_save_preserves_every_dataset_discovery_observation(database):
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.92,
         dataset_signals={"schema_dataset": True},
-        health_probability=0.8,
-        health_label="HEALTH",
         health_signals={"matched_keywords": ["mortality"]},
         distributions=[],
         discovery_method="ckan",
@@ -837,10 +809,7 @@ async def test_save_preserves_every_dataset_discovery_observation(database):
         publisher=dataset.publisher,
         hosting_platform="",
         uploader="",
-        dataset_probability=0.9,
         dataset_signals=dataset.dataset_signals,
-        health_probability=0.78,
-        health_label="HEALTH",
         health_signals=dataset.health_signals,
         distributions=[],
         discovery_method="sitemap",
@@ -881,10 +850,7 @@ async def test_save_links_dataset_discovery_observation_to_collection_job(databa
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.92,
         dataset_signals={"schema_dataset": True},
-        health_probability=0.8,
-        health_label="HEALTH",
         health_signals={"matched_keywords": ["mortality"]},
         distributions=[],
         discovery_method="ckan",
@@ -916,10 +882,7 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.8,
         dataset_signals={},
-        health_probability=0.7,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(
@@ -986,10 +949,7 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         publisher=dataset.publisher,
         hosting_platform="",
         uploader="",
-        dataset_probability=0.85,
         dataset_signals={},
-        health_probability=0.75,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(
@@ -1055,10 +1015,7 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         publisher=dataset.publisher,
         hosting_platform="",
         uploader="",
-        dataset_probability=0.86,
         dataset_signals={},
-        health_probability=0.76,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(
@@ -1101,10 +1058,7 @@ async def test_validation_results_match_distribution_by_url_and_format(database)
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.8,
         dataset_signals={},
-        health_probability=0.7,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(url=shared_url, format="CSV", probability=0.9),
@@ -1150,10 +1104,7 @@ async def test_duplicate_validation_results_fail_clearly(database):
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.8,
         dataset_signals={},
-        health_probability=0.7,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(
@@ -1196,10 +1147,7 @@ async def test_orphan_validation_result_fails_clearly(database):
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.8,
         dataset_signals={},
-        health_probability=0.7,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(
@@ -1235,10 +1183,7 @@ async def test_save_collected_distribution_without_validation_result(database):
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.8,
         dataset_signals={},
-        health_probability=0.7,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(
@@ -1289,10 +1234,7 @@ async def test_corrupted_stored_signals_fail_when_listing_datasets(database):
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.8,
         dataset_signals={},
-        health_probability=0.7,
-        health_label="HEALTH",
         health_signals={},
         distributions=[],
     )
@@ -1434,10 +1376,7 @@ async def test_non_json_serializable_signals_do_not_leave_partial_rows(database)
         publisher="National Health Agency",
         hosting_platform="",
         uploader="",
-        dataset_probability=0.8,
         dataset_signals={},
-        health_probability=0.7,
-        health_label="HEALTH",
         health_signals={},
         distributions=[
             DistributionCandidate(

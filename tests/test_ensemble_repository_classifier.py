@@ -8,7 +8,7 @@ from collector.classification.repository import RepositoryClassification
 from collector.storage.models import PageSnapshot
 
 
-def test_repository_ensemble_accepts_by_majority_without_health_label():
+def test_repository_ensemble_accepts_by_majority():
     classifier = EnsembleRepositoryRelevanceClassifier(
         [
             ("llm_a", _StaticClassifier(_classification("relevant", "clear match"))),
@@ -32,16 +32,12 @@ def test_repository_ensemble_accepts_by_majority_without_health_label():
     assert result.accepted is True
     assert result.relevance_label == "somewhat_relevant"
     assert result.reason == "partial match"
-    assert not hasattr(result, "health_label")
 
     ensemble = result.ensemble
     assert ensemble["accepted_votes"] == 2
     assert ensemble["decision"] == "accepted"
     assert ensemble["decision_reason"] == "enough_accept_votes"
     assert ensemble["decision_voter_ids"] == ["llm_a", "llm_b"]
-    assert "health_label" not in ensemble["voters"][0]
-    assert "dataset_probability" not in ensemble["voters"][0]
-    assert "health_probability" not in ensemble["voters"][0]
 
 
 def test_repository_ensemble_rejects_with_one_failure_and_one_accepting_vote():

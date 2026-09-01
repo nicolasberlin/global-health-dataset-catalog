@@ -6,15 +6,17 @@ from collector.classification.ensemble import (
     EnsemblePageClassifier,
     EnsembleRepositoryRelevanceClassifier,
 )
-from collector.classification.llm import (
+from collector.classification.llm_client import (
     HTTPJSONLLMClient,
-    LLMPageClassifier,
-    LLMRepositoryRelevanceClassifier,
     openai_repository_relevance_provider_config,
     openai_responses_provider_config,
 )
 from collector.classification.page import PageClassificationError, PageClassifier
+from collector.classification.page_llm_classifier import LLMPageClassifier
 from collector.classification.repository import RepositoryResultClassifier
+from collector.classification.repository_llm_classifier import (
+    LLMRepositoryRelevanceClassifier,
+)
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 
 OPENAI_CLASSIFIER_VOTERS: tuple[tuple[str, str], ...] = (

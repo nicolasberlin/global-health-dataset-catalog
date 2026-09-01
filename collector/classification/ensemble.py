@@ -17,13 +17,8 @@ from collector.classification.repository import (
     RepositoryRelevanceLabel,
     RepositoryResultClassifier,
 )
-from collector.storage.models import DistributionCandidate, HealthLabel, PageSnapshot
+from collector.storage.models import DistributionCandidate, PageSnapshot
 
-HEALTH_LABEL_CONSERVATIVE_ORDER: tuple[HealthLabel, ...] = (
-    "NON_HEALTH",
-    "PARTIALLY_HEALTH",
-    "HEALTH",
-)
 REPOSITORY_RELEVANCE_CONSERVATIVE_ORDER: tuple[RepositoryRelevanceLabel, ...] = (
     "not_relevant",
     "insufficient_information",
@@ -100,7 +95,7 @@ class EnsemblePageClassifier:
         accepted_votes = sum(1 for vote in votes if vote.accepted)
         accepted = accepted_votes >= self._votes_required
         decision_votes = _decision_votes(votes, accepted)
-        ensemble_summary = _ensemble_summary(
+        ensemble_arguments = dict(
             votes=votes,
             failures=failures,
             votes_required=self._votes_required,
@@ -118,15 +113,18 @@ class EnsemblePageClassifier:
 
         return PageClassification(
             accepted=accepted,
-            dataset_probability=_average(
-                [vote.dataset_probability for vote in decision_votes]
-            ),
-            health_probability=_average(
-                [vote.health_probability for vote in decision_votes]
-            ),
-            health_label=_majority_health_label(decision_votes),
-            dataset_signals={"ensemble": ensemble_summary},
-            health_signals={"ensemble": ensemble_summary},
+            dataset_signals={
+                "ensemble": _ensemble_summary(
+                    **ensemble_arguments,
+                    signal_kind="dataset",
+                )
+            },
+            health_signals={
+                "ensemble": _ensemble_summary(
+                    **ensemble_arguments,
+                    signal_kind="health",
+                )
+            },
         )
 
     def _classify_voters(
@@ -284,9 +282,6 @@ def _classify_voter(
         vote=PageClassificationVote(
             voter_id=voter_id,
             accepted=classification.accepted,
-            dataset_probability=classification.dataset_probability,
-            health_probability=classification.health_probability,
-            health_label=classification.health_label,
             dataset_signals=classification.dataset_signals,
             health_signals=classification.health_signals,
         ),
@@ -342,6 +337,7 @@ def _ensemble_summary(
     decision: str,
     decision_reason: str,
     decision_voter_ids: list[str],
+    signal_kind: str,
 ) -> dict[str, object]:
     return {
         "votes_required": votes_required,
@@ -352,20 +348,24 @@ def _ensemble_summary(
         "decision": decision,
         "decision_reason": decision_reason,
         "decision_voter_ids": decision_voter_ids,
-        "voters": [_vote_summary(vote) for vote in votes],
+        "voters": [_vote_summary(vote, signal_kind) for vote in votes],
         "failures": failures,
     }
 
 
-def _vote_summary(vote: PageClassificationVote) -> dict[str, object]:
+def _vote_summary(
+    vote: PageClassificationVote,
+    signal_kind: str,
+) -> dict[str, object]:
+    signals = (
+        vote.dataset_signals
+        if signal_kind == "dataset"
+        else vote.health_signals
+    )
     return {
         "voter_id": vote.voter_id,
         "accepted": vote.accepted,
-        "dataset_probability": vote.dataset_probability,
-        "health_probability": vote.health_probability,
-        "health_label": vote.health_label,
-        "dataset_signals": vote.dataset_signals,
-        "health_signals": vote.health_signals,
+        "signals": signals,
     }
 
 
@@ -404,10 +404,6 @@ def _repository_vote_summary(
         "reason": vote.reason,
         "missing_information": vote.missing_information,
     }
-
-
-def _average(values: list[float]) -> float:
-    return sum(values) / len(values)
 
 
 def _decision_votes(
@@ -464,22 +460,6 @@ def _repository_decision_reason(
         return "insufficient_accept_votes"
 
     return "insufficient_accept_votes"
-
-
-def _majority_health_label(votes: Iterable[PageClassificationVote]) -> HealthLabel:
-    counts = Counter(vote.health_label for vote in votes)
-    max_count = max(counts.values())
-    tied_labels = {
-        label
-        for label, count in counts.items()
-        if count == max_count
-    }
-
-    for label in HEALTH_LABEL_CONSERVATIVE_ORDER:
-        if label in tied_labels:
-            return label
-
-    raise PageClassificationError("Classifier votes did not include a health label.")
 
 
 def _majority_relevance_label(

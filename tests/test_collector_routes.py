@@ -6,33 +6,23 @@ import time
 
 import pytest
 from app.routes.collector import (
-    _analyze_html,
     _run_collection_job,
-    analyze_html,
-    analyze_url,
     classify_repository_result,
-    collect_url,
-    discover_url,
     list_collected,
     read_collection_job,
     search_repositories,
     start_collection_job,
 )
 from app.routes.collector_schemas import (
-    CollectorAnalyzeHTMLRequest,
-    CollectorCollectURLRequest,
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorURLRequest,
 )
 from fastapi import BackgroundTasks, HTTPException
 
-from collector.classification.heuristic import HeuristicPageClassifier
 from collector.classification.page import PageClassificationError
 from collector.classification.repository import RepositoryClassification
 from collector.config import DEFAULT_CONFIG
-from collector.discovery.adapters import DiscoveredPage
-from collector.fetch import FetchedPage
 from collector.repository_search import (
     RepositorySearchResponse,
     RepositorySearchResult,
@@ -42,18 +32,9 @@ from collector.storage.models import (
     CollectedDataset,
     CollectionReport,
     CollectionResult,
-    DistributionCandidate,
-    ValidationResult,
 )
 
 pytestmark = pytest.mark.anyio
-
-
-def _use_heuristic_default_classifier(monkeypatch):
-    monkeypatch.setattr(
-        "app.routes.collector.build_default_page_classifier",
-        lambda config=DEFAULT_CONFIG: HeuristicPageClassifier(config),
-    )
 
 
 def _use_accepting_repository_classifier(monkeypatch):
@@ -98,211 +79,6 @@ def _accepted_repository_ensemble(*, reason: str) -> dict[str, object]:
     }
 
 
-async def test_collector_analyze_html_route_returns_scores_and_distributions(monkeypatch):
-    _use_heuristic_default_classifier(monkeypatch)
-    threaded_calls = []
-
-    async def fake_to_thread(function, *args, **kwargs):
-        threaded_calls.append((function, args))
-        return function(*args, **kwargs)
-
-    monkeypatch.setattr("app.routes.collector.asyncio.to_thread", fake_to_thread)
-    payload = CollectorAnalyzeHTMLRequest(
-        url="https://example.org/datasets/mortality",
-        html="""
-        <html>
-            <head>
-                <title>Mortality health dataset</title>
-                <meta name="description" content="Official health mortality data." />
-                <script type="application/ld+json">
-                {
-                    "@context": "https://schema.org",
-                    "@type": "Dataset",
-                    "publisher": {"name": "National Health Agency"},
-                    "spatialCoverage": {"@type": "Country", "name": "France"},
-                    "distribution": {
-                        "@type": "DataDownload",
-                        "contentUrl": "https://example.org/files/mortality.csv",
-                        "encodingFormat": "text/csv"
-                    }
-                }
-                </script>
-            </head>
-            <body>
-                <h1>Mortality health dataset</h1>
-                <p>Mortality and epidemiology indicators.</p>
-                <a href="https://example.org/files/mortality.xlsx">Download XLSX</a>
-            </body>
-        </html>
-        """,
-    )
-
-    response = await analyze_html(payload)
-
-    assert response.accepted is True
-    assert response.publisher == "National Health Agency"
-    assert response.hosting_platform == ""
-    assert response.uploader == ""
-    assert response.geography == ["France"]
-    assert response.dataset_probability >= 0.9
-    assert response.health_probability >= 0.35
-    assert response.health_label in {"HEALTH", "PARTIALLY_HEALTH"}
-    assert {distribution.format for distribution in response.distributions} == {"CSV", "XLSX"}
-    assert threaded_calls == [
-        (
-            _analyze_html,
-            ("https://example.org/datasets/mortality", payload.html),
-        )
-    ]
-
-
-async def test_collector_analyze_url_route_fetches_and_analyzes_html(monkeypatch):
-    _use_heuristic_default_classifier(monkeypatch)
-    threaded_calls = []
-
-    async def fake_to_thread(function, *args, **kwargs):
-        threaded_calls.append((function, args))
-        return function(*args, **kwargs)
-
-    def fake_fetch_public_html(url):
-        return FetchedPage(
-            url=url,
-            final_url=url,
-            status_code=200,
-            content_type="text/html",
-            html="""
-            <html>
-                <head>
-                    <title>Vaccination dataset</title>
-                    <script type="application/ld+json">
-                    {"@type": "Dataset"}
-                    </script>
-                </head>
-                <body>
-                    <h1>Vaccination health dataset</h1>
-                    <p>Vaccination and epidemiology data.</p>
-                    <a href="https://example.org/files/vaccination.csv">Download CSV</a>
-                </body>
-            </html>
-            """,
-        )
-
-    monkeypatch.setattr("app.routes.collector.fetch_public_html", fake_fetch_public_html)
-    monkeypatch.setattr("app.routes.collector.asyncio.to_thread", fake_to_thread)
-
-    response = await analyze_url(CollectorURLRequest(url="https://example.org/catalog"))
-
-    assert response.accepted is True
-    assert response.publisher == ""
-    assert response.hosting_platform == ""
-    assert response.uploader == ""
-    assert response.dataset_probability >= 0.6
-    assert response.health_probability >= 0.35
-    assert {distribution.format for distribution in response.distributions} == {"CSV"}
-    assert [function for function, _args in threaded_calls] == [
-        fake_fetch_public_html,
-        _analyze_html,
-    ]
-
-
-def test_collector_analyze_html_route_returns_502_when_classification_fails():
-    class FailingClassifier:
-        def classify(self, page, distributions):
-            raise PageClassificationError("LLM classification failed.")
-
-    try:
-        _analyze_html(
-            "https://example.org/datasets/mortality",
-            "<html><head><title>Mortality dataset</title></head></html>",
-            classifier=FailingClassifier(),
-        )
-    except HTTPException as exception:
-        assert exception.status_code == 502
-        assert exception.detail == "Page classification failed."
-    else:
-        raise AssertionError("Expected HTTPException.")
-
-
-def test_collector_analyze_html_route_uses_llm_default_classifier(monkeypatch):
-    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_1", "model-a")
-    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_2", "model-b")
-    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_3", "model-c")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    try:
-        _analyze_html(
-            "https://example.org/datasets/mortality",
-            "<html><head><title>Mortality dataset</title></head></html>",
-        )
-    except HTTPException as exception:
-        assert exception.status_code == 502
-        assert exception.detail == "Page classification failed."
-    else:
-        raise AssertionError("Expected HTTPException.")
-
-
-async def test_collector_discover_url_route_returns_discovered_pages(monkeypatch):
-    def fake_discover_source(url):
-        assert url == "https://catalog.example.org/"
-        return [
-            DiscoveredPage(
-                url="https://catalog.example.org/dataset/mortality",
-                discovery_method="ckan",
-                priority=0.9,
-                title="Mortality dataset",
-                description="Official mortality health data.",
-                publisher="National Health Agency",
-                geography=("France",),
-                discovery_metadata={"ckan_name": "mortality"},
-                distributions=(
-                    DistributionCandidate(
-                        url="https://catalog.example.org/files/mortality.csv",
-                        format="CSV",
-                        probability=0.95,
-                        anchor="CSV download",
-                        mime_type="text/csv",
-                    ),
-                ),
-            )
-        ]
-
-    monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
-
-    response = await discover_url(CollectorURLRequest(url="https://catalog.example.org"))
-
-    assert len(response.items) == 1
-    item = response.items[0]
-    assert item.url == "https://catalog.example.org/dataset/mortality"
-    assert item.discovery_method == "ckan"
-    assert item.priority == 0.9
-    assert item.title == "Mortality dataset"
-    assert item.description == "Official mortality health data."
-    assert item.publisher == "National Health Agency"
-    assert item.geography == ["France"]
-    assert item.discovery_metadata == {"ckan_name": "mortality"}
-    assert len(item.distributions) == 1
-    assert item.distributions[0].url == "https://catalog.example.org/files/mortality.csv"
-    assert item.distributions[0].format == "CSV"
-    assert item.distributions[0].mime_type == "text/csv"
-
-
-async def test_collector_discover_url_route_returns_bad_request_for_discovery_errors(
-    monkeypatch,
-):
-    def fake_discover_source(url):
-        raise ValueError(f"Could not discover {url}")
-
-    monkeypatch.setattr("app.routes.collector.discover_source", fake_discover_source)
-
-    try:
-        await discover_url(CollectorURLRequest(url="https://catalog.example.org"))
-    except HTTPException as exception:
-        assert exception.status_code == 400
-        assert exception.detail == "Could not discover https://catalog.example.org/"
-    else:
-        raise AssertionError("Expected HTTPException.")
-
-
 async def test_collector_search_repositories_route_accepts_query_and_returns_results(
     monkeypatch,
 ):
@@ -319,7 +95,6 @@ async def test_collector_search_repositories_route_accepts_query_and_returns_res
                     date="2025",
                     doi="10.1234/example",
                     keywords=["malaria", "mortality"],
-                    relevance_score=0.93,
                     metadata={
                         "Title": "Malaria mortality estimates",
                         "Geography": "France",
@@ -361,7 +136,6 @@ async def test_collector_search_repositories_route_accepts_query_and_returns_res
     assert item.date == "2025"
     assert item.doi == "10.1234/example"
     assert item.keywords == ["malaria", "mortality"]
-    assert item.relevance_score == 0.93
     assert item.classification is None
     assert len(response.warnings) == 1
     assert response.warnings[0].provider == "HDX"
@@ -384,7 +158,6 @@ async def test_collector_classify_repository_result_route_returns_classification
             date="2025",
             doi="10.1234/example",
             keywords=["malaria", "mortality"],
-            relevance_score=0.93,
             metadata={
                 "Title": "Malaria mortality estimates",
                 "Geography": "France",
@@ -407,10 +180,6 @@ async def test_collector_classify_repository_result_route_returns_classification
     assert response.classification.reason == (
         "Malaria mortality estimates matches the search query."
     )
-    classification_data = response.classification.model_dump()
-    assert "health_label" not in classification_data
-    assert "dataset_probability" not in classification_data
-    assert "health_probability" not in classification_data
 
 
 async def test_collector_classify_repository_result_route_returns_502_when_classification_fails(
@@ -570,137 +339,6 @@ def test_collector_repository_item_rejects_incomplete_classification_contract():
         )
 
 
-async def test_collector_collect_url_route_returns_collected_datasets(monkeypatch):
-    saved_calls = []
-
-    def fake_collect_source(url):
-        assert url == "https://catalog.example.org/"
-        return [
-            CollectedDataset(
-                dataset_url="https://catalog.example.org/dataset/mortality",
-                title="Mortality health dataset",
-                description="Official mortality health data.",
-                publisher="National Health Agency",
-                hosting_platform="",
-                uploader="",
-                geography=("France",),
-                dataset_probability=0.92,
-                dataset_signals={"schema_dataset": True},
-                health_probability=0.8,
-                health_label="HEALTH",
-                health_signals={"matched_keywords": ["mortality"]},
-                distributions=[
-                    DistributionCandidate(
-                        url="https://catalog.example.org/files/mortality.csv",
-                        format="CSV",
-                        probability=0.95,
-                        anchor="CSV download",
-                        mime_type="text/csv",
-                    )
-                ],
-                discovery_method="ckan",
-                validation_results=[
-                    ValidationResult(
-                        url="https://catalog.example.org/files/mortality.csv",
-                        final_url="https://catalog.example.org/files/mortality.csv",
-                        format="CSV",
-                        ok=True,
-                        http_status=200,
-                        mime_type="text/csv",
-                        size_bytes=123,
-                    )
-                ],
-            )
-        ]
-
-    async def fake_save_collected_datasets(source_url, datasets):
-        saved_calls.append((source_url, datasets))
-        return datasets
-
-    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
-    monkeypatch.setattr(
-        "app.routes.collector.save_collected_datasets",
-        fake_save_collected_datasets,
-    )
-
-    response = await collect_url(
-        CollectorCollectURLRequest(url="https://catalog.example.org")
-    )
-
-    assert len(saved_calls) == 1
-    assert saved_calls[0][0] == "https://catalog.example.org/"
-    assert len(response.items) == 1
-    assert response.saved is True
-    assert response.saved_count == 1
-    item = response.items[0]
-    assert item.dataset_url == "https://catalog.example.org/dataset/mortality"
-    assert item.discovery_method == "ckan"
-    assert item.geography == ["France"]
-    assert item.dataset_probability == 0.92
-    assert item.health_label == "HEALTH"
-    assert item.distributions[0].format == "CSV"
-    assert item.validation_results[0].ok is True
-    assert item.validation_results[0].size_bytes == 123
-
-
-async def test_collector_collect_url_route_can_skip_saving(monkeypatch):
-    def fake_collect_source(url):
-        return [
-            CollectedDataset(
-                dataset_url="https://catalog.example.org/dataset/mortality",
-                title="Mortality health dataset",
-                description="Official mortality health data.",
-                publisher="National Health Agency",
-                hosting_platform="",
-                uploader="",
-                geography=("France",),
-                dataset_probability=0.92,
-                dataset_signals={},
-                health_probability=0.8,
-                health_label="HEALTH",
-                health_signals={},
-                distributions=[],
-                discovery_method="ckan",
-                validation_results=[],
-            )
-        ]
-
-    async def fake_save_collected_datasets(source_url, datasets):
-        raise AssertionError("Should not save when save is false.")
-
-    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
-    monkeypatch.setattr(
-        "app.routes.collector.save_collected_datasets",
-        fake_save_collected_datasets,
-    )
-
-    response = await collect_url(
-        CollectorCollectURLRequest(url="https://catalog.example.org", save=False)
-    )
-
-    assert response.saved is False
-    assert response.saved_count == 0
-    assert len(response.items) == 1
-    assert response.items[0].geography == ["France"]
-
-
-async def test_collector_collect_url_route_returns_502_when_classification_fails(
-    monkeypatch,
-):
-    def fake_collect_source(url):
-        raise PageClassificationError("LLM classification failed.")
-
-    monkeypatch.setattr("app.routes.collector.collect_source", fake_collect_source)
-
-    try:
-        await collect_url(CollectorCollectURLRequest(url="https://catalog.example.org"))
-    except HTTPException as exception:
-        assert exception.status_code == 502
-        assert exception.detail == "Page classification failed."
-    else:
-        raise AssertionError("Expected HTTPException.")
-
-
 async def test_collector_start_collection_job_route_enqueues_background_task(monkeypatch):
     async def fake_create_collection_job(source_url):
         assert source_url == "https://catalog.example.org/"
@@ -794,10 +432,7 @@ async def test_run_collection_job_marks_done(monkeypatch):
                     publisher="National Health Agency",
                     hosting_platform="",
                     uploader="",
-                    dataset_probability=0.92,
                     dataset_signals={},
-                    health_probability=0.8,
-                    health_label="HEALTH",
                     health_signals={},
                     distributions=[],
                     discovery_method="ckan",
@@ -921,10 +556,7 @@ async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch
                 hosting_platform="",
                 uploader="",
                 geography=("France",),
-                dataset_probability=0.92,
                 dataset_signals={},
-                health_probability=0.8,
-                health_label="HEALTH",
                 health_signals={},
                 distributions=[],
                 discovery_method="ckan",
@@ -942,8 +574,6 @@ async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch
 
     response = await list_collected()
 
-    assert response.saved is False
-    assert response.saved_count == 0
     assert len(response.items) == 1
     assert response.items[0].id == 7
     assert response.items[0].source_url == "https://catalog.example.org/"

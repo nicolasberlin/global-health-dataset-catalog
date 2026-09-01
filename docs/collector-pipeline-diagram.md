@@ -43,25 +43,10 @@ flowchart TD
     JobStatus -->|"when done"| ReloadCollected["reload collected datasets"]
     ReloadCollected --> CollectedList
 
-    UI -->|"POST /collector/analyze-html<br/>manual collector form"| AnalyzeHTML["_analyze_html()<br/>extract + classify"]
-    AnalyzeHTML --> Classifier
-    AnalyzeHTML -->|"no DB write"| AnalyzeResponse["analysis response"]
-
-    UI -->|"POST /collector/analyze-url<br/>manual collector button"| AnalyzeURL["fetch_public_html()<br/>then _analyze_html()"]
-    AnalyzeURL --> External
-    AnalyzeURL --> Classifier
-    AnalyzeURL -->|"no DB write"| AnalyzeResponse
-
     ApiClient["Frontend<br/>or API client"]
     ApiClient -.->|"GET /health"| Health["health()"]
     ApiClient -.->|"POST /sources"| CreateSource["create_source()"]
     CreateSource -.-> DB
-    ApiClient -.->|"POST /collector/discover-url"| DiscoverURL["discover_source()<br/>candidate pages only"]
-    DiscoverURL -.-> External
-    ApiClient -.->|"POST /collector/collect-url"| CollectURL["collect_source()<br/>sync collection"]
-    CollectURL -.-> External
-    CollectURL -.-> Classifier
-    CollectURL -.->|"save=true"| DB
     ApiClient -.->|"POST /collector/search-repositories"| RepoSearch["search_repository_metadata()<br/>normalized candidates"]
     RepoSearch -.-> External
     ApiClient -.->|"POST /collector/classify-repository-result"| RepoClassify["classify one repository result"]
@@ -77,10 +62,6 @@ flowchart TD
 | Frontend | `GET` | `/collector/collected-datasets` | Reads accepted/saved collected datasets. | No | Display datasets already written to PostgreSQL. |
 | Frontend | `POST` | `/collector/collection-jobs` | Creates a job and starts `collect_source_with_report()` in the background. | Yes | Main source collection flow from the `Collecter` button. |
 | Frontend | `GET` | `/collector/collection-jobs/{job_id}` | Reads job status and counters. | No | Poll until the background collection is `done` or `error`. |
-| Frontend | `POST` | `/collector/analyze-html` | Parses pasted HTML, extracts distributions, runs ensemble classification. | No | Manual/debug analysis of pasted HTML. |
-| Frontend | `POST` | `/collector/analyze-url` | Fetches one URL, parses HTML, extracts distributions, runs ensemble classification. | No | Manual/debug analysis of one live URL. |
-| API/manual | `POST` | `/collector/discover-url` | Runs discovery adapters only. | No | Inspect candidate pages without classification or storage. |
-| API/manual | `POST` | `/collector/collect-url` | Runs synchronous collection and optionally saves accepted datasets. | Optional | Direct API collection path; current frontend uses async jobs instead. |
 | Frontend or API/manual | `POST` | `/collector/search-repositories` | Searches repository APIs and normalizes candidate metadata. | No | Query-first repository search. Returns candidates, not final accepted datasets. |
 | Frontend or API/manual | `POST` | `/collector/classify-repository-result` | Converts one candidate to a `PageSnapshot`, then runs the ensemble classifier. Backend concurrency is limited to two candidates per process. | No | Progressive per-result classification; frontend shows only accepted results. |
 
@@ -100,10 +81,6 @@ Click "Collecter"
   -> background collect_source_with_report()
   -> repeated GET /collector/collection-jobs/{job_id}
   -> GET /collector/collected-datasets after success
-
-Manual collector panel
-  -> POST /collector/analyze-html
-  -> POST /collector/analyze-url
 
 Repository search flow
   -> POST /collector/search-repositories
@@ -224,7 +201,6 @@ classDiagram
         +str date
         +str doi
         +list keywords
-        +float relevance_score
         +dict metadata
         +RepositoryClassification classification
     }
@@ -283,8 +259,7 @@ raw fields into normalized `PageSnapshot` fields before classification.
 
 ## Discovery Adapter Pipeline
 
-This is the adapter path used by `/collector/discover-url`, `/collector/collect-url`,
-and async collection jobs.
+This is the adapter path used by asynchronous collection jobs.
 
 ```mermaid
 flowchart TD
@@ -312,9 +287,7 @@ flowchart TD
     DiscoveredPages --> DistributionFields
     DiscoveredPages --> DiscoveryMetadata
 
-    DiscoverRoute["POST /collector/discover-url"]
-    DiscoveryResponse["API response<br/>candidate pages only"]
-    CollectRoute["POST /collector/collect-url<br/>or collection job"]
+    CollectionJob["POST /collector/collection-jobs<br/>background collection"]
     SelectPages["selected pages<br/>max_pages_per_source"]
     StructuredCheck{"structured discovery data?"}
     DirectSnapshot["analyze_discovered_page()<br/>build PageSnapshot from DiscoveredPage"]
@@ -326,12 +299,9 @@ flowchart TD
     Rejected["rejected<br/>not written to DB"]
     CollectedDataset["CollectedDataset"]
     Validate["validate distributions"]
-    Save["save collected dataset<br/>if route requested save"]
+    Save["save collected dataset"]
 
-    DiscoverRoute --> DiscoverSource
-    DiscoveredPages --> DiscoveryResponse
-
-    CollectRoute --> DiscoverSource
+    CollectionJob --> DiscoverSource
     DiscoveredPages --> SelectPages --> StructuredCheck
     StructuredCheck -- "yes" --> DirectSnapshot
     StructuredCheck -- "no" --> FetchHTML --> ExtractHTML
@@ -339,7 +309,7 @@ flowchart TD
     ExtractHTML --> PageSnapshot
     BusinessFields -. "copied into" .-> PageSnapshot
     DistributionFields -. "passed with page" .-> Classify
-    DiscoveryMetadata -. "audit/API only" .-> DiscoveryResponse
+    DiscoveryMetadata -. "discovery audit" .-> CollectedDataset
     PageSnapshot --> Classify --> Accepted
     Accepted -- "no" --> Rejected
     Accepted -- "yes" --> CollectedDataset --> Validate --> Save
@@ -352,9 +322,8 @@ reads the normalized `PageSnapshot` business fields plus distributions.
 The default classifier is an `EnsemblePageClassifier`: it requires three distinct
 OpenAI model names in `OPENAI_CLASSIFIER_MODEL_1`, `OPENAI_CLASSIFIER_MODEL_2`,
 and `OPENAI_CLASSIFIER_MODEL_3`. A page is accepted when at least two successful
-votes return `accepted=true`. Final probabilities are averaged from the votes
-that carry the majority decision for audit/display only; they do not decide
-acceptance.
+votes return `accepted=true`. Dataset and health reasons are retained separately
+for every successful voter.
 
 ## Collector Pipeline
 
@@ -440,9 +409,6 @@ classDiagram
 
     class PageClassification {
         +bool accepted
-        +float dataset_probability
-        +float health_probability
-        +HealthLabel health_label
         +dict dataset_signals
         +dict health_signals
     }
@@ -456,9 +422,6 @@ classDiagram
     class PageClassificationVote {
         +str voter_id
         +bool accepted
-        +float dataset_probability
-        +float health_probability
-        +HealthLabel health_label
         +dict dataset_signals
         +dict health_signals
     }
@@ -471,10 +434,7 @@ classDiagram
         +tuple geography
         +str hosting_platform
         +str uploader
-        +float dataset_probability
         +dict dataset_signals
-        +float health_probability
-        +HealthLabel health_label
         +dict health_signals
         +list distributions
         +list validation_results

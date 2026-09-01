@@ -24,18 +24,8 @@ from collector.classification.repository import (
 )
 
 
-# Manual collector test endpoints: analyze pasted HTML or fetch one URL maybe refator later.
-class CollectorAnalyzeHTMLRequest(BaseModel):
-    url: HttpUrl
-    html: str = Field(min_length=1, max_length=100_000)
-
-
 class CollectorURLRequest(BaseModel):
     url: HttpUrl
-
-
-class CollectorCollectURLRequest(CollectorURLRequest):
-    save: bool = True
 
 
 # Query-driven repository search endpoint, separate from the collector test flow.
@@ -174,7 +164,6 @@ class CollectorRepositorySearchItem(BaseModel):
         default_factory=list,
         max_length=MAX_REPOSITORY_KEYWORDS,
     )
-    relevance_score: float = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
     classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
 
@@ -220,22 +209,6 @@ class CollectorDistribution(BaseModel):
     last_checked_at: str = ""
 
 
-class CollectorDiscoveredPage(BaseModel):
-    url: str
-    discovery_method: str
-    priority: float
-    title: str = ""
-    description: str = ""
-    publisher: str = ""
-    geography: list[str] = Field(default_factory=list)
-    discovery_metadata: dict[str, Any] = Field(default_factory=dict)
-    distributions: list[CollectorDistribution]
-
-
-class CollectorDiscoveryResponse(BaseModel):
-    items: list[CollectorDiscoveredPage]
-
-
 class CollectorValidation(BaseModel):
     url: str
     final_url: str
@@ -250,23 +223,6 @@ class CollectorValidation(BaseModel):
     error: str = ""
 
 
-class CollectorAnalyzeHTMLResponse(BaseModel):
-    accepted: bool
-    dataset_url: str
-    title: str
-    description: str
-    publisher: str
-    hosting_platform: str
-    uploader: str
-    geography: list[str] = Field(default_factory=list)
-    dataset_probability: float
-    dataset_signals: dict[str, Any]
-    health_probability: float
-    health_label: str
-    health_signals: dict[str, Any]
-    distributions: list[CollectorDistribution]
-
-
 class CollectorCollectedDataset(BaseModel):
     id: Optional[int] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     source_url: str = ""
@@ -278,10 +234,7 @@ class CollectorCollectedDataset(BaseModel):
     uploader: str
     geography: list[str] = Field(default_factory=list)
     discovery_method: str
-    dataset_probability: float
     dataset_signals: dict[str, Any]
-    health_probability: float
-    health_label: str
     health_signals: dict[str, Any]
     distributions: list[CollectorDistribution]
     validation_results: list[CollectorValidation]
@@ -292,8 +245,6 @@ class CollectorCollectedDataset(BaseModel):
 
 class CollectorCollectionResponse(BaseModel):
     items: list[CollectorCollectedDataset]
-    saved: bool = False
-    saved_count: int = 0
 
 
 class CollectorCollectionJob(BaseModel):

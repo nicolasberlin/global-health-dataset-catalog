@@ -1,42 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
-const REPOSITORY_RESULT_LIMIT = 10;
-const REPOSITORY_CLASSIFICATION_CONCURRENCY = 2;
-const AGREEMENT_FILTERS = [
-    { value: 'all', label: 'Tous' },
-    { value: '3', label: '3/3' },
-    { value: '2', label: '2/3' },
-];
+import CollectedDatasetsSection from './components/CollectedDatasetsSection.jsx';
+import { getAcceptedVoteCount } from './components/RepositoryAcceptedCard.jsx';
+import RepositorySearchSection from './components/RepositorySearchSection.jsx';
+import SourceCatalogSection from './components/SourceCatalogSection.jsx';
 
-const SAMPLE_COLLECTOR_HTML = `<html>
-  <head>
-    <title>Mortality by age and sex dataset</title>
-    <meta name="description" content="Official mortality health dataset." />
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Dataset",
-      "name": "Mortality by age and sex",
-      "publisher": {"@type": "Organization", "name": "National Health Agency"},
-      "spatialCoverage": {"@type": "Country", "name": "France"},
-      "distribution": [
-        {
-          "@type": "DataDownload",
-          "contentUrl": "https://example.org/files/mortality.csv",
-          "encodingFormat": "text/csv"
-        }
-      ]
-    }
-    </script>
-  </head>
-  <body>
-    <h1>Mortality by age and sex</h1>
-    <p>This health dataset contains mortality and epidemiology indicators.</p>
-    <a href="https://example.org/files/mortality.xlsx">Download data as XLSX</a>
-    <a href="https://example.org/api/export?dataset=mortality&format=json">API export</a>
-  </body>
-</html>`;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
+const REPOSITORY_CLASSIFICATION_CONCURRENCY = 2;
 
 function normalizeSearchValue(value) {
     return String(value ?? '')
@@ -45,32 +15,10 @@ function normalizeSearchValue(value) {
         .toLowerCase();
 }
 
-function formatPercent(value) {
-    return `${Math.round(Number(value ?? 0) * 100)}%`;
-}
-
-function getHostname(url) {
-    try {
-        return new URL(url).hostname;
-    } catch {
-        return url;
-    }
-}
-
 function wait(milliseconds) {
     return new Promise((resolve) => {
         window.setTimeout(resolve, milliseconds);
     });
-}
-
-function formatCollectionMethods(methods) {
-    const values = Array.isArray(methods) ? methods.filter(Boolean) : [];
-    return values.length > 0 ? values.join(', ') : 'n/a';
-}
-
-function formatCountries(countries) {
-    const values = Array.isArray(countries) ? countries.filter(Boolean) : [];
-    return values.length > 0 ? values.join(', ') : 'pays non detecte';
 }
 
 function getResponseError(payload, fallbackMessage) {
@@ -90,173 +38,8 @@ function isAbortError(exception) {
     );
 }
 
-function getEnsembleSummary(classification) {
-    return (
-        classification?.ensemble ??
-        classification?.dataset_signals?.ensemble ??
-        classification?.health_signals?.ensemble ??
-        null
-    );
-}
-
-function getAcceptedVoteCount(classification) {
-    const ensemble = getEnsembleSummary(classification);
-    const explicitCount = Number(ensemble?.accepted_votes);
-    if (Number.isFinite(explicitCount)) {
-        return explicitCount;
-    }
-
-    if (Array.isArray(ensemble?.voters)) {
-        return ensemble.voters.filter((voter) => voter?.accepted === true).length;
-    }
-
-    return null;
-}
-
-function formatRepositoryRelevanceLabel(label) {
-    const labels = {
-        relevant: 'Pertinent',
-        somewhat_relevant: 'Partiellement pertinent',
-        not_relevant: 'Non pertinent',
-        insufficient_information: 'Information insuffisante',
-    };
-
-    return labels[label] ?? String(label ?? '').replaceAll('_', ' ').toLowerCase();
-}
-
-function formatDecisionReason(reason) {
-    const reasons = {
-        enough_accept_votes: 'accord suffisant',
-        rejected_by_majority: 'rejet à la majorité',
-        insufficient_accept_votes: 'accord insuffisant',
-    };
-
-    return reasons[reason] ?? reason;
-}
-
 function repositoryCandidateId(item, index) {
     return `${item.source}:${item.url}:${index}`;
-}
-
-function RepositoryProgressCard({ candidate }) {
-    const { item, status } = candidate;
-
-    return (
-        <article className="repository-card repository-card--progress">
-            <div className="repository-card__top">
-                <span className="repository-source-pill">{item.source}</span>
-                <span
-                    className={`repository-status-pill repository-status-pill--${status}`}
-                    role="status"
-                >
-                    {status === 'classifying' ? 'Analyse IA…' : 'En attente'}
-                </span>
-            </div>
-            <h3>{item.title}</h3>
-            <p>{item.description || 'Description non disponible.'}</p>
-            <div className="repository-card__footer">
-                <span>{item.publisher || getHostname(item.url)}</span>
-                {item.date ? <small>{item.date}</small> : null}
-            </div>
-        </article>
-    );
-}
-
-function RepositoryAcceptedCard({ candidate }) {
-    const { item } = candidate;
-    const classification = item.classification;
-    const ensemble = getEnsembleSummary(classification);
-    const acceptedVotes = getAcceptedVoteCount(classification);
-    const voters = Array.isArray(ensemble?.voters) ? ensemble.voters : [];
-    const agreementLabel = acceptedVotes === null ? '' : ` ${acceptedVotes}/3`;
-
-    return (
-        <article className="repository-card repository-card--accepted">
-            <div className="repository-card__top">
-                <span className="repository-source-pill">{item.source}</span>
-                <span className="repository-status-pill repository-status-pill--accepted">
-                    Accepté{agreementLabel}
-                </span>
-            </div>
-
-            <h3>{item.title}</h3>
-            <p>{item.description || 'Description non disponible.'}</p>
-
-            {(item.publisher || item.date) && (
-                <dl className="repository-facts">
-                    {item.publisher ? (
-                        <div>
-                            <dt>Publisher</dt>
-                            <dd>{item.publisher}</dd>
-                        </div>
-                    ) : null}
-                    {item.date ? (
-                        <div>
-                            <dt>Date</dt>
-                            <dd>{item.date}</dd>
-                        </div>
-                    ) : null}
-                </dl>
-            )}
-
-            {classification?.relevance_label ? (
-                <div className="repository-decision-row">
-                    <span>
-                        Pertinence IA
-                        <strong>
-                            {formatRepositoryRelevanceLabel(
-                                classification.relevance_label,
-                            )}
-                        </strong>
-                    </span>
-                </div>
-            ) : null}
-
-            <div className="repository-card__link-row">
-                <span>{getHostname(item.url)}</span>
-                <a href={item.url} target="_blank" rel="noreferrer">
-                    Ouvrir le dataset
-                </a>
-            </div>
-
-            {ensemble ? (
-                <details className="repository-ai-details">
-                    <summary>Détails IA</summary>
-                    <p>
-                        {acceptedVotes ?? 0}/3 votes favorables
-                        {ensemble.decision_reason
-                            ? ` · ${formatDecisionReason(ensemble.decision_reason)}`
-                            : ''}
-                    </p>
-                    {voters.length > 0 ? (
-                        <ul>
-                            {voters.map((voter, index) => (
-                                <li key={`${voter.voter_id ?? 'ia'}-${index}`}>
-                                    <span>
-                                        {voter.voter_id || `IA ${index + 1}`}
-                                        {voter.reason ? (
-                                            <small>{voter.reason}</small>
-                                        ) : null}
-                                    </span>
-                                    <strong>
-                                        {voter.accepted ? 'Accepte' : 'Refuse'}
-                                        {voter.relevance_label
-                                            ? ` · ${formatRepositoryRelevanceLabel(
-                                                  voter.relevance_label,
-                                              )}`
-                                            : ''}
-                                    </strong>
-                                </li>
-                            ))}
-                        </ul>
-                    ) : null}
-                    {Number(ensemble.failed_votes) > 0 ? (
-                        <small>{ensemble.failed_votes} vote IA indisponible.</small>
-                    ) : null}
-                </details>
-            ) : null}
-        </article>
-    );
 }
 
 export default function App() {
@@ -274,11 +57,6 @@ export default function App() {
     const [collectingSourceId, setCollectingSourceId] = useState(null);
     const [collectionNotice, setCollectionNotice] = useState(null);
     const [activeCollectionJob, setActiveCollectionJob] = useState(null);
-    const [collectorUrl, setCollectorUrl] = useState('https://example.org/data/catalog');
-    const [collectorHtml, setCollectorHtml] = useState(SAMPLE_COLLECTOR_HTML);
-    const [collectorLoading, setCollectorLoading] = useState(false);
-    const [collectorError, setCollectorError] = useState('');
-    const [collectorResult, setCollectorResult] = useState(null);
     const [repositoryQuery, setRepositoryQuery] = useState('');
     const [repositoryResultQuery, setRepositoryResultQuery] = useState('');
     const [repositoryCandidates, setRepositoryCandidates] = useState([]);
@@ -492,17 +270,15 @@ export default function App() {
             const candidates = (Array.isArray(responsePayload?.items)
                 ? responsePayload.items
                 : []
-            )
-                .slice(0, REPOSITORY_RESULT_LIMIT)
-                .map((item, index) => ({
-                    id: repositoryCandidateId(item, index),
-                    item: {
-                        ...item,
-                        search_query: item.search_query || query,
-                    },
-                    status: 'pending',
-                    error: '',
-                }));
+            ).map((item, index) => ({
+                id: repositoryCandidateId(item, index),
+                item: {
+                    ...item,
+                    search_query: item.search_query || query,
+                },
+                status: 'pending',
+                error: '',
+            }));
 
             setRepositoryCandidates(candidates);
             setRepositoryWarnings(
@@ -620,47 +396,6 @@ export default function App() {
         } finally {
             setCollectingSourceId(null);
         }
-    }
-
-    async function analyzeCollector(endpoint, payload) {
-        try {
-            setCollectorLoading(true);
-            setCollectorError('');
-            setCollectorResult(null);
-
-            const response = await fetch(`${API_BASE_URL}/collector/${endpoint}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload),
-            });
-
-            if (!response.ok) {
-                const errorPayload = await response.json().catch(() => null);
-                throw new Error(errorPayload?.detail ?? 'Impossible d’analyser cette page.');
-            }
-
-            setCollectorResult(await response.json());
-        } catch (exception) {
-            setCollectorError(exception instanceof Error ? exception.message : 'Erreur inconnue');
-        } finally {
-            setCollectorLoading(false);
-        }
-    }
-
-    async function analyzeCollectorHtml(event) {
-        event.preventDefault();
-        await analyzeCollector('analyze-html', {
-            url: collectorUrl,
-            html: collectorHtml,
-        });
-    }
-
-    async function analyzeCollectorUrl() {
-        await analyzeCollector('analyze-url', {
-            url: collectorUrl,
-        });
     }
 
     const themes = useMemo(
@@ -829,567 +564,52 @@ export default function App() {
                 </article>
             </section>
 
-            <section
-                className="repository-section"
-                aria-labelledby="repository-search-title"
-                aria-busy={repositoryAnalysisInProgress}
-            >
-                <div className="section-heading repository-heading">
-                    <div>
-                        <h2 id="repository-search-title">Repository Search</h2>
-                        <p>
-                            Recherche des datasets santé, puis affiche progressivement ceux
-                            acceptés par les trois IA.
-                        </p>
-                    </div>
-                    {repositoryResultQuery ? (
-                        <span className="repository-query-label">
-                            « {repositoryResultQuery} »
-                        </span>
-                    ) : null}
-                </div>
+            <RepositorySearchSection
+                acceptedRepositoryCandidates={acceptedRepositoryCandidates}
+                agreementFilter={agreementFilter}
+                inProgressRepositoryCandidates={inProgressRepositoryCandidates}
+                repositoryAnalysisInProgress={repositoryAnalysisInProgress}
+                repositoryCandidates={repositoryCandidates}
+                repositoryClassificationErrors={repositoryClassificationErrors}
+                repositoryError={repositoryError}
+                repositoryHasSearched={repositoryHasSearched}
+                repositoryQuery={repositoryQuery}
+                repositoryResultQuery={repositoryResultQuery}
+                repositorySearching={repositorySearching}
+                repositoryStatusCounts={repositoryStatusCounts}
+                repositoryWarnings={repositoryWarnings}
+                searchRepositories={searchRepositories}
+                setAgreementFilter={setAgreementFilter}
+                setRepositoryQuery={setRepositoryQuery}
+            />
 
-                <form className="repository-search-form" onSubmit={searchRepositories}>
-                    <div className="repository-query-field">
-                        <label htmlFor="repository-query">Rechercher un dataset santé</label>
-                        <input
-                            id="repository-query"
-                            type="search"
-                            value={repositoryQuery}
-                            onChange={(event) => setRepositoryQuery(event.target.value)}
-                            placeholder="Ex. malaria mortality France"
-                            maxLength={300}
-                            autoComplete="off"
-                        />
-                    </div>
-                    <button type="submit" disabled={repositoryAnalysisInProgress}>
-                        {repositorySearching
-                            ? 'Recherche…'
-                            : repositoryAnalysisInProgress
-                              ? 'Analyse…'
-                              : 'Rechercher'}
-                    </button>
-                </form>
+            <SourceCatalogSection
+                activeCollectionJob={activeCollectionJob}
+                apiBaseUrl={API_BASE_URL}
+                collectSource={collectSource}
+                collectingSourceId={collectingSourceId}
+                collectionNotice={collectionNotice}
+                emptyState={emptyState}
+                error={error}
+                filteredSources={filteredSources}
+                loadSources={loadSources}
+                loading={loading}
+                searchTerm={searchTerm}
+                selectedTheme={selectedTheme}
+                setSearchTerm={setSearchTerm}
+                setSelectedTheme={setSelectedTheme}
+                sources={sources}
+                statusTone={statusTone}
+                themes={themes}
+            />
 
-                <div className="repository-controls">
-                    <fieldset className="agreement-filter">
-                        <legend>Accord IA</legend>
-                        <div className="agreement-filter__options">
-                            {AGREEMENT_FILTERS.map((filter) => (
-                                <button
-                                    key={filter.value}
-                                    type="button"
-                                    className={
-                                        agreementFilter === filter.value
-                                            ? 'agreement-filter__button agreement-filter__button--active'
-                                            : 'agreement-filter__button'
-                                    }
-                                    aria-pressed={agreementFilter === filter.value}
-                                    onClick={() => setAgreementFilter(filter.value)}
-                                >
-                                    {filter.label}
-                                </button>
-                            ))}
-                        </div>
-                    </fieldset>
+            <CollectedDatasetsSection
+                collectedDatasets={collectedDatasets}
+                collectedError={collectedError}
+                collectedLoading={collectedLoading}
+                loadCollectedDatasets={loadCollectedDatasets}
+            />
 
-                    <div className="repository-counters" aria-label="État de la classification">
-                        <span>
-                            <strong>{repositoryCandidates.length}</strong>
-                            candidats
-                        </span>
-                        <span>
-                            <strong>
-                                {repositoryStatusCounts.pending +
-                                    repositoryStatusCounts.classifying}
-                            </strong>
-                            en analyse
-                        </span>
-                        <span>
-                            <strong>{repositoryStatusCounts.accepted}</strong>
-                            acceptés
-                        </span>
-                        <span>
-                            <strong>{repositoryStatusCounts.rejected}</strong>
-                            rejetés
-                        </span>
-                        <span>
-                            <strong>{repositoryStatusCounts.error}</strong>
-                            erreurs
-                        </span>
-                    </div>
-                </div>
-
-                {repositoryError ? (
-                    <div className="repository-message repository-message--error" role="alert">
-                        <strong>Recherche impossible</strong>
-                        <span>{repositoryError}</span>
-                    </div>
-                ) : null}
-
-                {repositoryWarnings.length > 0 ? (
-                    <div className="repository-message repository-message--warning" role="status">
-                        <strong>Avertissements</strong>
-                        <ul>
-                            {repositoryWarnings.map((warning, index) => (
-                                <li key={`${warning.provider ?? 'repository'}-${index}`}>
-                                    {warning.provider ? `${warning.provider} : ` : ''}
-                                    {warning.message}
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                ) : null}
-
-                {!repositoryHasSearched ? (
-                    <div className="repository-empty-state">
-                        <h3>Trouver un dataset santé</h3>
-                        <p>
-                            Tape quelques mots-clés pour lancer la recherche et l’analyse IA.
-                        </p>
-                    </div>
-                ) : null}
-
-                {repositoryHasSearched && repositorySearching ? (
-                    <div
-                        className="repository-empty-state repository-empty-state--loading"
-                        role="status"
-                    >
-                        <h3>Recherche des candidats</h3>
-                        <p>Interrogation des repositories disponibles…</p>
-                    </div>
-                ) : null}
-
-                {!repositorySearching &&
-                (inProgressRepositoryCandidates.length > 0 ||
-                    acceptedRepositoryCandidates.length > 0) ? (
-                    <div className="repository-result-grid" aria-live="polite">
-                        {acceptedRepositoryCandidates.map((candidate) => (
-                            <RepositoryAcceptedCard
-                                key={candidate.id}
-                                candidate={candidate}
-                            />
-                        ))}
-                        {inProgressRepositoryCandidates.map((candidate) => (
-                            <RepositoryProgressCard
-                                key={candidate.id}
-                                candidate={candidate}
-                            />
-                        ))}
-                    </div>
-                ) : null}
-
-                {repositoryHasSearched &&
-                !repositoryAnalysisInProgress &&
-                repositoryStatusCounts.accepted === 0 &&
-                !repositoryError ? (
-                    <div className="repository-empty-state">
-                        <h3>Aucun dataset accepté pour cette recherche.</h3>
-                        <p>Essaie avec des mots-clés plus précis ou une autre zone géographique.</p>
-                    </div>
-                ) : null}
-
-                {repositoryHasSearched &&
-                !repositoryAnalysisInProgress &&
-                repositoryStatusCounts.accepted > 0 &&
-                acceptedRepositoryCandidates.length === 0 ? (
-                    <div className="repository-empty-state">
-                        <h3>Aucun résultat avec ce niveau d’accord.</h3>
-                        <p>Sélectionne « Tous » pour revoir les datasets acceptés.</p>
-                    </div>
-                ) : null}
-
-                {repositoryStatusCounts.rejected > 0 ? (
-                    <p className="repository-rejected-summary" aria-live="polite">
-                        Sur {repositoryCandidates.length} candidats,{' '}
-                        {repositoryStatusCounts.rejected}{' '}
-                        {repositoryStatusCounts.rejected === 1
-                            ? 'a été rejeté'
-                            : 'ont été rejetés'}{' '}
-                        par l’IA.
-                    </p>
-                ) : null}
-
-                {repositoryClassificationErrors.length > 0 ? (
-                    <div className="repository-classification-errors" aria-live="polite">
-                        <strong>Erreurs de classification</strong>
-                        <ul>
-                            {repositoryClassificationErrors.map((candidate) => (
-                                <li key={candidate.id}>
-                                    <span>
-                                        {candidate.item.title}
-                                        {candidate.error ? (
-                                            <small>{candidate.error}</small>
-                                        ) : null}
-                                    </span>
-                                    <strong>Erreur</strong>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                ) : null}
-            </section>
-
-            <section className="catalog-section">
-                <div className="section-heading">
-                    <div>
-                        <h2>Sources disponibles</h2>
-                        <p>
-                            {error
-                                ? 'Le catalogue ne peut pas être lu pour le moment.'
-                                : 'Catalogue local synchronisé depuis le backend FastAPI.'}
-                        </p>
-                    </div>
-                </div>
-
-                <div className="catalog-toolbar">
-                    <div className="search-field">
-                        <label htmlFor="source-search">Recherche</label>
-                        <input
-                            id="source-search"
-                            type="search"
-                            value={searchTerm}
-                            onChange={(event) => setSearchTerm(event.target.value)}
-                            placeholder="Nom, thème, source key, URL..."
-                            disabled={loading || sources.length === 0}
-                        />
-                    </div>
-                    <div className="filter-row">
-                        <label htmlFor="theme-filter">Thème</label>
-                        <select
-                            id="theme-filter"
-                            value={selectedTheme}
-                            onChange={(event) => setSelectedTheme(event.target.value)}
-                            disabled={loading || sources.length === 0}
-                        >
-                            {themes.map((theme) => (
-                                <option key={theme} value={theme}>
-                                    {theme === 'All' ? 'Tous' : theme}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <span className="results-count">
-                        {filteredSources.length} / {sources.length}
-                    </span>
-                </div>
-
-                <div className="source-grid">
-                    {filteredSources.length > 0 ? (
-                        filteredSources.map((source) => (
-                            <article className="source-card" key={source.id}>
-                                <div className="source-card__meta">
-                                    <span className="theme-pill">{source.theme}</span>
-                                    <span className="source-key">{source.source_key}</span>
-                                </div>
-                                <h3>{source.name}</h3>
-                                <p>{source.description}</p>
-                                <div className="source-card__footer">
-                                    <span>{getHostname(source.page_url)}</span>
-                                    <div className="source-card__actions">
-                                        <a
-                                            className="source-link"
-                                            href={`${API_BASE_URL}/sources/${source.id}/page`}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                        >
-                                            Ouvrir
-                                        </a>
-                                        <button
-                                            type="button"
-                                            className="secondary-button source-action-button"
-                                            onClick={() => collectSource(source)}
-                                            disabled={collectingSourceId !== null}
-                                        >
-                                            {collectingSourceId === source.id
-                                                ? 'Collecte...'
-                                                : 'Collecter'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </article>
-                        ))
-                    ) : (
-                        <article className={`empty-card empty-card--${statusTone}`}>
-                            <h3>{emptyState.title}</h3>
-                            <p>{emptyState.description}</p>
-                            {error ? (
-                                <button type="button" onClick={loadSources}>
-                                    Réessayer
-                                </button>
-                            ) : null}
-                        </article>
-                    )}
-                </div>
-
-                {collectionNotice ? (
-                    <article className={`collection-notice collection-notice--${collectionNotice.tone}`}>
-                        <p>{collectionNotice.message}</p>
-                        {activeCollectionJob ? (
-                            <>
-                                <small>
-                                    Statut: {activeCollectionJob.status} · méthodes:{' '}
-                                    {formatCollectionMethods(activeCollectionJob.discovery_methods)}
-                                </small>
-                                <div className="collection-notice__summary">
-                                    <span>
-                                        <strong>{activeCollectionJob.discovered_count ?? 0}</strong>
-                                        découvertes
-                                    </span>
-                                    <span>
-                                        <strong>{activeCollectionJob.analyzed_count ?? 0}</strong>
-                                        analysées
-                                    </span>
-                                    <span>
-                                        <strong>{activeCollectionJob.accepted_count ?? 0}</strong>
-                                        acceptées
-                                    </span>
-                                    <span>
-                                        <strong>{activeCollectionJob.rejected_count ?? 0}</strong>
-                                        rejetées
-                                    </span>
-                                    <span>
-                                        <strong>
-                                            {activeCollectionJob.invalid_distribution_count ?? 0}
-                                        </strong>
-                                        fichiers invalides
-                                    </span>
-                                    <span>
-                                        <strong>{activeCollectionJob.saved_count ?? 0}</strong>
-                                        sauvegardées
-                                    </span>
-                                </div>
-                            </>
-                        ) : null}
-                    </article>
-                ) : null}
-            </section>
-
-            <section className="collected-section">
-                <div className="section-heading">
-                    <div>
-                        <h2>Datasets collectés</h2>
-                        <p>Résultats sauvegardés après classification santé et validation des fichiers.</p>
-                    </div>
-                    <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() => loadCollectedDatasets()}
-                        disabled={collectedLoading}
-                    >
-                        {collectedLoading ? 'Chargement...' : 'Actualiser'}
-                    </button>
-                </div>
-
-                {collectedError ? (
-                    <article className="empty-card empty-card--error">
-                        <h3>Impossible de charger les datasets collectés</h3>
-                        <p>{collectedError}</p>
-                    </article>
-                ) : null}
-
-                {!collectedError && collectedLoading ? (
-                    <article className="empty-card empty-card--loading">
-                        <h3>Chargement des datasets collectés</h3>
-                        <p>Lecture des résultats sauvegardés.</p>
-                    </article>
-                ) : null}
-
-                {!collectedError && !collectedLoading && collectedDatasets.length === 0 ? (
-                    <article className="empty-card">
-                        <h3>Aucun dataset collecté</h3>
-                        <p>Lance une collecte depuis une source pour remplir cette liste.</p>
-                    </article>
-                ) : null}
-
-                {!collectedError && !collectedLoading && collectedDatasets.length > 0 ? (
-                    <div className="dataset-grid">
-                        {collectedDatasets.map((dataset) => (
-                            <article className="dataset-card" key={dataset.dataset_url}>
-                                <div className="dataset-card__meta">
-                                    <span className="theme-pill">{dataset.discovery_method || 'source'}</span>
-                                    <span className="health-pill">{dataset.health_label}</span>
-                                </div>
-                                <h3>{dataset.title}</h3>
-                                <p>{dataset.description || dataset.dataset_url}</p>
-
-                                <div className="dataset-score-row">
-                                    <span>
-                                        Dataset
-                                        <strong>{formatPercent(dataset.dataset_probability)}</strong>
-                                    </span>
-                                    <span>
-                                        Santé
-                                        <strong>{formatPercent(dataset.health_probability)}</strong>
-                                    </span>
-                                    <span>
-                                        Fichiers
-                                        <strong>{dataset.distributions?.length ?? 0}</strong>
-                                    </span>
-                                </div>
-
-                                <div className="dataset-card__source">
-                                    <div className="dataset-card__source-text">
-                                        <span>{dataset.publisher || getHostname(dataset.dataset_url)}</span>
-                                        <small>{formatCountries(dataset.geography)}</small>
-                                    </div>
-                                    <a href={dataset.dataset_url} target="_blank" rel="noreferrer">
-                                        Page dataset
-                                    </a>
-                                </div>
-
-                                {dataset.distributions?.length > 0 ? (
-                                    <ul className="distribution-list distribution-list--compact">
-                                        {dataset.distributions.slice(0, 4).map((distribution) => {
-                                            const validation = dataset.validation_results?.find(
-                                                (item) => item.url === distribution.url,
-                                            );
-
-                                            return (
-                                                <li key={`${dataset.dataset_url}-${distribution.url}`}>
-                                                    <strong>{distribution.format}</strong>
-                                                    <span>{distribution.url}</span>
-                                                    <small>
-                                                        {validation?.http_status
-                                                            ? `HTTP ${validation.http_status}`
-                                                            : 'validé'}
-                                                        {validation?.size_bytes
-                                                            ? ` · ${validation.size_bytes} bytes`
-                                                            : ''}
-                                                    </small>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                ) : null}
-                            </article>
-                        ))}
-                    </div>
-                ) : null}
-            </section>
-
-            <section className="collector-section">
-                <div className="section-heading">
-                    <div>
-                        <h2>Test collector</h2>
-                        <p>
-                            Colle du HTML ou analyse directement une URL publique pour voir comment
-                            le collector l’interprete.
-                        </p>
-                    </div>
-                </div>
-
-                <form className="collector-form" onSubmit={analyzeCollectorHtml}>
-                    <div className="collector-url-field">
-                        <label htmlFor="collector-url">URL de la page</label>
-                        <input
-                            id="collector-url"
-                            type="url"
-                            value={collectorUrl}
-                            onChange={(event) => setCollectorUrl(event.target.value)}
-                            required
-                        />
-                    </div>
-                    <div className="collector-html-field">
-                        <label htmlFor="collector-html">HTML a analyser</label>
-                        <textarea
-                            id="collector-html"
-                            value={collectorHtml}
-                            onChange={(event) => setCollectorHtml(event.target.value)}
-                            rows={12}
-                            required
-                        />
-                    </div>
-                    <div className="collector-action-row">
-                        <button type="submit" disabled={collectorLoading}>
-                            {collectorLoading ? 'Analyse...' : 'Analyser le HTML'}
-                        </button>
-                        <button
-                            type="button"
-                            className="secondary-button"
-                            onClick={analyzeCollectorUrl}
-                            disabled={collectorLoading}
-                        >
-                            Analyser l’URL
-                        </button>
-                    </div>
-                </form>
-
-                {collectorError ? (
-                    <article className="collector-result collector-result--error">
-                        <h3>Erreur collector</h3>
-                        <p>{collectorError}</p>
-                    </article>
-                ) : null}
-
-                {collectorResult ? (
-                    <article className="collector-result">
-                        <div className="collector-result__header">
-                            <div>
-                                <span className="theme-pill">
-                                    {collectorResult.accepted ? 'Dataset accepte' : 'Dataset rejete'}
-                                </span>
-                                <h3>{collectorResult.title}</h3>
-                                <p>{collectorResult.description || collectorResult.dataset_url}</p>
-                            </div>
-                            <div className="collector-score-grid">
-                                <span>
-                                    Dataset
-                                    <strong>
-                                        {formatPercent(collectorResult.dataset_probability)}
-                                    </strong>
-                                </span>
-                                <span>
-                                    Sante
-                                    <strong>{formatPercent(collectorResult.health_probability)}</strong>
-                                </span>
-                            </div>
-                        </div>
-
-                        <div className="collector-detail-grid">
-                            <div>
-                                <h4>Classification</h4>
-                                <p>
-                                    Label sante: <strong>{collectorResult.health_label}</strong>
-                                </p>
-                                <p>
-                                    Publisher:{' '}
-                                    <strong>{collectorResult.publisher || 'non detecte'}</strong>
-                                </p>
-                                <p>
-                                    Plateforme:{' '}
-                                    <strong>
-                                        {collectorResult.hosting_platform || 'non detectee'}
-                                    </strong>
-                                </p>
-                                <p>
-                                    Uploader:{' '}
-                                    <strong>{collectorResult.uploader || 'non detecte'}</strong>
-                                </p>
-                                <p>
-                                    Pays:{' '}
-                                    <strong>{formatCountries(collectorResult.geography)}</strong>
-                                </p>
-                            </div>
-                            <div>
-                                <h4>Distributions trouvees</h4>
-                                {collectorResult.distributions.length > 0 ? (
-                                    <ul className="distribution-list">
-                                        {collectorResult.distributions.map((distribution) => (
-                                            <li key={`${distribution.format}-${distribution.url}`}>
-                                                <strong>{distribution.format}</strong>
-                                                <span>{distribution.url}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                ) : (
-                                    <p>Aucun lien CSV/XLSX/API trouve.</p>
-                                )}
-                            </div>
-                        </div>
-                    </article>
-                ) : null}
-            </section>
         </main>
     );
 }

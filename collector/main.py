@@ -48,31 +48,10 @@ def analyze_html_page(
         hosting_platform=page.hosting_platform,
         uploader=page.uploader,
         geography=page.geography,
-        dataset_probability=classification.dataset_probability,
         dataset_signals=classification.dataset_signals,
-        health_probability=classification.health_probability,
-        health_label=classification.health_label,
         health_signals=classification.health_signals,
         distributions=distributions,
     )
-
-
-def collect_source(
-    source_url: str,
-    config: CollectorConfig = DEFAULT_CONFIG,
-    discover: DiscoverFunction = discover_source,
-    fetch_html: FetchHTMLFunction = fetch_public_html,
-    validate: ValidateDistributionFunction = validate_distribution,
-    classifier: PageClassifier | None = None,
-) -> list[CollectedDataset]:
-    return collect_source_with_report(
-        source_url,
-        config=config,
-        discover=discover,
-        fetch_html=fetch_html,
-        validate=validate,
-        classifier=classifier,
-    ).datasets
 
 
 def collect_source_with_report(
@@ -123,23 +102,6 @@ def collect_source_with_report(
             ),
         ),
     )
-
-
-def _collect_discovered_page(
-    discovered_page: DiscoveredPage,
-    config: CollectorConfig,
-    fetch_html: FetchHTMLFunction,
-    validate: ValidateDistributionFunction,
-    classifier: PageClassifier | None = None,
-) -> CollectedDataset | None:
-    dataset, _invalid_count = _collect_discovered_page_with_report(
-        discovered_page,
-        config,
-        fetch_html,
-        validate,
-        classifier,
-    )
-    return dataset
 
 
 def _collect_discovered_page_with_report(
@@ -224,10 +186,7 @@ def analyze_discovered_page(
         hosting_platform="",
         uploader="",
         geography=page.geography,
-        dataset_probability=classification.dataset_probability,
         dataset_signals=classification.dataset_signals,
-        health_probability=classification.health_probability,
-        health_label=classification.health_label,
         health_signals=classification.health_signals,
         distributions=distributions,
         discovery_method=discovered_page.discovery_method,
@@ -239,6 +198,8 @@ def _classifier_or_default(
     classifier: PageClassifier | None,
 ) -> PageClassifier:
     return classifier if classifier is not None else build_default_page_classifier(config)
+
+
 def _has_structured_discovery_metadata(discovered_page: DiscoveredPage) -> bool:
     return bool(
         discovered_page.title
@@ -246,15 +207,6 @@ def _has_structured_discovery_metadata(discovered_page: DiscoveredPage) -> bool:
         or discovered_page.publisher
         or discovered_page.distributions
     )
-
-
-def _with_valid_distributions(
-    dataset: CollectedDataset,
-    config: CollectorConfig,
-    validate: ValidateDistributionFunction,
-) -> CollectedDataset | None:
-    dataset, _invalid_count = _with_valid_distributions_and_report(dataset, config, validate)
-    return dataset
 
 
 def _with_valid_distributions_and_report(

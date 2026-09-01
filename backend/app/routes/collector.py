@@ -18,15 +18,10 @@ from app.database import (
     save_collected_datasets,
 )
 from app.routes.collector_schemas import (
-    CollectorAnalyzeHTMLRequest,
-    CollectorAnalyzeHTMLResponse,
     CollectorCollectedDataset,
     CollectorCollectionJob,
     CollectorCollectionJobResponse,
     CollectorCollectionResponse,
-    CollectorCollectURLRequest,
-    CollectorDiscoveredPage,
-    CollectorDiscoveryResponse,
     CollectorDistribution,
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
@@ -36,10 +31,9 @@ from app.routes.collector_schemas import (
     CollectorValidation,
 )
 from collector.classification.factory import (
-    build_default_page_classifier,
     build_default_repository_result_classifier,
 )
-from collector.classification.page import PageClassificationError, PageClassifier
+from collector.classification.page import PageClassificationError
 from collector.classification.repository import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
@@ -55,12 +49,8 @@ from collector.classification.repository import (
     MAX_REPOSITORY_TITLE_CHARS,
 )
 from collector.config import DEFAULT_CONFIG
-from collector.discovery.manager import discover_source
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
-from collector.extraction.distributions import extract_distributions
-from collector.extraction.extractor import extract_page
-from collector.fetch import fetch_public_html
-from collector.main import collect_source, collect_source_with_report
+from collector.main import collect_source_with_report
 from collector.repository_search import (
     RepositorySearchResult,
     RepositorySearchWarning,
@@ -83,51 +73,6 @@ _repository_classification_executor = ThreadPoolExecutor(
 )
 
 
-@router.post("/analyze-html")
-async def analyze_html(
-    payload: CollectorAnalyzeHTMLRequest,
-) -> CollectorAnalyzeHTMLResponse:
-    return await asyncio.to_thread(_analyze_html, str(payload.url), payload.html)
-
-
-@router.post("/analyze-url")
-async def analyze_url(payload: CollectorURLRequest) -> CollectorAnalyzeHTMLResponse:
-    try:
-        fetched_page = await asyncio.to_thread(fetch_public_html, str(payload.url))
-    except ValueError as exception:
-        raise HTTPException(status_code=400, detail=str(exception)) from exception
-
-    return await asyncio.to_thread(_analyze_html, fetched_page.final_url, fetched_page.html)
-
-
-@router.post("/discover-url")
-async def discover_url(payload: CollectorURLRequest) -> CollectorDiscoveryResponse:
-    try:
-        discovered_pages = await asyncio.to_thread(discover_source, str(payload.url))
-    except ValueError as exception:
-        raise HTTPException(status_code=400, detail=str(exception)) from exception
-
-    return CollectorDiscoveryResponse(
-        items=[
-            CollectorDiscoveredPage(
-                url=page.url,
-                discovery_method=page.discovery_method,
-                priority=page.priority,
-                title=page.title,
-                description=page.description,
-                publisher=page.publisher,
-                geography=list(page.geography),
-                discovery_metadata=page.discovery_metadata,
-                distributions=[
-                    _collector_distribution(distribution)
-                    for distribution in page.distributions
-                ],
-            )
-            for page in discovered_pages
-        ]
-    )
-
-
 @router.post("/collection-jobs", status_code=202)
 async def start_collection_job(
     payload: CollectorURLRequest,
@@ -148,28 +93,6 @@ async def read_collection_job(job_id: int) -> CollectorCollectionJobResponse:
     return CollectorCollectionJobResponse(job=CollectorCollectionJob(**job))
 
 
-@router.post("/collect-url")
-async def collect_url(payload: CollectorCollectURLRequest) -> CollectorCollectionResponse:
-    try:
-        collected_datasets = await asyncio.to_thread(collect_source, str(payload.url))
-    except ValueError as exception:
-        raise HTTPException(status_code=400, detail=str(exception)) from exception
-    except PageClassificationError as exception:
-        raise HTTPException(status_code=502, detail="Page classification failed.") from exception
-
-    if payload.save:
-        collected_datasets = await save_collected_datasets(
-            str(payload.url),
-            collected_datasets,
-        )
-
-    return CollectorCollectionResponse(
-        items=[_collector_collected_dataset(dataset) for dataset in collected_datasets],
-        saved=payload.save,
-        saved_count=len(collected_datasets) if payload.save else 0,
-    )
-
-
 @router.get("/collected-datasets")
 async def list_collected() -> CollectorCollectionResponse:
     return CollectorCollectionResponse(
@@ -177,8 +100,6 @@ async def list_collected() -> CollectorCollectionResponse:
             _collector_collected_dataset(dataset)
             for dataset in await list_collected_datasets()
         ],
-        saved=False,
-        saved_count=0,
     )
 
 
@@ -252,44 +173,6 @@ async def _run_collection_job(job_id: int, source_url: str) -> None:
         await mark_collection_job_done(job_id, len(saved_datasets), collection_result.report)
     except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
         await mark_collection_job_error(job_id, str(exception))
-
-
-def _analyze_html(
-    url: str,
-    html: str,
-    classifier: PageClassifier | None = None,
-) -> CollectorAnalyzeHTMLResponse:
-    page = extract_page(url, html)
-    distributions = extract_distributions(page)
-    try:
-        page_classifier = (
-            classifier
-            if classifier is not None
-            else build_default_page_classifier(DEFAULT_CONFIG)
-        )
-        classification = page_classifier.classify(page, distributions)
-    except PageClassificationError as exception:
-        raise HTTPException(status_code=502, detail="Page classification failed.") from exception
-
-    return CollectorAnalyzeHTMLResponse(
-        accepted=classification.accepted,
-        dataset_url=page.canonical_url,
-        title=page.title or page.h1 or page.canonical_url,
-        description=page.meta_description or page.og_description,
-        publisher=page.publisher,
-        hosting_platform=page.hosting_platform,
-        uploader=page.uploader,
-        geography=list(page.geography),
-        dataset_probability=classification.dataset_probability,
-        dataset_signals=classification.dataset_signals,
-        health_probability=classification.health_probability,
-        health_label=classification.health_label,
-        health_signals=classification.health_signals,
-        distributions=[
-            _collector_distribution(distribution)
-            for distribution in distributions
-        ],
-    )
 
 
 def _collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution:
@@ -381,7 +264,6 @@ def _repository_search_result_from_item(
         date=item.date,
         doi=item.doi,
         keywords=list(item.keywords),
-        relevance_score=item.relevance_score,
         metadata=dict(item.metadata),
     )
 
@@ -420,10 +302,7 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
         uploader=dataset.uploader,
         geography=list(dataset.geography),
         discovery_method=dataset.discovery_method,
-        dataset_probability=dataset.dataset_probability,
         dataset_signals=dataset.dataset_signals,
-        health_probability=dataset.health_probability,
-        health_label=dataset.health_label,
         health_signals=dataset.health_signals,
         distributions=[
             _collector_distribution(distribution)
