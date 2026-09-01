@@ -203,6 +203,7 @@ def test_http_json_llm_client_uses_provider_config():
         default_model="fake-default-model",
         request_body_builder=_fake_request_body,
         response_text_extractor=_fake_response_text,
+        extra_headers={"X-Provider-Version": "2026-01-01"},
     )
     client = HTTPJSONLLMClient(
         provider=provider,
@@ -218,6 +219,7 @@ def test_http_json_llm_client_uses_provider_config():
     assert result["accepted"] is True
     assert captured["timeout"] == 12.0
     assert captured["request"].get_header("Authorization") == "Bearer test-key"
+    assert captured["request"].get_header("X-provider-version") == "2026-01-01"
     assert captured["request"].full_url == "https://llm.example.org/classify"
     assert body["model"] == "test-model"
     assert body["classification_payload"] == {"page": {"title": "Mortality dataset"}}

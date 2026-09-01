@@ -34,7 +34,7 @@ def analyze_html_page(
 ) -> CollectedDataset | None:
     page = extract_page(url, html)
     distributions = extract_distributions(page)
-    page_classifier = _classifier_or_default(config, classifier)
+    page_classifier = _classifier_or_default(classifier)
     classification = page_classifier.classify(page, distributions)
 
     if not classification.accepted:
@@ -67,7 +67,7 @@ def collect_source_with_report(
     invalid_distribution_count = 0
     discovered_pages = discover(source_url)
     selected_pages = discovered_pages[: config.max_pages_per_source]
-    page_classifier = _classifier_or_default(config, classifier)
+    page_classifier = _classifier_or_default(classifier)
 
     for discovered_page in selected_pages:
         dataset, invalid_count = _collect_discovered_page_with_report(
@@ -111,7 +111,7 @@ def _collect_discovered_page_with_report(
     validate: ValidateDistributionFunction,
     classifier: PageClassifier | None = None,
 ) -> tuple[CollectedDataset | None, int]:
-    page_classifier = _classifier_or_default(config, classifier)
+    page_classifier = _classifier_or_default(classifier)
     if _has_structured_discovery_metadata(discovered_page):
         dataset = analyze_discovered_page(discovered_page, config, page_classifier)
     else:
@@ -172,7 +172,7 @@ def analyze_discovered_page(
         json_ld=({"@type": "Dataset"},),
     )
     distributions = list(discovered_page.distributions)
-    page_classifier = _classifier_or_default(config, classifier)
+    page_classifier = _classifier_or_default(classifier)
     classification = page_classifier.classify(page, distributions)
 
     if not classification.accepted:
@@ -194,10 +194,9 @@ def analyze_discovered_page(
 
 
 def _classifier_or_default(
-    config: CollectorConfig,
     classifier: PageClassifier | None,
 ) -> PageClassifier:
-    return classifier if classifier is not None else build_default_page_classifier(config)
+    return classifier if classifier is not None else build_default_page_classifier()
 
 
 def _has_structured_discovery_metadata(discovered_page: DiscoveredPage) -> bool:

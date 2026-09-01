@@ -22,7 +22,6 @@ from fastapi import BackgroundTasks, HTTPException
 
 from collector.classification.page import PageClassificationError
 from collector.classification.repository import RepositoryClassification
-from collector.config import DEFAULT_CONFIG
 from collector.repository_search import (
     RepositorySearchResponse,
     RepositorySearchResult,
@@ -50,7 +49,7 @@ def _use_accepting_repository_classifier(monkeypatch):
 
     monkeypatch.setattr(
         "app.routes.collector.build_default_repository_result_classifier",
-        lambda config=DEFAULT_CONFIG: AcceptingRepositoryClassifier(),
+        lambda: AcceptingRepositoryClassifier(),
     )
 
 
@@ -192,7 +191,7 @@ async def test_collector_classify_repository_result_route_returns_502_when_class
 
     monkeypatch.setattr(
         "app.routes.collector.build_default_repository_result_classifier",
-        lambda config=DEFAULT_CONFIG: FailingClassifier(),
+        lambda: FailingClassifier(),
     )
     caplog.set_level("ERROR", logger="app.routes.collector")
 
@@ -242,7 +241,7 @@ async def test_collector_repository_classification_limits_backend_concurrency(
     )
     monkeypatch.setattr(
         "app.routes.collector.build_default_repository_result_classifier",
-        lambda config=DEFAULT_CONFIG: object(),
+        lambda: object(),
     )
     payload = CollectorRepositorySearchItem(
         title="Malaria mortality estimates",

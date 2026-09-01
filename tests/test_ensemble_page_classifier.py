@@ -152,6 +152,24 @@ def test_ensemble_classifier_rejects_duplicate_voter_ids():
         )
 
 
+def test_ensemble_classifier_rejects_minimum_below_required_votes():
+    voters = [
+        ("llm_a", _StaticClassifier(_classification(True))),
+        ("llm_b", _StaticClassifier(_classification(True))),
+        ("llm_c", _StaticClassifier(_classification(True))),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="minimum_successful_votes cannot be lower than votes_required",
+    ):
+        EnsemblePageClassifier(
+            voters,
+            votes_required=3,
+            minimum_successful_votes=1,
+        )
+
+
 class _StaticClassifier:
     def __init__(self, classification: PageClassification) -> None:
         self._classification = classification

@@ -6,19 +6,19 @@ from collector.classification.ensemble import (
     EnsemblePageClassifier,
     EnsembleRepositoryRelevanceClassifier,
 )
-from collector.classification.llm_client import (
-    HTTPJSONLLMClient,
+from collector.classification.llm_client import HTTPJSONLLMClient
+from collector.classification.page import PageClassificationError, PageClassifier
+from collector.classification.page_llm_classifier import LLMPageClassifier
+from collector.classification.providers.openai import (
     openai_repository_relevance_provider_config,
     openai_responses_provider_config,
 )
-from collector.classification.page import PageClassificationError, PageClassifier
-from collector.classification.page_llm_classifier import LLMPageClassifier
 from collector.classification.repository import RepositoryResultClassifier
 from collector.classification.repository_llm_classifier import (
     LLMRepositoryRelevanceClassifier,
 )
-from collector.config import DEFAULT_CONFIG, CollectorConfig
 
+# Each voter id maps to the environment variable containing its OpenAI model name.
 OPENAI_CLASSIFIER_VOTERS: tuple[tuple[str, str], ...] = (
     ("openai_primary", "OPENAI_CLASSIFIER_MODEL_1"),
     ("openai_secondary", "OPENAI_CLASSIFIER_MODEL_2"),
@@ -26,10 +26,8 @@ OPENAI_CLASSIFIER_VOTERS: tuple[tuple[str, str], ...] = (
 )
 
 
-def build_default_page_classifier(
-    config: CollectorConfig = DEFAULT_CONFIG,
-) -> PageClassifier:
-    del config
+def build_default_page_classifier() -> PageClassifier:
+    """Build the default three-model page classifier with a 2-of-3 vote."""
     return EnsemblePageClassifier(
         [
             (
@@ -38,24 +36,20 @@ def build_default_page_classifier(
                     client=HTTPJSONLLMClient(
                         provider=openai_responses_provider_config(
                             name=f"OpenAI {voter_id}",
-                            model_env_var=model_env_var,
-                            default_model=model,
                         ),
                         model=model,
                     ),
                 ),
             )
-            for voter_id, model_env_var, model in _openai_classifier_models()
+            for voter_id, _model_env_var, model in _openai_classifier_models()
         ],
         votes_required=2,
         minimum_successful_votes=2,
     )
 
 
-def build_default_repository_result_classifier(
-    config: CollectorConfig = DEFAULT_CONFIG,
-) -> RepositoryResultClassifier:
-    del config
+def build_default_repository_result_classifier() -> RepositoryResultClassifier:
+    """Build the default three-model repository classifier with a 2-of-3 vote."""
     return EnsembleRepositoryRelevanceClassifier(
         [
             (
@@ -64,14 +58,12 @@ def build_default_repository_result_classifier(
                     client=HTTPJSONLLMClient(
                         provider=openai_repository_relevance_provider_config(
                             name=f"OpenAI {voter_id}",
-                            model_env_var=model_env_var,
-                            default_model=model,
                         ),
                         model=model,
                     ),
                 ),
             )
-            for voter_id, model_env_var, model in _openai_classifier_models()
+            for voter_id, _model_env_var, model in _openai_classifier_models()
         ],
         votes_required=2,
         minimum_successful_votes=2,
@@ -79,6 +71,7 @@ def build_default_repository_result_classifier(
 
 
 def _openai_classifier_models() -> tuple[tuple[str, str, str], ...]:
+    """Load and validate the three distinct OpenAI model names."""
     models = tuple(
         (
             voter_id,

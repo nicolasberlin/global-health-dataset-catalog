@@ -100,6 +100,24 @@ def test_repository_classification_requires_missing_information_details():
         _classification("insufficient_information", "geography is missing")
 
 
+def test_repository_ensemble_rejects_minimum_below_required_votes():
+    voters = [
+        ("llm_a", _StaticClassifier(_classification("relevant", "match"))),
+        ("llm_b", _StaticClassifier(_classification("relevant", "match"))),
+        ("llm_c", _StaticClassifier(_classification("relevant", "match"))),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="minimum_successful_votes cannot be lower than votes_required",
+    ):
+        EnsembleRepositoryRelevanceClassifier(
+            voters,
+            votes_required=3,
+            minimum_successful_votes=1,
+        )
+
+
 class _StaticClassifier:
     def __init__(self, classification: RepositoryClassification) -> None:
         self._classification = classification

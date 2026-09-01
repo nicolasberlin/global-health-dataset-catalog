@@ -47,7 +47,6 @@ from collector.classification.repository import (
     MAX_REPOSITORY_SOURCE_CHARS,
     MAX_REPOSITORY_TITLE_CHARS,
 )
-from collector.config import DEFAULT_CONFIG
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
 from collector.main import collect_source_with_report
 from collector.repository_search import (
@@ -141,7 +140,7 @@ async def classify_repository_result(
             _repository_classification_executor,
             classify_one_repository_result,
             result,
-            build_default_repository_result_classifier(DEFAULT_CONFIG),
+            build_default_repository_result_classifier(),
         )
     except PageClassificationError as exception:
         logger.exception(

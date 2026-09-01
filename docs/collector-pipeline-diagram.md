@@ -322,8 +322,68 @@ reads the normalized `PageSnapshot` business fields plus distributions.
 The default classifier is an `EnsemblePageClassifier`: it requires three distinct
 OpenAI model names in `OPENAI_CLASSIFIER_MODEL_1`, `OPENAI_CLASSIFIER_MODEL_2`,
 and `OPENAI_CLASSIFIER_MODEL_3`. A page is accepted when at least two successful
-votes return `accepted=true`. Dataset and health reasons are retained separately
-for every successful voter.
+votes return `accepted=true`, including when the third voter fails. With only one
+successful response, the ensemble fails instead of making a decision. Dataset and
+health reasons are retained separately for every successful voter.
+
+Provider-specific HTTP details are isolated from the voting logic:
+
+The complete function-by-function classification map is documented in
+[`classification-architecture.md`](classification-architecture.md).
+
+```mermaid
+flowchart TB
+    subgraph Build["Construction des classificateurs"]
+        Env["3 variables de modèles<br/>OPENAI_CLASSIFIER_MODEL_1..3"] --> Factory["factory.py<br/>valide 3 noms distincts"]
+        PageContract["page.py<br/>PageClassifier et PageClassification"] -. "contrat" .-> Factory
+        RepositoryContract["repository.py<br/>RepositoryResultClassifier et labels"] -. "contrat" .-> Factory
+        Factory --> PageVoters["3 x LLMPageClassifier<br/>avec HTTPJSONLLMClient"]
+        Factory --> RepositoryVoters["3 x LLMRepositoryRelevanceClassifier<br/>avec HTTPJSONLLMClient"]
+    end
+
+    subgraph Provider["Transport et API provider"]
+        GenericClient["llm_client.py<br/>transport JSON, auth header, timeout, erreurs"]
+        OpenAIAdapter["providers/openai.py<br/>endpoint, clé, builders, extracteur"]
+        Prompts["prompts.py<br/>system prompts et JSON schemas"]
+        Prompts --> OpenAIAdapter
+        OpenAIAdapter --> GenericClient
+    end
+
+    GenericClient -. "classe utilisée" .-> PageVoters
+    GenericClient -. "classe utilisée" .-> RepositoryVoters
+
+    subgraph PageFlow["Classification d'une page collectée"]
+        PageInput["PageSnapshot + distributions"] --> PageVoters
+        PageVoters --> PageAPI["3 requêtes OpenAI en parallèle"]
+        PageAPI --> PageParsed["validation: accepted + dataset_signals + health_signals"]
+        PageParsed --> PageEnsemble["EnsemblePageClassifier"]
+    end
+
+    subgraph RepositoryFlow["Classification d'un résultat repository"]
+        RepositoryInput["PageSnapshot + search_query"] --> RepositoryVoters
+        RepositoryVoters --> RepositoryAPI["3 requêtes OpenAI en parallèle"]
+        RepositoryAPI --> RepositoryParsed["validation: label + reason + missing_information"]
+        RepositoryParsed --> RepositoryEnsemble["EnsembleRepositoryRelevanceClassifier"]
+    end
+
+    PageEnsemble --> VoteRule["Règle commune<br/>au moins 2 réponses réussies<br/>et 2 votes positifs pour accepter"]
+    RepositoryEnsemble --> VoteRule
+    VoteRule --> Accepted["Accepté<br/>Oui + Oui + Oui/Non/Erreur"]
+    VoteRule --> Rejected["Rejeté<br/>moins de 2 votes positifs"]
+    VoteRule --> ClassificationError["Erreur<br/>moins de 2 réponses réussies"]
+
+    Facade["llm.py<br/>façade de compatibilité"] -. "réexporte" .-> GenericClient
+    Facade -. "réexporte" .-> OpenAIAdapter
+    FutureProvider["Futur adapter provider"] -. "même LLMProviderConfig" .-> GenericClient
+    FutureProvider -. "enregistré ici" .-> Factory
+```
+
+To add another header-authenticated LLM API family, add one module under
+`collector/classification/providers/` that configures its endpoint,
+authentication, required headers, request builder, and response extractor. The
+prompt and JSON-schema builders remain in `prompts.py`. Then register that provider
+as a voter in `factory.py`. The generic client, classifiers, and ensemble decision
+do not need provider-specific branches.
 
 ## Collector Pipeline
 

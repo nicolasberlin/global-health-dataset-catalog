@@ -818,10 +818,10 @@ Separation des responsabilites :
 ### Decision 4 - Ensemble de trois classificateurs LLM
 
 - Contexte : juger conjointement si une page decrit un dataset individuel et si elle concerne la sante.
-- Solution retenue : trois votants LLM distincts, decision a la majorite de deux votes.
+- Solution retenue : trois votants LLM distincts, decision a la majorite de deux votes. Deux votes `accepted=true` suffisent meme si le troisieme provider echoue ; moins de deux reponses exploitables provoquent une erreur de classification.
 - Avantages : decision explicite et raisons dataset/sante conservees par votant.
 - Inconvenients : cout, latence et dependance aux providers LLM.
-- Consequences : mesurer les faux positifs/faux negatifs et surveiller les echecs de providers.
+- Consequences : le transport JSON avec authentification par header reste generique dans `llm_client.py`, les prompts et schemas restent dans `prompts.py`, et la configuration de chaque API est isolee dans `collector/classification/providers/`. Ajouter un provider compatible exige sa configuration de requete/reponse et son enregistrement dans `factory.py`, sans modifier les ensembles. Mesurer les faux positifs/faux negatifs et surveiller les echecs de providers.
 
 ### Decision 5 - Base PostgreSQL geree par l'application
 
