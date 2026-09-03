@@ -21,8 +21,6 @@ def test_ensemble_classifier_accepts_when_two_of_three_voters_accept():
     assert result.accepted is True
 
     ensemble = result.dataset_signals["ensemble"]
-    health_ensemble = result.health_signals["ensemble"]
-    assert health_ensemble != ensemble
     assert ensemble["votes_required"] == 2
     assert ensemble["minimum_successful_votes"] == 2
     assert ensemble["successful_votes"] == 3
@@ -37,7 +35,6 @@ def test_ensemble_classifier_accepts_when_two_of_three_voters_accept():
         "llm_c",
     ]
     assert ensemble["voters"][0]["signals"] == {"reason": "dataset signal"}
-    assert health_ensemble["voters"][0]["signals"] == {"reason": "health signal"}
 
 
 def test_ensemble_classifier_uses_votes_not_probability_thresholds():
@@ -190,7 +187,6 @@ def _classification(accepted: bool) -> PageClassification:
     return PageClassification(
         accepted=accepted,
         dataset_signals={"reason": "dataset signal"},
-        health_signals={"reason": "health signal"},
     )
 
 

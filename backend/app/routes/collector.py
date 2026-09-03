@@ -296,7 +296,6 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
         geography=list(dataset.geography),
         discovery_method=dataset.discovery_method,
         dataset_signals=dataset.dataset_signals,
-        health_signals=dataset.health_signals,
         distributions=[
             _collector_distribution(distribution)
             for distribution in dataset.distributions

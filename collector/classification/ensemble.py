@@ -151,13 +151,6 @@ class EnsemblePageClassifier:
             dataset_signals={
                 "ensemble": _ensemble_summary(
                     **ensemble_arguments,
-                    signal_kind="dataset",
-                )
-            },
-            health_signals={
-                "ensemble": _ensemble_summary(
-                    **ensemble_arguments,
-                    signal_kind="health",
                 )
             },
         )
@@ -358,7 +351,6 @@ def _classify_voter(
             voter_id=voter_id,
             accepted=classification.accepted,
             dataset_signals=classification.dataset_signals,
-            health_signals=classification.health_signals,
         ),
     )
 
@@ -421,7 +413,6 @@ def _ensemble_summary(
     decision: str,
     decision_reason: str,
     decision_voter_ids: list[str],
-    signal_kind: str,
 ) -> dict[str, object]:
     return {
         "votes_required": votes_required,
@@ -433,7 +424,7 @@ def _ensemble_summary(
         "decision_reason": decision_reason,
         "decision_voter_ids": decision_voter_ids,
         "voters": [
-            _vote_summary(vote, signal_kind)
+            _vote_summary(vote)
             for vote in votes
         ],
         "failures": failures,
@@ -442,18 +433,11 @@ def _ensemble_summary(
 
 def _vote_summary(
     vote: PageClassificationVote,
-    signal_kind: str,
 ) -> dict[str, object]:
-    signals = (
-        vote.dataset_signals
-        if signal_kind == "dataset"
-        else vote.health_signals
-    )
-
     return {
         "voter_id": vote.voter_id,
         "accepted": vote.accepted,
-        "signals": signals,
+        "signals": vote.dataset_signals,
     }
 
 

@@ -5,7 +5,7 @@ import socket
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from collector.config import DEFAULT_CONFIG
 
@@ -24,8 +24,6 @@ def fetch_public_html(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 1_000_000,
 ) -> FetchedPage:
-    _ensure_public_http_url(url)
-
     request = Request(
         url,
         headers={
@@ -36,7 +34,7 @@ def fetch_public_html(
     )
 
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with open_public_http_url(request, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type", "")
             body = response.read(max_bytes + 1)
             if len(body) > max_bytes:
@@ -69,8 +67,21 @@ def _ensure_public_http_url(url: str) -> None:
             or ip_address.is_link_local
             or ip_address.is_multicast
             or ip_address.is_reserved
+            or ip_address.is_unspecified
         ):
             raise ValueError("Private or local network URLs cannot be fetched.")
+
+
+class _PublicHTTPRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _ensure_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def open_public_http_url(request: Request, *, timeout: float):
+    """Open an untrusted HTTP URL after validating it and every redirect."""
+    _ensure_public_http_url(request.full_url)
+    return build_opener(_PublicHTTPRedirectHandler()).open(request, timeout=timeout)
 
 
 def _decode_html(body: bytes, content_type: str) -> str:
@@ -82,4 +93,3 @@ def _decode_html(body: bytes, content_type: str) -> str:
             break
 
     return body.decode(charset, errors="replace")
-

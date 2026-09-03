@@ -69,8 +69,6 @@ CREATE TABLE collected_datasets (
     discovery_method TEXT NOT NULL DEFAULT '',
     dataset_signals JSONB NOT NULL DEFAULT '{}'::jsonb
         CHECK(jsonb_typeof(dataset_signals) = 'object'),
-    health_signals JSONB NOT NULL DEFAULT '{}'::jsonb
-        CHECK(jsonb_typeof(health_signals) = 'object'),
     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

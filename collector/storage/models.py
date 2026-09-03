@@ -151,7 +151,6 @@ class CollectedDataset:
     hosting_platform: str
     uploader: str
     dataset_signals: dict[str, object]
-    health_signals: dict[str, object]
     geography: tuple[str, ...] = ()
     distributions: list[DistributionCandidate] = field(default_factory=list)
     discovery_method: str = ""

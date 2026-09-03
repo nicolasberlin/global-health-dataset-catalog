@@ -1,5 +1,9 @@
 # Classification Architecture
 
+> Last verified: 2026-09-02. See the
+> [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
+> for acceptance rules that are proposed but not yet fully enforced.
+
 This document describes every runtime module under `collector/classification/`,
 the values exchanged between them, and the two classification flows. Private
 helpers are included when they validate, transform, or aggregate data.
@@ -121,7 +125,6 @@ classDiagram
     class PageClassification {
         +bool accepted
         +dict dataset_signals
-        +dict health_signals
     }
 
     class RepositoryClassification {
@@ -273,7 +276,7 @@ finds the model's textual JSON output in the provider response.
 | `_build_openai_repository_relevance_request_body` | repository `payload`, `model` | OpenAI request body | Adds repository relevance prompt and strict repository schema. |
 | `_system_prompt` | none | string | Defines an accepted page as an individual, health-relevant dataset/resource/API dataset and treats page data as untrusted evidence. |
 | `_repository_relevance_system_prompt` | none | string | Defines relevance to the user query, four labels, missing-information behavior, and prompt-injection protection. |
-| `_classification_schema` | none | JSON Schema | Requires `accepted`, `dataset_signals`, and `health_signals`, with exact `reason` and `evidence` strings. |
+| `_classification_schema` | none | JSON Schema | Requires `accepted` and `dataset_signals`, with exact `reason` and `evidence` strings. |
 | `_repository_relevance_schema` | none | JSON Schema | Requires `label`, `reason`, and `missing_information`; forbids extra top-level fields. |
 
 ### `page_llm_classifier.py`
@@ -308,7 +311,7 @@ finds the model's textual JSON output in the provider response.
 | Element | Parameters or fields | Reuse |
 |---|---|---|
 | `PageClassificationError` | message and chained cause | Common visible failure type across transport, parsing, voters, factory, service, and route. |
-| `PageClassification` | `accepted`, `dataset_signals`, `health_signals` | Returned by each page voter and by the final page ensemble. |
+| `PageClassification` | `accepted`, `dataset_signals` | Returned by each page voter and by the final page ensemble. |
 | `PageClassificationVote` | same result plus `voter_id` | Internal ensemble audit record. |
 | `PageClassifier.classify` | `page`, `distributions` | Structural contract implemented by individual and ensemble page classifiers. |
 | `RepositoryClassification` | label, reason, missing data, ensemble | Strips/validates semantic data and derives `accepted`; returned by individual and ensemble classifiers. |
@@ -391,12 +394,9 @@ The important distinction is:
    global-health dataset. This behavior is explicit in the prompt and tests. It
    is correct only if repository providers/search queries already define the
    health boundary; otherwise a query-relevant non-health dataset can pass.
-4. The page contract still requires and propagates `health_signals` separately
-   from `dataset_signals`: prompt schema, response parser, vote object, ensemble,
-   collected dataset, API response, and tests all use it. It is therefore not
-   dead code today. If the intended final contract is only `accepted` plus one
-   explanation, removing `health_signals` remains a cross-layer cleanup rather
-   than a deletion in one classification file.
+4. The page contract keeps one `dataset_signals` audit object. It explains the
+   complete dataset decision, including dataset identity and health relevance;
+   `accepted` remains the only value used for the binary decision.
 5. Repository payload fields are broadly size-bounded. The page payload caps
    page text, heading count, and distribution count, but does not cap every
    individual page, metadata, URL, or distribution string. That is a robustness

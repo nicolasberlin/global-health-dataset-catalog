@@ -48,8 +48,7 @@ async def list_collected_datasets() -> list[CollectedDataset]:
             """
             SELECT id, source_url, dataset_url, title, description, publisher,
                    hosting_platform, uploader, geography, discovery_method,
-                   dataset_signals, health_signals, first_seen_at, last_seen_at,
-                   updated_at
+                   dataset_signals, first_seen_at, last_seen_at, updated_at
             FROM collected_datasets
             ORDER BY updated_at DESC, title
             """,
@@ -120,10 +119,10 @@ async def _upsert_collected_dataset(
         INSERT INTO collected_datasets (
             source_url, dataset_url, title, description, publisher,
             hosting_platform, uploader, geography, discovery_method,
-            dataset_signals, health_signals, first_seen_at, last_seen_at
+            dataset_signals, first_seen_at, last_seen_at
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
         )
         ON CONFLICT(dataset_url) DO UPDATE SET
             source_url = excluded.source_url,
@@ -154,13 +153,11 @@ async def _upsert_collected_dataset(
                 collected_datasets.discovery_method
             ),
             dataset_signals = excluded.dataset_signals,
-            health_signals = excluded.health_signals,
             last_seen_at = NOW(),
             updated_at = NOW()
         RETURNING id, source_url, dataset_url, title, description, publisher,
                   hosting_platform, uploader, geography, discovery_method,
-                  dataset_signals, health_signals, first_seen_at, last_seen_at,
-                  updated_at
+                  dataset_signals, first_seen_at, last_seen_at, updated_at
         """,
         (
             source_url,
@@ -173,7 +170,6 @@ async def _upsert_collected_dataset(
             _serialize_geography(dataset.geography),
             dataset.discovery_method,
             _serialize_signals(dataset.dataset_signals),
-            _serialize_signals(dataset.health_signals),
         ),
     )
     if row is None:
@@ -480,10 +476,6 @@ def _collected_dataset_from_rows(
         dataset_signals=_deserialize_signals(
             dataset_row["dataset_signals"],
             "collected_datasets.dataset_signals",
-        ),
-        health_signals=_deserialize_signals(
-            dataset_row["health_signals"],
-            "collected_datasets.health_signals",
         ),
         distributions=distributions,
         discovery_method=str(dataset_row["discovery_method"]),

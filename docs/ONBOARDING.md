@@ -1,1388 +1,330 @@
-# Global Health Dataset Catalog — Onboarding
+# Global Health Dataset Catalog - Onboarding
 
-> Introduction document for new developers.  
+> Last verified: 2026-09-02.
 
-> Goal: understand the project, how it works, and its key points without having to read the entire TDD.
+This guide is the shortest path from a fresh checkout to understanding and
+running the application. Detailed contracts and diagrams live in the
+[documentation index](../README.md#documentation).
 
----
+## 1. Project in 30 Seconds
 
-## 1. The Project in 30 Seconds
+The project discovers health dataset candidates, classifies them with three LLM
+voters, validates data links, and stores accepted collection results in
+PostgreSQL.
 
-**Global Health Dataset Catalog** is an application that searches for, identifies, and catalogs **official pages for global health datasets**.
+It has two distinct user flows:
 
-The application does not download or store the datasets themselves.
+1. **Repository search** queries DataCite and classifies each returned record for
+   relevance to the user's query. Accepted results are displayed as candidates;
+   they are not persisted.
+2. **Source collection** discovers records from a configured source, classifies
+   each record as an individual health dataset, validates at least one file or
+   API distribution, and persists successful results.
 
-It mainly stores:
+The word "official" is not an enforced quality guarantee. The seed catalogue
+contains official organizations, but arbitrary sources can be added and no full
+source-trust policy is implemented yet.
 
-- the dataset URL;
-
-- its title;
-
-- its publisher;
-
-- how it was discovered;
-
-- the dataset and health evidence returned by the LLM voters;
-
-- links to its files/APIs;
-
-- the validation result for these links.
-
-- its country or countries of origin, when this information is available;
-
-### Simple Example
-
-The system is given:
+## 2. Runtime Architecture
 
 ```text
-
-https://data.example.org
-
+React/Vite frontend
+        |
+        v
+FastAPI routes
+        |
+        +--> repository search and repository LLM ensemble
+        |
+        +--> background collection job
+                  |
+                  +--> discovery adapters
+                  +--> page LLM ensemble
+                  +--> distribution validation
+                  +--> atomic PostgreSQL completion
 ```
 
-The collector may discover:
+Main ownership boundaries:
+
+- `frontend/src/`: repository search, source catalogue, job progress, and saved
+  dataset views;
+- `backend/app/routes/`: HTTP contracts and background-job orchestration;
+- `backend/app/db/`: PostgreSQL connection, schema, jobs, and persistence;
+- `collector/discovery/`: structured and generic discovery adapters;
+- `collector/classification/`: LLM clients, prompts, classifiers, and ensembles;
+- `collector/repository_search/`: DataCite search, normalization, filtering, and
+  repository-result classification;
+- `collector/validation/`: lightweight file/API link validation.
+
+For diagrams, see [Collector Pipeline Diagram](collector-pipeline-diagram.md),
+[Classification Architecture](classification-architecture.md), and
+[Database Schema Diagram](database-schema-diagram.md).
+
+## 3. Repository Structure
 
 ```text
-
-https://data.example.org/dataset/life-expectancy
-
-```
-
-It then analyzes this page and obtains:
-
-```text
-
-LLM votes: 2 accepted, 1 rejected
-
-Decision: accepted
-
-```
-
-If this link works, the dataset can be saved to the catalog.
-
----
-
-# 2. General Architecture
-
-The current architecture is intentionally simple.
-
-```text
-
-User
-
-    ↓
-
-Frontend React
-
-    ↓
-
-Backend FastAPI
-
-    ↓
-
-Collector Python
-
-    ↓
-
-External sources
-
-    ↓
-
-PostgreSQL
-
-```
-
-The four main parts are:
-
-### Frontend
-
-```text
-
-frontend/
-
-```
-
-React/Vite application.
-
-It can be used to:
-
-- view sources;
-
-- filter results;
-
-- monitor jobs;
-
-- view collected datasets;
-
-Debugging/administration functions:
-
-- start a collection;
-
-- test the collector.
-
----
-
-### Backend
-
-```text
-
-backend/app/
-
-```
-
-FastAPI API.
-
-Main responsibilities:
-
-- expose HTTP endpoints;
-
-- validate requests;
-
-- start the collector;
-
-- return results to the frontend.
-
----
-
-### Collector
-
-```text
+backend/
+  app/
+    main.py
+    database.py                 compatibility facade
+    db/
+      connection.py
+      schema.py
+      sources.py
+      collection_jobs.py
+      collection_completion.py
+      collected_datasets.py
+    routes/
+      sources.py
+      collector.py
 
 collector/
+  main.py                       source collection pipeline
+  fetch.py                      SSRF-protected public HTTP fetch
+  classification/
+    factory.py
+    ensemble.py
+    llm_client.py
+    page_llm_classifier.py
+    repository_llm_classifier.py
+    prompts.py
+  discovery/
+    adapters/
+    sitemap.py
+  repository_search/
+    models.py
+    filtering.py
+    service.py
+    providers/datacite.py
+  validation/downloads.py
 
+frontend/src/
+  App.jsx
+  components/
+    RepositorySearchSection.jsx
+    RepositoryAcceptedCard.jsx
+    RepositoryProgressCard.jsx
+    SourceCatalogSection.jsx
+    CollectedDatasetsSection.jsx
+
+tests/
 ```
 
-This is the core of the discovery logic.
+## 4. Repository Search
 
-It handles:
+`POST /collector/search-repositories` calls
+`repository_search/service.py:search_repository_metadata()`.
+
+Current behavior:
+
+1. DataCite is the only default provider.
+2. The provider requests `resource-type-id=dataset` and sorts by relevance.
+3. Results without a title or syntactically valid HTTP(S) URL are removed.
+4. A provider failure is logged and returned as a warning when another provider
+   succeeds. If every provider fails, the request fails.
+5. The frontend progressively calls
+   `POST /collector/classify-repository-result` for each candidate.
+6. Three distinct OpenAI models vote; two positive votes are required.
+7. `relevant` and `somewhat_relevant` are positive repository votes.
+
+The repository prompt evaluates relevance to the search query. It does not
+independently establish health relevance, source trust, file availability, or
+publication eligibility. Repository candidates are not written to PostgreSQL.
+
+## 5. Source Discovery
+
+`POST /collector/collection-jobs` creates a background job. The collector then
+calls `collect_source_with_report()` in `collector/main.py`.
+
+Discovery prefers structured metadata from CKAN, Socrata, and data.json/DCAT
+before generic HTML and sitemap fallbacks. Dataverse is not registered in the
+active adapter tuple and remains future work. The collector limits how many
+pages and distributions it analyzes using `CollectorConfig`. Adapter-specific
+behavior belongs in `collector/discovery/`, not in the core classifier.
+
+## 6. LLM Classification
+
+Classification is implemented, not a future feature. Two separate ensembles
+share the same three configured OpenAI models:
+
+- `EnsembleRepositoryRelevanceClassifier` judges query relevance for repository
+  candidates;
+- `EnsemblePageClassifier` judges whether a discovered page is an individual,
+  health-relevant dataset.
+
+Both defaults use:
 
 ```text
-
-Discovery
-
-    ↓
-
-Extraction
-
-    ↓
-
-Classification
-
-    ↓
-
-Distribution detection
-
-    ↓
-
-Validation
-
+votes_required = 2
+minimum_successful_votes = 2
 ```
 
----
+This permits one model failure while still requiring a two-model majority. The
+three model names must be distinct, but all voters use the same OpenAI provider
+and API key; this is model diversity, not provider independence.
 
-### Database
+See [Classification Architecture](classification-architecture.md) for exact
+prompts, payloads, output schemas, failure handling, and parameter traces.
+
+## 7. Distribution Validation
+
+After page acceptance, the collector validates candidate files and APIs:
+
+1. send `HEAD`;
+2. use a bounded partial `GET` when `HEAD` is unsupported or inconclusive;
+3. require an HTTP status from 200 through 399;
+4. reject HTML responses for non-API distributions;
+5. infer a format from headers or a small body sample when possible.
+
+This verifies lightweight accessibility, not scientific correctness or complete
+file integrity. The project does not download and retain dataset files.
+
+All untrusted collector fetches use the public-HTTP guard in
+`collector/fetch.py`. Initial URLs and every redirect are checked so private,
+loopback, link-local, multicast, reserved, and unspecified addresses are
+blocked.
+
+## 8. Persistence Decision
+
+A discovered result reaches PostgreSQL only when:
 
 ```text
-
-PostgreSQL
-
+page ensemble accepted it with at least 2 positive votes
+AND
+at least one considered distribution validated successfully
 ```
 
-PostgreSQL stores application metadata. The backend uses `DATABASE_URL`, fails
-at startup if that variable is missing, and manages its own schema versions.
-
----
-
-# 3. Repository Structure
-
-The main structure is:
-
-```text
-
-project/
-
-├── backend/
-
-│   ├── app/
-
-│   │   ├── main.py
-
-│   │   ├── database.py
-
-│   │   ├── db/
-
-│   │   │   ├── connection.py
-
-│   │   │   ├── schema.py
-
-│   │   │   ├── sources.py
-
-│   │   │   ├── collected_datasets.py
-
-│   │   │   ├── collection_jobs.py
-
-│   │   │   └── serialization.py
-
-│   │   └── routes/
-
-│   │       ├── sources.py
-
-│   │       ├── collector.py
-
-│   │       └── collector_schemas.py
-
-│   └── requirements.txt
-
-│
-
-├── collector/
-
-│   ├── classification/
-
-│   ├── discovery/
-
-│   ├── extraction/
-
-│   ├── storage/
-
-│   ├── validation/
-
-│   ├── config.py
-
-│   ├── fetch.py
-
-│   ├── repository_search.py
-
-│   └── main.py
-
-│
-
-├── frontend/
-
-│   ├── src/
-
-│   │   ├── App.jsx
-
-│   │   ├── main.jsx
-
-│   │   └── styles.css
-
-│   ├── package.json
-
-│   └── vite.config.js
-
-│
-
-├── tests/
-
-├── docs/
-
-└── pyproject.toml
-
-```
-
-Key points:
-
-```text
-
-backend/   → API + DB
-
-collector/ → collection logic
-
-frontend/  → user interface
-
-tests/     → expected system behavior
-
-```
-
-
-Key points:
-
-```text
-
-backend/   → API + DB
-
-collector/ → collection logic
-
-frontend/  → user interface
-
-tests/     → expected system behavior
-
-```
-
----
-
-# 4. How the Collector Works
-
-The collector prioritizes structured sources before using generic search:
-
-```text
-CKAN → Socrata → data.json / DCAT → Generic site
-```
-
-The idea is simple:
-
-> use structured metadata when available and scrape HTML only when necessary.
-
-More Open Data Platforms can be added 
-
----
-
-# 4.1 Query-Based Repository Search
-
-The newer search flow starts from a user query instead of a source URL.
-
-```text
-User query
-
-    ↓
-
-POST /collector/search-repositories
-
-    ↓
-
-search_repository_metadata(query)
-
-    ↓
-
-Repository providers
-
-    ↓
-
-Normalized candidate results + controlled warnings
-
-    ↓
-
-POST /collector/classify-repository-result
-
-    ↓
-
-One classified result JSON
-
-```
-
-Current implementation:
-
-- `backend/app/routes/collector_schemas.py` contains the FastAPI/Pydantic request and response schemas;
-- `backend/app/routes/collector.py` keeps the route functions;
-- `collector/repository_search/` contains the provider interface, DataCite provider, normalization, filtering, and partial-failure warnings;
-- DataCite is the first active provider.
-
-Repository classification is limited to two candidates at a time per FastAPI
-process. Input fields and metadata size are bounded by Pydantic, and the payload
-is truncated again immediately before it is sent to the LLM voters. Repository
-metadata is untrusted input: classifiers must treat embedded instructions as
-data, never as commands. Detailed classification failures are logged on the
-server while the API keeps a generic public error message.
-
-The public response shape is:
-
-```json
-{
-  "query": "malaria mortality",
-  "items": [
-    {
-      "title": "Malaria mortality estimates",
-      "url": "https://example.org/dataset",
-      "source": "DataCite",
-      "publisher": "Example Repository",
-      "date": "2025",
-      "doi": "10.1234/example",
-      "keywords": ["malaria", "mortality"],
-      "metadata": {}
-    }
-  ],
-  "warnings": [
-    {
-      "provider": "HDX",
-      "message": "This source could not be searched."
-    }
-  ]
-}
-```
-
-Warnings are controlled messages. They indicate partial search coverage without exposing raw backend exceptions. Provider-specific warnings include the provider name; global search warnings use `"provider": null`. If all providers fail, the API returns `502 Repository search failed.`
-
-Search results are filtered before being returned:
-
-- title must not be empty;
-- URL must be valid `http` or `https` with a hostname;
-
-Important distinction:
-
-```text
-RepositorySearchResult
-    = candidate dataset found through repository APIs
-
-CollectedDataset
-    = dataset accepted by the older URL-based collection pipeline and possibly saved
-```
-
-Future providers should be added by API family, not one class per website. For example:
-
-```text
-DataCiteRepositorySearchProvider()
-CKANRepositorySearchProvider("HDX", "https://data.humdata.org")
-CKANRepositorySearchProvider("data.gov.uk", "https://www.data.gov.uk")
-DataverseRepositorySearchProvider("Harvard Dataverse", "https://dataverse.harvard.edu")
-```
-
----
-
-# 5. Discovery
-
-Discovery consists of finding URLs that may correspond to dataset pages. The collector first uses structured sources because they provide reliable metadata directly:
-
-- **CKAN**: query the `status_show` and `package_search` APIs to retrieve available packages;
-- **Socrata**: query the Socrata catalog to find datasets;
-- **data.json / DCAT**: read the metadata and distributions published by the portal.
-
-If none of these methods works, the collector uses a generic method: it checks `robots.txt`, locates sitemaps, and then selects candidate URLs whose HTML pages can be analyzed.
-
----
-
-# 6. Page Classification
-
-A discovered page is not automatically considered a dataset.
-
-The default classifier asks three LLM voters for an explicit decision. Each voter
-returns `accepted=true` or `accepted=false`. The page is accepted only when at
-least two successful voters accept it.
-
-The decision is not derived from percentage thresholds.
-
-Each voter returns concise `dataset_signals` and `health_signals` containing a
-reason and supporting evidence. These signals are retained for audit, while the
-boolean vote is the only input to the ensemble decision.
-
-The LLM voters must check:
-
-- Does the content actually concern health?
-- Does this page correspond to an individual dataset rather than a general catalog?
-- Does the link provide access to the dataset, or to a page from which the dataset can actually be accessed?
-
----
-
-# 7. Simple Classification Example
-
-Page :
-
-```text
-
-Global Life Expectancy Dataset
-
-```
-
-Content:
-
-```text
-
-Life expectancy by country and year.
-
-Download CSV.
-
-World Health Organization.
-
-```
-
-The system might detect:
-
-```text
-
-title contains health-related terms
-
-publisher = WHO
-
-CSV link detected
-
-dataset metadata detected
-
-```
-
-And produce:
-
-```text
-llm_a.accepted = true
-llm_b.accepted = true
-llm_c.accepted = false
-```
-
-The page is accepted because 2 of 3 LLM voters accepted it. The dataset and
-health evidence returned by each voter is stored with the ensemble summary.
-
-
-
----
-
-# 9. Important Signals
-
-Signals are the reasons and evidence returned by each LLM voter. The ensemble
-keeps dataset evidence separate from health evidence.
-
-This part can be further developed with the LLM.
-
-## Signals Indicating a Dataset
-
-These are the strongest clues:
-
-- the page contains `Schema.org Dataset` or `DCAT Dataset` metadata;
-- it describes a title, publisher, or other dataset-specific information.
-
-## Signals Indicating Data Access
-
-These indicate that a file or API is probably available: `CSV`, `XLSX`, `JSON`, `API`, `export`, `download`, or `distribution`.
-
-## Signals Indicating a Health Connection
-
-The collector looks for these clues in the title, metadata, text, URL, and publisher. Examples include: `malaria`, `mortality`, `hospital`, `vaccination`, or `WHO`.
-
-The more consistent signals a page contains, the stronger the evidence available
-to the LLM voters. Conversely, a page that only contains the word "data" without
-a file, metadata, or health-related content should be rejected by the voters.
-
----
-
-# 10. Distributions
-
-A distribution is a way to access the data.
-
-Examples:
-
-```text
-
-dataset.csv
-
-dataset.xlsx
-
-API endpoint
-
-dataset.json
-
-dataset.parquet
-
-```
-
-The collector supports, among others:
-
-```text
-
-CSV
-
-TSV
-
-XLS
-
-XLSX
-
-JSON
-
-JSONL
-
-XML
-
-PARQUET
-
-ZIP
-
-GZ
-
-SAV
-
-DTA
-
-SAS7BDAT
-
-GEOJSON
-
-API
-
-```
-
-The following formats are excluded by default:
-
-```text
-
-PDF
-
-HTML
-
-images
-
-```
-
-The goal is to identify **usable data**, not simply documents.
-
----
-
-# 11. Distribution Validation
-
-Finding a link is not enough.
-
-The collector verifies that it works.
-
-It first tries:
-
-```text
-
-HEAD
-
-```
-
-Then, if necessary:
-
-```text
-
-Partiel GET
-
-```
-
-The partial GET is used in particular when:
-
-- HEAD is forbidden;
-
-- the headers do not provide enough information;
-
-- the server returns HTML;
-
-- an additional check is needed.
-
-The GET is limited to approximately:
-
-```text
-
-65 536 bytes
-
-```
-
-so that the entire dataset is not downloaded.
-
----
-
-# 12. Saving Condition
-
-A dataset is saved only if it has at least one validated distribution.
-
-In summary:
-
-```text
-
-Dataset discovered 
-
-      ↓
-
-At least 2 of 3 LLM voters accepted ?
-
-      ↓
-
-Distribution found ?
-
-      ↓
-
-Distribution validated ?
-
-      ↓
-
-SAVE
-
-```
-
-Without a valid distribution:
-
-```text
-
-not saved
-
-```
-
----
-
-# 13. Complete Pipeline
-
-The pipeline can be summarized as follows:
-
-```text
-
-Source URL
-
-    ↓
-
-Portal type detection
-
-    ↓
-
-CKAN / Socrata / data.json / generic
-
-    ↓
-
-Discovery
-
-    ↓
-
-Candidate pages
-
-    ↓
-
-Extraction
-
-    ↓
-
-Dataset scoring
-
-    ↓
-
-Health scoring
-
-    ↓
-
-Distribution extraction
-
-    ↓
-
-HTTP validation
-
-    ↓
-
-Accepted dataset
-
-    ↓
-
-PostgreSQL
-
-```
-
----
-
-# 14. Collection Jobs
-
-A collection can be run as a job.
-
-Typical cycle:
-
-```text
-
-pending
-
-   ↓
-
-running
-
-   ↓
-
-done
-
-```
-
-or:
-
-```text
-
-pending
-
-   ↓
-
-running
-
-   ↓
-
-error
-
-```
-
-The frontend regularly queries the backend to retrieve the job status.
-
----
-
-# 15. Data Model
-
-The main tables are:
-
-## `data_sources`
-
-Starting points configured manually to launch a collection. A source generally represents a portal or organization, along with its main URL.
-
-Examples:
-
-```text
-
-WHO
-
-CDC
-
-HDX
-
-```
-
-These sources are the collector's entry points. They do not represent the datasets found: discovered datasets are stored separately in `collected_datasets`.
-
----
-
-## `collected_datasets`
-
-Main metadata for detected datasets.
-
-It includes, among other fields:
-
-```text
-
-dataset_url
-
-title
-
-publisher
-
-geography
-
-discovery_method
-
-dataset_signals
-
-health_signals
-
-timestamps
-
-```
-
----
-
-## `collected_distributions`
-
-Links to the data.
-
-It includes, among other fields:
-
-```text
-
-url
-
-format
-
-probability
-
-validation_ok
-
-validation_http_status
-
-```
-
----
-
-## `dataset_discovery_observations`
-
-History of dataset discoveries. This table records the date, source, and method used to find a dataset. The same dataset can therefore have several observations if it is discovered multiple times, for example through CKAN and then through a sitemap.
-
----
-
-## `collection_jobs`
-
-Collection status.
-
-Example fields:
-
-```text
-
-source_url
-
-status
-
-saved_count
-
-discovered_count
-
-analyzed_count
-
-error
-
-timestamps
-
-```
-
----
-
-# 16. Important Endpoints
-
-## Health
-
-```text
-
-GET /health
-
-```
-
----
-
-## Sources
-
-```text
-
-GET /sources
-
-POST /sources
-
-GET /sources/{id}/page
-
-```
-
----
-
-## Collector
-
-```text
-
-POST /collector/search-repositories
-
-POST /collector/classify-repository-result
-
-```
-
----
-
-## Jobs
-
-```text
-
-POST /collector/collection-jobs
-
-GET /collector/collection-jobs/{job_id}
-
-```
-
----
-
-## Results
-
-```text
-
-GET /collector/collected-datasets
-
-```
-
----
-
-# 17. Important Limits
-
-The collector intentionally has several limits to prevent collections from taking too long.
-
-Current values:
-
-```text
-
-HTTP timeout                 = 10 s
-
-HTML analyze-url             = 1 MB maximum
-
-sitemaps                     = 10 maximum
-
-URLs sitemap                 = 1000 maximum
-
-generic sitemap candidates   = 50
-
-pages analyzed / source      = 5
-
-distributions / dataset      = 1
-
-```
-
-These values reflect the current MVP behavior.
-
----
-
-# 18. Important Network Security
-
-The backend must not become a proxy for accessing the internal network.
-
-Analyzed URLs must therefore use:
-
-```text
-
-HTTP
-
-or
-
-HTTPS
-
-```
-
-The following addresses are rejected:
-
-```text
-
-localhost
-
-private IP
-
-loopback
-
-link-local
-
-multicast
-
-reserved IP
-
-```
-
-This notably reduces the risk of SSRF.
-
----
-
-# 19. Local Database
-
-PostgreSQL is used for local development. Start it with Docker Compose and
-provide `DATABASE_URL` to the backend.
-
-Example:
+Collection and LLM calls run outside a database transaction. Once the complete
+`CollectionResult` exists, `complete_collection_job()` opens one PostgreSQL
+transaction, upserts every accepted dataset, and marks the job `done`. Any
+persistence failure rolls back both the dataset writes and the `done` status.
+
+Datasets are deduplicated only by exact `dataset_url`. DOI-, title-, version-,
+and mirror-aware deduplication are not implemented.
+
+## 9. Database
+
+The application is PostgreSQL-only and requires `DATABASE_URL`. At startup it:
+
+1. opens the async connection pool;
+2. checks `schema_migrations`;
+3. creates the current schema only for an empty database;
+4. inserts system seed sources.
+
+It deliberately refuses obsolete or partially managed schemas. Historical
+SQLite behavior is documented in
+[ADR 0001](adr/0001-postgresql-only.md), not in this runtime guide.
+
+## 10. HTTP API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Process health response |
+| GET | `/sources` | List configured sources |
+| POST | `/sources` | Add a source |
+| GET | `/sources/{id}/page` | Redirect to source page |
+| POST | `/collector/search-repositories` | Search DataCite metadata |
+| POST | `/collector/classify-repository-result` | Classify one candidate |
+| POST | `/collector/collection-jobs` | Start source collection |
+| GET | `/collector/collection-jobs/{id}` | Read job status |
+| GET | `/collector/collected-datasets` | List persisted datasets |
+
+## 11. Run Locally
+
+From the repository root:
 
 ```bash
-export POSTGRES_PASSWORD='change-me-locally'
+export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+export POSTGRES_PASSWORD="change-me-locally"
 docker compose up -d postgres
+
 export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_CLASSIFIER_MODEL_1="model-a"
+export OPENAI_CLASSIFIER_MODEL_2="model-b"
+export OPENAI_CLASSIFIER_MODEL_3="model-c"
 ```
 
-The PostgreSQL database is managed by the application and must be empty on first
-startup. The backend creates the current schema, records it in
-`schema_migrations`, and applies the default system seeds. Partial PostgreSQL
-schemas and hand-modified application tables are not migrated automatically.
+The model values are examples: use three distinct model names available to the
+configured OpenAI account.
 
-If startup fails because the local database schema is outdated, recreate the
-local development database. Pre-stable local databases are disposable and are not
-migrated.
+Backend:
 
----
+```bash
+cd backend
+DATABASE_URL="$DATABASE_URL" PYTHONPATH=.. \
+  ../.venv/bin/python -m uvicorn app.main:app --reload --port 8001
+```
 
-# 20. Storage Evolution
+Frontend, in another terminal:
 
-For the MVP and local development:
+```bash
+cd frontend
+VITE_API_BASE_URL=http://127.0.0.1:8001 npm run dev
+```
+
+Open `http://127.0.0.1:5173/`.
+
+## 12. Tests and Checks
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/pytest
+npm --prefix frontend run build
+```
+
+Last verified without `TEST_DATABASE_URL`: **117 passed, 33 skipped**. The skipped
+tests require PostgreSQL. Run the complete database suite with:
+
+```bash
+TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
+```
+
+Test counts are observations, not a permanent contract; update this line when
+the suite changes.
+
+## 13. Current Limits
+
+| Limit | Current value |
+| --- | ---: |
+| Outbound request timeout | 10 seconds |
+| Pages analyzed per source | 5 |
+| Distributions validated per dataset | 1 |
+| Distribution partial-GET sample | 65,536 bytes |
+| HTML response | 1,000,000 bytes |
+| JSON or sitemap response | 5,000,000 bytes |
+| Sitemaps traversed per source | 10 |
+| Sitemap URLs returned by the active generic adapter | 50 |
+| Sitemap utility hard cap | 1,000 |
+
+- repository search candidates are display-only and are not fed automatically
+  into source collection;
+- repository classification does not independently enforce health relevance;
+- source authority and the word "official" are not enforced;
+- licensing is extracted when available but no allow/deny policy is enforced;
+- duplicate handling uses exact dataset URLs only;
+- authentication, production deployment, monitoring, scheduled revalidation,
+  and human review workflows are not implemented.
+
+The proposed controls are tracked in the
+[Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
+and [Roadmap](roadmap.md).
+
+## 14. Recommended Reading Order
+
+1. `README.md`
+2. `frontend/src/App.jsx` and `frontend/src/components/`
+3. `backend/app/routes/collector.py`
+4. `collector/main.py`
+5. `collector/repository_search/service.py`
+6. `collector/classification/factory.py` and `ensemble.py`
+7. `collector/classification/prompts.py`
+8. `collector/validation/downloads.py` and `collector/fetch.py`
+9. `backend/app/db/collection_completion.py`
+10. tests corresponding to the code being changed
+
+The mental model to retain is:
 
 ```text
-PostgreSQL
+repository search = candidate relevance and display
+source collection = dataset + health classification + link validation + storage
 ```
-
-The collector network layer is still mostly synchronous. During the DB async
-migration, API routes run blocking collector work in a worker thread.
-
----
-
-# 21. Running the Project Locally
-
-The current environment uses:
-
-```text
-
-Backend : FastAPI / Uvicorn
-
-Port backend : 8001
-
-Frontend : React / Vite
-
-Port frontend : 5173
-
-```
-
-By default, the frontend points to:
-
-```text
-
-http://127.0.0.1:8001
-
-```
-
-For the backend:
-
-```text
-
-backend/requirements.txt
-
-```
-
-contains the main runtime dependencies.
-
-The documented local launch uses Uvicorn from the backend directory, with the Python project available through `PYTHONPATH`.
-
-For the frontend:
-
-```text
-
-VITE_API_BASE_URL=http://127.0.0.1:8001
-
-```
-
-is used to connect React to the backend.
-
-For the exact commands and any changes, also check `README.md`.
-
----
-
-# 22. Tests
-
-The Python test suite currently contains:
-
-```text
-
-89 tests
-
-```
-
-In the last documented validation:
-
-```text
-
-89 passed
-
-```
-
-The Vite frontend build also passes.
-
-The tests cover, among other areas:
-
-```text
-
-database
-
-migrations
-
-routes
-
-collector pipeline
-
-repository search
-
-DataCite
-
-partial provider warnings
-
-CKAN
-
-Socrata
-
-data.json
-
-generic discovery
-
-sitemaps
-
-stored JSON
-
-jobs
-
-```
-
-Before changing a collector rule, the tests are therefore a good source for understanding the expected behavior.
-
----
-
-# 23. Main Technologies
-
-```text
-
-Python >= 3.9
-
-FastAPI
-
-Pydantic
-
-Uvicorn
-
-PostgreSQL
-
-React 18
-
-Vite 5
-
-pytest
-
-ruff
-
-```
-
----
-
-# 24. What Is Not Yet Defined
-
-The project is currently a local/internal MVP.
-
-The following topics are not yet clearly defined:
-
-```text
-
-production hosting
-
-authentication
-
-roles / permissions
-
-CI/CD
-
-monitoring
-
-alerting
-
-backup strategy
-
-rate limiting
-
-retention policy
-
-background worker strategy
-
-```
-
-The current architecture should therefore not be assumed to be the final production architecture.
-
----
-
-# 25. Open Questions
-
-The main remaining decisions concern:
-
-1. define the target environment;
-
-2. define which sources are considered official;
-
-3. define authentication and roles;
-
-4. determine the target volume;
-
-5. define the production PostgreSQL operating model;
-
-6. decide whether FastAPI `BackgroundTasks` remain sufficient;
-
-7. define CI/CD, monitoring, and backups;
-
-8. define the criteria used to measure collector quality;
-
-9. clarify the role of the LLM in classification and the criteria for calling the model.
-
----
-
-# 26. Recommended Code Reading Order
-
-For someone joining the project, the easiest approach is to read the code in this order:
-
-```text
-
-1. README.md
-
-       ↓
-
-2. collector/main.py
-
-       ↓
-
-3. collector/discovery/
-
-       ↓
-
-4. collector/classification/
-
-       ↓
-
-5. collector/extraction/
-
-       ↓
-
-6. collector/validation/
-
-       ↓
-
-7. backend/app/routes/collector.py
-
-       ↓
-
-8. backend/app/database.py + backend/app/db_*.py
-
-       ↓
-
-9. tests/
-
-       ↓
-
-10. frontend/src/App.jsx
-
-```
-
-The goal is to understand first:
-
-```text
-
-how a dataset is found
-
-```
-
-before looking at:
-
-```text
-
-how it is displayed in the interface
-
-```
-
----
-
-# 27. Mental Model to Remember
-
-If you remember only one thing:
-
-```text
-
-The system is given a source
-
-        ↓
-
-It searches for dataset pages
-
-        ↓
-
-It checks whether they really look like datasets
-
-        ↓
-
-It checks whether they are health-related
-
-        ↓
-
-It looks for associated files/APIs
-
-        ↓
-
-It checks that these links work
-
-        ↓
-
-It saves only accepted results
-
-```
-
----
-
-# 28. Summary
-
-The project has three main responsibilities:
-
-### 1. Discover
-
-```text
-
-Where are the datasets?
-
-```
-
-### 2. Qualify
-
-```text
-
-Is it really a dataset?
-
-Is it health-related?
-
-```
-
-### 3. Validate
-
-```text
-
-Is there actually a usable file or API?
-
-```
-
-The current system is functional and tested as a local MVP backed by
-PostgreSQL. The next major developments include improving classification with an
-LLM and converting the collector network layer to native async.

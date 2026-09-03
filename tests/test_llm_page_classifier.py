@@ -141,7 +141,7 @@ def test_llm_page_classifier_rejects_missing_accepted_decision():
     ("field_name", "invalid_signals", "expected_error"),
     [
         ("dataset_signals", {"reason": 12, "evidence": "title"}, "reason"),
-        ("health_signals", {"reason": "health", "evidence": []}, "evidence"),
+        ("dataset_signals", {"reason": "dataset", "evidence": []}, "evidence"),
         ("dataset_signals", {"reason": "dataset"}, "exactly reason and evidence"),
     ],
 )
@@ -470,10 +470,6 @@ def _valid_llm_response() -> dict[str, object]:
         "dataset_signals": {
             "reason": "The page describes an individual downloadable dataset.",
             "evidence": "The title and CSV distribution indicate dataset access.",
-        },
-        "health_signals": {
-            "reason": "The topic is health-related.",
-            "evidence": "The page mentions mortality and epidemiology.",
         },
     }
 

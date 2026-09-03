@@ -66,7 +66,6 @@ class AcceptingPageClassifier:
         return PageClassification(
             accepted=True,
             dataset_signals={"source": "test"},
-            health_signals={"source": "test"},
         )
 
 
@@ -75,7 +74,6 @@ class RejectingPageClassifier:
         return PageClassification(
             accepted=False,
             dataset_signals={"source": "test"},
-            health_signals={"source": "test"},
         )
 
 
@@ -273,7 +271,6 @@ def test_analyze_html_page_uses_injected_page_classifier():
             return PageClassification(
                 accepted=True,
                 dataset_signals={"source": "fake"},
-                health_signals={"source": "fake"},
             )
 
     result = analyze_html_page(
@@ -285,7 +282,6 @@ def test_analyze_html_page_uses_injected_page_classifier():
     assert result is not None
     assert result.geography == ("France",)
     assert result.dataset_signals == {"source": "fake"}
-    assert result.health_signals == {"source": "fake"}
 
 
 def test_analyze_html_page_respects_injected_page_classifier_rejection():

@@ -144,18 +144,6 @@ async def _assert_schema_constraints_are_enforced(database, suffix: str = "") ->
         ),
         (
             """
-            INSERT INTO collected_datasets (
-                dataset_url, title, health_signals
-            )
-            VALUES (%s, %s, '[]'::jsonb)
-            """,
-            (
-                f"https://catalog.example.org/dataset/bad-health-signals{suffix}",
-                "Bad health signals",
-            ),
-        ),
-        (
-            """
             INSERT INTO collected_distributions (
                 dataset_id, url, format, probability
             )
@@ -279,7 +267,6 @@ def _mortality_dataset() -> CollectedDataset:
         uploader="",
         geography=("France",),
         dataset_signals={"schema_dataset": True},
-        health_signals={"matched_keywords": ["mortality"]},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/mortality.csv",
@@ -730,7 +717,6 @@ async def test_save_and_list_collected_datasets(database):
     assert collected[0].dataset_url == "https://catalog.example.org/dataset/mortality"
     assert collected[0].geography == ("France",)
     assert collected[0].dataset_signals == {"schema_dataset": True}
-    assert collected[0].health_signals == {"matched_keywords": ["mortality"]}
     assert collected[0].distributions[0].format == "CSV"
     assert collected[0].distributions[0].signals == {"ckan_resource": True}
     assert collected[0].validation_results[0].ok is True
@@ -745,7 +731,6 @@ async def test_save_and_list_collected_datasets(database):
         uploader="",
         geography=("Germany", "France"),
         dataset_signals=dataset.dataset_signals,
-        health_signals=dataset.health_signals,
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/mortality.json",
@@ -793,7 +778,6 @@ async def test_save_preserves_every_dataset_discovery_observation(database):
         hosting_platform="",
         uploader="",
         dataset_signals={"schema_dataset": True},
-        health_signals={"matched_keywords": ["mortality"]},
         distributions=[],
         discovery_method="ckan",
     )
@@ -811,7 +795,6 @@ async def test_save_preserves_every_dataset_discovery_observation(database):
         hosting_platform="",
         uploader="",
         dataset_signals=dataset.dataset_signals,
-        health_signals=dataset.health_signals,
         distributions=[],
         discovery_method="sitemap",
     )
@@ -854,7 +837,6 @@ async def test_save_does_not_replace_known_metadata_with_empty_values(database):
         uploader="Health team",
         geography=("France",),
         dataset_signals={"source": "first crawl"},
-        health_signals={"source": "first crawl"},
         distributions=[],
         discovery_method="ckan",
     )
@@ -867,7 +849,6 @@ async def test_save_does_not_replace_known_metadata_with_empty_values(database):
         uploader="",
         geography=(),
         dataset_signals={"source": "second crawl"},
-        health_signals={"source": "second crawl"},
         distributions=[],
         discovery_method="",
     )
@@ -891,7 +872,6 @@ async def test_save_does_not_replace_known_metadata_with_empty_values(database):
     assert collected.geography == ("France",)
     assert collected.discovery_method == "ckan"
     assert collected.dataset_signals == {"source": "second crawl"}
-    assert collected.health_signals == {"source": "second crawl"}
 
 
 async def test_save_links_dataset_discovery_observation_to_collection_job(database):
@@ -905,7 +885,6 @@ async def test_save_links_dataset_discovery_observation_to_collection_job(databa
         hosting_platform="",
         uploader="",
         dataset_signals={"schema_dataset": True},
-        health_signals={"matched_keywords": ["mortality"]},
         distributions=[],
         discovery_method="ckan",
     )
@@ -937,7 +916,6 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/current.csv",
@@ -1004,7 +982,6 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/current.csv",
@@ -1070,7 +1047,6 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/current.csv",
@@ -1113,7 +1089,6 @@ async def test_validation_results_match_distribution_by_url_and_format(database)
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(url=shared_url, format="CSV", probability=0.9),
             DistributionCandidate(url=shared_url, format="JSON", probability=0.8),
@@ -1159,7 +1134,6 @@ async def test_duplicate_validation_results_fail_clearly(database):
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/duplicate.csv",
@@ -1202,7 +1176,6 @@ async def test_orphan_validation_result_fails_clearly(database):
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/current.csv",
@@ -1238,7 +1211,6 @@ async def test_save_collected_distribution_without_validation_result(database):
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/unvalidated.csv",
@@ -1289,7 +1261,6 @@ async def test_corrupted_stored_signals_fail_when_listing_datasets(database):
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[],
     )
     await database.save_collected_datasets("https://catalog.example.org/", [dataset])
@@ -1431,7 +1402,6 @@ async def test_non_json_serializable_signals_do_not_leave_partial_rows(database)
         hosting_platform="",
         uploader="",
         dataset_signals={},
-        health_signals={},
         distributions=[
             DistributionCandidate(
                 url="https://catalog.example.org/files/bad-signals.csv",
@@ -1510,7 +1480,6 @@ async def test_complete_collection_job_rolls_back_datasets_when_one_save_fails(d
         hosting_platform="",
         uploader="",
         dataset_signals={"invalid": object()},
-        health_signals={},
         distributions=[],
     )
 

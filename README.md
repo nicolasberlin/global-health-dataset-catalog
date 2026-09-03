@@ -1,9 +1,10 @@
 # Global Health Dataset Catalog
 
-Small React + FastAPI app for cataloging official health dataset pages.
+Small React + FastAPI app for discovering and cataloging health dataset pages.
+Some seeded sources are official organizations, but the application does not
+currently enforce official publisher status for every collected record.
 
 The tagged `v0.1.0-no-collector` release is the stable catalogue-only baseline.
-The `collector-update` branch introduces the first generic collector modules.
 The collector does not download or store datasets themselves. It extracts
 dataset page metadata, classifies pages with three LLM voters, finds possible
 data distributions, and validates download/API links lightly.
@@ -12,12 +13,24 @@ data distributions, and validates download/API links lightly.
 
 - `backend/app/main.py`: FastAPI app setup, CORS, startup, and router registration
 - `backend/app/database.py`: compatibility facade for the async PostgreSQL DB layer
-- `backend/app/db_*.py`: DB connection, schema, sources, collected datasets, jobs, and JSON serialization
+- `backend/app/db/*.py`: DB connection, schema, sources, collected datasets, jobs, and JSON serialization
 - `backend/app/routes/sources.py`: `/sources` API routes for dataset page links
 - `collector/`: generic collector modules for extraction, classification, validation, and discovery
 - `frontend/src/App.jsx`: React UI that reads and displays dataset links
 - `tests/test_database.py`: database structure and seed test
 - `tests/test_collector_pipeline.py`: collector extraction, classification, and validation tests
+
+## Documentation
+
+- [`docs/ONBOARDING.md`](docs/ONBOARDING.md): concise developer setup and code-reading guide
+- [`docs/technical-design-document.md`](docs/technical-design-document.md): current technical design
+- [`docs/collector-pipeline-diagram.md`](docs/collector-pipeline-diagram.md): current runtime flows
+- [`docs/classification-architecture.md`](docs/classification-architecture.md): LLM contracts, prompts, and voting
+- [`docs/database-schema-diagram.md`](docs/database-schema-diagram.md): current PostgreSQL schema
+- [`docs/dataset-collection-and-quality-policy.md`](docs/dataset-collection-and-quality-policy.md): draft collection and quality policy
+- [`docs/roadmap.md`](docs/roadmap.md): proposed product and production work
+- [`docs/multi-repository-architecture.md`](docs/multi-repository-architecture.md): proposed multi-provider search design
+- [`docs/adr/0001-postgresql-only.md`](docs/adr/0001-postgresql-only.md): PostgreSQL migration decision
 
 ## Collector
 
@@ -57,6 +70,16 @@ Configure the API database URL:
 
 ```bash
 export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
+```
+
+Configure the OpenAI classifier. All three model variables are required and
+must contain distinct model names:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_CLASSIFIER_MODEL_1="model-a"
+export OPENAI_CLASSIFIER_MODEL_2="model-b"
+export OPENAI_CLASSIFIER_MODEL_3="model-c"
 ```
 
 The PostgreSQL database is managed by the application. It must be empty on

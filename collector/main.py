@@ -49,7 +49,6 @@ def analyze_html_page(
         uploader=page.uploader,
         geography=page.geography,
         dataset_signals=classification.dataset_signals,
-        health_signals=classification.health_signals,
         distributions=distributions,
     )
 
@@ -187,7 +186,6 @@ def analyze_discovered_page(
         uploader="",
         geography=page.geography,
         dataset_signals=classification.dataset_signals,
-        health_signals=classification.health_signals,
         distributions=distributions,
         discovery_method=discovered_page.discovery_method,
     )

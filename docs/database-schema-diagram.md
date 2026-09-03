@@ -6,6 +6,11 @@ the application.
 The PostgreSQL database is managed by the application. A new database starts at
 the current application schema, recorded in `schema_migrations`.
 
+This diagram describes the current schema only. Proposed review status,
+persistent identifiers, licensing, quality, and lifecycle fields are tracked in
+the [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
+and [roadmap](roadmap.md).
+
 ```mermaid
 erDiagram
     schema_migrations {
@@ -52,7 +57,6 @@ erDiagram
         jsonb geography
         string discovery_method
         jsonb dataset_signals
-        jsonb health_signals
         timestamptz first_seen_at
         timestamptz last_seen_at
         timestamptz created_at

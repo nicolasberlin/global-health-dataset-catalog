@@ -7,10 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import _ensure_public_http_url
+from collector.fetch import open_public_http_url
 from collector.url_utils import canonicalize_url, same_domain
 
 TextFetcher = Callable[[str], str]
@@ -205,8 +205,6 @@ def fetch_text_url(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 5_000_000,
 ) -> str:
-    _ensure_public_http_url(url)
-
     request = Request(
         url,
         headers={
@@ -217,7 +215,7 @@ def fetch_text_url(
     )
 
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with open_public_http_url(request, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type", "")
             body = response.read(max_bytes + 1)
             if len(body) > max_bytes:

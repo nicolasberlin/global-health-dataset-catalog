@@ -235,7 +235,6 @@ class CollectorCollectedDataset(BaseModel):
     geography: list[str] = Field(default_factory=list)
     discovery_method: str
     dataset_signals: dict[str, Any]
-    health_signals: dict[str, Any]
     distributions: list[CollectorDistribution]
     validation_results: list[CollectorValidation]
     first_seen_at: str = ""

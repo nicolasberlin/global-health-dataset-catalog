@@ -10,7 +10,6 @@ export function getEnsembleSummary(classification) {
     return (
         classification?.ensemble ??
         classification?.dataset_signals?.ensemble ??
-        classification?.health_signals?.ensemble ??
         null
     );
 }

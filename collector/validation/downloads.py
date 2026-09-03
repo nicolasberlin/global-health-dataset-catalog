@@ -3,10 +3,11 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from collector.config import DEFAULT_CONFIG
 from collector.extraction.distributions import guess_format
+from collector.fetch import open_public_http_url
 from collector.storage.models import DistributionCandidate, HTTPProbe, ValidationResult
 
 ProbeFunction = Callable[..., HTTPProbe]
@@ -68,7 +69,7 @@ def probe_url(
     request = Request(url, method=method, headers=headers or {})
 
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with open_public_http_url(request, timeout=timeout) as response:
             body_sample = response.read(max_bytes) if max_bytes > 0 else b""
             return HTTPProbe(
                 url=url,
@@ -87,7 +88,7 @@ def probe_url(
             body_sample=body_sample,
             error=str(exception),
         )
-    except (TimeoutError, URLError, OSError) as exception:
+    except (TimeoutError, URLError, OSError, ValueError) as exception:
         return HTTPProbe(
             url=url,
             final_url=url,
@@ -156,4 +157,3 @@ def _parse_content_length(value: str) -> int | None:
     if not value or not re.fullmatch(r"\d+", value.strip()):
         return None
     return int(value)
-

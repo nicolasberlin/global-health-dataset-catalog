@@ -91,7 +91,9 @@ def _system_prompt() -> str:
         "Health-relevant pages concern health, clinical, epidemiology, public health, "
         "healthcare, disease, mortality, morbidity, vaccination, or similar topics. "
         "The backend uses your accepted value directly for this voter's decision; "
-        "keep signals concise and JSON-safe."
+        "dataset_signals must concisely explain the complete decision, including "
+        "whether the resource is an individual dataset and whether it is "
+        "health-relevant. Keep signals JSON-safe."
     )
 
 
@@ -235,12 +237,10 @@ def _classification_schema() -> dict[str, object]:
         "properties": {
             "accepted": {"type": "boolean"},
             "dataset_signals": signal_schema,
-            "health_signals": signal_schema,
         },
         "required": [
             "accepted",
             "dataset_signals",
-            "health_signals",
         ],
         "additionalProperties": False,
     }

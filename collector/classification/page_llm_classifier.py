@@ -76,12 +76,10 @@ def _parse_page_classification(
 
     accepted = _required_bool(raw, "accepted")
     dataset_signals = _required_signal_object(raw, "dataset_signals")
-    health_signals = _required_signal_object(raw, "health_signals")
 
     return PageClassification(
         accepted=accepted,
         dataset_signals=dataset_signals,
-        health_signals=health_signals,
     )
 
 

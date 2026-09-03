@@ -14,7 +14,6 @@ class PageClassificationError(RuntimeError):
 class PageClassification:
     accepted: bool
     dataset_signals: dict[str, object] = field(default_factory=dict)
-    health_signals: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -22,7 +21,6 @@ class PageClassificationVote:
     voter_id: str
     accepted: bool
     dataset_signals: dict[str, object] = field(default_factory=dict)
-    health_signals: dict[str, object] = field(default_factory=dict)
 
 
 class PageClassifier(Protocol):

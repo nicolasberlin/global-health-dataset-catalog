@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import _ensure_public_http_url
+from collector.fetch import open_public_http_url
 from collector.storage.models import DistributionCandidate
 
 JsonFetcher = Callable[[str], dict[str, object]]
@@ -107,8 +107,6 @@ def fetch_json_url(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 5_000_000,
 ) -> dict[str, object]:
-    _ensure_public_http_url(url)
-
     request = Request(
         url,
         headers={
@@ -119,7 +117,7 @@ def fetch_json_url(
     )
 
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with open_public_http_url(request, timeout=timeout) as response:
             body = response.read(max_bytes + 1)
     except HTTPError as exception:
         raise ValueError(f"JSON URL returned HTTP {exception.code}.") from exception
