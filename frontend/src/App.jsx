@@ -59,6 +59,8 @@ export default function App() {
     const [activeCollectionJob, setActiveCollectionJob] = useState(null);
     const [repositoryQuery, setRepositoryQuery] = useState('');
     const [repositoryResultQuery, setRepositoryResultQuery] = useState('');
+    const [repositoryOrigin, setRepositoryOrigin] = useState(null);
+    const [localRepositoryResults, setLocalRepositoryResults] = useState([]);
     const [repositoryCandidates, setRepositoryCandidates] = useState([]);
     const [repositoryWarnings, setRepositoryWarnings] = useState([]);
     const [repositoryError, setRepositoryError] = useState('');
@@ -241,13 +243,15 @@ export default function App() {
         setRepositorySearching(true);
         setRepositoryHasSearched(true);
         setRepositoryResultQuery(query);
+        setRepositoryOrigin(null);
+        setLocalRepositoryResults([]);
         setRepositoryCandidates([]);
         setRepositoryWarnings([]);
         setRepositoryError('');
 
         let classificationStarted = false;
         try {
-            const response = await fetch(`${API_BASE_URL}/collector/search-repositories`, {
+            const response = await fetch(`${API_BASE_URL}/collector/search-datasets`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -267,7 +271,20 @@ export default function App() {
                 return;
             }
 
-            const candidates = (Array.isArray(responsePayload?.items)
+            if (!['database', 'online'].includes(responsePayload?.origin)) {
+                throw new Error('La réponse de recherche est incomplète.');
+            }
+
+            setRepositoryOrigin(responsePayload.origin);
+            if (responsePayload.origin === 'database') {
+                setLocalRepositoryResults(
+                    Array.isArray(responsePayload.items) ? responsePayload.items : [],
+                );
+                setRepositoryWarnings([]);
+                return;
+            }
+
+            const candidates = (Array.isArray(responsePayload.items)
                 ? responsePayload.items
                 : []
             ).map((item, index) => ({
@@ -573,11 +590,13 @@ export default function App() {
                 repositoryClassificationErrors={repositoryClassificationErrors}
                 repositoryError={repositoryError}
                 repositoryHasSearched={repositoryHasSearched}
+                repositoryOrigin={repositoryOrigin}
                 repositoryQuery={repositoryQuery}
                 repositoryResultQuery={repositoryResultQuery}
                 repositorySearching={repositorySearching}
                 repositoryStatusCounts={repositoryStatusCounts}
                 repositoryWarnings={repositoryWarnings}
+                localRepositoryResults={localRepositoryResults}
                 searchRepositories={searchRepositories}
                 setAgreementFilter={setAgreementFilter}
                 setRepositoryQuery={setRepositoryQuery}

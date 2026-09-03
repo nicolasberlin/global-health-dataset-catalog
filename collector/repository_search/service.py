@@ -1,3 +1,5 @@
+"""Orchestration of repository providers, filtering, and classification."""
+
 from __future__ import annotations
 
 import logging
@@ -25,6 +27,8 @@ def search_repository_metadata(
     query: str,
     providers: Iterable[RepositorySearchProvider] | None = None,
 ) -> RepositorySearchResponse:
+    """Search providers while preserving partial results and warning on failures."""
+
     normalized_query = query.strip()
     if not normalized_query:
         raise ValueError("Search query is required")
@@ -67,7 +71,8 @@ def classify_repository_result(
     result: RepositorySearchResult,
     classifier: RepositoryResultClassifier,
 ) -> RepositorySearchResult:
-    """Classify one repository result from its normalized metadata contract."""
+    """Return a copy classified from the result's normalized metadata contract."""
+
     classification = classifier.classify(_repository_result_page(result))
     return replace(result, classification=classification)
 

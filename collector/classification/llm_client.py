@@ -1,3 +1,5 @@
+"""Provider-neutral HTTP client contracts for LLM classification."""
+
 from __future__ import annotations
 
 import json
@@ -15,12 +17,16 @@ ResponseTextExtractor = Callable[[object], str]
 
 
 class LLMPageClassificationClient(Protocol):
+    """Client capable of returning one structured page-classification decision."""
+
     def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
         ...
 
 
 @dataclass(frozen=True)
 class LLMProviderConfig:
+    """HTTP and payload conventions required by one LLM provider."""
+
     name: str
     endpoint_url: str
     api_key_env_var: str
@@ -34,6 +40,8 @@ class LLMProviderConfig:
 
 
 class HTTPJSONLLMClient:
+    """Call an LLM HTTP endpoint and return its JSON classification object."""
+
     def __init__(
         self,
         provider: LLMProviderConfig,
@@ -85,6 +93,8 @@ class HTTPJSONLLMClient:
 
         output_text = self._provider.response_text_extractor(response_payload)
 
+        # The provider envelope is JSON, while output_text contains the model's
+        # separate JSON classification document.
         try:
             raw_classification = json.loads(output_text)
         except json.JSONDecodeError as exception:

@@ -226,7 +226,7 @@ class CollectorValidation(BaseModel):
 class CollectorCollectedDataset(BaseModel):
     id: Optional[int] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     source_url: str = ""
-    dataset_url: str
+    dataset_url: HttpUrl
     title: str
     description: str
     publisher: str
@@ -240,6 +240,20 @@ class CollectorCollectedDataset(BaseModel):
     first_seen_at: str = ""
     last_seen_at: str = ""
     updated_at: str = ""
+
+
+class CollectorDatabaseDatasetSearchResponse(BaseModel):
+    query: str
+    origin: Literal["database"] = "database"
+    items: list[CollectorCollectedDataset] = Field(default_factory=list)
+    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
+
+
+class CollectorOnlineDatasetSearchResponse(BaseModel):
+    query: str
+    origin: Literal["online"] = "online"
+    items: list[CollectorRepositorySearchItem] = Field(default_factory=list)
+    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
 
 
 class CollectorCollectionResponse(BaseModel):

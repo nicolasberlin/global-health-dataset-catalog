@@ -1,3 +1,5 @@
+"""Immutable data contracts shared across the collection pipeline."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -5,10 +7,13 @@ from dataclasses import dataclass, field
 from collector.extraction.dataset_metadata import (
     build_dataset_metadata,
 )
+from collector.url_utils import require_http_url
 
 
 @dataclass(frozen=True)
 class LinkCandidate:
+    """Page link and surrounding evidence considered during extraction."""
+
     url: str
     anchor: str = ""
     nearby_text: str = ""
@@ -19,6 +24,8 @@ class LinkCandidate:
 
 @dataclass(frozen=True)
 class PageSnapshot:
+    """Normalized page content and dataset metadata used by classifiers."""
+
     url: str
     canonical_url: str
     search_query: str = ""
@@ -78,6 +85,8 @@ class PageSnapshot:
         )
 
     def dataset_metadata(self) -> dict[str, str]:
+        """Return the fixed metadata contract supplied to classification."""
+
         return build_dataset_metadata(
             title=self.title,
             geography=self.geography,
@@ -102,6 +111,8 @@ def _normalized_values(values: tuple[str, ...]) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class DistributionCandidate:
+    """Potential downloadable data resource discovered for a dataset page."""
+
     url: str
     format: str
     probability: float
@@ -119,6 +130,8 @@ class DistributionCandidate:
 
 @dataclass(frozen=True)
 class HTTPProbe:
+    """Raw bounded HTTP probe outcome used to validate a distribution."""
+
     url: str
     final_url: str
     status_code: int | None
@@ -129,6 +142,8 @@ class HTTPProbe:
 
 @dataclass(frozen=True)
 class ValidationResult:
+    """Normalized validation outcome for one distribution URL."""
+
     url: str
     final_url: str
     format: str
@@ -144,6 +159,8 @@ class ValidationResult:
 
 @dataclass(frozen=True)
 class CollectedDataset:
+    """Accepted dataset whose canonical URL is guaranteed to be HTTP(S)."""
+
     dataset_url: str
     title: str
     description: str
@@ -161,9 +178,14 @@ class CollectedDataset:
     last_seen_at: str = ""
     updated_at: str = ""
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dataset_url", require_http_url(self.dataset_url))
+
 
 @dataclass(frozen=True)
 class CollectionReport:
+    """Aggregate counters and discovery methods for one collection run."""
+
     discovered_count: int = 0
     analyzed_count: int = 0
     accepted_count: int = 0
@@ -174,5 +196,7 @@ class CollectionReport:
 
 @dataclass(frozen=True)
 class CollectionResult:
+    """Datasets and aggregate report produced by one collection run."""
+
     datasets: list[CollectedDataset] = field(default_factory=list)
     report: CollectionReport = field(default_factory=CollectionReport)

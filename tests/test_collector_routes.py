@@ -5,15 +5,18 @@ import threading
 import time
 
 import pytest
+from app.database import normalize_dataset_search_query
 from app.routes.collector import (
     _run_collection_job,
     classify_repository_result,
     list_collected,
     read_collection_job,
+    search_datasets,
     search_repositories,
     start_collection_job,
 )
 from app.routes.collector_schemas import (
+    CollectorCollectedDataset,
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorURLRequest,
@@ -31,6 +34,7 @@ from collector.storage.models import (
     CollectedDataset,
     CollectionReport,
     CollectionResult,
+    DistributionCandidate,
 )
 
 pytestmark = pytest.mark.anyio
@@ -139,6 +143,206 @@ async def test_collector_search_repositories_route_accepts_query_and_returns_res
     assert len(response.warnings) == 1
     assert response.warnings[0].provider == "HDX"
     assert response.warnings[0].message == "This source could not be searched."
+
+
+async def test_collector_search_datasets_returns_local_results_without_provider_call(
+    monkeypatch,
+):
+    async def fake_search_collected_datasets(query):
+        assert query == "about malaria mortality in France"
+        return [
+            CollectedDataset(
+                dataset_url="https://catalog.example.org/malaria",
+                title="Malaria mortality data",
+                description="Annual observations.",
+                publisher="Public Health Institute",
+                hosting_platform="CKAN",
+                uploader="Epidemiology team",
+                geography=("Senegal",),
+                dataset_signals={"dataset": True},
+                distributions=[
+                    DistributionCandidate(
+                        url="https://catalog.example.org/malaria.csv",
+                        format="CSV",
+                        probability=0.98,
+                    )
+                ],
+                discovery_method="ckan",
+                source_url="https://catalog.example.org",
+                database_id=42,
+            )
+        ]
+
+    def fail_if_provider_called(query):
+        raise AssertionError(f"Provider called unexpectedly for {query!r}")
+
+    monkeypatch.setattr(
+        "app.routes.collector.search_collected_datasets",
+        fake_search_collected_datasets,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.search_repository_metadata",
+        fail_if_provider_called,
+    )
+
+    response = await search_datasets(
+        CollectorRepositorySearchRequest(
+            query=" datasets about malaria mortality in France "
+        )
+    )
+
+    assert response.origin == "database"
+    assert response.query == "datasets about malaria mortality in France"
+    assert response.items[0].id == 42
+    assert response.items[0].geography == ["Senegal"]
+    assert response.items[0].distributions[0].format == "CSV"
+
+
+async def test_collector_search_datasets_falls_back_online_when_database_is_empty(
+    monkeypatch,
+):
+    async def fake_search_collected_datasets(query):
+        assert query == "about malaria mortality in France"
+        return []
+
+    def fake_search_repository_metadata(query):
+        assert query == "datasets about malaria mortality in France"
+        return RepositorySearchResponse(
+            results=[
+                RepositorySearchResult(
+                    title="Online malaria dataset",
+                    url="https://example.org/online-malaria",
+                    source="DataCite",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        "app.routes.collector.search_collected_datasets",
+        fake_search_collected_datasets,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.search_repository_metadata",
+        fake_search_repository_metadata,
+    )
+
+    response = await search_datasets(
+        CollectorRepositorySearchRequest(
+            query="datasets about malaria mortality in France"
+        )
+    )
+
+    assert response.origin == "online"
+    assert response.items[0].source == "DataCite"
+    assert response.query == "datasets about malaria mortality in France"
+    assert response.items[0].search_query == (
+        "datasets about malaria mortality in France"
+    )
+
+    captured_queries = []
+
+    class QueryCapturingClassifier:
+        def classify(self, page):
+            captured_queries.append(page.search_query)
+            return RepositoryClassification(
+                relevance_label="relevant",
+                reason="The candidate matches the complete query.",
+                ensemble=_accepted_repository_ensemble(
+                    reason="The candidate matches the complete query."
+                ),
+            )
+
+    monkeypatch.setattr(
+        "app.routes.collector.build_default_repository_result_classifier",
+        lambda: QueryCapturingClassifier(),
+    )
+    await classify_repository_result(response.items[0])
+
+    assert captured_queries == ["datasets about malaria mortality in France"]
+
+
+async def test_collector_search_datasets_skips_local_search_for_generic_terms(
+    monkeypatch,
+):
+    async def fail_if_database_called(query):
+        raise AssertionError(f"Database called unexpectedly for {query!r}")
+
+    def fake_search_repository_metadata(query):
+        assert query == "data datasets databases"
+        return RepositorySearchResponse()
+
+    monkeypatch.setattr(
+        "app.routes.collector.search_collected_datasets",
+        fail_if_database_called,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.search_repository_metadata",
+        fake_search_repository_metadata,
+    )
+
+    response = await search_datasets(
+        CollectorRepositorySearchRequest(query="data datasets databases")
+    )
+
+    assert response.origin == "online"
+    assert response.query == "data datasets databases"
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("  malaria   mortality  ", "malaria mortality"),
+        (
+            "datasets about malaria mortality in France",
+            "about malaria mortality in France",
+        ),
+        ("mortality datasets", "mortality"),
+        ("DATA, dataset! databases", ""),
+        ("database-driven surveillance", "database-driven surveillance"),
+    ],
+)
+def test_normalize_dataset_search_query(query, expected):
+    assert normalize_dataset_search_query(query) == expected
+
+
+async def test_collector_search_datasets_does_not_fallback_on_database_error(
+    monkeypatch,
+):
+    async def failing_database_search(query):
+        raise RuntimeError("PostgreSQL unavailable")
+
+    provider_called = False
+
+    def fake_search_repository_metadata(query):
+        nonlocal provider_called
+        provider_called = True
+        return RepositorySearchResponse()
+
+    monkeypatch.setattr(
+        "app.routes.collector.search_collected_datasets",
+        failing_database_search,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.search_repository_metadata",
+        fake_search_repository_metadata,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await search_datasets(
+            CollectorRepositorySearchRequest(query="malaria mortality")
+        )
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Database search failed."
+    assert provider_called is False
+
+
+async def test_collector_search_datasets_requires_non_blank_query():
+    with pytest.raises(HTTPException) as error:
+        await search_datasets(CollectorRepositorySearchRequest(query="   "))
+
+    assert error.value.status_code == 400
+    assert error.value.detail == "Search query is required"
 
 
 async def test_collector_classify_repository_result_route_returns_classification(
@@ -335,6 +539,22 @@ def test_collector_repository_item_rejects_incomplete_classification_contract():
             url="https://example.org/datasets/malaria-mortality",
             source="DataCite",
             classification={"accepted": True},
+        )
+
+
+def test_collected_dataset_response_rejects_non_http_dataset_url():
+    with pytest.raises(ValueError):
+        CollectorCollectedDataset(
+            dataset_url="javascript:alert(1)",
+            title="Invalid dataset",
+            description="",
+            publisher="",
+            hosting_platform="",
+            uploader="",
+            discovery_method="html",
+            dataset_signals={},
+            distributions=[],
+            validation_results=[],
         )
 
 

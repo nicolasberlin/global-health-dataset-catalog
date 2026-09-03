@@ -88,6 +88,7 @@ There is no obsolete manual pasted-HTML collector flow in the current UI.
 | POST | `/collector/collection-jobs` | Creates and schedules a background collection job |
 | GET | `/collector/collection-jobs/{job_id}` | Returns job status and counters |
 | GET | `/collector/collected-datasets` | Lists persisted datasets and distributions |
+| POST | `/collector/search-datasets` | Searches collected datasets first, then repository providers on no match |
 
 FastAPI background tasks are process-local. There is no durable worker queue,
 retry scheduler, or multi-process job ownership mechanism.
@@ -96,8 +97,12 @@ retry scheduler, or multi-process job ownership mechanism.
 
 ```mermaid
 flowchart TD
-    Query["User query"] --> SearchRoute["POST /collector/search-repositories"]
-    SearchRoute --> Service["search_repository_metadata()"]
+    Query["User query"] --> SearchRoute["POST /collector/search-datasets"]
+    SearchRoute --> LocalNormalize["Remove catalog-generic terms<br/>for local lookup only"]
+    LocalNormalize --> LocalSearch["PostgreSQL english weighted full-text search"]
+    LocalSearch --> LocalMatch{"Local match?"}
+    LocalMatch -->|yes| LocalResults["Return origin=database<br/>with distributions"]
+    LocalMatch -->|no| Service["search_repository_metadata()"]
     Service --> Provider["DataCite provider"]
     Provider --> Filter["Require title + HTTP(S) URL"]
     Filter --> UI["Candidates in React state"]
@@ -107,6 +112,17 @@ flowchart TD
     Display -->|yes| Accepted["Display accepted candidate"]
     Display -->|no| Rejected["Display rejected candidate"]
 ```
+
+The local search uses a trigger-maintained `tsvector` and a GIN index. Title has
+the highest weight, followed by description, publisher/geography, then hosting
+platform/uploader/dataset URL. Results are ordered by relevance and `updated_at`.
+The catalog-specific normalizer removes only `data`, `dataset`, and `database`;
+the PostgreSQL `english` configuration handles language stop words and stemming.
+The original query remains unchanged for responses, DataCite, LLMs, and the UI.
+Database errors return HTTP 500 and never trigger an online fallback. This
+pre-stable full-text configuration change has no upgrade migration; an older
+local database must be recreated. Search is currently optimized for primarily
+English metadata rather than complete bilingual retrieval.
 
 DataCite is the only provider enabled by default. Its query includes
 `resource-type-id=dataset`, a page size, and relevance sorting. Provider output
@@ -186,6 +202,13 @@ The classifiers are intentionally separate:
 | `EnsembleRepositoryRelevanceClassifier` | User query plus repository metadata | Query relevance label |
 | `EnsemblePageClassifier` | Page metadata/text plus distributions | Individual dataset and health relevance |
 
+Repository relevance responses use a strict conditional contract.
+`missing_information` must contain at least one nonempty item when the label is
+`insufficient_information`, and must be empty for every other label. A response
+that violates this relationship is a failed voter response rather than being
+silently rewritten. Two other valid voters can still satisfy the ensemble
+quorum.
+
 Although model names are distinct, all voters share one provider, endpoint,
 account, and API-key path. This is not provider-independent fault isolation.
 
@@ -208,6 +231,14 @@ Untrusted HTTP requests for HTML, JSON, sitemaps, and distributions pass through
 `open_public_http_url()`. It rejects private/local destinations before opening
 and revalidates every redirect destination, mitigating direct and redirect-based
 SSRF against local services.
+
+Dataset identity validation is deliberately separate from network safety.
+`normalize_http_url()` accepts only normalized HTTP(S) URLs with a hostname and
+valid port and rejects credentials, control characters, and backslashes. HTML
+canonicals are accepted only on the fetched page's hostname. Invalid structured
+dataset URLs are rejected before LLM classification, while
+`CollectedDataset.__post_init__` enforces the invariant for every construction
+path. The API exposes persisted dataset URLs as Pydantic `HttpUrl` values.
 
 ## 10. Persistence and Schema
 
@@ -392,11 +423,14 @@ Test areas include routes, database behavior, collection, discovery adapters,
 sitemaps, repository search, page/repository ensembles, LLM payload parsing, and
 safe HTTP fetching.
 
-Last verified locally without `TEST_DATABASE_URL`:
+Last verified locally:
 
 ```text
-pytest: 117 passed, 33 skipped
-ruff on changed Python files: passed
+pytest without PostgreSQL: 162 passed, 47 skipped
+pytest with PostgreSQL: 209 passed
+frontend tests: 4 passed
+ruff: passed
+frontend build: passed
 ```
 
 The skipped tests require a reachable PostgreSQL server. The complete check is:
@@ -404,6 +438,7 @@ The skipped tests require a reachable PostgreSQL server. The complete check is:
 ```bash
 .venv/bin/ruff check .
 TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
+npm --prefix frontend test
 npm --prefix frontend run build
 ```
 

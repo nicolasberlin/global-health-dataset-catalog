@@ -1,3 +1,5 @@
+"""LLM-backed classification of discovered dataset pages."""
+
 from __future__ import annotations
 
 import math
@@ -6,11 +8,14 @@ from collector.classification.llm_client import LLMPageClassificationClient
 from collector.classification.page import PageClassification, PageClassificationError
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
+# Bound untrusted evidence so model requests have predictable size.
 MAX_PAGE_TEXT_CHARS = 4000
 MAX_DISTRIBUTIONS = 10
 
 
 class LLMPageClassifier:
+    """Classify a page by sending bounded page and distribution evidence to an LLM."""
+
     def __init__(
         self,
         client: LLMPageClassificationClient,

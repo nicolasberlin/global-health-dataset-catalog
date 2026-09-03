@@ -333,6 +333,17 @@ async def test_init_database_creates_current_schema_with_integrity(database):
 
     assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
     assert set(SCHEMA_TABLES).issubset(await _table_names(database))
+    indexes = await _fetchall(
+        database,
+        """
+        SELECT indexdef
+        FROM pg_indexes
+        WHERE schemaname = current_schema()
+          AND indexname = 'collected_datasets_search_vector_idx'
+        """,
+    )
+    assert len(indexes) == 1
+    assert "USING gin" in str(indexes[0]["indexdef"])
     await _assert_schema_constraints_are_enforced(database, "-fresh")
 
 
@@ -765,6 +776,152 @@ async def test_save_and_list_collected_datasets(database):
         "CSV",
         "JSON",
     }
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "titlemarker",
+        "descriptionmarker",
+        "publishermarker",
+        "hostingmarker",
+        "uploadermarker",
+        "geographymarker",
+        "urlmarker",
+    ],
+)
+async def test_search_collected_datasets_searches_all_metadata_fields(database, query):
+    await database.init_database()
+    dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/urlmarker",
+        title="Titlemarker dataset",
+        description="Descriptionmarker observations.",
+        publisher="Publishermarker Institute",
+        hosting_platform="Hostingmarker",
+        uploader="Uploadermarker team",
+        geography=("Geographymarker",),
+        dataset_signals={"dataset": True},
+        distributions=[
+            DistributionCandidate(
+                url="https://catalog.example.org/files/data.csv",
+                format="CSV",
+                probability=0.9,
+            )
+        ],
+        discovery_method="ckan",
+    )
+    await database.save_collected_datasets("https://catalog.example.org/", [dataset])
+
+    results = await database.search_collected_datasets(query)
+
+    assert [result.dataset_url for result in results] == [dataset.dataset_url]
+    assert results[0].distributions[0].format == "CSV"
+
+
+async def test_search_collected_datasets_ranks_title_above_description(database):
+    await database.init_database()
+    title_match = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/title-result",
+        title="Malaria surveillance",
+        description="Annual observations.",
+        publisher="",
+        hosting_platform="",
+        uploader="",
+        dataset_signals={},
+    )
+    description_match = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/description-result",
+        title="Annual surveillance",
+        description="Malaria observations.",
+        publisher="",
+        hosting_platform="",
+        uploader="",
+        dataset_signals={},
+    )
+    await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [description_match, title_match],
+    )
+
+    results = await database.search_collected_datasets("malaria", limit=1)
+
+    assert [result.dataset_url for result in results] == [title_match.dataset_url]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_url"),
+    [
+        (
+            "malaria mortality France",
+            "https://catalog.example.org/dataset/malaria-france",
+        ),
+        (
+            "datasets about malaria mortality in France",
+            "https://catalog.example.org/dataset/malaria-france",
+        ),
+        (
+            "mortality datasets",
+            "https://catalog.example.org/dataset/malaria-france",
+        ),
+        (
+            "vaccination observations",
+            "https://catalog.example.org/dataset/vaccination",
+        ),
+    ],
+)
+async def test_search_collected_datasets_handles_natural_queries(
+    database,
+    query,
+    expected_url,
+):
+    await database.init_database()
+    datasets = [
+        CollectedDataset(
+            dataset_url="https://catalog.example.org/dataset/malaria-france",
+            title="Malaria mortality estimates",
+            description="Annual epidemiological records.",
+            publisher="National Health Agency",
+            hosting_platform="CKAN",
+            uploader="Surveillance team",
+            geography=("France",),
+            dataset_signals={},
+        ),
+        CollectedDataset(
+            dataset_url="https://catalog.example.org/dataset/vaccination",
+            title="Vaccination coverage",
+            description="Regional vaccination observations.",
+            publisher="Public Health Institute",
+            hosting_platform="CKAN",
+            uploader="Immunization team",
+            geography=("Europe",),
+            dataset_signals={},
+        ),
+    ]
+    await database.save_collected_datasets("https://catalog.example.org/", datasets)
+
+    local_query = database.normalize_dataset_search_query(query)
+    results = await database.search_collected_datasets(local_query)
+
+    assert results
+    assert results[0].dataset_url == expected_url
+
+
+async def test_empty_local_search_does_not_return_catalog(database):
+    await database.init_database()
+    await database.save_collected_datasets(
+        "https://catalog.example.org/",
+        [_mortality_dataset()],
+    )
+
+    assert database.normalize_dataset_search_query("data datasets databases") == ""
+    assert await database.search_collected_datasets("") == []
+
+
+async def test_search_collected_datasets_rejects_non_positive_limit(database):
+    await database.init_database()
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        await database.search_collected_datasets("malaria", limit=0)
 
 
 async def test_save_preserves_every_dataset_discovery_observation(database):
@@ -1264,6 +1421,13 @@ async def test_corrupted_stored_signals_fail_when_listing_datasets(database):
         distributions=[],
     )
     await database.save_collected_datasets("https://catalog.example.org/", [dataset])
+    await _execute(
+        database,
+        """
+        ALTER TABLE collected_datasets
+        DROP CONSTRAINT collected_datasets_dataset_signals_check
+        """,
+    )
     await _execute(
         database,
         """

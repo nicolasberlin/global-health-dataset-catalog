@@ -1,3 +1,5 @@
+"""Discovery adapter registry and public adapter contracts."""
+
 from collector.discovery.adapters.ckan import CKANAdapter
 from collector.discovery.adapters.html import (
     DataJsonAdapter,
@@ -11,6 +13,7 @@ from collector.discovery.adapters.shared import (
     fetch_json_url,
 )
 
+# Detection stops at the first match, so the generic HTTP adapter must remain last.
 ADAPTERS: tuple[DiscoveryAdapter, ...] = (
     CKANAdapter(),
     SocrataAdapter(),

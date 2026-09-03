@@ -11,8 +11,9 @@ from collector.extraction.dataset_metadata import (
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
 from collector.fetch import FetchedPage
-from collector.main import analyze_html_page, collect_source_with_report
+from collector.main import analyze_discovered_page, analyze_html_page, collect_source_with_report
 from collector.storage.models import (
+    CollectedDataset,
     DistributionCandidate,
     HTTPProbe,
     PageSnapshot,
@@ -93,6 +94,64 @@ def test_collector_extracts_dataset_page_and_distributions():
         distribution.url != "https://example.org/files/report.pdf"
         for distribution in distributions
     )
+
+
+@pytest.mark.parametrize(
+    "canonical_href",
+    [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "https://other.example/dataset",
+        "https://example.org:invalid/dataset",
+    ],
+)
+def test_extract_page_falls_back_when_canonical_is_not_acceptable(canonical_href):
+    page = extract_page(
+        "https://example.org/catalog/page",
+        f'<html><head><link rel="canonical" href="{canonical_href}"></head></html>',
+    )
+
+    assert page.canonical_url == "https://example.org/catalog/page"
+    assert page.dataset_url == "https://example.org/catalog/page"
+
+
+def test_analyze_discovered_page_rejects_invalid_url_before_classification():
+    class ClassifierThatMustNotRun:
+        def classify(self, page, distributions):
+            raise AssertionError("The classifier must not receive an invalid URL.")
+
+    result = analyze_discovered_page(
+        DiscoveredPage(
+            url="javascript:alert(1)",
+            discovery_method="data_json",
+            title="Invalid dataset",
+        ),
+        classifier=ClassifierThatMustNotRun(),
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "dataset_url",
+    [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "https://example.org:invalid/dataset",
+        "https://user@example.org/dataset",
+    ],
+)
+def test_collected_dataset_rejects_invalid_dataset_url(dataset_url):
+    with pytest.raises(ValueError, match=r"valid HTTP\(S\) URL"):
+        CollectedDataset(
+            dataset_url=dataset_url,
+            title="Invalid dataset",
+            description="",
+            publisher="",
+            hosting_platform="",
+            uploader="",
+            dataset_signals={},
+        )
 
 def test_extract_page_builds_normalized_business_metadata():
     page = extract_page("https://example.org/data/catalog", DATASET_HTML)

@@ -1,3 +1,4 @@
+import LocalDatasetSearchCard from './LocalDatasetSearchCard.jsx';
 import RepositoryAcceptedCard from './RepositoryAcceptedCard.jsx';
 import RepositoryProgressCard from './RepositoryProgressCard.jsx';
 
@@ -16,11 +17,13 @@ export default function RepositorySearchSection({
     repositoryClassificationErrors,
     repositoryError,
     repositoryHasSearched,
+    repositoryOrigin,
     repositoryQuery,
     repositoryResultQuery,
     repositorySearching,
     repositoryStatusCounts,
     repositoryWarnings,
+    localRepositoryResults,
     searchRepositories,
     setAgreementFilter,
     setRepositoryQuery,
@@ -35,8 +38,8 @@ export default function RepositorySearchSection({
                 <div>
                     <h2 id="repository-search-title">Repository Search</h2>
                     <p>
-                        Recherche des datasets santé, puis affiche progressivement ceux
-                        acceptés par les trois IA.
+                        Recherche d’abord dans le catalogue local, puis dans les
+                        repositories avec validation IA si nécessaire.
                     </p>
                 </div>
                 {repositoryResultQuery ? (
@@ -68,54 +71,59 @@ export default function RepositorySearchSection({
                 </button>
             </form>
 
-            <div className="repository-controls">
-                <fieldset className="agreement-filter">
-                    <legend>Accord IA</legend>
-                    <div className="agreement-filter__options">
-                        {AGREEMENT_FILTERS.map((filter) => (
-                            <button
-                                key={filter.value}
-                                type="button"
-                                className={
-                                    agreementFilter === filter.value
-                                        ? 'agreement-filter__button agreement-filter__button--active'
-                                        : 'agreement-filter__button'
-                                }
-                                aria-pressed={agreementFilter === filter.value}
-                                onClick={() => setAgreementFilter(filter.value)}
-                            >
-                                {filter.label}
-                            </button>
-                        ))}
-                    </div>
-                </fieldset>
+            {repositoryOrigin !== 'database' ? (
+                <div className="repository-controls">
+                    <fieldset className="agreement-filter">
+                        <legend>Accord IA</legend>
+                        <div className="agreement-filter__options">
+                            {AGREEMENT_FILTERS.map((filter) => (
+                                <button
+                                    key={filter.value}
+                                    type="button"
+                                    className={
+                                        agreementFilter === filter.value
+                                            ? 'agreement-filter__button agreement-filter__button--active'
+                                            : 'agreement-filter__button'
+                                    }
+                                    aria-pressed={agreementFilter === filter.value}
+                                    onClick={() => setAgreementFilter(filter.value)}
+                                >
+                                    {filter.label}
+                                </button>
+                            ))}
+                        </div>
+                    </fieldset>
 
-                <div className="repository-counters" aria-label="État de la classification">
-                    <span>
-                        <strong>{repositoryCandidates.length}</strong>
-                        candidats
-                    </span>
-                    <span>
-                        <strong>
-                            {repositoryStatusCounts.pending +
-                                repositoryStatusCounts.classifying}
-                        </strong>
-                        en analyse
-                    </span>
-                    <span>
-                        <strong>{repositoryStatusCounts.accepted}</strong>
-                        acceptés
-                    </span>
-                    <span>
-                        <strong>{repositoryStatusCounts.rejected}</strong>
-                        rejetés
-                    </span>
-                    <span>
-                        <strong>{repositoryStatusCounts.error}</strong>
-                        erreurs
-                    </span>
+                    <div
+                        className="repository-counters"
+                        aria-label="État de la classification"
+                    >
+                        <span>
+                            <strong>{repositoryCandidates.length}</strong>
+                            candidats
+                        </span>
+                        <span>
+                            <strong>
+                                {repositoryStatusCounts.pending +
+                                    repositoryStatusCounts.classifying}
+                            </strong>
+                            en analyse
+                        </span>
+                        <span>
+                            <strong>{repositoryStatusCounts.accepted}</strong>
+                            acceptés
+                        </span>
+                        <span>
+                            <strong>{repositoryStatusCounts.rejected}</strong>
+                            rejetés
+                        </span>
+                        <span>
+                            <strong>{repositoryStatusCounts.error}</strong>
+                            erreurs
+                        </span>
+                    </div>
                 </div>
-            </div>
+            ) : null}
 
             {repositoryError ? (
                 <div className="repository-message repository-message--error" role="alert">
@@ -138,6 +146,20 @@ export default function RepositorySearchSection({
                 </div>
             ) : null}
 
+            {repositoryOrigin === 'database' ? (
+                <div className="repository-message repository-message--local" role="status">
+                    <strong>Résultats trouvés dans le catalogue local</strong>
+                    <span>Aucune recherche externe ni classification IA nécessaire.</span>
+                </div>
+            ) : null}
+
+            {repositoryOrigin === 'online' ? (
+                <div className="repository-message repository-message--online" role="status">
+                    <strong>Aucun résultat local</strong>
+                    <span>Recherche dans les repositories et validation IA en cours.</span>
+                </div>
+            ) : null}
+
             {!repositoryHasSearched ? (
                 <div className="repository-empty-state">
                     <h3>Trouver un dataset santé</h3>
@@ -151,7 +173,20 @@ export default function RepositorySearchSection({
                     role="status"
                 >
                     <h3>Recherche des candidats</h3>
-                    <p>Interrogation des repositories disponibles…</p>
+                    <p>Interrogation du catalogue local puis des repositories disponibles…</p>
+                </div>
+            ) : null}
+
+            {!repositorySearching &&
+            repositoryOrigin === 'database' &&
+            localRepositoryResults.length > 0 ? (
+                <div className="repository-result-grid" aria-live="polite">
+                    {localRepositoryResults.map((item) => (
+                        <LocalDatasetSearchCard
+                            key={item.id ?? item.dataset_url}
+                            item={item}
+                        />
+                    ))}
                 </div>
             ) : null}
 
@@ -170,6 +205,7 @@ export default function RepositorySearchSection({
 
             {repositoryHasSearched &&
             !repositoryAnalysisInProgress &&
+            repositoryOrigin === 'online' &&
             repositoryStatusCounts.accepted === 0 &&
             !repositoryError ? (
                 <div className="repository-empty-state">
@@ -180,6 +216,7 @@ export default function RepositorySearchSection({
 
             {repositoryHasSearched &&
             !repositoryAnalysisInProgress &&
+            repositoryOrigin === 'online' &&
             repositoryStatusCounts.accepted > 0 &&
             acceptedRepositoryCandidates.length === 0 ? (
                 <div className="repository-empty-state">

@@ -104,9 +104,29 @@ GET  /sources/{id}/page
 POST /collector/collection-jobs
 GET  /collector/collection-jobs/{job_id}
 GET  /collector/collected-datasets
+POST /collector/search-datasets
 POST /collector/search-repositories
 POST /collector/classify-repository-result
 ```
+
+`POST /collector/search-datasets` searches PostgreSQL first. Matching collected
+datasets are returned with `origin: "database"` and do not trigger repository or
+LLM calls. When there is no local match, the route returns repository candidates
+with `origin: "online"`; the frontend then classifies them progressively. The
+older `/collector/search-repositories` endpoint remains available for direct
+online-only searches.
+
+Only the PostgreSQL lookup uses a reduced query: the catalog-generic terms
+`data`, `dataset`, and `database` are removed, while PostgreSQL's `english`
+dictionary handles grammatical words and lexical variants. The original query
+is preserved for API responses, DataCite, LLM classification, and display. Local
+search currently targets primarily English metadata; complete bilingual search
+is not implemented.
+
+The current development schema includes a weighted PostgreSQL full-text GIN
+index using the `english` configuration. No upgrade migration is provided;
+recreate a local database created with an earlier version of schema 1 or with
+the previous `simple` search vector.
 
 Example:
 

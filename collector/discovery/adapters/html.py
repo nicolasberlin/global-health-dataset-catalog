@@ -1,3 +1,5 @@
+"""Socrata, data.json, and generic website discovery adapters."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,6 +37,8 @@ from collector.url_utils import canonicalize_url
 
 @dataclass(frozen=True)
 class SocrataCatalogResult:
+    """Socrata resource and metadata sections used to build one result."""
+
     resource: dict[object, object]
     metadata: dict[object, object]
     permalink: str = ""
@@ -42,6 +46,8 @@ class SocrataCatalogResult:
 
 
 class GenericWebsiteAdapter:
+    """Discover same-domain sitemap pages, falling back to the source page."""
+
     name = "generic_website"
 
     def __init__(
@@ -85,6 +91,8 @@ class GenericWebsiteAdapter:
 
 
 class SocrataAdapter:
+    """Detect Socrata portals and discover datasets through its catalog API."""
+
     name = "socrata"
 
     def __init__(
@@ -183,6 +191,8 @@ class SocrataAdapter:
 
 
 class DataJsonAdapter:
+    """Detect and discover datasets from a source's data.json catalog."""
+
     name = "data_json"
 
     def __init__(

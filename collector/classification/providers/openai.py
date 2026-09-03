@@ -1,3 +1,5 @@
+"""OpenAI Responses API configuration for classification prompts."""
+
 from __future__ import annotations
 
 from collector.classification.llm_client import LLMProviderConfig
@@ -16,6 +18,8 @@ def openai_responses_provider_config(
     model_env_var: str = "OPENAI_MODEL",
     default_model: str = DEFAULT_OPENAI_MODEL,
 ) -> LLMProviderConfig:
+    """Build the OpenAI provider configuration for page eligibility."""
+
     return LLMProviderConfig(
         name=name,
         endpoint_url=OPENAI_RESPONSES_API_URL,
@@ -32,6 +36,8 @@ def openai_repository_relevance_provider_config(
     model_env_var: str = "OPENAI_MODEL",
     default_model: str = DEFAULT_OPENAI_MODEL,
 ) -> LLMProviderConfig:
+    """Build the OpenAI provider configuration for repository relevance."""
+
     return LLMProviderConfig(
         name=name,
         endpoint_url=OPENAI_RESPONSES_API_URL,

@@ -3,7 +3,9 @@ from __future__ import annotations
 from .db.collected_datasets import (
     list_collected_datasets,
     list_dataset_discovery_observations,
+    normalize_dataset_search_query,
     save_collected_datasets,
+    search_collected_datasets,
 )
 from .db.collection_completion import complete_collection_job
 from .db.collection_jobs import (
@@ -53,8 +55,10 @@ __all__ = (
     "mark_collection_job_running",
     "normalize_data_source_key",
     "normalize_data_source_page_url",
+    "normalize_dataset_search_query",
     "open_database_pool",
     "save_collected_datasets",
+    "search_collected_datasets",
     "upsert_collector_data_source",
     "upsert_data_source",
 )

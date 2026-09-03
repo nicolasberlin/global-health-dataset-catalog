@@ -1,3 +1,5 @@
+"""OpenAI request builders, classifier prompts, and strict output schemas."""
+
 from __future__ import annotations
 
 import json

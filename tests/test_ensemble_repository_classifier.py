@@ -4,7 +4,10 @@ import pytest
 
 from collector.classification.ensemble import EnsembleRepositoryRelevanceClassifier
 from collector.classification.page import PageClassificationError
-from collector.classification.repository import RepositoryClassification
+from collector.classification.repository import (
+    RepositoryClassification,
+    RepositoryClassificationVote,
+)
 from collector.storage.models import PageSnapshot
 
 
@@ -95,9 +98,32 @@ def test_repository_classification_derives_acceptance_from_relevance_label():
     )
 
 
+@pytest.mark.parametrize(
+    "classification_type",
+    [RepositoryClassification, RepositoryClassificationVote],
+)
+def test_repository_classification_rejects_unknown_relevance_label(
+    classification_type,
+):
+    arguments = {
+        "relevance_label": "unknown",
+        "reason": "Unexpected classifier response.",
+    }
+    if classification_type is RepositoryClassificationVote:
+        arguments["voter_id"] = "llm_a"
+
+    with pytest.raises(ValueError, match="Unsupported repository relevance label"):
+        classification_type(**arguments)
+
+
 def test_repository_classification_requires_missing_information_details():
     with pytest.raises(ValueError, match="identify missing information"):
         _classification("insufficient_information", "geography is missing")
+
+
+def test_repository_classification_rejects_unexpected_missing_information():
+    with pytest.raises(ValueError, match="must be empty"):
+        _classification("somewhat_relevant", "partial match", ["geography"])
 
 
 def test_repository_ensemble_rejects_minimum_below_required_votes():

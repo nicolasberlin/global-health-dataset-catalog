@@ -1,3 +1,5 @@
+"""Dataset discovery through the CKAN Action API."""
+
 from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -24,6 +26,8 @@ from collector.url_utils import canonicalize_url
 
 
 class CKANAdapter:
+    """Detect CKAN portals and convert package metadata into discovered pages."""
+
     name = "ckan"
 
     def __init__(

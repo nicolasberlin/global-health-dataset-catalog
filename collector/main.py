@@ -19,6 +19,7 @@ from collector.storage.models import (
     PageSnapshot,
     ValidationResult,
 )
+from collector.url_utils import normalize_http_url
 from collector.validation.downloads import validate_distribution
 
 DiscoverFunction = Callable[[str], list[DiscoveredPage]]
@@ -145,16 +146,20 @@ def analyze_discovered_page(
     config: CollectorConfig = DEFAULT_CONFIG,
     classifier: PageClassifier | None = None,
 ) -> CollectedDataset | None:
+    dataset_url = normalize_http_url(discovered_page.url)
+    if dataset_url is None:
+        return None
+
     page = PageSnapshot(
-        url=discovered_page.url,
-        canonical_url=discovered_page.url,
+        url=dataset_url,
+        canonical_url=dataset_url,
         title=discovered_page.title,
         h1=discovered_page.title,
         meta_description=discovered_page.description,
         publisher=discovered_page.publisher,
         geography=discovered_page.geography,
         date_of_publication=discovered_page.date_of_publication,
-        dataset_url=discovered_page.url,
+        dataset_url=dataset_url,
         diseases=discovered_page.diseases,
         size_of_dataset=discovered_page.size_of_dataset,
         demographic_information=discovered_page.demographic_information,

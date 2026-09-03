@@ -1,6 +1,6 @@
 # Collector Pipeline Diagram
 
-> Current runtime flow, last verified 2026-09-02.
+> Current runtime flow, last verified 2026-09-03.
 
 The application has two separate flows. Repository search classifies candidates
 for display. Source collection decides whether discovered records can be stored.
@@ -11,7 +11,7 @@ for display. Source collection decides whether discovered records can be stored.
 flowchart LR
     UI["React frontend"]
     Sources["/sources"]
-    RepoSearch["/collector/search-repositories"]
+    RepoSearch["/collector/search-datasets"]
     RepoClassify["/collector/classify-repository-result"]
     Jobs["/collector/collection-jobs"]
     JobStatus["/collector/collection-jobs/{id}"]
@@ -19,7 +19,7 @@ flowchart LR
     DB[(PostgreSQL)]
 
     UI --> Sources --> DB
-    UI --> RepoSearch
+    UI --> RepoSearch --> DB
     UI --> RepoClassify
     UI --> Jobs --> DB
     UI --> JobStatus --> DB
@@ -33,14 +33,19 @@ source collection are separate API workflows.
 
 ```mermaid
 flowchart TD
-    Query["User query"] --> Route["POST /collector/search-repositories"]
-    Route --> Service["search_repository_metadata()"]
+    Query["User query"] --> Route["POST /collector/search-datasets"]
+    Route --> LocalQuery["Remove data/dataset/database<br/>for PostgreSQL only"]
+    LocalQuery --> DBSearch["english full-text search"]
+    DBSearch --> Match{"Full-text match?"}
+    Match -->|yes| Local["origin=database<br/>datasets + distributions"]
+    Local --> LocalUI["Display 'Déjà dans la base'<br/>no IA controls"]
+    Match -->|no| Service["search_repository_metadata(original query)"]
     Service --> DataCite["DataCiteRepositorySearchProvider"]
     DataCite --> API["DataCite /dois<br/>resource-type-id=dataset"]
     API --> Normalize["Normalize RepositorySearchResult"]
     Normalize --> Filter{"Title and HTTP(S) URL present?"}
     Filter -->|no| MetadataWarning["Drop result + warning"]
-    Filter -->|yes| Candidates["Return candidates to frontend"]
+    Filter -->|yes| Candidates["Return origin=online candidates"]
     Candidates --> Workers["Progressive frontend workers"]
     Workers --> ClassifyRoute["POST /collector/classify-repository-result"]
     ClassifyRoute --> RepoClassifier["EnsembleRepositoryRelevanceClassifier"]
@@ -52,12 +57,20 @@ flowchart TD
     Majority -->|no| Rejected["Display rejected candidate"]
 ```
 
+Database search covers title, description, publisher, hosting platform,
+uploader, geography, and dataset URL. PostgreSQL weights title highest and
+orders matches by rank then update time. Both `tsvector` and `tsquery` use the
+`english` configuration. The original query is preserved for the API, DataCite,
+LLM classification, and display. A database error ends the request with HTTP
+500; it is not treated as an empty result. Local retrieval is optimized for
+primarily English metadata; complete bilingual search is not implemented.
+
 Repository positive labels are `relevant` and `somewhat_relevant`. The prompt
 judges relevance to the user query from repository metadata. It does not
 independently validate health relevance, source authority, licence policy, or a
 working data distribution.
 
-Repository results remain in React state. There is no repository-search save to
+Online repository results remain in React state. There is no repository-search save to
 PostgreSQL and no automatic transition into the source collection pipeline.
 
 ### Normalized Repository Metadata Contract

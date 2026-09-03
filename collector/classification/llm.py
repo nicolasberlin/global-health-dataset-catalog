@@ -1,3 +1,5 @@
+"""Compatibility exports for the split LLM classification modules."""
+
 from collector.classification.llm_client import (
     HTTPJSONLLMClient,
     LLMPageClassificationClient,

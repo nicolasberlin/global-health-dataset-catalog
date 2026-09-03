@@ -1,3 +1,5 @@
+"""LLM-backed relevance classification for repository search results."""
+
 from __future__ import annotations
 
 from typing import cast
@@ -17,6 +19,7 @@ from collector.classification.repository import (
 )
 from collector.storage.models import PageSnapshot
 
+# PageSnapshot permits larger values; these tighter limits keep prompts bounded.
 MAX_REPOSITORY_LLM_DESCRIPTION_CHARS = 6_000
 MAX_REPOSITORY_LLM_METADATA_VALUE_CHARS = 1_500
 MAX_REPOSITORY_LLM_TEXT_CHARS = 4_000
@@ -24,6 +27,8 @@ MAX_REPOSITORY_LLM_URL_CHARS = 2_048
 
 
 class LLMRepositoryRelevanceClassifier:
+    """Compare bounded repository metadata with the original user query via an LLM."""
+
     def __init__(
         self,
         client: LLMPageClassificationClient,
@@ -92,19 +97,16 @@ def _parse_repository_relevance_classification(
     label = _required_relevance_label(raw, "label")
     reason = _required_non_empty_string(raw, "reason")
     missing_information = _required_string_list(raw, "missing_information")
-    if label == "insufficient_information" and not missing_information:
-        raise PageClassificationError(
-            "LLM classification field missing_information must identify at least "
-            "one missing item for insufficient_information."
+    try:
+        return RepositoryClassification(
+            relevance_label=label,
+            reason=reason,
+            missing_information=missing_information,
         )
-    if label != "insufficient_information":
-        missing_information = []
-
-    return RepositoryClassification(
-        relevance_label=label,
-        reason=reason,
-        missing_information=missing_information,
-    )
+    except ValueError as exception:
+        raise PageClassificationError(
+            f"Invalid repository classification: {exception}"
+        ) from exception
 
 
 def _required_relevance_label(

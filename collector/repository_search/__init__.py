@@ -1,3 +1,5 @@
+"""Repository metadata search, filtering, and classification interfaces."""
+
 from collector.repository_search.filtering import filter_repository_results
 from collector.repository_search.models import (
     INVALID_METADATA_MESSAGE,

@@ -57,7 +57,11 @@ def _validate_voting_thresholds(
 
 
 class EnsemblePageClassifier:
-    """Combine independent page-classifier votes into one decision."""
+    """Run page classifiers in parallel and combine their votes by threshold.
+
+    Classification fails when fewer than ``minimum_successful_votes`` voters
+    return usable decisions.
+    """
 
     def __init__(
         self,
@@ -174,7 +178,11 @@ class EnsemblePageClassifier:
 
 
 class EnsembleRepositoryRelevanceClassifier:
-    """Combine independent repository-relevance votes into one decision."""
+    """Run repository classifiers in parallel and combine relevance votes.
+
+    Classification fails when fewer than ``minimum_successful_votes`` voters
+    return usable decisions.
+    """
 
     def __init__(
         self,

@@ -260,7 +260,7 @@ def test_repository_relevance_classifier_returns_repository_classification():
             return {
                 "label": "somewhat_relevant",
                 "reason": "The metadata matches the topic but not every query constraint.",
-                "missing_information": ["Ignored for non-insufficient labels."],
+                "missing_information": [],
             }
 
     client = FakeClient()
@@ -324,6 +324,21 @@ def test_repository_relevance_classifier_requires_missing_information_details():
     classifier = LLMRepositoryRelevanceClassifier(FakeClient())
 
     with pytest.raises(PageClassificationError, match="missing_information"):
+        classifier.classify(_repository_page())
+
+
+def test_repository_relevance_classifier_rejects_unexpected_missing_information():
+    class FakeClient:
+        def classify_page(self, payload):
+            return {
+                "label": "somewhat_relevant",
+                "reason": "The topic matches but geography is missing.",
+                "missing_information": ["geography"],
+            }
+
+    classifier = LLMRepositoryRelevanceClassifier(FakeClient())
+
+    with pytest.raises(PageClassificationError, match="must be empty"):
         classifier.classify(_repository_page())
 
 

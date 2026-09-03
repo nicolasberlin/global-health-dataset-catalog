@@ -1,3 +1,5 @@
+"""DataCite repository search and metadata normalization."""
+
 from __future__ import annotations
 
 import re
@@ -14,6 +16,7 @@ from collector.repository_search.models import (
     RepositorySearchResult,
 )
 
+# These vocabularies infer metadata fields only; relevance is decided later.
 DISEASE_TERMS = (
     "aids",
     "cancer",
@@ -106,6 +109,8 @@ TEXT_MODALITY_TERMS = {
 
 
 class DataCiteRepositorySearchProvider:
+    """Search DataCite datasets and map records to the repository contract."""
+
     name = "DataCite"
     _base_url = "https://api.datacite.org/dois"
 

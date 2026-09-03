@@ -57,6 +57,7 @@ erDiagram
         jsonb geography
         string discovery_method
         jsonb dataset_signals
+        tsvector search_vector
         timestamptz first_seen_at
         timestamptz last_seen_at
         timestamptz created_at
@@ -104,3 +105,12 @@ erDiagram
     collected_datasets ||--o{ dataset_discovery_observations : "delete cascade"
     collection_jobs ||--o{ dataset_discovery_observations : "set null"
 ```
+
+`collected_datasets.search_vector` is maintained by a trigger and indexed by
+`collected_datasets_search_vector_idx` using GIN. It covers title, description,
+publisher, hosting platform, uploader, geography, and dataset URL with decreasing
+weights. The vector and matching query both use PostgreSQL's `english`
+configuration. This pre-stable schema update has no migration; older local
+databases, including those built with the previous `simple` configuration, must
+be recreated. This currently favors primarily English metadata; full bilingual
+search is not implemented.

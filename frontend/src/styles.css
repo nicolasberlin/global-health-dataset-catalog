@@ -454,6 +454,16 @@ p {
     background: #fffaf1;
 }
 
+.repository-message--local {
+    border-color: #bad3c5;
+    background: #f3faf6;
+}
+
+.repository-message--online {
+    border-color: #c9d7e2;
+    background: #f5f8fb;
+}
+
 .repository-empty-state {
     border: 1px dashed #cddbd3;
     border-radius: 8px;
@@ -529,6 +539,11 @@ p {
 .repository-status-pill--accepted {
     background: #e3f2e9;
     color: #17613f;
+}
+
+.repository-status-pill--local {
+    background: #e8f0ec;
+    color: #285b46;
 }
 
 .repository-status-pill--pending {

@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from collector.source_identity import identify_source
 from collector.storage.models import LinkCandidate, PageSnapshot
-from collector.url_utils import canonicalize_url, same_domain
+from collector.url_utils import canonicalize_url, same_domain, select_dataset_url
 
 SKIP_TEXT_TAGS = {"script", "style", "noscript", "svg"}
 BLOCKED_LINK_SCHEMES = {"mailto", "tel", "javascript"}
@@ -25,7 +25,7 @@ class _PageHTMLParser(HTMLParser):
         self.text_parts: list[str] = []
         self.links: list[LinkCandidate] = []
         self.json_ld: list[object] = []
-        self.canonical_url = ""
+        self.canonical_href = ""
         self.meta_description = ""
         self.og_title = ""
         self.og_description = ""
@@ -43,7 +43,7 @@ class _PageHTMLParser(HTMLParser):
             rel = attributes.get("rel", "").lower()
             href = attributes.get("href", "")
             if "canonical" in rel and href:
-                self.canonical_url = canonicalize_url(href, self.url)
+                self.canonical_href = href.strip()
 
         if tag == "meta":
             self._handle_meta(attributes)
@@ -172,7 +172,7 @@ class _PageHTMLParser(HTMLParser):
 def extract_page(url: str, html: str) -> PageSnapshot:
     parser = _PageHTMLParser(url)
     parser.feed(html)
-    canonical_url = parser.canonical_url or canonicalize_url(url)
+    canonical_url = select_dataset_url(url, parser.canonical_href)
     source_identity = identify_source(canonical_url)
     publisher = (
         parser.publisher

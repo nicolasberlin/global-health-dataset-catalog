@@ -1,3 +1,5 @@
+"""Data contracts for repository metadata search providers and responses."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -16,6 +18,8 @@ MISSING_METADATA_VALUE = MISSING_DATASET_METADATA_VALUE
 
 @dataclass(frozen=True)
 class RepositorySearchResult:
+    """Normalized metadata returned for one external repository result."""
+
     title: str
     url: str
     source: str
@@ -31,17 +35,23 @@ class RepositorySearchResult:
 
 @dataclass(frozen=True)
 class RepositorySearchWarning:
+    """Non-fatal provider or metadata problem exposed with search results."""
+
     message: str = PROVIDER_UNAVAILABLE_MESSAGE
     provider: Optional[str] = None  # noqa: UP045 - Keep Python 3.9-compatible typing.
 
 
 @dataclass(frozen=True)
 class RepositorySearchResponse:
+    """Repository results together with non-fatal search warnings."""
+
     results: list[RepositorySearchResult] = field(default_factory=list)
     warnings: list[RepositorySearchWarning] = field(default_factory=list)
 
 
 class RepositorySearchProvider(Protocol):
+    """Interface implemented by external repository search providers."""
+
     name: str
 
     def search(self, query: str) -> list[RepositorySearchResult]:

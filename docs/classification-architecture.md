@@ -187,7 +187,7 @@ sequenceDiagram
     end
     Ensemble->>Ensemble: require at least 2 successful votes
     Ensemble->>Ensemble: accepted when accepted_votes >= 2
-    Ensemble->>Ensemble: build dataset and health audit summaries
+    Ensemble->>Ensemble: build the dataset audit summary
     Ensemble-->>Caller: final PageClassification
 ```
 
@@ -235,6 +235,25 @@ For repository results, `relevant` and `somewhat_relevant` are positive votes.
 `not_relevant` and `insufficient_information` are negative votes. When labels
 tie inside the group that supports the binary decision, the conservative order
 is `not_relevant`, `insufficient_information`, `somewhat_relevant`, `relevant`.
+
+### Strict `missing_information` contract
+
+`missing_information` is meaningful only when the classifier cannot make a
+reliable relevance decision. The label and list must therefore agree:
+
+| Label | `missing_information` | Valid? |
+|---|---|---|
+| `relevant` | `[]` | Yes |
+| `somewhat_relevant` | `[]` | Yes |
+| `not_relevant` | `[]` | Yes |
+| `insufficient_information` | one or more nonempty strings | Yes |
+| `insufficient_information` | `[]` | No |
+| any other label | a nonempty list | No |
+
+The prompt asks the model to follow this contract, and the backend validates it
+again. A contradiction is not silently corrected: that voter's response becomes
+a `PageClassificationError`. The ensemble can still decide when at least two
+other voters return valid responses.
 
 ## Function Inventory
 
@@ -317,7 +336,8 @@ finds the model's textual JSON output in the provider response.
 | `RepositoryClassification` | label, reason, missing data, ensemble | Strips/validates semantic data and derives `accepted`; returned by individual and ensemble classifiers. |
 | `RepositoryClassificationVote` | repository result plus `voter_id` | Internal repository ensemble record; also derives `accepted`. |
 | `RepositoryResultClassifier.classify` | `page` | Structural contract implemented by individual and ensemble repository classifiers. |
-| `_normalized_missing_information` | label and list | Deduplicates/strips values; requires a nonempty list only for `insufficient_information`; clears it otherwise. |
+| `_validate_relevance_label` | runtime value | Rejects values outside the four supported labels; this complements the non-runtime `Literal` annotation. |
+| `_normalized_missing_information` | label and list | Deduplicates/strips values; requires a nonempty list for `insufficient_information` and rejects a nonempty list for every other label. |
 
 The value-object methods and accessors are also active parts of the contract:
 
@@ -351,7 +371,7 @@ The value-object methods and accessors are also active parts of the contract:
 | `_classify_voter` | `(voter_id, classifier)`, page, distributions | `_VoteOutcome` | Converts successful classifications into votes and expected page failures into error outcomes. |
 | `_classify_repository_voter` | `(voter_id, classifier)`, page | `_RepositoryVoteOutcome` | Same conversion; also treats repository dataclass `ValueError` as a voter failure. |
 | `_minimum_votes_error` | minimum, success count, failures | error message | Includes each failed voter ID and error when quorum is not reached. |
-| `_ensemble_summary` / `_vote_summary` | page votes, failures, thresholds, decision, `signal_kind` | audit dict | Builds parallel dataset/health audit views. `signal_kind` chooses which signal object each voter exposes. |
+| `_ensemble_summary` / `_vote_summary` | page votes, failures, thresholds and decision | audit dict | Builds the dataset-classification audit view and preserves each voter's signals. |
 | `_repository_ensemble_summary` / `_repository_vote_summary` | repository votes and decision data | audit dict | Preserves labels, reasons, missing information, failures, and voter IDs. |
 | `_decision_votes` | page votes and final boolean | supporting page votes | Rejects impossible state where no successful vote supports the final decision. |
 | `_repository_decision_votes` | repository votes and final boolean | supporting repository votes | Same invariant for repository decisions. |

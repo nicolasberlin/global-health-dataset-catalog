@@ -1,3 +1,5 @@
+"""Bounded, same-domain discovery of dataset candidates from sitemaps."""
+
 from __future__ import annotations
 
 import gzip
@@ -59,6 +61,8 @@ URL_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 
 @dataclass(frozen=True)
 class SitemapEntry:
+    """One page URL discovered in a sitemap with its ranking metadata."""
+
     url: str
     priority: float
     source_sitemap_url: str
@@ -67,11 +71,15 @@ class SitemapEntry:
 
 @dataclass(frozen=True)
 class ParsedSitemap:
+    """URLs extracted from either a sitemap URL set or sitemap index."""
+
     page_urls: tuple[str, ...] = ()
     nested_sitemap_urls: tuple[str, ...] = ()
 
 
 def sitemap_urls_from_robots(robots_text: str, source_url: str) -> list[str]:
+    """Extract and canonicalize Sitemap directives from a robots.txt body."""
+
     sitemap_urls: list[str] = []
     base_url = site_root_url(source_url)
 
@@ -86,6 +94,8 @@ def sitemap_urls_from_robots(robots_text: str, source_url: str) -> list[str]:
 
 
 def default_sitemap_candidates(source_url: str) -> list[str]:
+    """Return the conventional robots.txt and sitemap.xml URLs for a source."""
+
     base_url = site_root_url(source_url)
     return [
         urljoin(base_url, "robots.txt"),
@@ -99,6 +109,8 @@ def discover_sitemap_entries(
     max_sitemaps: int = MAX_SITEMAPS_PER_SOURCE,
     max_urls: int = MAX_URLS_PER_SOURCE,
 ) -> list[SitemapEntry]:
+    """Discover ranked, same-domain page URLs within configured crawl limits."""
+
     fetch_text = fetch_text or fetch_text_url
     robots_url, default_sitemap_url = default_sitemap_candidates(source_url)
     sitemap_urls = [default_sitemap_url]
@@ -106,6 +118,7 @@ def discover_sitemap_entries(
     try:
         sitemap_urls = sitemap_urls_from_robots(fetch_text(robots_url), source_url) + sitemap_urls
     except ValueError:
+        # Missing or invalid robots.txt is expected; sitemap.xml remains a candidate.
         pass
 
     entries: list[SitemapEntry] = []
@@ -156,6 +169,8 @@ def discover_sitemap_entries(
 
 
 def parse_sitemap(xml_text: str, sitemap_url: str) -> ParsedSitemap:
+    """Parse a sitemap URL set or index and resolve relative locations."""
+
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exception:
@@ -172,6 +187,8 @@ def parse_sitemap(xml_text: str, sitemap_url: str) -> ParsedSitemap:
 
 
 def score_sitemap_url(url: str) -> float:
+    """Estimate dataset-page likelihood from URL path and query tokens."""
+
     parts = urlsplit(url)
     normalized_text = f"{parts.path} {parts.query}".lower()
     normalized_text = normalized_text.replace("_", "-")
@@ -205,6 +222,8 @@ def fetch_text_url(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 5_000_000,
 ) -> str:
+    """Fetch a bounded public text resource for sitemap discovery."""
+
     request = Request(
         url,
         headers={
@@ -230,6 +249,8 @@ def fetch_text_url(
 
 
 def site_root_url(source_url: str) -> str:
+    """Return the scheme and authority of a source as a root URL."""
+
     parts = urlsplit(source_url)
     return urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
 

@@ -111,8 +111,23 @@ tests/
 
 ## 4. Repository Search
 
-`POST /collector/search-repositories` calls
-`repository_search/service.py:search_repository_metadata()`.
+`POST /collector/search-datasets` first calls
+`app.database.search_collected_datasets()`. PostgreSQL searches title,
+description, publisher, hosting platform, uploader, geography, and dataset URL
+with weighted full-text ranking. Before this lookup only, the backend removes
+the catalog-generic terms `data`, `dataset`, and `database`; PostgreSQL's
+`english` dictionary handles grammatical words and stemming. A local match is
+returned immediately with `origin: "database"`, including its distributions,
+without repository or LLM calls.
+
+When PostgreSQL returns no match, the route calls
+`repository_search/service.py:search_repository_metadata()` and returns
+`origin: "online"`. The legacy online-only endpoint
+`POST /collector/search-repositories` remains available.
+
+The original user query is retained in API responses and is passed unchanged to
+DataCite and repository LLM classification. Local search is currently optimized
+for primarily English metadata; full bilingual search is not implemented.
 
 Current behavior:
 
@@ -121,7 +136,7 @@ Current behavior:
 3. Results without a title or syntactically valid HTTP(S) URL are removed.
 4. A provider failure is logged and returned as a warning when another provider
    succeeds. If every provider fails, the request fails.
-5. The frontend progressively calls
+5. For `online` results, the frontend progressively calls
    `POST /collector/classify-repository-result` for each candidate.
 6. Three distinct OpenAI models vote; two positive votes are required.
 7. `relevant` and `somewhat_relevant` are positive repository votes.
@@ -129,6 +144,10 @@ Current behavior:
 The repository prompt evaluates relevance to the search query. It does not
 independently establish health relevance, source trust, file availability, or
 publication eligibility. Repository candidates are not written to PostgreSQL.
+
+There is intentionally no schema migration for full-text configuration changes.
+Recreate an older local schema-1 database, including one built with the previous
+`simple` vector, before starting this version.
 
 ## 5. Source Discovery
 
@@ -182,6 +201,13 @@ All untrusted collector fetches use the public-HTTP guard in
 `collector/fetch.py`. Initial URLs and every redirect are checked so private,
 loopback, link-local, multicast, reserved, and unspecified addresses are
 blocked.
+
+Dataset identity URLs have a separate, non-network validation. `url_utils.py`
+normalizes only absolute HTTP(S) URLs with a hostname and valid port, and rejects
+credentials, control characters, and ambiguous backslashes. HTML canonicals are
+used only when they have the same hostname as the fetched page; otherwise the
+page URL is retained. `CollectedDataset` enforces this invariant for every
+discovery path before persistence.
 
 ## 8. Persistence Decision
 
@@ -269,11 +295,13 @@ Open `http://127.0.0.1:5173/`.
 ```bash
 .venv/bin/ruff check .
 .venv/bin/pytest
+npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-Last verified without `TEST_DATABASE_URL`: **117 passed, 33 skipped**. The skipped
-tests require PostgreSQL. Run the complete database suite with:
+Last verified without `TEST_DATABASE_URL`: **162 passed, 47 skipped**. With a
+local PostgreSQL database: **209 passed**. Frontend: **4 tests passed**. Run the
+complete database suite with:
 
 ```bash
 TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest

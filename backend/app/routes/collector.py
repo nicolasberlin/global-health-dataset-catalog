@@ -5,6 +5,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from typing import Union
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -14,6 +15,8 @@ from app.database import (
     list_collected_datasets,
     mark_collection_job_error,
     mark_collection_job_running,
+    normalize_dataset_search_query,
+    search_collected_datasets,
 )
 from app.database import create_collection_job as db_create_collection_job
 from app.routes.collector_schemas import (
@@ -21,7 +24,9 @@ from app.routes.collector_schemas import (
     CollectorCollectionJob,
     CollectorCollectionJobResponse,
     CollectorCollectionResponse,
+    CollectorDatabaseDatasetSearchResponse,
     CollectorDistribution,
+    CollectorOnlineDatasetSearchResponse,
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorRepositorySearchResponse,
@@ -109,6 +114,50 @@ async def search_repositories(
     if not query:
         raise HTTPException(status_code=400, detail="Search query is required")
 
+    return await _search_online_repositories(query)
+
+
+@router.post("/search-datasets")
+async def search_datasets(
+    payload: CollectorRepositorySearchRequest,
+) -> Union[  # noqa: UP007 - Python 3.9 cannot parse PEP 604 unions.
+    CollectorDatabaseDatasetSearchResponse,
+    CollectorOnlineDatasetSearchResponse,
+]:
+    original_query = payload.query.strip()
+    if not original_query:
+        raise HTTPException(status_code=400, detail="Search query is required")
+
+    # Only PostgreSQL uses the reduced query; providers and downstream LLM
+    # classification must retain the user's complete information need.
+    local_query = normalize_dataset_search_query(original_query)
+    try:
+        local_datasets = (
+            await search_collected_datasets(local_query) if local_query else []
+        )
+    except Exception as exception:  # noqa: BLE001 - DB errors must not trigger online calls.
+        logger.exception("Collected dataset search failed for query=%r", original_query)
+        raise HTTPException(status_code=500, detail="Database search failed.") from exception
+
+    if local_datasets:
+        return CollectorDatabaseDatasetSearchResponse(
+            query=original_query,
+            items=[
+                _collector_collected_dataset(dataset) for dataset in local_datasets
+            ],
+        )
+
+    online_response = await _search_online_repositories(original_query)
+    return CollectorOnlineDatasetSearchResponse(
+        query=online_response.query,
+        items=online_response.items,
+        warnings=online_response.warnings,
+    )
+
+
+async def _search_online_repositories(
+    query: str,
+) -> CollectorRepositorySearchResponse:
     try:
         search_response = await asyncio.to_thread(search_repository_metadata, query)
     except ValueError as exception:

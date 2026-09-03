@@ -1,3 +1,5 @@
+"""Repository-result relevance contracts and validation rules."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -18,11 +20,13 @@ REPOSITORY_RELEVANCE_LABELS: set[RepositoryRelevanceLabel] = {
     "not_relevant",
     "insufficient_information",
 }
+# Partially relevant results remain eligible for the repository search flow.
 REPOSITORY_ACCEPTED_RELEVANCE_LABELS: set[RepositoryRelevanceLabel] = {
     "relevant",
     "somewhat_relevant",
 }
 
+# Bound untrusted repository inputs and model outputs at classification boundaries.
 MAX_REPOSITORY_TITLE_CHARS = 500
 MAX_REPOSITORY_SEARCH_QUERY_CHARS = 300
 MAX_REPOSITORY_DESCRIPTION_CHARS = 20_000
@@ -42,6 +46,8 @@ MAX_REPOSITORY_MISSING_INFORMATION_CHARS = 500
 
 @dataclass(frozen=True)
 class RepositoryClassification:
+    """Final repository classification with acceptance derived from relevance."""
+
     relevance_label: RepositoryRelevanceLabel
     reason: str
     missing_information: list[str] = field(default_factory=list)
@@ -49,6 +55,7 @@ class RepositoryClassification:
     accepted: bool = field(init=False)
 
     def __post_init__(self) -> None:
+        _validate_relevance_label(self.relevance_label)
         reason = self.reason.strip()
         if not reason:
             raise ValueError("Repository classification reason cannot be empty.")
@@ -68,6 +75,8 @@ class RepositoryClassification:
 
 @dataclass(frozen=True)
 class RepositoryClassificationVote:
+    """Classification decision returned by one repository-classifier voter."""
+
     voter_id: str
     relevance_label: RepositoryRelevanceLabel
     reason: str
@@ -75,6 +84,7 @@ class RepositoryClassificationVote:
     accepted: bool = field(init=False)
 
     def __post_init__(self) -> None:
+        _validate_relevance_label(self.relevance_label)
         reason = self.reason.strip()
         if not reason:
             raise ValueError("Repository classification vote reason cannot be empty.")
@@ -93,8 +103,15 @@ class RepositoryClassificationVote:
 
 
 class RepositoryResultClassifier(Protocol):
+    """Interface implemented by repository-result classifiers."""
+
     def classify(self, page: PageSnapshot) -> RepositoryClassification:
         ...
+
+
+def _validate_relevance_label(value: object) -> None:
+    if not isinstance(value, str) or value not in REPOSITORY_RELEVANCE_LABELS:
+        raise ValueError(f"Unsupported repository relevance label: {value!r}.")
 
 
 def _normalized_missing_information(
@@ -107,8 +124,15 @@ def _normalized_missing_information(
     if relevance_label == "insufficient_information":
         if not normalized_values:
             raise ValueError(
-                "An insufficient-information classification must identify missing information."
+                "An insufficient-information classification must identify missing "
+                "information in missing_information."
             )
         return normalized_values
+
+    if normalized_values:
+        raise ValueError(
+            "missing_information must be empty unless the classification "
+            "label is insufficient_information."
+        )
 
     return []

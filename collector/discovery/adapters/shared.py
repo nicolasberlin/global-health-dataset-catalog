@@ -1,3 +1,5 @@
+"""Shared discovery contracts, metadata helpers, and bounded JSON fetching."""
+
 from __future__ import annotations
 
 import json
@@ -17,6 +19,7 @@ JsonFetcher = Callable[[str], dict[str, object]]
 
 EXCLUDED_RESOURCE_FORMATS = {"HTML", "HTM", "PDF", "PNG", "JPG", "JPEG", "GIF", "SVG"}
 
+# These vocabularies enrich metadata only; they do not accept or reject a page.
 DISEASE_TERMS = (
     "aids",
     "cancer",
@@ -75,6 +78,8 @@ FORMAT_MODALITIES = {
 
 @dataclass(frozen=True)
 class DiscoveredPage:
+    """Normalized page candidate and metadata emitted by a discovery adapter."""
+
     url: str
     discovery_method: str
     priority: float = 0.0
@@ -93,6 +98,8 @@ class DiscoveredPage:
 
 
 class DiscoveryAdapter(Protocol):
+    """Interface for source-specific discovery strategies."""
+
     name: str
 
     def detect(self, source_url: str) -> bool:
@@ -107,6 +114,8 @@ def fetch_json_url(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 5_000_000,
 ) -> dict[str, object]:
+    """Fetch a bounded public URL and require a JSON object response."""
+
     request = Request(
         url,
         headers={
