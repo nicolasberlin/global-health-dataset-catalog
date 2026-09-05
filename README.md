@@ -6,7 +6,7 @@ currently enforce official publisher status for every collected record.
 
 The tagged `v0.1.0-no-collector` release is the stable catalogue-only baseline.
 The collector does not download or store datasets themselves. It extracts
-dataset page metadata, classifies pages with three LLM voters, finds possible
+dataset page metadata, classifies pages through EPFL RCP, finds possible
 data distributions, and validates download/API links lightly.
 
 ## Structure
@@ -38,7 +38,7 @@ Current MVP layer:
 
 - extracts a normalized page snapshot from HTML;
 - extracts normalized dataset and health evidence for LLM classification;
-- accepts a page when at least two of three LLM voters accept it;
+- accepts a page when the EPFL RCP classifier returns `accepted=true`;
 - detects known publishers, hosting platforms, and uploaders when possible;
 - extracts likely CSV, XLSX, JSON, ZIP, API, and download distributions;
 - ignores PDF as a dataset distribution by default;
@@ -72,15 +72,17 @@ Configure the API database URL:
 export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
 ```
 
-Configure the OpenAI classifier. All three model variables are required and
-must contain distinct model names:
+Configure the EPFL RCP classifier:
 
 ```bash
-export OPENAI_API_KEY="your-api-key"
-export OPENAI_CLASSIFIER_MODEL_1="model-a"
-export OPENAI_CLASSIFIER_MODEL_2="model-b"
-export OPENAI_CLASSIFIER_MODEL_3="model-c"
+export RCP_API_KEY="your-rcp-api-key"
+export RCP_CLASSIFIER_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
 ```
+
+`RCP_CLASSIFIER_MODEL` is optional and defaults to
+`deepseek-ai/DeepSeek-V4-Flash-0731`.
+The default page and repository classifiers each make one synchronous EPFL RCP
+Chat Completions call.
 
 The PostgreSQL database is managed by the application. It must be empty on
 first startup; the backend creates the current schema, stores its version in
@@ -134,7 +136,7 @@ Example:
 curl -i http://127.0.0.1:8001/sources
 ```
 
-Add a dataset page:
+Add a source page:
 
 ```bash
 curl -i -X POST http://127.0.0.1:8001/sources \
@@ -192,6 +194,7 @@ source collection jobs, and inspection of saved datasets and distributions.
 ```bash
 .venv/bin/python -m ruff check .
 TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/python -m pytest
+npm --prefix frontend test
 npm --prefix frontend run build
 ```
 

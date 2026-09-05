@@ -1,6 +1,6 @@
 # Collector Pipeline Diagram
 
-> Current runtime flow, last verified 2026-09-03.
+> Current runtime flow, last verified 2026-09-04.
 
 The application has two separate flows. Repository search classifies candidates
 for display. Source collection decides whether discovered records can be stored.
@@ -48,13 +48,13 @@ flowchart TD
     Filter -->|yes| Candidates["Return origin=online candidates"]
     Candidates --> Workers["Progressive frontend workers"]
     Workers --> ClassifyRoute["POST /collector/classify-repository-result"]
-    ClassifyRoute --> RepoClassifier["EnsembleRepositoryRelevanceClassifier"]
-    RepoClassifier --> Models["3 distinct OpenAI model calls"]
-    Models --> Quorum{"At least 2 usable votes?"}
-    Quorum -->|no| Error["Classification error"]
-    Quorum -->|yes| Majority{"At least 2 positive votes?"}
-    Majority -->|yes| Accepted["Display accepted candidate"]
-    Majority -->|no| Rejected["Display rejected candidate"]
+    ClassifyRoute --> RepoClassifier["Repository relevance classifier<br/>1-voter audit wrapper"]
+    RepoClassifier --> Model["1 EPFL RCP model call"]
+    Model --> Usable{"Usable structured response?"}
+    Usable -->|no| Error["Classification error"]
+    Usable -->|yes| Decision{"Relevant or somewhat relevant?"}
+    Decision -->|yes| Accepted["Display accepted candidate"]
+    Decision -->|no| Rejected["Display rejected candidate"]
 ```
 
 Database search covers title, description, publisher, hosting platform,
@@ -123,21 +123,28 @@ flowchart TD
     Collect --> Discover["discover_source()"]
     Discover --> Limit["Limit pages by CollectorConfig"]
     Limit --> Analyze["Analyze each discovered record/page"]
-    Analyze --> PageClassifier["EnsemblePageClassifier"]
-    PageClassifier --> PageModels["3 distinct OpenAI model calls"]
-    PageModels --> Accepted{"At least 2 accepted votes?"}
+    Analyze --> PageClassifier["Page classifier<br/>1-voter audit wrapper"]
+    PageClassifier --> PageModel["1 EPFL RCP model call"]
+    PageModel --> Accepted{"accepted=true?"}
     Accepted -->|no| Rejected["Count rejected"]
-    Accepted -->|yes| Candidate["Build CollectedDataset<br/>classification signals copied"]
-    Candidate --> Validate["validate_distribution()"]
+    Accepted -->|yes| Transient["Build transient CollectedDataset<br/>classification signals copied"]
+    Transient --> Validate["validate_distribution()"]
     Validate --> Valid{"At least one valid distribution?"}
     Valid -->|no| Rejected
-    Valid -->|yes| Result["Add dataset to CollectionResult"]
-    Result --> Complete["complete_collection_job()"]
+    Valid -->|yes| Result["Add eligible dataset to CollectionResult"]
+    Result --> Complete["Persist dataset with complete_collection_job()"]
 ```
 
 The page classifier prompt requires both an individual dataset/data resource and
 health relevance. Its `dataset_signals` are copied into the `CollectedDataset`
 for persistence and audit display.
+
+`CollectionReport.accepted_count` is the number of eligible datasets retained
+after distribution validation, not the number of positive page-classifier
+responses. `rejected_count` includes inaccessible HTML pages, negative page
+decisions, invalid structured URLs, and candidates left without a valid
+distribution. Unexpected classifier or validation exceptions abort the job
+instead of incrementing that counter.
 
 ## 4. Discovery Pipeline
 
@@ -207,17 +214,18 @@ can also fail.
 ## 7. Final Storage Condition
 
 ```text
-Page ensemble has at least 2 successful responses
-AND
-Page ensemble has at least 2 accepted votes
+The EPFL RCP page response is valid and accepted=true
 AND
 At least one considered distribution validates successfully
 THEN
-The dataset is included in CollectionResult and persisted atomically
+The eligible dataset is included in CollectionResult
+AND
+complete_collection_job() persists it while atomically marking the job done
 ```
 
-Exact-URL conflicts update the existing `collected_datasets` record. The current
-schema does not deduplicate semantically by DOI, title, version, or mirror.
+An exact conflict on the normalized `dataset_url` updates the existing
+`collected_datasets` record. The current schema does not deduplicate semantically
+by DOI, title, version, or mirror.
 
 For detailed contracts, see
 [Classification Architecture](classification-architecture.md),

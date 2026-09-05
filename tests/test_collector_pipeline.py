@@ -309,12 +309,10 @@ def test_collector_rejects_non_health_non_dataset_page():
 
 
 def test_analyze_html_page_uses_llm_default_classifier(monkeypatch):
-    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_1", "model-a")
-    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_2", "model-b")
-    monkeypatch.setenv("OPENAI_CLASSIFIER_MODEL_3", "model-c")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("RCP_CLASSIFIER_MODEL", "deepseek-test-model")
+    monkeypatch.delenv("RCP_API_KEY", raising=False)
 
-    with pytest.raises(PageClassificationError, match="OPENAI_API_KEY"):
+    with pytest.raises(PageClassificationError, match="RCP_API_KEY"):
         analyze_html_page("https://example.org/data/catalog", DATASET_HTML)
 
 

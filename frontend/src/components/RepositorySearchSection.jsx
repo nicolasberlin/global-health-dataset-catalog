@@ -4,8 +4,7 @@ import RepositoryProgressCard from './RepositoryProgressCard.jsx';
 
 const AGREEMENT_FILTERS = [
     { value: 'all', label: 'Tous' },
-    { value: '3', label: '3/3' },
-    { value: '2', label: '2/3' },
+    { value: '1', label: '1/1' },
 ];
 
 export default function RepositorySearchSection({

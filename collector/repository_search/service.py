@@ -27,7 +27,13 @@ def search_repository_metadata(
     query: str,
     providers: Iterable[RepositorySearchProvider] | None = None,
 ) -> RepositorySearchResponse:
-    """Search providers while preserving partial results and warning on failures."""
+    """Return transient provider candidates without classifying or saving them.
+
+    Provider calls may perform outbound requests. A provider ``ValueError`` is
+    downgraded to a warning when another provider succeeds; if every provider
+    fails, this function raises ``ValueError``. Results with invalid titles or
+    URLs are omitted before being returned.
+    """
 
     normalized_query = query.strip()
     if not normalized_query:
@@ -71,13 +77,21 @@ def classify_repository_result(
     result: RepositorySearchResult,
     classifier: RepositoryResultClassifier,
 ) -> RepositorySearchResult:
-    """Return a copy classified from the result's normalized metadata contract."""
+    """Attach one relevance decision to a transient repository candidate.
+
+    Acceptance only makes the candidate eligible for display in repository
+    search; it does not convert or save it as a ``CollectedDataset``. LLM
+    failures propagate as classification errors instead of becoming semantic
+    rejections.
+    """
 
     classification = classifier.classify(_repository_result_page(result))
     return replace(result, classification=classification)
 
 
 def _repository_result_page(result: RepositorySearchResult) -> PageSnapshot:
+    """Adapt provider metadata to the shared classifier evidence contract."""
+
     metadata = normalize_dataset_metadata(result.metadata)
     title = _metadata_text(metadata["Title"], fallback=result.title)
     description = _metadata_text(

@@ -1,3 +1,5 @@
+"""Bounded HTTP fetching with public-network URL enforcement."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -24,6 +26,14 @@ def fetch_public_html(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 1_000_000,
 ) -> FetchedPage:
+    """Fetch and decode a bounded response requested as HTML.
+
+    The initial URL and every redirect are checked by
+    ``open_public_http_url``. Reading one byte beyond ``max_bytes`` detects an
+    oversized response; HTTP and transport failures are converted to
+    ``ValueError`` for the collection pipeline.
+    """
+
     request = Request(
         url,
         headers={
@@ -53,6 +63,8 @@ def fetch_public_html(
 
 
 def _ensure_public_http_url(url: str) -> None:
+    """Reject non-HTTP URLs and blocked local or special-purpose addresses."""
+
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http and https URLs can be analyzed.")
@@ -73,13 +85,19 @@ def _ensure_public_http_url(url: str) -> None:
 
 
 class _PublicHTTPRedirectHandler(HTTPRedirectHandler):
+    """Reapply public-network validation before following each redirect."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         _ensure_public_http_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def open_public_http_url(request: Request, *, timeout: float):
-    """Open an untrusted HTTP URL after validating it and every redirect."""
+    """Open an untrusted URL after validating it and every redirect.
+
+    URL validation and opener errors intentionally propagate so callers can
+    either convert them to a rejected probe or abort their operation.
+    """
     _ensure_public_http_url(request.full_url)
     return build_opener(_PublicHTTPRedirectHandler()).open(request, timeout=timeout)
 

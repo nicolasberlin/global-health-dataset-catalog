@@ -18,7 +18,13 @@ MISSING_METADATA_VALUE = MISSING_DATASET_METADATA_VALUE
 
 @dataclass(frozen=True)
 class RepositorySearchResult:
-    """Normalized metadata returned for one external repository result."""
+    """Provider-normalized candidate returned by repository search.
+
+    ``url`` is the dataset landing page rather than a validated distribution.
+    ``search_query`` preserves the user query for the later relevance check,
+    ``metadata`` carries the normalized classifier contract, and
+    ``classification`` remains absent until that check completes.
+    """
 
     title: str
     url: str

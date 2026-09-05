@@ -114,3 +114,9 @@ configuration. This pre-stable schema update has no migration; older local
 databases, including those built with the previous `simple` configuration, must
 be recreated. This currently favors primarily English metadata; full bilingual
 search is not implemented.
+
+`CollectedDataset` normalizes an HTTP(S) identity before insertion, and the
+database deduplicates only exact matches of that normalized `dataset_url`.
+Separate URLs for the same DOI, version, or mirror remain separate records.
+Distributions are unique by `(dataset_id, url, format)`; rediscovery refreshes
+their evidence without deleting distributions absent from a later crawl.

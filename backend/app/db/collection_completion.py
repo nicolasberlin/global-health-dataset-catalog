@@ -12,6 +12,14 @@ async def complete_collection_job(
     job_id: int,
     collection_result: CollectionResult,
 ) -> dict[str, object]:
+    """Save all collected datasets and mark their running job done atomically.
+
+    Collection and LLM calls have already finished before this function opens
+    one connection and one transaction. Locking supplies the authoritative
+    source URL from the job. Any dataset write or job-state failure rolls back
+    every dataset write and prevents the job from becoming ``done``.
+    """
+
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         async with connection.transaction():

@@ -78,7 +78,13 @@ FORMAT_MODALITIES = {
 
 @dataclass(frozen=True)
 class DiscoveredPage:
-    """Normalized page candidate and metadata emitted by a discovery adapter."""
+    """Adapter-normalized candidate emitted at the discovery stage.
+
+    ``discovery_method`` identifies the adapter path. ``priority`` retains
+    adapter ranking evidence; adapters may use it when ordering candidates
+    before the configured page limit. Structured adapters can attach direct
+    ``distributions`` and source-specific ``discovery_metadata``.
+    """
 
     url: str
     discovery_method: str

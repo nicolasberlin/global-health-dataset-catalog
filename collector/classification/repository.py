@@ -46,7 +46,13 @@ MAX_REPOSITORY_MISSING_INFORMATION_CHARS = 500
 
 @dataclass(frozen=True)
 class RepositoryClassification:
-    """Final repository classification with acceptance derived from relevance."""
+    """Validated relevance decision attached to a repository search result.
+
+    ``accepted`` is derived from ``relevance_label`` and controls result
+    eligibility in the repository flow. ``missing_information`` is valid only
+    for an insufficient-information decision, while ``ensemble`` preserves the
+    aggregate vote audit trail.
+    """
 
     relevance_label: RepositoryRelevanceLabel
     reason: str
@@ -75,7 +81,12 @@ class RepositoryClassification:
 
 @dataclass(frozen=True)
 class RepositoryClassificationVote:
-    """Classification decision returned by one repository-classifier voter."""
+    """One model's repository-relevance decision before vote aggregation.
+
+    ``accepted`` is derived from the voter's relevance label. ``voter_id``
+    identifies the model for auditing, and ``missing_information`` follows the
+    same insufficient-information invariant as the final decision.
+    """
 
     voter_id: str
     relevance_label: RepositoryRelevanceLabel

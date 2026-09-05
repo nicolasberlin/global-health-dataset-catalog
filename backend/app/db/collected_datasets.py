@@ -1,3 +1,5 @@
+"""PostgreSQL search and persistence for collected dataset aggregates."""
+
 from __future__ import annotations
 
 import string
@@ -32,6 +34,8 @@ CATALOG_GENERIC_SEARCH_TERMS = {
 
 
 def normalize_dataset_search_query(query: str) -> str:
+    """Remove catalog-generic terms before PostgreSQL full-text search."""
+
     meaningful_terms = []
     for term in query.strip().split():
         normalized_term = term.strip(string.punctuation).casefold()
@@ -55,6 +59,12 @@ async def save_collected_datasets(
     datasets: list[CollectedDataset],
     collection_job_id: int | None = None,
 ) -> list[CollectedDataset]:
+    """Upsert a batch of datasets in one transaction without changing job state.
+
+    Any dataset, observation, distribution, or validation error rolls back the
+    complete batch and propagates to the caller.
+    """
+
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         async with connection.transaction():
@@ -70,6 +80,8 @@ async def save_collected_datasets(
 
 
 async def list_collected_datasets() -> list[CollectedDataset]:
+    """Load all dataset aggregates, ordered by latest update then title."""
+
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         dataset_rows = await _fetchall(
@@ -108,6 +120,13 @@ async def search_collected_datasets(
     query: str,
     limit: int = 10,
 ) -> list[CollectedDataset]:
+    """Search persisted metadata with weighted PostgreSQL full-text ranking.
+
+    An empty query returns no rows, while a non-positive limit raises
+    ``ValueError``. Database and deserialization errors propagate. Matching
+    distributions are loaded only for the bounded result set.
+    """
+
     normalized_query = query.strip()
     if not normalized_query:
         return []
@@ -185,6 +204,12 @@ async def _save_collected_dataset(
     dataset: CollectedDataset,
     collection_job_id: int | None,
 ) -> CollectedDataset:
+    """Upsert one dataset aggregate using the caller's active transaction.
+
+    Each save also appends a discovery observation and upserts current
+    distributions before reloading the stored aggregate.
+    """
+
     dataset_row = await _upsert_collected_dataset(connection, source_url, dataset)
     dataset_id = int(dataset_row["id"])
     await _insert_dataset_discovery_observation(
@@ -207,6 +232,14 @@ async def _upsert_collected_dataset(
     source_url: str,
     dataset: CollectedDataset,
 ) -> Row:
+    """Deduplicate by the normalized dataset URL and refresh non-empty metadata.
+
+    On conflict, empty descriptive values preserve existing data, while source
+    URL and classifier signals are replaced. ``first_seen_at`` is retained and
+    the last-seen and update timestamps advance. Failure to return the stored
+    row raises ``RuntimeError``.
+    """
+
     row = await _fetchone(
         connection,
         """
@@ -278,6 +311,8 @@ async def _insert_dataset_discovery_observation(
     discovery_method: str,
     collection_job_id: int | None,
 ) -> None:
+    """Append one observation even when the dataset URL already existed."""
+
     await connection.execute(
         """
         INSERT INTO dataset_discovery_observations (
@@ -331,6 +366,8 @@ def _dataset_discovery_observation_to_dict(
 def _validation_results_by_distribution_key(
     validation_results: list[ValidationResult],
 ) -> dict[tuple[str, str], ValidationResult]:
+    """Index validations by URL and format, rejecting duplicate evidence."""
+
     validation_by_distribution_key: dict[tuple[str, str], ValidationResult] = {}
     for validation in validation_results:
         key = (validation.url, validation.format)
@@ -348,6 +385,8 @@ def _orphan_validation_result_error(
     dataset: CollectedDataset,
     validation_keys: set[tuple[str, str]],
 ) -> ValueError | None:
+    """Describe validation evidence that has no matching distribution."""
+
     distribution_keys = {
         (distribution.url, distribution.format) for distribution in dataset.distributions
     }
@@ -369,6 +408,12 @@ async def _upsert_collected_distributions(
     dataset_id: int,
     dataset: CollectedDataset,
 ) -> None:
+    """Validate evidence links and upsert each currently observed distribution.
+
+    Existing distributions absent from the new observation are retained; this
+    function does not interpret absence from one crawl as deletion.
+    """
+
     validation_by_distribution_key = _validation_results_by_distribution_key(
         dataset.validation_results
     )
@@ -394,9 +439,14 @@ async def _upsert_collected_distribution(
     distribution: DistributionCandidate,
     validation: ValidationResult | None,
 ) -> None:
-    # validation_attempted means the distribution has been checked at least once.
-    # Crawls that see the distribution without revalidating it preserve the last
-    # validation result and its last_checked_at timestamp.
+    """Deduplicate a distribution by dataset, URL, and format.
+
+    Discovery evidence and ``last_seen_at`` are refreshed on conflict.
+    Validation fields and ``last_checked_at`` change only when the current save
+    supplies a matching validation result, preserving the last known check
+    otherwise.
+    """
+
     validation_attempted = validation is not None
     await connection.execute(
         """
@@ -518,6 +568,8 @@ def _collected_dataset_from_rows(
     dataset_row: Row,
     distribution_rows: list[Row],
 ) -> CollectedDataset:
+    """Rehydrate one dataset aggregate and only attempted validations."""
+
     distributions = [
         DistributionCandidate(
             url=str(row["url"]),

@@ -1,3 +1,5 @@
+"""Collector API routes, background orchestration, and response mapping."""
+
 from __future__ import annotations
 
 import asyncio
@@ -81,6 +83,12 @@ async def start_collection_job(
     payload: CollectorURLRequest,
     background_tasks: BackgroundTasks,
 ) -> CollectorCollectionJobResponse:
+    """Persist a pending job and schedule network and LLM work in-process.
+
+    The 202 response is returned before collection finishes. FastAPI executes
+    the task in the application process; this is not a durable external queue.
+    """
+
     job = await db_create_collection_job(str(payload.url))
     background_tasks.add_task(_run_collection_job, int(job["id"]), str(payload.url))
 
@@ -110,6 +118,8 @@ async def list_collected() -> CollectorCollectionResponse:
 async def search_repositories(
     payload: CollectorRepositorySearchRequest,
 ) -> CollectorRepositorySearchResponse:
+    """Return unclassified external candidates without reading or writing datasets."""
+
     query = payload.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Search query is required")
@@ -124,6 +134,12 @@ async def search_datasets(
     CollectorDatabaseDatasetSearchResponse,
     CollectorOnlineDatasetSearchResponse,
 ]:
+    """Return local datasets first, or unclassified external candidates.
+
+    Database failures are surfaced instead of triggering an external search.
+    The original query is preserved for providers and later LLM classification.
+    """
+
     original_query = payload.query.strip()
     if not original_query:
         raise HTTPException(status_code=400, detail="Search query is required")
@@ -158,6 +174,8 @@ async def search_datasets(
 async def _search_online_repositories(
     query: str,
 ) -> CollectorRepositorySearchResponse:
+    """Run blocking providers off the event loop and map total failure to 502."""
+
     try:
         search_response = await asyncio.to_thread(search_repository_metadata, query)
     except ValueError as exception:
@@ -180,6 +198,11 @@ async def _search_online_repositories(
 async def classify_repository_result(
     payload: CollectorRepositorySearchItem,
 ) -> CollectorRepositorySearchItem:
+    """Classify one transient repository candidate without persisting it.
+
+    Classifier failures are logged and exposed as a generic 502 response.
+    """
+
     if not payload.search_query.strip():
         raise HTTPException(status_code=400, detail="Search query is required")
 
@@ -203,6 +226,15 @@ async def classify_repository_result(
 
 
 async def _run_collection_job(job_id: int, source_url: str) -> None:
+    """Collect outside PostgreSQL, then persist datasets and completion atomically.
+
+    Network and LLM work runs in a worker thread before the atomic completion
+    transaction begins. Any collection or completion error is recorded in a
+    separate transaction by marking the job as failed; if PostgreSQL itself is
+    unavailable, that error update can also fail. If the pending-to-running
+    transition loses its state race, no collection work is started.
+    """
+
     try:
         running_job = await mark_collection_job_running(job_id)
         if running_job is None:

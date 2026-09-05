@@ -28,6 +28,19 @@ export function getAcceptedVoteCount(classification) {
     return null;
 }
 
+function getTotalVoteCount(classification) {
+    const ensemble = getEnsembleSummary(classification);
+    const successfulVotes = Number(ensemble?.successful_votes);
+    const failedVotes = Number(ensemble?.failed_votes);
+    if (Number.isFinite(successfulVotes) && Number.isFinite(failedVotes)) {
+        return successfulVotes + failedVotes;
+    }
+
+    const voters = Array.isArray(ensemble?.voters) ? ensemble.voters.length : 0;
+    const failures = Array.isArray(ensemble?.failures) ? ensemble.failures.length : 0;
+    return voters + failures || null;
+}
+
 function formatRepositoryRelevanceLabel(label) {
     const labels = {
         relevant: 'Pertinent',
@@ -54,8 +67,12 @@ export default function RepositoryAcceptedCard({ candidate }) {
     const classification = item.classification;
     const ensemble = getEnsembleSummary(classification);
     const acceptedVotes = getAcceptedVoteCount(classification);
+    const totalVotes = getTotalVoteCount(classification);
     const voters = Array.isArray(ensemble?.voters) ? ensemble.voters : [];
-    const agreementLabel = acceptedVotes === null ? '' : ` ${acceptedVotes}/3`;
+    const agreementLabel =
+        acceptedVotes === null || totalVotes === null
+            ? ''
+            : ` ${acceptedVotes}/${totalVotes}`;
 
     return (
         <article className="repository-card repository-card--accepted">
@@ -110,7 +127,7 @@ export default function RepositoryAcceptedCard({ candidate }) {
                 <details className="repository-ai-details">
                     <summary>Détails IA</summary>
                     <p>
-                        {acceptedVotes ?? 0}/3 votes favorables
+                        {acceptedVotes ?? 0}/{totalVotes ?? 1} votes favorables
                         {ensemble.decision_reason
                             ? ` · ${formatDecisionReason(ensemble.decision_reason)}`
                             : ''}

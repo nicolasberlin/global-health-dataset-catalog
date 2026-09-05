@@ -1,6 +1,6 @@
 # Global Health Dataset Catalog - Onboarding
 
-> Last verified: 2026-09-02.
+> Last verified: 2026-09-04.
 
 This guide is the shortest path from a fresh checkout to understanding and
 running the application. Detailed contracts and diagrams live in the
@@ -8,8 +8,9 @@ running the application. Detailed contracts and diagrams live in the
 
 ## 1. Project in 30 Seconds
 
-The project discovers health dataset candidates, classifies them with three LLM
-voters, validates data links, and stores accepted collection results in
+The project discovers health dataset candidates, classifies them with one
+DeepSeek model hosted through EPFL RCP, validates data links, and stores eligible
+collection results in
 PostgreSQL.
 
 It has two distinct user flows:
@@ -33,12 +34,12 @@ React/Vite frontend
         v
 FastAPI routes
         |
-        +--> repository search and repository LLM ensemble
+        +--> repository search and repository EPFL RCP classification
         |
         +--> background collection job
                   |
                   +--> discovery adapters
-                  +--> page LLM ensemble
+                  +--> page EPFL RCP classification
                   +--> distribution validation
                   +--> atomic PostgreSQL completion
 ```
@@ -138,7 +139,7 @@ Current behavior:
    succeeds. If every provider fails, the request fails.
 5. For `online` results, the frontend progressively calls
    `POST /collector/classify-repository-result` for each candidate.
-6. Three distinct OpenAI models vote; two positive votes are required.
+6. One valid EPFL RCP response decides the classification.
 7. `relevant` and `somewhat_relevant` are positive repository votes.
 
 The repository prompt evaluates relevance to the search query. It does not
@@ -162,24 +163,24 @@ behavior belongs in `collector/discovery/`, not in the core classifier.
 
 ## 6. LLM Classification
 
-Classification is implemented, not a future feature. Two separate ensembles
-share the same three configured OpenAI models:
+Classification is implemented, not a future feature. Two separate classifiers
+use the configured DeepSeek model through EPFL RCP:
 
 - `EnsembleRepositoryRelevanceClassifier` judges query relevance for repository
   candidates;
 - `EnsemblePageClassifier` judges whether a discovered page is an individual,
   health-relevant dataset.
 
-Both defaults use:
+The compatibility audit wrappers both use:
 
 ```text
-votes_required = 2
-minimum_successful_votes = 2
+votes_required = 1
+minimum_successful_votes = 1
 ```
 
-This permits one model failure while still requiring a two-model majority. The
-three model names must be distinct, but all voters use the same OpenAI provider
-and API key; this is model diversity, not provider independence.
+Each classification makes one synchronous EPFL RCP call. A failed or malformed
+response is
+therefore a classification error; there is no model fallback or majority vote.
 
 See [Classification Architecture](classification-architecture.md) for exact
 prompts, payloads, output schemas, failure handling, and parameter traces.
@@ -214,18 +215,18 @@ discovery path before persistence.
 A discovered result reaches PostgreSQL only when:
 
 ```text
-page ensemble accepted it with at least 2 positive votes
+the EPFL RCP page classifier returned accepted=true
 AND
 at least one considered distribution validated successfully
 ```
 
 Collection and LLM calls run outside a database transaction. Once the complete
 `CollectionResult` exists, `complete_collection_job()` opens one PostgreSQL
-transaction, upserts every accepted dataset, and marks the job `done`. Any
+transaction, upserts every eligible dataset, and marks the job `done`. Any
 persistence failure rolls back both the dataset writes and the `done` status.
 
-Datasets are deduplicated only by exact `dataset_url`. DOI-, title-, version-,
-and mirror-aware deduplication are not implemented.
+Datasets are deduplicated only by exact normalized `dataset_url`. DOI-, title-,
+version-, and mirror-aware deduplication are not implemented.
 
 ## 9. Database
 
@@ -264,14 +265,12 @@ export POSTGRES_PASSWORD="change-me-locally"
 docker compose up -d postgres
 
 export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
-export OPENAI_API_KEY="your-api-key"
-export OPENAI_CLASSIFIER_MODEL_1="model-a"
-export OPENAI_CLASSIFIER_MODEL_2="model-b"
-export OPENAI_CLASSIFIER_MODEL_3="model-c"
+export RCP_API_KEY="your-rcp-api-key"
+export RCP_CLASSIFIER_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
 ```
 
-The model values are examples: use three distinct model names available to the
-configured OpenAI account.
+The model variable is optional and defaults to
+`deepseek-ai/DeepSeek-V4-Flash-0731`.
 
 Backend:
 
@@ -299,8 +298,8 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-Last verified without `TEST_DATABASE_URL`: **162 passed, 47 skipped**. With a
-local PostgreSQL database: **209 passed**. Frontend: **4 tests passed**. Run the
+Last verified without `TEST_DATABASE_URL`: **164 passed, 47 skipped**. With a
+local PostgreSQL database: **211 passed**. Frontend: **4 tests passed**. Run the
 complete database suite with:
 
 ```bash
@@ -329,7 +328,7 @@ the suite changes.
 - repository classification does not independently enforce health relevance;
 - source authority and the word "official" are not enforced;
 - licensing is extracted when available but no allow/deny policy is enforced;
-- duplicate handling uses exact dataset URLs only;
+- duplicate handling uses exact normalized dataset URLs only;
 - authentication, production deployment, monitoring, scheduled revalidation,
   and human review workflows are not implemented.
 
@@ -353,6 +352,6 @@ and [Roadmap](roadmap.md).
 The mental model to retain is:
 
 ```text
-repository search = candidate relevance and display
-source collection = dataset + health classification + link validation + storage
+repository search = candidate relevance and display, without persistence
+source collection = accepted page + valid distribution -> eligible dataset -> storage
 ```

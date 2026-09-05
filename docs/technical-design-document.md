@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | Current architecture |
-| Last verified | 2026-09-02 |
+| Last verified | 2026-09-04 |
 | Runtime | React/Vite, FastAPI, Python collector, PostgreSQL |
 
 This document describes the system that exists now. Proposed product,
@@ -16,7 +16,7 @@ multi-repository, governance, and production work is kept in the
 The application helps a technical user:
 
 - search DataCite for dataset candidates relevant to a query;
-- inspect progressive three-model relevance decisions;
+- inspect progressive EPFL RCP relevance decisions;
 - maintain a catalogue of source portals;
 - launch asynchronous collection jobs against those sources;
 - discover candidate dataset records and distributions;
@@ -36,12 +36,12 @@ flowchart LR
     API --> Search["Repository search service"]
     Search --> DataCite["DataCite API"]
     API --> Collector["Collector pipeline"]
-    API --> RepoLLM["Repository LLM ensemble"]
+    API --> RepoLLM["Repository EPFL RCP classifier"]
     Collector --> Discovery["Discovery adapters"]
-    Collector --> PageLLM["Page LLM ensemble"]
+    Collector --> PageLLM["Page EPFL RCP classifier"]
     Collector --> Validation["Distribution validation"]
-    RepoLLM --> OpenAI["OpenAI Responses API"]
-    PageLLM --> OpenAI
+    RepoLLM --> RCP["EPFL RCP Chat Completions API<br/>DeepSeek V4 Flash 0731"]
+    PageLLM --> RCP
     Collector --> Result["CollectionResult"]
     Result --> Completion["Backend complete_collection_job()"]
     API --> DB["PostgreSQL"]
@@ -84,7 +84,7 @@ There is no obsolete manual pasted-HTML collector flow in the current UI.
 | POST | `/sources` | Creates a source after Pydantic and DB validation |
 | GET | `/sources/{source_id}/page` | Redirects to the configured source URL |
 | POST | `/collector/search-repositories` | Searches repository providers and returns normalized candidates/warnings |
-| POST | `/collector/classify-repository-result` | Runs the repository relevance ensemble for one candidate |
+| POST | `/collector/classify-repository-result` | Runs EPFL RCP repository relevance classification for one candidate |
 | POST | `/collector/collection-jobs` | Creates and schedules a background collection job |
 | GET | `/collector/collection-jobs/{job_id}` | Returns job status and counters |
 | GET | `/collector/collected-datasets` | Lists persisted datasets and distributions |
@@ -107,8 +107,8 @@ flowchart TD
     Provider --> Filter["Require title + HTTP(S) URL"]
     Filter --> UI["Candidates in React state"]
     UI --> ClassifyRoute["POST /collector/classify-repository-result"]
-    ClassifyRoute --> RepoEnsemble["EnsembleRepositoryRelevanceClassifier"]
-    RepoEnsemble --> Display{"At least 2 positive votes?"}
+    ClassifyRoute --> RepoClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
+    RepoClassifier --> Display{"Positive structured decision?"}
     Display -->|yes| Accepted["Display accepted candidate"]
     Display -->|no| Rejected["Display rejected candidate"]
 ```
@@ -146,13 +146,13 @@ flowchart TD
     Pending --> Running["Mark running"]
     Running --> Discover["discover_source()"]
     Discover --> Analyze["Analyze bounded discovered pages"]
-    Analyze --> PageEnsemble["EnsemblePageClassifier"]
-    PageEnsemble --> Accepted{"At least 2 accepted votes?"}
+    Analyze --> PageClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
+    PageClassifier --> Accepted{"Valid response with accepted=true?"}
     Accepted -->|no| Reject["Count rejected"]
     Accepted -->|yes| Validate["Validate bounded distributions"]
     Validate --> HasFile{"At least one valid distribution?"}
     HasFile -->|no| Reject
-    HasFile -->|yes| Result["Add to CollectionResult"]
+    HasFile -->|yes| Result["Add eligible dataset to CollectionResult"]
     Result --> Complete["complete_collection_job()"]
     Complete --> Transaction["One PostgreSQL transaction"]
     Transaction --> Save["Upsert all datasets/distributions"]
@@ -164,6 +164,8 @@ Collection, network access, and LLM calls happen outside PostgreSQL
 transactions. `complete_collection_job()` locks the running job, derives the
 authoritative `source_url` from it, saves every dataset, and marks the job done
 inside one transaction. A failed write rolls back the entire completion.
+`accepted_count` reports datasets retained after distribution validation,
+whereas an unexpected classifier or validation exception fails the job.
 
 ## 7. Discovery
 
@@ -185,15 +187,12 @@ metadata and URL utilities remain in shared collector modules.
 
 ## 8. Classification
 
-Three required, distinct model names are loaded from:
-
-- `OPENAI_CLASSIFIER_MODEL_1`;
-- `OPENAI_CLASSIFIER_MODEL_2`;
-- `OPENAI_CLASSIFIER_MODEL_3`.
-
-All calls use `OPENAI_API_KEY` and the OpenAI Responses API. Both default
-ensembles require two successful responses and two positive votes. One model
-failure is tolerated; fewer than two usable responses is an error.
+All default classification calls use `RCP_API_KEY` and the EPFL RCP
+Chat Completions API. `RCP_CLASSIFIER_MODEL` selects the model and defaults to
+`deepseek-ai/DeepSeek-V4-Flash-0731`. Calls remain synchronous. Both
+classifiers use one-voter compatibility wrappers with
+`votes_required=1` and `minimum_successful_votes=1` so the existing API audit
+shape remains stable.
 
 The classifiers are intentionally separate:
 
@@ -205,12 +204,8 @@ The classifiers are intentionally separate:
 Repository relevance responses use a strict conditional contract.
 `missing_information` must contain at least one nonempty item when the label is
 `insufficient_information`, and must be empty for every other label. A response
-that violates this relationship is a failed voter response rather than being
-silently rewritten. Two other valid voters can still satisfy the ensemble
-quorum.
-
-Although model names are distinct, all voters share one provider, endpoint,
-account, and API-key path. This is not provider-independent fault isolation.
+that violates this relationship is a classification error rather than being
+silently rewritten. With one model there is no fallback vote.
 
 Exact prompts, payloads, schemas, aggregation, and failure behavior are described
 in [Classification Architecture](classification-architecture.md).
@@ -252,9 +247,10 @@ schema contains:
 - `collected_distributions`;
 - `dataset_discovery_observations`.
 
-`collected_datasets.dataset_url` is unique. Repeated exact URLs update the
-existing record and create a discovery observation. This is not semantic
-deduplication by DOI, title, version, or mirror relationship.
+`CollectedDataset` normalizes its HTTP(S) identity URL before persistence, and
+`collected_datasets.dataset_url` is unique. Repeated exact normalized URLs
+update the existing record and create a discovery observation. This is not
+semantic deduplication by DOI, title, version, or mirror relationship.
 
 The complete schema is shown in
 [Database Schema Diagram](database-schema-diagram.md). PostgreSQL-only startup
@@ -266,10 +262,8 @@ and the decision not to migrate the historical SQLite data are recorded in
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes for backend | PostgreSQL connection |
-| `OPENAI_API_KEY` | Yes for classification | OpenAI authentication |
-| `OPENAI_CLASSIFIER_MODEL_1` | Yes for classification | Primary voter model |
-| `OPENAI_CLASSIFIER_MODEL_2` | Yes for classification | Secondary voter model |
-| `OPENAI_CLASSIFIER_MODEL_3` | Yes for classification | Tertiary voter model |
+| `RCP_API_KEY` | Yes for classification | EPFL RCP authentication |
+| `RCP_CLASSIFIER_MODEL` | No | RCP model; defaults to `deepseek-ai/DeepSeek-V4-Flash-0731` |
 | `VITE_API_BASE_URL` | No | Frontend API base; defaults to `http://127.0.0.1:8001` |
 | `TEST_DATABASE_URL` | No | Enables PostgreSQL integration tests |
 
@@ -285,7 +279,7 @@ crawling. The limits below are code defaults, not production capacity targets.
 | Concern | Current limit | Enforcement point |
 | --- | ---: | --- |
 | Collector HTTP timeout | 10 seconds/request | `CollectorConfig.request_timeout_seconds` |
-| OpenAI HTTP timeout | 20 seconds/request | `HTTPJSONLLMClient` |
+| EPFL RCP HTTP timeout | 20 seconds/request | `HTTPJSONLLMClient` |
 | Pages analyzed per source | 5 | `CollectorConfig.max_pages_per_source` |
 | Distributions validated per dataset | 1 | `CollectorConfig.max_distributions_per_dataset` |
 | Distribution partial-GET sample | 65,536 bytes | `CollectorConfig.max_sample_bytes` |
@@ -297,8 +291,8 @@ crawling. The limits below are code defaults, not production capacity targets.
 | Sitemap utility hard cap | 1,000/source | `MAX_URLS_PER_SOURCE` |
 | DataCite search results | 10/query | provider `page_size` |
 | CKAN/Socrata/data.json rows | 5/discovery call | adapter `rows` defaults |
-| Repository candidate classifications | 2 concurrent ensembles | frontend workers and backend executor |
-| Repository LLM calls | up to 6 concurrently | 2 ensembles x 3 parallel voters |
+| Repository candidate classifications | 2 concurrent classifications | frontend workers and backend executor |
+| Repository LLM calls | up to 2 concurrently | 2 classifications x 1 EPFL RCP call |
 | Page text sent to a page LLM | 4,000 characters | `MAX_PAGE_TEXT_CHARS` |
 | Distributions sent to a page LLM | 10 | `MAX_DISTRIBUTIONS` |
 | Repository query | 300 characters | repository classification contract |
@@ -326,10 +320,10 @@ Availability expectations are intentionally local-MVP level:
 | Socrata catalog API | Adapter detection and record discovery | 10-second JSON fetch; 5 MB; 5 rows | Same detect/discover distinction as CKAN | Next adapter on failed detection |
 | data.json/DCAT endpoint | Adapter detection and record discovery | 10-second JSON fetch; 5 MB; 5 selected records | Same detect/discover distinction as CKAN | Next adapter on failed detection |
 | Generic website/sitemap | Page discovery and HTML extraction | 10 seconds; 5 MB text; 1 MB HTML | robots/sitemap failures are skipped; HTML fetch failure rejects that page | Source URL fallback when sitemap discovery yields no entries |
-| OpenAI Responses API | Repository and page classification | 20 seconds/model call; bounded payloads | One failed voter is tolerated; fewer than two usable votes raises classification error | No provider fallback; all voters share OpenAI |
+| EPFL RCP Chat Completions API | Repository and page classification with `deepseek-ai/DeepSeek-V4-Flash-0731` by default | 20 seconds/model call; bounded payloads | A failed or malformed response raises a classification error | No provider or model fallback |
 | PostgreSQL | Sources, jobs, collected metadata, transactions | Pool defaults 1-10 connections | Startup fails without DB; persistence rolls back on error; writing job `error` can also fail during outage | No storage fallback |
 
-All untrusted collector destinations use the shared public-HTTP guard. OpenAI
+All untrusted collector destinations use the shared public-HTTP guard. EPFL RCP
 uses a server-configured endpoint and does not consume a URL supplied by a
 collected page.
 
@@ -357,7 +351,7 @@ must not be confused with non-destructive startup seeding.
 
 ### Collected dataset upsert
 
-`collected_datasets` conflicts on exact `dataset_url`:
+`collected_datasets` conflicts on the exact normalized `dataset_url`:
 
 - `source_url`, classification signals, `last_seen_at`, and `updated_at` are
   refreshed;
@@ -379,15 +373,18 @@ validation fields and advances `last_checked_at`; if a later crawl observes the
 distribution without validating it, the previous validation result is
 preserved.
 
-All dataset, distribution, observation, and job-completion writes occur inside
-the single `complete_collection_job()` transaction.
+The active background collection path performs all dataset, distribution,
+observation, and job-completion writes inside the single
+`complete_collection_job()` transaction. The lower-level
+`save_collected_datasets()` entry point performs a standalone batch transaction
+and does not change job state.
 
 ## 15. Security Boundaries
 
 Implemented controls include:
 
 - Pydantic validation and bounded repository payload fields;
-- JSON-schema-constrained OpenAI responses plus local parsing;
+- JSON-only EPFL RCP responses with an embedded schema plus local validation;
 - untrusted prompt fields treated as evidence, not instructions;
 - public HTTP(S) destination validation and redirect checks;
 - bounded HTML, JSON, sitemap, and distribution reads;
@@ -426,8 +423,8 @@ safe HTTP fetching.
 Last verified locally:
 
 ```text
-pytest without PostgreSQL: 162 passed, 47 skipped
-pytest with PostgreSQL: 209 passed
+pytest without PostgreSQL: 164 passed, 47 skipped
+pytest with PostgreSQL: 211 passed
 frontend tests: 4 passed
 ruff: passed
 frontend build: passed
@@ -454,8 +451,8 @@ contract.
 | High | Repository relevance mistaken for catalogue approval | Repository cards can look accepted although health/file gates did not run | Keep candidate wording and connect save only through collection gates |
 | High | Source authority, licence, and sensitivity not enforced | Technically valid records may still be unsuitable for publication | Implement policy gates and human review before public catalogue claims |
 | Medium | One distribution validated by default | A valid secondary file can be missed | Validate ranked alternatives within a bounded budget |
-| Medium | Exact-URL duplicate identity | DOI-equivalent versions and mirrors can create separate records | Add persistent identifiers and version/mirror relationships |
-| Medium | One LLM provider for all voters | Provider/account outage defeats all three model votes | Decide whether provider-level diversity is required |
+| Medium | Normalized-URL-only duplicate identity | DOI-equivalent versions and mirrors can create separate records | Add persistent identifiers and version/mirror relationships |
+| Medium | One LLM model and provider | Provider/account outage stops classification | Decide whether fallback models or provider diversity are required |
 | Medium | External APIs have no retries | Transient failures can fail detection, search, or jobs | Add bounded retry/backoff with idempotent behavior |
 | Medium | PostgreSQL tests can be skipped locally | DB regressions may escape a non-DB test run | Require `TEST_DATABASE_URL` in CI |
 | Low | Volatile test counts in documentation | Counts become stale as tests change | Keep a verification date and update counts during review |
@@ -488,7 +485,7 @@ The detailed provider proposal is isolated in
 - repository relevance does not independently enforce global-health relevance;
 - source officiality and publisher authority are not enforced;
 - licence acceptance is not enforced;
-- exact-URL deduplication does not model versions or mirrors;
+- normalized-URL-only deduplication does not model versions or mirrors;
 - background jobs are not durable outside the FastAPI process;
 - no human-review, publication status, or lifecycle workflow exists;
 - no CI/staging/production architecture is defined in code.

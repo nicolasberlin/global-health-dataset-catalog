@@ -12,7 +12,12 @@ class PageClassificationError(RuntimeError):
 
 @dataclass(frozen=True)
 class PageClassification:
-    """Eligibility decision and audit signals for one discovered page."""
+    """Validated page-eligibility decision produced before distribution validation.
+
+    ``accepted`` controls whether collection continues. ``dataset_signals``
+    preserves the decision evidence, including ensemble audit data when an
+    ensemble performs the classification.
+    """
 
     accepted: bool
     dataset_signals: dict[str, object] = field(default_factory=dict)
@@ -20,7 +25,12 @@ class PageClassification:
 
 @dataclass(frozen=True)
 class PageClassificationVote:
-    """Page-classification decision attributed to one ensemble voter."""
+    """One classifier's page-eligibility decision before vote aggregation.
+
+    ``voter_id`` identifies the model in the audit trail, and
+    ``dataset_signals`` contains that voter's evidence rather than the final
+    ensemble summary.
+    """
 
     voter_id: str
     accepted: bool

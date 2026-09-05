@@ -1,3 +1,5 @@
+"""Bounded network validation of discovered distribution candidates."""
+
 from __future__ import annotations
 
 import re
@@ -19,6 +21,15 @@ def validate_distribution(
     max_sample_bytes: int = DEFAULT_CONFIG.max_sample_bytes,
     probe: ProbeFunction | None = None,
 ) -> ValidationResult:
+    """Normalize one distribution probe into a validation outcome.
+
+    Validation starts with ``HEAD`` and falls back to a ranged ``GET`` when the
+    server rejects ``HEAD`` or does not expose credible data headers. The GET
+    sample is capped by ``max_sample_bytes``. Probe failures become
+    ``ValidationResult(ok=False)``; exceptions from an injected probe are not
+    intercepted here.
+    """
+
     probe = probe or probe_url
     head_probe = probe(distribution.url, method="HEAD", timeout=timeout, max_bytes=0)
     selected_probe = head_probe
@@ -66,6 +77,13 @@ def probe_url(
     max_bytes: int,
     headers: dict[str, str] | None = None,
 ) -> HTTPProbe:
+    """Perform one bounded probe with public-URL and redirect protection.
+
+    Successful responses read at most ``max_bytes``. HTTP, transport, DNS, and
+    blocked-destination errors are captured as probe data so distribution
+    validation can reject the resource without raising.
+    """
+
     request = Request(url, method=method, headers=headers or {})
 
     try:
@@ -112,6 +130,8 @@ def _validated_format(
     content_disposition: str,
     probe: HTTPProbe,
 ) -> str:
+    """Prefer response metadata, then sampled bytes, then the discovered format."""
+
     format_from_headers, _ = guess_format(
         probe.final_url or distribution.url,
         mime_type=f"{content_type} {content_disposition}",

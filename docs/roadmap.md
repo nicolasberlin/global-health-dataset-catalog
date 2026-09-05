@@ -20,7 +20,7 @@ risk and dependency, not by a committed delivery date.
 ## 2. Identity and Lifecycle
 
 - persist DOI and other stable identifiers as first-class fields;
-- detect duplicates by identifier and normalized identity, not only exact URL;
+- detect duplicates by identifier and semantic identity, not only one normalized URL string;
 - model versions, mirrors, replacements, and withdrawals explicitly;
 - schedule link revalidation and expose stale/broken status without deleting
   historical observations.
@@ -41,8 +41,8 @@ Detailed design: [Multi-Repository Architecture](multi-repository-architecture.m
 - create a labeled evaluation set and measure precision, recall, disagreement,
   failure rates, latency, and cost;
 - add a human-review path for uncertainty and policy triggers;
-- decide whether provider-level independence is required instead of relying on
-  three models behind one OpenAI provider.
+- decide whether provider-level independence or a fallback model is required
+  instead of relying on one DeepSeek model.
 
 ## 5. Production Architecture
 

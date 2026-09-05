@@ -129,14 +129,14 @@ acceptance.
 
 | Gate | Required policy | Current enforcement | Result when unmet |
 | --- | --- | --- | --- |
-| G1 — identifiable resource | The candidate describes one identifiable dataset, downloadable data resource, or API-backed dataset, not only a catalog, article, dashboard, or document. | The page-classification prompt asks three LLM voters to make this distinction. | Reject, or review if the evidence is ambiguous. |
+| G1 — identifiable resource | The candidate describes one identifiable dataset, downloadable data resource, or API-backed dataset, not only a catalog, article, dashboard, or document. | The page-classification prompt asks the EPFL RCP classifier to make this distinction. | Reject, or review if the evidence is ambiguous. |
 | G2 — health relevance | The dataset materially concerns health, public health, clinical care, epidemiology, disease, mortality, morbidity, vaccination, health systems, or a closely related topic. | Enforced by the page-classification prompt. Not independently enforced by repository relevance classification. | Reject from the health catalog. |
 | G3 — provenance | A publisher or responsible depositor and the discovery source can be identified. Hosting platform and publisher must remain separate. | Source URL and discovery method are stored; publisher may be empty. | Review when publisher is missing; reject when provenance is unverifiable. |
 | G4 — usable data access | At least one machine-usable file or API distribution is present. A PDF, ordinary HTML page, or image alone is insufficient. | Persistent collection requires at least one validated distribution. | Do not publish as an accessible dataset. |
 | G5 — technical validation | At least one distribution responds successfully and is not an HTML error or landing page masquerading as data. | `HEAD` is tried first, followed by a bounded partial `GET` when needed. Successful 2xx/3xx non-HTML responses pass. | Reject from automatic storage or send to review. |
 | G6 — minimum metadata | Dataset URL and title must be present. Publisher and source must be present before public publication. Unknown optional fields must remain explicitly unknown. | Dataset URL and title are populated; publisher can be blank. Repository results require a title and HTTP(S) URL. | Withhold or review if a publication-critical field is missing. |
 | G7 — lawful and safe description | Available metadata must not indicate unlawful access, exposed credentials, or direct publication of sensitive person-level health data without an appropriate access mechanism. | No complete automated control exists. | Quarantine and require human review. |
-| G8 — duplicate control | The record must not duplicate an existing dataset identity. Versions and mirrors must be linked intentionally. | Stored datasets are unique by exact `dataset_url`; distribution candidates are deduplicated by canonical URL and format within extraction. | Merge, link as a version/mirror, or reject the duplicate. |
+| G8 — duplicate control | The record must not duplicate an existing dataset identity. Versions and mirrors must be linked intentionally. | Stored datasets are unique by exact normalized `dataset_url`; distribution candidates are deduplicated by canonical URL and format within extraction. | Merge, link as a version/mirror, or reject the duplicate. |
 
 ### Automatic acceptance rule
 
@@ -144,7 +144,7 @@ A candidate may be accepted automatically only when:
 
 - G1 through G8 pass;
 - its source is Tier A or Tier B;
-- the LLM ensemble has enough successful responses and at least two positive votes;
+- the EPFL RCP page response is valid and positive;
 - at least one distribution validates successfully; and
 - no human-review trigger in section 12 applies.
 
@@ -183,15 +183,13 @@ dataset and whether it has a usable distribution.
 
 Current behavior:
 
-1. three model voters classify the page;
-2. at least two successful votes are required for a decision;
-3. at least two `accepted=true` votes are required for acceptance;
-4. `yes + yes + error` is accepted;
-5. `yes + no + error` is rejected because it lacks two positive votes;
-6. fewer than two usable model responses causes a classification error;
-7. a dataset without a validated distribution is not saved.
+1. one DeepSeek model hosted through EPFL RCP classifies the page;
+2. a valid structured response is required for a decision;
+3. `accepted=true` is required for acceptance;
+4. a failed or malformed response causes a classification error;
+5. a dataset without a validated distribution is not saved.
 
-This behavior is fail-closed when a majority cannot be established.
+This behavior is fail-closed when EPFL RCP cannot produce a valid decision.
 
 ## 9. Metadata Quality Requirements
 
@@ -274,18 +272,18 @@ redirect before connecting, and blocks private or local network addresses.
 
 ### Current decision rule
 
-The default ensembles use three distinct OpenAI model names. They share one
-provider, endpoint family, and API-key path, so this is model diversity rather
-than provider-level fault isolation.
+The default classifiers use one DeepSeek model through EPFL RCP and one API-key
+path. There is no
+majority vote, provider fallback, or model-level fault isolation.
 
-Every successful page voter returns:
+The successful page voter returns:
 
 - a boolean acceptance decision;
-- dataset reason and evidence;
-- health reason and evidence.
+- one `dataset_signals` object whose reason and evidence cover both dataset
+  identity and health relevance.
 
-The ensemble audit must retain each successful vote, failed voter, decision
-threshold, and the voters supporting the final decision.
+The compatibility audit retains the single vote, failure state, and 1/1
+decision threshold.
 
 ### Required controls
 
@@ -360,9 +358,9 @@ Rules:
   distinguish it and the version relationship is retained.
 - Automatic fuzzy merging must not occur without a reversible audit trail.
 
-**Current:** Database upsert identity is the exact `dataset_url`. Repeated
-discoveries can create observations, but DOI-based and cross-URL duplicate
-resolution are not implemented.
+**Current:** Database upsert identity is the exact normalized `dataset_url`.
+Repeated discoveries can create observations, but DOI-based and cross-URL
+duplicate resolution are not implemented.
 
 ## 14. Privacy, Ethics, and Licensing
 
@@ -399,7 +397,7 @@ The following measures should be reported by release and by source/provider:
 | Duplicate rate | Percentage of reviewed records that duplicate another catalog identity. |
 | Review rate | Percentage of candidates requiring human review. |
 | Model failure rate | Percentage of voter calls that fail operationally or return invalid output. |
-| Decision disagreement rate | Percentage of ensemble decisions without unanimous successful votes. |
+| Classification error rate | Percentage of calls that fail or return invalid structured output. |
 
 Recommended launch criteria, subject to owner approval:
 
@@ -437,8 +435,9 @@ Recommended revalidation:
 **Decision required:** Define revalidation frequency and retention periods for
 jobs, observations, rejected candidates, reviews, and withdrawn records.
 
-**Implementation gap:** The current schema persists accepted datasets and job
-outcomes but does not implement the complete lifecycle above.
+**Implementation gap:** The current schema persists datasets that passed page
+classification and distribution validation, plus job outcomes, but it does not
+implement the complete lifecycle above.
 
 ## 17. Roles and Accountability
 
@@ -477,7 +476,7 @@ affected, a benchmark evaluation.
 | P1 | Source officiality and trust tiers are not enforced. | Add source type, provenance status, and review requirement. |
 | P1 | Review and lifecycle states are absent from the schema. | Add review decision, status, reviewer, reason, and timestamps. |
 | P1 | Several useful extracted fields, including sharing license and DOI, are not persisted on collected datasets. | Extend the storage/API contract through an explicit schema migration. |
-| P1 | Duplicate identity relies on exact dataset URL. | Add persistent-identifier and canonical-URL identity rules. |
+| P1 | Duplicate identity relies on one normalized dataset URL string. | Add persistent-identifier and cross-URL identity rules. |
 | P1 | Only one distribution is validated by default. | Validate additional ranked candidates when the first fails, within a bounded budget. |
 | P2 | Missing values differ between repository results and persisted records. | Define one API convention for unknown values while keeping database types appropriate. |
 | P2 | Scheduled revalidation, stale status, and withdrawal workflow are absent. | Add periodic link checks and a non-destructive lifecycle. |

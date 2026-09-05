@@ -27,7 +27,12 @@ MAX_REPOSITORY_LLM_URL_CHARS = 2_048
 
 
 class LLMRepositoryRelevanceClassifier:
-    """Compare bounded repository metadata with the original user query via an LLM."""
+    """Classify a repository candidate against the original user query.
+
+    Only bounded provider metadata is sent. A valid relevance label produces a
+    decision, while missing queries, provider failures, and malformed or
+    inconsistent responses raise ``PageClassificationError``.
+    """
 
     def __init__(
         self,

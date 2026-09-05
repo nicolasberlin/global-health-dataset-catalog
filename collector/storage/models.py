@@ -24,7 +24,13 @@ class LinkCandidate:
 
 @dataclass(frozen=True)
 class PageSnapshot:
-    """Normalized page content and dataset metadata used by classifiers."""
+    """Classifier evidence assembled from HTML or repository metadata.
+
+    ``search_query`` is populated for repository relevance checks, while
+    ``dataset_url`` is the preferred dataset identity. ``links`` and
+    ``json_ld`` retain extraction evidence that has not been flattened into
+    the normalized metadata fields.
+    """
 
     url: str
     canonical_url: str
@@ -111,7 +117,12 @@ def _normalized_values(values: tuple[str, ...]) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class DistributionCandidate:
-    """Potential downloadable data resource discovered for a dataset page."""
+    """Potential data resource emitted before HTTP validation.
+
+    ``probability`` ranks extraction evidence; it does not prove that the
+    resource is reachable. ``signals`` preserves the evidence behind that
+    ranking, and lifecycle timestamps are populated after persistence.
+    """
 
     url: str
     format: str
@@ -142,7 +153,12 @@ class HTTPProbe:
 
 @dataclass(frozen=True)
 class ValidationResult:
-    """Normalized validation outcome for one distribution URL."""
+    """Bounded HTTP-probe result used to retain or reject a distribution.
+
+    ``final_url`` records the destination after redirects, and ``format`` may
+    be refined from response headers or a body sample. ``ok`` confirms the
+    resource response, not the dataset's semantic relevance.
+    """
 
     url: str
     final_url: str
@@ -159,7 +175,13 @@ class ValidationResult:
 
 @dataclass(frozen=True)
 class CollectedDataset:
-    """Accepted dataset whose canonical URL is guaranteed to be HTTP(S)."""
+    """Dataset assembled after page acceptance and prepared for persistence.
+
+    Before validation, ``distributions`` may still contain candidates; the
+    completed collection keeps only validated resources and their
+    ``validation_results``. ``dataset_signals`` is the classifier audit trail,
+    while database identifiers and lifecycle timestamps are added on storage.
+    """
 
     dataset_url: str
     title: str
@@ -184,7 +206,11 @@ class CollectedDataset:
 
 @dataclass(frozen=True)
 class CollectionReport:
-    """Aggregate counters and discovery methods for one collection run."""
+    """Aggregate counters and discovery methods for one collection run.
+
+    ``accepted_count`` counts datasets retained after distribution validation,
+    not every positive page-classifier response.
+    """
 
     discovered_count: int = 0
     analyzed_count: int = 0
@@ -196,7 +222,7 @@ class CollectionReport:
 
 @dataclass(frozen=True)
 class CollectionResult:
-    """Datasets and aggregate report produced by one collection run."""
+    """Transient collector output later persisted by the backend completion step."""
 
     datasets: list[CollectedDataset] = field(default_factory=list)
     report: CollectionReport = field(default_factory=CollectionReport)

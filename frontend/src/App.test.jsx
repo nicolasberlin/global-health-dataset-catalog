@@ -130,7 +130,8 @@ describe('database-first dataset search', () => {
                         reason: 'Matches the query.',
                         missing_information: [],
                         ensemble: {
-                            accepted_votes: 2,
+                            successful_votes: 1,
+                            accepted_votes: 1,
                             failed_votes: 0,
                             decision_reason: 'enough_accept_votes',
                             voters: [],
@@ -140,7 +141,7 @@ describe('database-first dataset search', () => {
             );
         });
 
-        expect(await screen.findByText('Accepté 2/3')).toBeInTheDocument();
+        expect(await screen.findByText('Accepté 1/1')).toBeInTheDocument();
         expect(screen.getByText('Accord IA')).toBeInTheDocument();
     });
 
