@@ -1,12 +1,15 @@
+"""Bounded network validation of discovered distribution candidates."""
+
 from __future__ import annotations
 
 import re
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from collector.config import DEFAULT_CONFIG
 from collector.extraction.distributions import guess_format
+from collector.fetch import open_public_http_url
 from collector.storage.models import DistributionCandidate, HTTPProbe, ValidationResult
 
 ProbeFunction = Callable[..., HTTPProbe]
@@ -18,6 +21,15 @@ def validate_distribution(
     max_sample_bytes: int = DEFAULT_CONFIG.max_sample_bytes,
     probe: ProbeFunction | None = None,
 ) -> ValidationResult:
+    """Normalize one distribution probe into a validation outcome.
+
+    Validation starts with ``HEAD`` and falls back to a ranged ``GET`` when the
+    server rejects ``HEAD`` or does not expose credible data headers. The GET
+    sample is capped by ``max_sample_bytes``. Probe failures become
+    ``ValidationResult(ok=False)``; exceptions from an injected probe are not
+    intercepted here.
+    """
+
     probe = probe or probe_url
     head_probe = probe(distribution.url, method="HEAD", timeout=timeout, max_bytes=0)
     selected_probe = head_probe
@@ -65,10 +77,17 @@ def probe_url(
     max_bytes: int,
     headers: dict[str, str] | None = None,
 ) -> HTTPProbe:
+    """Perform one bounded probe with public-URL and redirect protection.
+
+    Successful responses read at most ``max_bytes``. HTTP, transport, DNS, and
+    blocked-destination errors are captured as probe data so distribution
+    validation can reject the resource without raising.
+    """
+
     request = Request(url, method=method, headers=headers or {})
 
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with open_public_http_url(request, timeout=timeout) as response:
             body_sample = response.read(max_bytes) if max_bytes > 0 else b""
             return HTTPProbe(
                 url=url,
@@ -87,7 +106,7 @@ def probe_url(
             body_sample=body_sample,
             error=str(exception),
         )
-    except (TimeoutError, URLError, OSError) as exception:
+    except (TimeoutError, URLError, OSError, ValueError) as exception:
         return HTTPProbe(
             url=url,
             final_url=url,
@@ -111,6 +130,8 @@ def _validated_format(
     content_disposition: str,
     probe: HTTPProbe,
 ) -> str:
+    """Prefer response metadata, then sampled bytes, then the discovered format."""
+
     format_from_headers, _ = guess_format(
         probe.final_url or distribution.url,
         mime_type=f"{content_type} {content_disposition}",
@@ -156,4 +177,3 @@ def _parse_content_length(value: str) -> int | None:
     if not value or not re.fullmatch(r"\d+", value.strip()):
         return None
     return int(value)
-

@@ -1,1109 +1,505 @@
 # Technical Design Document - Global Health Dataset Catalog
 
-## Analyse de la documentation existante
-
-### Documents analyses
-
-| Document | Type | Sujet | Informations importantes | Fiabilite / actualite |
-| --- | --- | --- | --- | --- |
-| Consignes utilisateur jointes | Specification de livrable | Structure attendue du TDD | Demande une analyse complete avant redaction, une separation entre confirme, deduction, hypothese et information manquante, et un TDD utilisable par responsables et equipes techniques. | Haute. Source de cadrage du document. |
-| `README.md` | Documentation projet | Vue globale, lancement, endpoints, checks | Projet React + FastAPI pour cataloguer des pages officielles de datasets sante. Le tag `v0.1.0-no-collector` est le baseline catalogue, la branche `collector-update` introduit le collecteur. Liste des endpoints et controles. | Haute, mais a croiser avec la base SQLite locale. |
-| `pyproject.toml` | Configuration Python | Packaging et outillage | Projet `global-health-dataset-catalog` version 0.1.0, Python >= 3.9, packages `backend/app` et `collector`, ruff et pytest en dependances de dev. | Haute pour le code Python. |
-| `backend/requirements.txt` | Configuration backend | Dependances runtime backend | Dependances minimales : FastAPI >= 0.115 et Uvicorn standard >= 0.30. | Haute pour les contraintes minimales. |
-| `frontend/package.json` et `frontend/package-lock.json` | Configuration frontend | React/Vite et versions verrouillees | React 18.3.1, React DOM 18.3.1, Vite 5.4.21, plugin React Vite 4.7.0. Scripts `dev`, `build`, `preview`. | Haute pour l'environnement frontend local. |
-| `backend/app/main.py` | Code source backend | Application FastAPI | Initialisation de la base au demarrage, CORS limite a `localhost`/`127.0.0.1:5173`, routes `/sources`, `/collector`, `/health`. | Haute. |
-| `backend/app/database.py` | Code source backend | Schema SQLite, migrations, queries | Schema courant version 1, seeds WHO reserves, tables sources, datasets collectes, distributions, observations de decouverte, jobs de collecte, contraintes et upserts. | Haute pour l'intention applicative actuelle. |
-| `backend/app/routes/*.py` | Code source backend | API HTTP | Routes de catalogue, analyse HTML/URL, decouverte, collecte synchrone, jobs asynchrones, recherche repositories, liste des datasets collectes. | Haute. |
-| `collector/**/*.py` | Code source collecteur | Extraction, classification, decouverte, validation, recherche repositories | Collecteur generique, adaptateurs CKAN/Socrata/data.json/site generique, scoring dataset/sante, detection de distributions, validation HEAD puis GET partiel, recherche DataCite normalisee. | Haute. |
-| `frontend/src/App.jsx`, `frontend/src/styles.css` | Code source frontend | Interface utilisateur | Catalogue des sources, filtres, lancement et polling de jobs, liste des datasets collectes, panneau de test collecteur. | Haute. |
-| `tests/*.py` | Tests automatises | Comportement attendu | 76 tests couvrent base, routes, pipeline collecteur, discovery adapters et sitemaps. Ils confirment les regles metier et les erreurs attendues. | Haute. Tests executes localement avec succes le 2026-08-19. |
-| `backend/global_health.db` | Base SQLite locale | Donnees locales existantes | 4 sources, 10 datasets collectes, 10 distributions validees, 3 jobs. Schema historique non versionne (`PRAGMA user_version = 0`) et incomplet par rapport au code actuel. | Moyenne. Donnees utiles, mais schema incompatible avec l'application actuelle. |
-| `.gitignore` et metadonnees Git | Configuration depot | Etat projet | Branche courante `collector-update`, tag `v0.1.0-no-collector`, dernier commit local observe `e32eca2 Make stored JSON errors explicit`. | Haute pour le contexte local. |
-
-Fichiers exclus de l'analyse fonctionnelle : `.venv`, `frontend/node_modules`, `frontend/dist`, caches pytest/ruff, `__pycache__`, artefacts Git internes. Ils sont generes ou vendorises et ne constituent pas des specifications projet.
-
-### Comprehension globale du projet
-
-Le projet **Global Health Dataset Catalog** vise a maintenir un catalogue local de pages officielles de datasets de sante mondiale. L'application permet de referencer des sources, de consulter les pages externes, de decouvrir des pages candidates depuis des catalogues publics, de classifier ces pages comme datasets et comme contenus sante, puis de sauvegarder uniquement les metadonnees et les liens de distributions valides. Le projet ne stocke pas les fichiers de donnees eux-memes.
-
-L'architecture actuelle est une application locale ou MVP : un frontend React/Vite consomme une API FastAPI, laquelle persiste dans une base SQLite locale et orchestre un package Python `collector`. Le collecteur est volontairement generique : il privilegie d'abord les catalogues structures CKAN, Socrata et `data.json`/DCAT, puis bascule vers une decouverte par `robots.txt`/`sitemap.xml` et analyse HTML.
-
-Les utilisateurs identifies sont principalement des personnes techniques ou data qui veulent inventorier des sources de datasets sante, tester la detection du collecteur, lancer des collectes et inspecter les resultats. Aucun role metier, administrateur, equipe de production ou utilisateur final externe n'est documente.
-
-### Informations confirmees
-
-- **CONFIRME** - Le projet est nomme `global-health-dataset-catalog` et versionne `0.1.0` dans `pyproject.toml` et `frontend/package.json`.
-- **CONFIRME** - Le backend est FastAPI et expose `/health`, `/sources`, `/sources/{id}/page`, `/collector/analyze-html`, `/collector/analyze-url`, `/collector/discover-url`, `/collector/collect-url`, `/collector/collection-jobs`, `/collector/collection-jobs/{job_id}`, `/collector/search-repositories` et `/collector/collected-datasets`.
-- **CONFIRME** - Le frontend utilise React/Vite et pointe par defaut vers `http://127.0.0.1:8001`.
-- **CONFIRME** - La base cible du code est SQLite, configuree par `GLOBAL_HEALTH_DB_PATH` ou par defaut `backend/global_health.db`.
-- **CONFIRME** - Les seeds applicatifs reserves sont `who_gho_indicators` et `who_gho_life_expectancy`.
-- **CONFIRME** - Les seuils par defaut du collecteur sont `min_dataset_probability = 0.6`, `min_health_probability = 0.35`, `max_pages_per_source = 5`, `max_distributions_per_dataset = 1`.
-- **CONFIRME** - Les adaptateurs de decouverte sont executes dans l'ordre CKAN, Socrata, `data_json`, puis site generique.
-- **CONFIRME** - Les liens PDF et formats image/HTML sont exclus des distributions de donnees par defaut.
-- **CONFIRME** - Les URLs fetchables par l'API d'analyse URL sont limitees aux schemes HTTP/HTTPS et les IP privees/locales sont rejetees.
-- **CONFIRME** - Les tests Python passent : `76 passed in 0.39s`. Le build frontend passe avec Vite 5.4.21.
-
-### Deductions
-
-- **DEDUCTION** - L'architecture actuelle est un MVP local/interne plutot qu'une solution production : les fichiers analyses documentent le lancement local, mais pas d'authentification, d'hebergement, de CI/CD, de monitoring ou de sauvegardes.
-- **DEDUCTION** - Les utilisateurs cibles actuels sont des profils techniques/data : l'interface expose des scores, signaux, URLs, compteurs de jobs et validations HTTP plutot qu'un parcours grand public.
-- **DEDUCTION** - Le collecteur est concu pour stocker des metadonnees et des validations de liens, pas les donnees dataset elles-memes : le README le dit explicitement et le schema SQLite ne contient pas de stockage de fichiers.
-- **DEDUCTION** - Une migration de donnees est necessaire avant de considerer `backend/global_health.db` comme utilisable avec le code courant : le code refuse les schemas non versionnes avec tables gerees, et la base locale est precisement dans cet etat.
-- **DEDUCTION** - Les sources institutionnelles sont le coeur du cas d'usage : les seeds sont WHO et la base locale contient HDX/CDC, mais la politique d'acceptation des sources reste a valider.
-- **DEDUCTION** - La recherche repositories doit etre etendue par famille d'API et non par site individuel : DataCite est implemente, CKAN/Dataverse/WHO/World Bank restent des adapters cibles a ajouter.
-
-### Informations manquantes
-
-- **INFORMATION MANQUANTE** - Environnement cible de production, hebergement, reseau, DNS, HTTPS et reverse proxy.
-- **INFORMATION MANQUANTE** - Strategie d'authentification, autorisation, roles et audit.
-- **INFORMATION MANQUANTE** - Proprietaires metier, reviewers, approbateurs et equipe de support.
-- **INFORMATION MANQUANTE** - Volumetrie attendue : nombre de sources, frequence de collecte, taille des sitemaps, nombre d'utilisateurs.
-- **INFORMATION MANQUANTE** - Politique de conservation des metadonnees, des jobs et des resultats de validation.
-- **INFORMATION MANQUANTE** - Liste officielle des repositories interroges par defaut et politique de degradation si un provider externe echoue.
-- **INFORMATION MANQUANTE** - Strategie de migration de la base SQLite locale historique vers le schema versionne courant.
-- **INFORMATION MANQUANTE** - CI/CD, environnements de test/QA/staging/production, monitoring et alerting.
-- **INFORMATION MANQUANTE** - Politique d'acceptation pour les sources non officielles comme Kaggle, HDX ou portails gouvernementaux externes.
-
-### Contradictions detectees
-
-| Sujet | Source A | Source B | Impact | Decision necessaire |
-| --- | --- | --- | --- | --- |
-| Schema SQLite courant vs base locale | `backend/app/database.py` definit `CURRENT_SCHEMA_VERSION = 1`, une table `dataset_discovery_observations`, des contraintes et des champs `first_seen_at`, `last_seen_at`, `last_checked_at`, `validation_attempted`. | `backend/global_health.db` a `user_version = 0`, ne contient pas `dataset_discovery_observations` et conserve un ancien schema. | Elevé. Le demarrage sur la base locale echoue : le code refuse les tables gerees non versionnees. | Creer une migration historique explicite ou regenerer la base apres export/import controle. |
-| README indique une base locale creee par le backend | `README.md` liste `backend/global_health.db` comme base SQLite locale creee par le backend. | L'initialisation du code actuel refuse cette base car elle contient deja des tables gerees non versionnees. | Elevé. Risque de confusion au lancement local. | Mettre a jour le README et fournir une procedure de migration ou de recreation. |
-| Formats de distributions affiches dans l'UI | `frontend/src/App.jsx` affiche "Aucun lien CSV/XLSX/API trouve" dans le panneau collecteur. | `collector/extraction/distributions.py` supporte aussi TSV, XLS, JSON, JSONL, XML, PARQUET, ZIP, GZ, SAV, DTA, SAS7BDAT, GEOJSON et API. | Faible a moyen. L'UI sous-decrit les capacites reelles. | Ajuster le libelle UI ou limiter officiellement les formats acceptes. |
-
-### Hypotheses de travail
-
-| Hypothese | Pourquoi elle est necessaire | Risque si incorrecte | A valider avec |
-| --- | --- | --- | --- |
-| Le projet cible d'abord un MVP local/interne avant production. | Aucune configuration prod, auth, CI/CD ou deploiement n'est documentee. | Sous-dimensionnement de la securite et de l'exploitation si exposition publique. | Responsables projet, equipe infra/securite. |
-| Les donnees stockees sont des metadonnees publiques, pas des donnees personnelles de sante. | Le collecteur stocke URLs, titres, descriptions, publishers, signaux et validations, pas les fichiers dataset. | Risque legal/confidentialite si des sources contiennent des donnees sensibles ou non publiques. | DPO/securite, owner data. |
-| SQLite convient au MVP mais devra etre reevalue pour un usage multi-utilisateur ou planifie. | Le code persiste dans SQLite et utilise des background tasks FastAPI simples. | Blocages de concurrence, sauvegarde et scalabilite limitees. | Architecture, exploitation. |
-| Les portails officiels ou institutionnels sont prioritaires. | README parle de pages officielles de datasets sante, seeds WHO, base locale HDX/CDC. | Mauvaise qualite catalogue si des sources communautaires/non officielles sont acceptees sans gouvernance. | Responsable metier/data governance. |
-| Les jobs de collecte peuvent rester courts et bornes. | `max_pages_per_source = 5` et `max_distributions_per_dataset = 1`. | Timeouts ou resultats incomplets si les sources sont grandes. | Product owner, equipe data. |
-
-## 1. Informations generales
-
-| Champ | Valeur |
+| Field | Value |
 | --- | --- |
-| Nom du projet | Global Health Dataset Catalog |
-| Version document | 0.1 |
-| Date | 2026-08-19 |
-| Auteur | Codex, d'apres analyse du projet local |
-| Statut | Brouillon pour revue |
-| Reviewers / approbateurs | A confirmer / Information non disponible dans la documentation analysee |
+| Status | Current architecture |
+| Last verified | 2026-09-04 |
+| Runtime | React/Vite, FastAPI, Python collector, PostgreSQL |
 
-Historique des versions :
+This document describes the system that exists now. Proposed product,
+multi-repository, governance, and production work is kept in the
+[roadmap](roadmap.md). The historical SQLite decision is kept in
+[ADR 0001](adr/0001-postgresql-only.md).
 
-| Version | Date | Auteur | Modification |
-| --- | --- | --- | --- |
-| 0.1 | 2026-08-19 | Codex | Creation du TDD apres analyse du projet local. |
+## 1. Purpose and Scope
 
-## 2. Executive Summary
+The application helps a technical user:
 
-Le projet repond a un besoin d'inventaire et de qualification de pages de datasets de sante mondiale. Il fournit un catalogue local de sources, un collecteur capable de decouvrir des pages candidates sur des portails publics, un scoring pour determiner si une page est un dataset et si elle est liee a la sante, puis une validation legere des liens de fichiers ou d'API.
+- search DataCite for dataset candidates relevant to a query;
+- inspect progressive EPFL RCP relevance decisions;
+- maintain a catalogue of source portals;
+- launch asynchronous collection jobs against those sources;
+- discover candidate dataset records and distributions;
+- classify records as individual health-relevant datasets;
+- validate file/API links lightly;
+- inspect datasets persisted in PostgreSQL.
 
-La solution actuelle est une application MVP composee d'un frontend React/Vite, d'une API FastAPI, d'un package collecteur Python et d'une base SQLite. L'architecture est simple, testee et adaptee au developpement local. Elle n'est pas encore documentee comme une architecture de production.
+The application stores metadata and links. It does not download and retain
+dataset files, prove scientific validity, enforce source officiality, or provide
+a production review workflow.
 
-Le principal risque technique identifie est la divergence entre le schema SQLite attendu par le code actuel et la base locale existante. Avant tout usage fiable, il faut decider si la base locale doit etre migree, recreee ou remplacee par une base cible plus robuste.
+## 2. Current Architecture
 
-Les decisions importantes a valider concernent le perimetre des sources officielles, la strategie de migration, l'authentification, l'hebergement, l'observabilite et la frequence des collectes.
+```mermaid
+flowchart LR
+    Browser["React/Vite frontend"] --> API["FastAPI"]
+    API --> Search["Repository search service"]
+    Search --> DataCite["DataCite API"]
+    API --> Collector["Collector pipeline"]
+    API --> RepoLLM["Repository EPFL RCP classifier"]
+    Collector --> Discovery["Discovery adapters"]
+    Collector --> PageLLM["Page EPFL RCP classifier"]
+    Collector --> Validation["Distribution validation"]
+    RepoLLM --> RCP["EPFL RCP Chat Completions API<br/>DeepSeek V4 Flash 0731"]
+    PageLLM --> RCP
+    Collector --> Result["CollectionResult"]
+    Result --> Completion["Backend complete_collection_job()"]
+    API --> DB["PostgreSQL"]
+    Completion --> DB
+```
 
-## 3. Contexte et probleme
+The runtime has four main ownership boundaries:
 
-### Situation actuelle
-
-Le catalogue stable initial est decrit comme `v0.1.0-no-collector`. La branche courante `collector-update` ajoute une couche de collecte generique. Le systeme permet deja de :
-
-- lister et ajouter des sources de pages dataset ;
-- rediriger vers les pages externes ;
-- tester une analyse de HTML colle ou d'URL publique ;
-- decouvrir des pages via CKAN, Socrata, `data.json`/DCAT ou sitemap ;
-- lancer des jobs de collecte en arriere-plan ;
-- sauvegarder et afficher les datasets collectes et leurs distributions validees.
-
-### Probleme rencontre
-
-Les organisations qui travaillent avec des datasets sante doivent retrouver les pages officielles, distinguer catalogues et datasets individuels, identifier les formats disponibles et eviter de sauvegarder des liens invalides. La recherche manuelle est fragile et difficile a maintenir.
-
-### Limitations existantes
-
-- L'architecture de production n'est pas definie.
-- La base SQLite locale presente un schema historique incompatible avec le code actuel.
-- Les criteres metier d'officialite et de qualite des sources ne sont pas formalises.
-- L'authentification, les roles et la protection de l'API ne sont pas implementes.
-- L'observabilite est limitee aux messages de jobs et a quelques exceptions/logs.
-
-## 4. Objectifs
-
-### Objectifs metier
-
-- Centraliser des pages de datasets sante dans un catalogue consultable.
-- Reduire le travail manuel de detection de datasets pertinents.
-- Identifier les distributions de donnees exploitables, sans telecharger ni stocker les datasets eux-memes.
-- Fournir des signaux de confiance : source, publisher, methode de decouverte, score dataset, score sante, validation HTTP.
-
-### Objectifs techniques
-
-- Maintenir une API backend simple et testable.
-- Isoler la logique collecteur dans des modules reutilisables et site-agnostiques.
-- Persister les metadonnees collectees avec historique minimal de decouverte.
-- Proteger les fetchs publics contre les URLs locales/privees.
-- Fournir un frontend de pilotage pour test, collecte et consultation.
-
-### Criteres de reussite
-
-| Critere | Mesure actuelle ou cible |
-| --- | --- |
-| Tests backend/collecteur | CONFIRME : 76 tests passent localement. |
-| Build frontend | CONFIRME : `npm --prefix frontend run build` passe localement. |
-| Base demarrable | A confirmer : actuellement bloque par la base locale historique. |
-| Qualite des resultats | A definir : precision/recall des heuristiques non documentees. |
-| Exploitation | A definir : health checks, logs structures, alertes et sauvegardes. |
-
-## 5. Perimetre
-
-### Inclus dans le projet
-
-- Catalogue local de sources de datasets.
-- API CRUD partielle pour creation/listing de sources et redirection page.
-- Analyse HTML/URL publique.
-- Decouverte CKAN, Socrata, `data.json`/DCAT et sitemaps.
-- Scoring dataset et scoring sante.
-- Extraction de distributions probables.
-- Validation HEAD puis GET partiel des liens.
-- Jobs de collecte asynchrones via FastAPI background tasks.
-- Persistance SQLite des metadonnees collectees.
-- Frontend React de consultation, filtrage, test collecteur et suivi de jobs.
-
-### Hors perimetre
-
-- Telechargement et stockage des fichiers datasets eux-memes.
-- Authentification et gestion de roles.
-- Orchestration planifiee ou recurrente des collectes.
-- Deploiement cloud/production.
-- Monitoring avance, dashboards et alertes.
-- Review humaine des datasets collectes.
-- Interface d'administration complete.
-
-Elements non clairement definis : gouvernance des sources, SLA, volumetrie, politique de conservation, securite production.
-
-## 6. Utilisateurs et acteurs
-
-| Acteur | Role | Interaction avec le systeme |
+| Area | Responsibility | Main paths |
 | --- | --- | --- |
-| Utilisateur data / analyste | Consulte et filtre les sources et datasets collectes. | Frontend React, liens externes, panneau collecteur. |
-| Developpeur | Maintient backend, collecteur, frontend et tests. | Code Python/React, tests, migrations. |
-| Administrateur catalogue | HYPOTHESE : ajoute ou valide des sources. | API `/sources`, future interface d'administration. |
-| Portails externes CKAN | Source de metadonnees structurees. | API `/api/3/action/status_show` et `/package_search`. |
-| Portails Socrata | Source de metadonnees et exports. | `https://api.us.socrata.com/api/catalog/v1` et exports `/resource/{id}.csv/json`. |
-| Catalogues `data.json`/DCAT | Source de datasets structures. | Fichier `data.json` a la racine du site ou URL donnee. |
-| Sites generiques | Fallback de decouverte. | `robots.txt`, `sitemap.xml`, pages HTML. |
-| Base SQLite | Persistance locale. | Acces direct par backend via `sqlite3`. |
+| Frontend | Search, progressive status, source collection, saved-result display | `frontend/src/App.jsx`, `frontend/src/components/` |
+| Backend | HTTP contracts, validation, job orchestration | `backend/app/main.py`, `backend/app/routes/` |
+| Collector | Discovery, extraction, classification, validation | `collector/` |
+| Database | Schema, sources, jobs, atomic completion, upserts | `backend/app/db/` |
 
-## 7. Exigences fonctionnelles principales
+## 3. Frontend Capabilities
 
-| Fonctionnalite | Objectif | Entree | Traitement | Resultat | Erreurs possibles | Dependances |
-| --- | --- | --- | --- | --- | --- | --- |
-| Lister les sources | Afficher les sources cataloguees. | GET `/sources` | Lecture SQLite et tri par theme/nom. | Liste `DataSource`. | Schema non initialise, base indisponible. | SQLite. |
-| Ajouter une source | Ajouter ou mettre a jour une source utilisateur. | `source_key`, `name`, `description`, `theme`, `page_url`. | Validation Pydantic, refus des keys reservees, upsert SQLite. | Source sauvegardee. | 400 key reservee, URL invalide. | FastAPI, SQLite. |
-| Ouvrir une source | Rediriger vers la page externe. | `source_id`. | Recherche source par id. | Redirect HTTP. | 404 source inconnue. | SQLite. |
-| Analyser du HTML | Tester le collecteur sans fetch reseau. | URL + HTML. | Extraction page, distributions, scoring dataset/sante. | Scores, signaux, distributions, acceptation. | HTML vide refuse par modele. | Collecteur. |
-| Analyser une URL | Tester une page publique. | URL HTTP/HTTPS. | Controle URL publique, fetch HTML, analyse. | Meme reponse qu'analyse HTML. | 400 fetch impossible, URL locale/privee, page trop grosse. | Reseau externe. |
-| Rechercher des repositories | Trouver des datasets dans des catalogues externes sans ajouter une source manuellement. | Query texte. | Orchestrateur `search_repository_metadata`, providers configures par defaut, normalisation en `RepositorySearchResult`. | Liste de resultats normalises. | 400 query vide, 502 erreur provider actuelle. | APIs externes, adapters repository. |
-| Decouvrir une URL | Identifier des pages candidates. | URL source. | Adaptateur CKAN/Socrata/data.json/generic. | Liste `DiscoveredPage`. | 400 erreur de decouverte. | APIs externes, sitemaps. |
-| Collecter une URL | Decouvrir, classifier, valider et optionnellement sauvegarder. | URL + `save`. | Pipeline `collect_source`, validation, persistance si `save=true`. | Datasets collectes, compteur sauvegarde. | 400 source invalide. | Collecteur, reseau, SQLite. |
-| Lancer un job de collecte | Executer la collecte en arriere-plan. | URL source. | Creation job `pending`, tache FastAPI background, mise a jour statut. | 202 + job. | Erreur persistee dans job. | FastAPI background tasks, SQLite. |
-| Suivre un job | Afficher statut et compteurs. | `job_id`. | Lecture SQLite. | Job avec status/counters/message. | 404 job inconnu. | SQLite. |
-| Afficher datasets collectes | Consulter les resultats persistants. | GET `/collector/collected-datasets`. | Jointure logique datasets/distributions. | Datasets, distributions, validations. | JSON signaux corrompu, schema incompatible. | SQLite. |
+`frontend/src/App.jsx` coordinates three extracted sections:
 
-## 8. Exigences non fonctionnelles
+- `RepositorySearchSection.jsx` searches repository metadata and shows candidate
+  counts, progressive classification, warnings, rejected results, and errors;
+- `SourceCatalogSection.jsx` filters configured sources and starts collection
+  jobs;
+- `CollectedDatasetsSection.jsx` lists persisted datasets, distributions, and
+  validation information.
 
-| Domaine | Etat confirme | Besoin / A confirmer |
+Repository candidate classification runs progressively with two frontend
+workers. Accepted repository cards link to the external record; they do not
+offer persistence or collection. Source collection creates a job and polls until
+`done` or `error`, then refreshes persisted datasets.
+
+There is no obsolete manual pasted-HTML collector flow in the current UI.
+
+## 4. HTTP API Inventory
+
+| Method | Route | Current behavior |
 | --- | --- | --- |
-| Performance | Limites par defaut : 5 pages analysees par source, 1 distribution validee par dataset, timeout 10 s. | Volumetrie cible et temps de reponse attendus non documentes. |
-| Disponibilite | Aucune architecture HA documentee. | SLA, redemarrage, supervision et sauvegardes a definir. |
-| Scalabilite | SQLite et background tasks FastAPI conviennent au MVP. | Pour production, evaluer queue de jobs et base serveur. |
-| Securite | Controle anti-URL privee pour fetch public, CORS local limite. | Auth, authorization, rate limiting, secrets, HTTPS, audit a definir. |
-| Confidentialite | Le code stocke des metadonnees et URLs, pas les fichiers dataset. | Confirmer absence de donnees personnelles/sensibles. |
-| Resilience | Validation fallback HEAD vers GET partiel. Erreurs de job persistantes. | Retries, backoff, reprise apres incident non documentes. |
-| Observabilite | Messages et compteurs de jobs, logging minimal en base. | Logs structures, metriques, dashboards, alertes non definis. |
-| Maintenabilite | Modules separes, tests nombreux, ruff configure. | Procedure ADR/revue architecture a formaliser. |
-| Accessibilite | UI responsive, labels de formulaires presents. | Audit accessibilite non documente. |
-| Sauvegarde | Non documentee. | Politique backup/restore SQLite ou DB cible requise. |
+| GET | `/health` | Returns `{"status":"ok"}`; it does not test dependencies |
+| GET | `/sources` | Lists configured source records |
+| POST | `/sources` | Creates a source after Pydantic and DB validation |
+| GET | `/sources/{source_id}/page` | Redirects to the configured source URL |
+| POST | `/collector/search-repositories` | Searches repository providers and returns normalized candidates/warnings |
+| POST | `/collector/classify-repository-result` | Runs EPFL RCP repository relevance classification for one candidate |
+| POST | `/collector/collection-jobs` | Creates and schedules a background collection job |
+| GET | `/collector/collection-jobs/{job_id}` | Returns job status and counters |
+| GET | `/collector/collected-datasets` | Lists persisted datasets and distributions |
+| POST | `/collector/search-datasets` | Searches collected datasets first, then repository providers on no match |
 
-## 9. Architecture actuelle - AS-IS
+FastAPI background tasks are process-local. There is no durable worker queue,
+retry scheduler, or multi-process job ownership mechanism.
 
-```mermaid
-flowchart LR
-    User["Utilisateur"] --> UI["Frontend React/Vite"]
-    UI --> API["Backend FastAPI"]
-    API --> DB[("SQLite backend/global_health.db")]
-    API --> Collector["Package collector"]
-    Collector --> External["Portails publics: CKAN, Socrata, data.json, sitemaps, HTML"]
-    Collector --> API
-```
-
-Composants confirmes :
-
-- `frontend/` : application React mono-page.
-- `backend/app/` : API FastAPI, initialisation SQLite, routes.
-- `collector/` : modules d'extraction, classification, decouverte, validation.
-- `backend/global_health.db` : base SQLite locale existante, mais schema historique.
-- `tests/` : tests unitaires et d'integration legere.
-
-Limite AS-IS majeure : la base fournie ne peut pas etre consideree comme compatible avec le code actuel sans migration.
-
-## 10. Architecture cible - TO-BE
-
-La cible proposee conserve l'architecture modulaire actuelle et ajoute les capacites minimales necessaires a un usage fiable : migration explicite, configuration d'environnement, securisation de l'API, observabilite et execution de jobs plus robuste si le volume augmente.
-
-| Composant | Responsabilite | Technologie | Entrees | Sorties | Dependances |
-| --- | --- | --- | --- | --- | --- |
-| Frontend | Consultation, filtres, test collecteur, lancement et suivi de jobs. | React 18, Vite 5 | API JSON | Interface utilisateur | Backend API |
-| API backend | Validation HTTP, orchestration, exposition des routes. | FastAPI, Pydantic | Requetes HTTP | JSON, redirects | SQLite/DB cible, collecteur |
-| Recherche repositories | Recherche federee dans des catalogues externes configures. | Python, providers JSON | Query utilisateur | `RepositorySearchResult[]` | APIs DataCite/CKAN/Dataverse/WHO/World Bank |
-| Collecteur | Decouverte, extraction, scoring, validation des distributions. | Python stdlib + modules projet | URLs, HTML, metadonnees externes | `CollectedDataset`, rapports | Reseau public |
-| Stockage | Persistance des sources, datasets, distributions, observations, jobs. | SQLite MVP ; HYPOTHESE PostgreSQL si production multi-user | Donnees applicatives | Resultats consultables | Migrations, sauvegardes |
-| Worker jobs | Execution des collectes longues. | CONFIRME FastAPI BackgroundTasks ; HYPOTHESE queue dediee | Jobs de collecte | Statuts et resultats | API, collecteur, stockage |
-| Observabilite | Suivi erreurs, performances, volumes. | A definir | Logs, metriques | Alertes, dashboards | Infra cible |
-
-```mermaid
-flowchart TB
-    Browser["Navigateur"] --> Web["Frontend statique"]
-    Web --> Api["FastAPI API"]
-    Api --> Auth["Auth / rate limiting\nA CONFIRMER"]
-    Api --> RepoSearch["Recherche repositories\nConfig + adapters"]
-    Api --> JobRunner["Runner de jobs\nBackgroundTasks MVP / Queue cible"]
-    Api --> Store[("Base applicative\nSQLite MVP / DB cible")]
-    RepoSearch --> DataCite["DataCite API"]
-    RepoSearch --> RepoCKAN["CKAN repositories"]
-    RepoSearch --> Dataverse["Dataverse APIs"]
-    JobRunner --> Collector["Collector modulaire"]
-    Collector --> CKAN["CKAN APIs"]
-    Collector --> Socrata["Socrata Catalog API"]
-    Collector --> DataJson["data.json / DCAT"]
-    Collector --> Sitemap["robots.txt / sitemap.xml / HTML"]
-    Collector --> Store
-    Api --> Logs["Logs, metriques, alertes\nA DEFINIR"]
-```
-
-### Recherche multi-repositories - cible
-
-Objectif : permettre une recherche federee dans plusieurs catalogues externes sans ecrire une classe par repository individuel. La generalisation se fait par famille d'API : un adapter CKAN peut servir HDX, `data.gov.uk` ou un autre portail CKAN ; un adapter Dataverse peut servir Harvard Dataverse ou LSHTM Data Compass.
-
-Etat courant confirme : `collector/repository_search.py` contient un `DataCiteRepositorySearchProvider`, un protocole `RepositorySearchProvider`, un modele `RepositorySearchResult` et l'orchestrateur `search_repository_metadata`. La structure ci-dessous est la cible recommandee pour etendre cette approche.
-
-Schema global :
-
-```mermaid
-flowchart LR
-    UI["Frontend"] --> Route["POST /collector/search-repositories"]
-    Route --> Search["search_repository_metadata(query)"]
-    Search --> Defaults["Repositories par defaut"]
-    Defaults --> Registry["ADAPTERS registry"]
-    Registry --> Providers["Providers configures"]
-    Providers --> APIs["APIs externes"]
-    APIs --> Normalized["RepositorySearchResult[]"]
-    Normalized --> Clean["Validation minimale + tri"]
-    Clean --> Response["Reponse API"]
-    Response --> UI
-```
-
-Difference entre config et adapter :
-
-```mermaid
-flowchart LR
-    subgraph Config["RepositoryConfig = quoi interroger"]
-        Name["name: HDX"]
-        Type["type: ckan"]
-        BaseUrl["base_url: https://data.humdata.org"]
-        PageSize["page_size: 10"]
-    end
-
-    Config --> Registry["ADAPTERS[type]"]
-    Registry --> Adapter["CKAN adapter = comment interroger"]
-    Adapter --> Url["Construit /api/3/action/package_search"]
-    Url --> Json["Lit le JSON CKAN"]
-    Json --> Result["Produit RepositorySearchResult"]
-```
-
-Reutilisation d'un meme adapter :
-
-```mermaid
-flowchart TB
-    subgraph RepoConfigs["Repository configs"]
-        DataCiteConfig["DataCite config<br/>type=datacite"]
-        HDXConfig["HDX config<br/>type=ckan"]
-        DataGovConfig["data.gov.uk config<br/>type=ckan"]
-        HarvardConfig["Harvard config<br/>type=dataverse"]
-    end
-
-    DataCiteConfig --> DataCiteAdapter["DataCite adapter"]
-    HDXConfig --> CKANAdapter["CKAN adapter"]
-    DataGovConfig --> CKANAdapter
-    HarvardConfig --> DataverseAdapter["Dataverse adapter"]
-
-    DataCiteAdapter --> Results["Resultats normalises"]
-    CKANAdapter --> Results
-    DataverseAdapter --> Results
-    Results --> Frontend["Frontend"]
-```
-
-Regle pour ajouter un repository :
+## 5. Repository Search Flow
 
 ```mermaid
 flowchart TD
-    NewRepo["Nouveau repository"] --> KnownApi{"API deja supportee ?"}
-    KnownApi -- "Oui" --> AddConfig["Ajouter une RepositoryConfig"]
-    KnownApi -- "Non" --> AddAdapter["Coder un nouvel adapter"]
-    AddConfig --> Done["Aucun nouveau mapping JSON"]
-    AddAdapter --> Contract["Respecter search(query)"]
-    Contract --> Done
+    Query["User query"] --> SearchRoute["POST /collector/search-datasets"]
+    SearchRoute --> LocalNormalize["Remove catalog-generic terms<br/>for local lookup only"]
+    LocalNormalize --> LocalSearch["PostgreSQL english weighted full-text search"]
+    LocalSearch --> LocalMatch{"Local match?"}
+    LocalMatch -->|yes| LocalResults["Return origin=database<br/>with distributions"]
+    LocalMatch -->|no| Service["search_repository_metadata()"]
+    Service --> Provider["DataCite provider"]
+    Provider --> Filter["Require title + HTTP(S) URL"]
+    Filter --> UI["Candidates in React state"]
+    UI --> ClassifyRoute["POST /collector/classify-repository-result"]
+    ClassifyRoute --> RepoClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
+    RepoClassifier --> Display{"Positive structured decision?"}
+    Display -->|yes| Accepted["Display accepted candidate"]
+    Display -->|no| Rejected["Display rejected candidate"]
 ```
+
+The local search uses a trigger-maintained `tsvector` and a GIN index. Title has
+the highest weight, followed by description, publisher/geography, then hosting
+platform/uploader/dataset URL. Results are ordered by relevance and `updated_at`.
+The catalog-specific normalizer removes only `data`, `dataset`, and `database`;
+the PostgreSQL `english` configuration handles language stop words and stemming.
+The original query remains unchanged for responses, DataCite, LLMs, and the UI.
+Database errors return HTTP 500 and never trigger an online fallback. This
+pre-stable full-text configuration change has no upgrade migration; an older
+local database must be recreated. Search is currently optimized for primarily
+English metadata rather than complete bilingual retrieval.
+
+DataCite is the only provider enabled by default. Its query includes
+`resource-type-id=dataset`, a page size, and relevance sorting. Provider output
+is normalized into a fixed metadata contract.
+
+Partial-provider handling is implemented: a provider `ValueError` is logged and
+returned as a warning when another provider succeeds. The operation fails only
+when every active provider fails. With the current one-provider default, a
+DataCite failure therefore fails the search.
+
+Repository classification asks whether the metadata is relevant to the user's
+query. It does not independently establish health relevance, source trust,
+working distributions, or publication eligibility. Results remain frontend
+candidates and are not persisted.
+
+## 6. Source Collection Flow
+
+```mermaid
+flowchart TD
+    Start["POST /collector/collection-jobs"] --> Pending["Create pending job"]
+    Pending --> Running["Mark running"]
+    Running --> Discover["discover_source()"]
+    Discover --> Analyze["Analyze bounded discovered pages"]
+    Analyze --> PageClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
+    PageClassifier --> Accepted{"Valid response with accepted=true?"}
+    Accepted -->|no| Reject["Count rejected"]
+    Accepted -->|yes| Validate["Validate bounded distributions"]
+    Validate --> HasFile{"At least one valid distribution?"}
+    HasFile -->|no| Reject
+    HasFile -->|yes| Result["Add eligible dataset to CollectionResult"]
+    Result --> Complete["complete_collection_job()"]
+    Complete --> Transaction["One PostgreSQL transaction"]
+    Transaction --> Save["Upsert all datasets/distributions"]
+    Save --> Done["Mark job done"]
+    Running -. exception .-> Error["Separate transaction marks job error"]
+```
+
+Collection, network access, and LLM calls happen outside PostgreSQL
+transactions. `complete_collection_job()` locks the running job, derives the
+authoritative `source_url` from it, saves every dataset, and marks the job done
+inside one transaction. A failed write rolls back the entire completion.
+`accepted_count` reports datasets retained after distribution validation,
+whereas an unexpected classifier or validation exception fails the job.
+
+## 7. Discovery
+
+The discovery manager composes adapters for supported catalogue families and a
+generic fallback. The active `ADAPTERS` tuple contains CKAN, Socrata, data.json,
+and the generic website adapter. The generic adapter uses sitemap-driven page
+discovery and falls back to the source URL.
+
+A Dataverse module exists in the source tree but is not imported or registered
+by `collector/discovery/adapters/__init__.py`; Dataverse support is therefore not
+an active runtime capability.
+
+Structured records become `DiscoveredPage` objects with normalized metadata and
+distribution candidates. Generic HTML pages are fetched and extracted before
+classification. Discovery is bounded by `CollectorConfig`.
+
+Provider-specific rules belong under `collector/discovery/adapters/`. Shared
+metadata and URL utilities remain in shared collector modules.
+
+## 8. Classification
+
+All default classification calls use `RCP_API_KEY` and the EPFL RCP
+Chat Completions API. `RCP_CLASSIFIER_MODEL` selects the model and defaults to
+`deepseek-ai/DeepSeek-V4-Flash-0731`. Calls remain synchronous. Both
+classifiers use one-voter compatibility wrappers with
+`votes_required=1` and `minimum_successful_votes=1` so the existing API audit
+shape remains stable.
+
+The classifiers are intentionally separate:
+
+| Classifier | Input | Decision |
+| --- | --- | --- |
+| `EnsembleRepositoryRelevanceClassifier` | User query plus repository metadata | Query relevance label |
+| `EnsemblePageClassifier` | Page metadata/text plus distributions | Individual dataset and health relevance |
+
+Repository relevance responses use a strict conditional contract.
+`missing_information` must contain at least one nonempty item when the label is
+`insufficient_information`, and must be empty for every other label. A response
+that violates this relationship is a classification error rather than being
+silently rewritten. With one model there is no fallback vote.
+
+Exact prompts, payloads, schemas, aggregation, and failure behavior are described
+in [Classification Architecture](classification-architecture.md).
+
+## 9. Distribution Validation
+
+`validate_distribution()` sends `HEAD` first and uses a bounded partial `GET`
+when the response is inconclusive. A validation succeeds when:
+
+- no network error is reported;
+- the status is between 200 and 399;
+- a non-API distribution does not return HTML.
+
+Headers and a small sample may refine the detected format. This is an
+availability/type probe, not a complete file download or content audit.
+
+Untrusted HTTP requests for HTML, JSON, sitemaps, and distributions pass through
+`open_public_http_url()`. It rejects private/local destinations before opening
+and revalidates every redirect destination, mitigating direct and redirect-based
+SSRF against local services.
+
+Dataset identity validation is deliberately separate from network safety.
+`normalize_http_url()` accepts only normalized HTTP(S) URLs with a hostname and
+valid port and rejects credentials, control characters, and backslashes. HTML
+canonicals are accepted only on the fetched page's hostname. Invalid structured
+dataset URLs are rejected before LLM classification, while
+`CollectedDataset.__post_init__` enforces the invariant for every construction
+path. The API exposes persisted dataset URLs as Pydantic `HttpUrl` values.
+
+## 10. Persistence and Schema
+
+The application uses PostgreSQL through an async psycopg pool. The current
+schema contains:
+
+- `schema_migrations`;
+- `data_sources`;
+- `collection_jobs`;
+- `collected_datasets`;
+- `collected_distributions`;
+- `dataset_discovery_observations`.
+
+`CollectedDataset` normalizes its HTTP(S) identity URL before persistence, and
+`collected_datasets.dataset_url` is unique. Repeated exact normalized URLs
+update the existing record and create a discovery observation. This is not
+semantic deduplication by DOI, title, version, or mirror relationship.
+
+The complete schema is shown in
+[Database Schema Diagram](database-schema-diagram.md). PostgreSQL-only startup
+and the decision not to migrate the historical SQLite data are recorded in
+[ADR 0001](adr/0001-postgresql-only.md).
+
+## 11. Configuration
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | Yes for backend | PostgreSQL connection |
+| `RCP_API_KEY` | Yes for classification | EPFL RCP authentication |
+| `RCP_CLASSIFIER_MODEL` | No | RCP model; defaults to `deepseek-ai/DeepSeek-V4-Flash-0731` |
+| `VITE_API_BASE_URL` | No | Frontend API base; defaults to `http://127.0.0.1:8001` |
+| `TEST_DATABASE_URL` | No | Enables PostgreSQL integration tests |
+
+The project dependency constraints are defined in `pyproject.toml`,
+`backend/requirements.txt`, and `frontend/package.json`. Locally installed
+package versions are deliberately not duplicated here.
+
+## 12. Non-Functional Requirements and Runtime Limits
+
+The current MVP prioritizes bounded work and visible failure over exhaustive
+crawling. The limits below are code defaults, not production capacity targets.
+
+| Concern | Current limit | Enforcement point |
+| --- | ---: | --- |
+| Collector HTTP timeout | 10 seconds/request | `CollectorConfig.request_timeout_seconds` |
+| EPFL RCP HTTP timeout | 20 seconds/request | `HTTPJSONLLMClient` |
+| Pages analyzed per source | 5 | `CollectorConfig.max_pages_per_source` |
+| Distributions validated per dataset | 1 | `CollectorConfig.max_distributions_per_dataset` |
+| Distribution partial-GET sample | 65,536 bytes | `CollectorConfig.max_sample_bytes` |
+| HTML response body | 1,000,000 bytes | `fetch_public_html()` |
+| JSON discovery response body | 5,000,000 bytes | `fetch_json_url()` |
+| Sitemap/robots response body | 5,000,000 bytes | `fetch_text_url()` |
+| Sitemaps traversed | 10/source | `MAX_SITEMAPS_PER_SOURCE` |
+| Generic adapter sitemap results | 50/source | `GenericWebsiteAdapter.max_sitemap_urls` |
+| Sitemap utility hard cap | 1,000/source | `MAX_URLS_PER_SOURCE` |
+| DataCite search results | 10/query | provider `page_size` |
+| CKAN/Socrata/data.json rows | 5/discovery call | adapter `rows` defaults |
+| Repository candidate classifications | 2 concurrent classifications | frontend workers and backend executor |
+| Repository LLM calls | up to 2 concurrently | 2 classifications x 1 EPFL RCP call |
+| Page text sent to a page LLM | 4,000 characters | `MAX_PAGE_TEXT_CHARS` |
+| Distributions sent to a page LLM | 10 | `MAX_DISTRIBUTIONS` |
+| Repository query | 300 characters | repository classification contract |
+| Repository metadata JSON | 100,000 bytes | route bounding logic |
+
+Network bodies are read one byte beyond their limit to detect overflow and then
+rejected. Distribution validation reads only a bounded sample when a partial
+`GET` is needed. These limits reduce memory and latency risk but do not provide
+global request-rate limiting or per-user quotas.
+
+Availability expectations are intentionally local-MVP level:
+
+- no uptime service-level objective is defined;
+- process restart may interrupt background jobs;
+- no automatic retry budget is configured for external APIs or LLM calls;
+- PostgreSQL is a mandatory startup dependency;
+- the frontend expects the API at one configured base URL.
+
+## 13. External Dependency Matrix
+
+| Dependency | Used for | Timeout/bound | Failure behavior | Current fallback |
+| --- | --- | --- | --- | --- |
+| DataCite API | Repository search metadata | 10-second JSON fetch; 5 MB; 10 results | Provider raises `ValueError`; route returns 502 when all providers fail | Partial results are supported across providers, but only DataCite is active |
+| CKAN API | Adapter detection and package discovery | 10-second JSON fetch; 5 MB; 5 rows | Detection failure returns `False`; failure after a positive detection propagates to the collection job | Next adapter is tried only when detection returns false |
+| Socrata catalog API | Adapter detection and record discovery | 10-second JSON fetch; 5 MB; 5 rows | Same detect/discover distinction as CKAN | Next adapter on failed detection |
+| data.json/DCAT endpoint | Adapter detection and record discovery | 10-second JSON fetch; 5 MB; 5 selected records | Same detect/discover distinction as CKAN | Next adapter on failed detection |
+| Generic website/sitemap | Page discovery and HTML extraction | 10 seconds; 5 MB text; 1 MB HTML | robots/sitemap failures are skipped; HTML fetch failure rejects that page | Source URL fallback when sitemap discovery yields no entries |
+| EPFL RCP Chat Completions API | Repository and page classification with `deepseek-ai/DeepSeek-V4-Flash-0731` by default | 20 seconds/model call; bounded payloads | A failed or malformed response raises a classification error | No provider or model fallback |
+| PostgreSQL | Sources, jobs, collected metadata, transactions | Pool defaults 1-10 connections | Startup fails without DB; persistence rolls back on error; writing job `error` can also fail during outage | No storage fallback |
+
+All untrusted collector destinations use the shared public-HTTP guard. EPFL RCP
+uses a server-configured endpoint and does not consume a URL supplied by a
+collected page.
+
+Dataverse is intentionally absent from this matrix because it is not registered
+at runtime. Its proposed integration is described in
+[Multi-Repository Architecture](multi-repository-architecture.md).
+
+## 14. Seed and Upsert Rules
+
+### Source seeds
+
+The schema defines two WHO source seeds:
+
+- `who_gho_indicators`;
+- `who_gho_life_expectancy`.
+
+Startup inserts missing seeds with `ON CONFLICT(source_key) DO NOTHING`.
+Therefore startup never overwrites an existing source row, including local
+changes to a seed. Seed keys are reserved and cannot be created through the
+public `POST /sources` path.
+
+`upsert_collector_data_source()` is a separate internal operation. It may update
+name, description, theme, and URL for an existing key, including a seed key. It
+must not be confused with non-destructive startup seeding.
+
+### Collected dataset upsert
+
+`collected_datasets` conflicts on the exact normalized `dataset_url`:
+
+- `source_url`, classification signals, `last_seen_at`, and `updated_at` are
+  refreshed;
+- incoming non-empty title, description, publisher, hosting platform, uploader,
+  and discovery method replace stored values;
+- empty incoming text does not erase an existing non-empty value;
+- incoming geography replaces stored geography only when non-empty;
+- `first_seen_at` remains the original timestamp.
+
+Every successful observation inserts a `dataset_discovery_observations` row so
+the collection job, source URL, discovery method, and observation time remain
+auditable.
+
+### Distribution upsert
+
+Distributions conflict on `(dataset_id, url, format)`. Discovery fields and
+`last_seen_at` are refreshed. A new validation result replaces the stored
+validation fields and advances `last_checked_at`; if a later crawl observes the
+distribution without validating it, the previous validation result is
+preserved.
+
+The active background collection path performs all dataset, distribution,
+observation, and job-completion writes inside the single
+`complete_collection_job()` transaction. The lower-level
+`save_collected_datasets()` entry point performs a standalone batch transaction
+and does not change job state.
+
+## 15. Security Boundaries
+
+Implemented controls include:
+
+- Pydantic validation and bounded repository payload fields;
+- JSON-only EPFL RCP responses with an embedded schema plus local validation;
+- untrusted prompt fields treated as evidence, not instructions;
+- public HTTP(S) destination validation and redirect checks;
+- bounded HTML, JSON, sitemap, and distribution reads;
+- parameterized SQL;
+- atomic completion transactions.
+
+Current limitations include:
+
+- no authentication or authorization;
+- permissive local-development CORS origins only;
+- no source allowlist or complete trust-tier enforcement;
+- no enforced license policy;
+- no automated privacy/sensitivity review;
+- no production secret-management or audit-log design.
+
+Policy requirements that exceed current enforcement are explicit in the
+[Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md).
+
+## 16. Error Handling and Observability
+
+Repository provider failures produce sanitized API warnings for partial success.
+Repository classification failures return HTTP 502 and are logged with source
+and URL context. Background collection exceptions attempt to mark the job
+`error`; if PostgreSQL itself is unavailable, that status write can also fail.
+
+Collection jobs persist counters, messages, errors, discovery methods, and
+timestamps. Application logging exists, but there is no metrics backend,
+distributed tracing, alerting, or centralized log policy.
+
+## 17. Tests and Quality Checks
+
+Test areas include routes, database behavior, collection, discovery adapters,
+sitemaps, repository search, page/repository ensembles, LLM payload parsing, and
+safe HTTP fetching.
+
+Last verified locally:
 
 ```text
-POST /collector/search-repositories
-        |
-        v
-search_repository_metadata(query)
-        |
-        v
-default_repository_providers()
-        |
-        v
-[
-  DataCiteProvider(config DataCite),
-  CKANProvider(config HDX),
-  CKANProvider(config data.gov.uk),
-  DataverseProvider(config Harvard)
-]
-        |
-        v
-RepositorySearchResult[]
-        |
-        v
-validation minimale + tri
-        |
-        v
-reponse frontend
+pytest without PostgreSQL: 164 passed, 47 skipped
+pytest with PostgreSQL: 211 passed
+frontend tests: 4 passed
+ruff: passed
+frontend build: passed
 ```
 
-Note de scope MVP : avec DataCite comme seul provider actif, le backend applique seulement des garde-fous minimaux avant affichage : query bornee, forme de reponse DataCite explicite, URL `http/https` ou fallback DOI, score normalise. Un filtre metier strict et une validation de sauvegarde restent reserves a la pipeline de collecte/ecriture DB. Le dedoublonnage global par DOI/URL devient utile quand plusieurs providers actifs peuvent renvoyer le meme dataset.
+The skipped tests require a reachable PostgreSQL server. The complete check is:
 
-Structures cibles :
-
-```python
-@dataclass(frozen=True)
-class RepositoryConfig:
-    name: str
-    type: str
-    base_url: str
-    page_size: int = 10
-    enabled: bool = True
+```bash
+.venv/bin/ruff check .
+TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
+npm --prefix frontend test
+npm --prefix frontend run build
 ```
 
-`RepositoryConfig` decrit quoi interroger. Il ne contient pas la logique HTTP ni la logique de parsing JSON.
+Counts are verification evidence for the stated date, not an architectural
+contract.
 
-```python
-DEFAULT_REPOSITORIES = [
-    RepositoryConfig("DataCite", "datacite", "https://api.datacite.org"),
-    RepositoryConfig("HDX", "ckan", "https://data.humdata.org"),
-    RepositoryConfig("Harvard Dataverse", "dataverse", "https://dataverse.harvard.edu"),
-]
-```
+## 18. Risk Register
 
-```python
-ADAPTERS = {
-    "datacite": DataCiteRepositorySearchProvider,
-    "ckan": CKANRepositorySearchProvider,
-    "dataverse": DataverseRepositorySearchProvider,
-}
-```
-
-Le registre `ADAPTERS` choisit comment parler a un repository selon son `type`.
-
-```python
-class RepositorySearchProvider(Protocol):
-    name: str
-
-    def search(self, query: str) -> list[RepositorySearchResult]:
-        ...
-```
-
-Tous les adapters exposent le meme contrat : `search(query)`.
-
-```python
-@dataclass(frozen=True)
-class RepositorySearchResult:
-    title: str
-    url: str
-    source: str
-    description: str = ""
-    publisher: str = ""
-    date: str = ""
-    doi: str = ""
-    keywords: list[str] = field(default_factory=list)
-    relevance_score: float = 0.0
-    metadata: dict[str, object] = field(default_factory=dict)
-```
-
-`RepositorySearchResult` est le format commun renvoye a l'API et au frontend. Le frontend ne doit pas connaitre la structure JSON DataCite, CKAN ou Dataverse.
-
-Squelette commun recommande quand au moins deux familles d'API existent :
-
-```python
-class BaseJsonRepositorySearchProvider:
-    def __init__(self, config: RepositoryConfig):
-        self.config = config
-
-    def search(self, query: str) -> list[RepositorySearchResult]:
-        url = self.build_search_url(query)
-        data = fetch_json(url)
-        items = self.extract_items(data)
-        return [
-            self.normalize_item(item, rank)
-            for rank, item in enumerate(items)
-        ]
-
-    def build_search_url(self, query: str) -> str:
-        raise NotImplementedError
-
-    def extract_items(self, data: dict[str, object]) -> list[object]:
-        raise NotImplementedError
-
-    def normalize_item(self, item: object, rank: int) -> RepositorySearchResult | None:
-        raise NotImplementedError
-```
-
-Ce squelette generalise la mecanique HTTP/JSON/liste/resultats. Chaque adapter conserve le mapping propre a son API :
-
-| Adapter | Config exemples | URL recherche type | Extraction items | Normalisation |
-| --- | --- | --- | --- | --- |
-| `DataCiteRepositorySearchProvider` | DataCite | `/dois?query=...&resource-type-id=dataset` | `data[]` | `attributes.titles`, `attributes.publisher`, DOI, subjects |
-| `CKANRepositorySearchProvider` | HDX, `data.gov.uk`, portails CKAN | `/api/3/action/package_search?q=...` | `result.results[]` | `title`, `notes`, `organization`, `resources` |
-| `DataverseRepositorySearchProvider` | Harvard Dataverse, LSHTM Data Compass | `/api/search?q=...&type=dataset` | `data.items[]` | `name`, `global_id`, `description`, `published_at` |
-| `WHORepositorySearchProvider` | WHO data APIs | A definir | A definir selon API retenue | Mapping specifique WHO |
-| `WorldBankRepositorySearchProvider` | World Bank data/catalog APIs | A definir | A definir selon API retenue | Mapping specifique World Bank |
-
-Regle d'extension :
-
-- Nouveau repository utilisant une API deja supportee : ajouter une `RepositoryConfig`.
-- Nouvelle famille d'API : ajouter un adapter.
-- Ne pas creer `HDXProvider`, `DataGovUkProvider`, `HarvardProvider` si ces sites utilisent deja CKAN ou Dataverse.
-
-## 11. Flux fonctionnels principaux
-
-### Recherche repositories
-
-```mermaid
-sequenceDiagram
-    actor User as Utilisateur
-    participant UI as Frontend
-    participant API as FastAPI
-    participant Search as Orchestrateur recherche
-    participant Registry as Config + registry
-    participant Provider as Adapter repository
-    participant External as API externe
-
-    User->>UI: Saisir une query
-    UI->>API: POST /collector/search-repositories
-    API->>Search: search_repository_metadata(query)
-    Search->>Registry: Charger repositories par defaut
-    Registry-->>Search: Providers configures
-    loop Pour chaque provider enabled
-        Search->>Provider: search(query)
-        Provider->>External: GET endpoint API
-        External-->>Provider: JSON provider
-        Provider-->>Search: RepositorySearchResult[]
-    end
-    Search->>Search: Valider, dedoublonner, trier
-    Search-->>API: Resultats normalises
-    API-->>UI: items[]
-```
-
-### Collecte asynchrone depuis une source
-
-```mermaid
-sequenceDiagram
-    actor User as Utilisateur
-    participant UI as Frontend
-    participant API as FastAPI
-    participant DB as SQLite
-    participant Collector as Collector
-    participant External as Source externe
-
-    User->>UI: Cliquer "Collecter"
-    UI->>API: POST /collector/collection-jobs
-    API->>DB: Creer job pending
-    API-->>UI: 202 + job
-    API->>DB: Marquer running
-    API->>Collector: collect_source_with_report(url)
-    Collector->>External: Detecter et decouvrir
-    Collector->>External: Fetch/validate distributions
-    Collector-->>API: Datasets + rapport
-    API->>DB: Sauvegarder datasets, distributions, observations
-    API->>DB: Marquer done ou error
-    UI->>API: Poll GET /collector/collection-jobs/{id}
-    API-->>UI: Statut et compteurs
-```
-
-### Analyse HTML locale
-
-```mermaid
-sequenceDiagram
-    actor User as Utilisateur
-    participant UI as Frontend
-    participant API as FastAPI
-    participant Collector as Collector
-
-    User->>UI: Coller HTML et URL
-    UI->>API: POST /collector/analyze-html
-    API->>Collector: extract_page
-    API->>Collector: extract_distributions
-    API->>Collector: score_dataset_page + score_health_page
-    API-->>UI: Scores, signaux, distributions, accepted
-```
-
-### Ajout d'une source
-
-1. Acteur : utilisateur ou administrateur catalogue.
-2. Action : POST `/sources` avec `source_key`, `name`, `theme`, `page_url`.
-3. Traitement : validation Pydantic, controle key reservee, upsert SQLite.
-4. Reponse : source sauvegardee ou erreur 400.
-5. Acces donnees : table `data_sources`.
-
-## 12. Logique metier
-
-- Une page est acceptee comme dataset collectable si `dataset_probability >= 0.6` et `health_probability >= 0.35`.
-- Une collecte persistante ne conserve un dataset que s'il possede au moins une distribution validee `ok=True`.
-- Le scoring dataset distingue les preuves de dataset individuel des simples signaux de catalogue. Sans preuve de dataset individuel, le score est plafonne a `0.5`.
-- Les preuves fortes incluent Schema.org `Dataset` et `dcat:Dataset`.
-- Les signaux d'acces incluent API, CSV, XLSX, export, downloads et distributions directes.
-- Le scoring sante s'appuie sur mots cles en titre, metadonnees, corps, URL et publisher.
-- Labels sante : `HEALTH` si probabilite >= 0.75, `PARTIALLY_HEALTH` si >= 0.35, sinon `NON_HEALTH`.
-- Les distributions PDF, HTML et images sont exclues.
-- La validation tente `HEAD`, puis un `GET` partiel si HEAD est interdit, sans content-type utile ou retourne HTML.
-- Les source keys WHO seed sont reservees et ne peuvent pas etre ecrasees par l'utilisateur.
-- Les signaux JSON stockes doivent etre des objets JSON valides ; les erreurs sont explicites.
-
-## 13. Modele de donnees
-
-### Entites principales
-
-| Entite | Description | Champs principaux | Relations |
+| Priority | Risk | Current exposure | Mitigation or next control |
 | --- | --- | --- | --- |
-| `data_sources` | Sources configurees du catalogue. | `id`, `source_key`, `name`, `description`, `theme`, `page_url`. | Source logique de collectes. |
-| `collected_datasets` | Metadonnees de datasets acceptes. | `dataset_url`, `title`, `publisher`, `discovery_method`, scores, signaux, timestamps. | 1-n vers distributions et observations. |
-| `collected_distributions` | Liens de fichiers/API detectes et valides. | `url`, `format`, `probability`, signaux, validation HTTP, timestamps. | n-1 vers dataset. |
-| `dataset_discovery_observations` | Historique des observations d'un dataset. | `collection_job_id`, `dataset_id`, `source_url`, `discovery_method`, `observed_at`. | n-1 vers dataset, optionnellement job. |
-| `collection_jobs` | Jobs de collecte et compteurs. | `source_url`, `status`, compteurs, `discovery_methods`, message, error, timestamps. | Lie les observations quand collecte asynchrone. |
+| High | Unauthenticated mutation/collection routes | Any caller that can reach the API can add a source or start work | Keep deployment private until authentication and authorization exist |
+| High | Process-local background jobs | Restart or multi-worker deployment can leave jobs unfinished | Introduce a durable queue, leases, retries, and recovery |
+| High | Repository relevance mistaken for catalogue approval | Repository cards can look accepted although health/file gates did not run | Keep candidate wording and connect save only through collection gates |
+| High | Source authority, licence, and sensitivity not enforced | Technically valid records may still be unsuitable for publication | Implement policy gates and human review before public catalogue claims |
+| Medium | One distribution validated by default | A valid secondary file can be missed | Validate ranked alternatives within a bounded budget |
+| Medium | Normalized-URL-only duplicate identity | DOI-equivalent versions and mirrors can create separate records | Add persistent identifiers and version/mirror relationships |
+| Medium | One LLM model and provider | Provider/account outage stops classification | Decide whether fallback models or provider diversity are required |
+| Medium | External APIs have no retries | Transient failures can fail detection, search, or jobs | Add bounded retry/backoff with idempotent behavior |
+| Medium | PostgreSQL tests can be skipped locally | DB regressions may escape a non-DB test run | Require `TEST_DATABASE_URL` in CI |
+| Low | Volatile test counts in documentation | Counts become stale as tests change | Keep a verification date and update counts during review |
 
-```mermaid
-erDiagram
-    DATA_SOURCES {
-        integer id PK
-        text source_key UK
-        text name
-        text theme
-        text page_url
-    }
-    COLLECTED_DATASETS {
-        integer id PK
-        text dataset_url UK
-        text source_url
-        text title
-        text discovery_method
-        real dataset_probability
-        real health_probability
-        text health_label
-    }
-    COLLECTED_DISTRIBUTIONS {
-        integer id PK
-        integer dataset_id FK
-        text url
-        text format
-        real probability
-        integer validation_ok
-        integer validation_http_status
-    }
-    COLLECTION_JOBS {
-        integer id PK
-        text source_url
-        text status
-        integer saved_count
-        integer discovered_count
-        integer analyzed_count
-    }
-    DATASET_DISCOVERY_OBSERVATIONS {
-        integer id PK
-        integer collection_job_id FK
-        integer dataset_id FK
-        text source_url
-        text discovery_method
-    }
+The security correction for private distribution URLs and redirect-based SSRF is
+implemented; it is no longer listed as an open risk. DNS resolution and network
+egress policy should still receive production infrastructure review.
 
-    COLLECTED_DATASETS ||--o{ COLLECTED_DISTRIBUTIONS : has
-    COLLECTED_DATASETS ||--o{ DATASET_DISCOVERY_OBSERVATIONS : observed
-    COLLECTION_JOBS ||--o{ DATASET_DISCOVERY_OBSERVATIONS : records
-```
+## 19. Open Decisions
 
-Note critique : ce modele correspond au code courant. La base locale `backend/global_health.db` ne contient pas encore ce modele complet.
-
-## 14. APIs et interfaces
-
-### API interne FastAPI
-
-| Methode | Endpoint | Objectif | Auth | Request | Response |
-| --- | --- | --- | --- | --- | --- |
-| GET | `/health` | Health check applicatif. | Non documentee | Aucune | `{status: "ok"}` |
-| GET | `/sources` | Lister les sources. | Non documentee | Aucune | `{items: DataSource[]}` |
-| POST | `/sources` | Creer/upsert une source utilisateur. | Non documentee | `DataSourceCreate` | `DataSource`, status 201 |
-| GET | `/sources/{id}/page` | Rediriger vers la page externe. | Non documentee | Path `source_id` | Redirect ou 404 |
-| POST | `/collector/analyze-html` | Analyser du HTML fourni. | Non documentee | `{url, html}` | Scores, signaux, distributions |
-| POST | `/collector/analyze-url` | Fetcher et analyser une URL publique. | Non documentee | `{url}` | Scores, signaux, distributions |
-| POST | `/collector/discover-url` | Decouvrir des pages candidates. | Non documentee | `{url}` | `{items: DiscoveredPage[]}` |
-| POST | `/collector/collect-url` | Collecte synchrone, option save. | Non documentee | `{url, save=true}` | `{items, saved, saved_count}` |
-| POST | `/collector/collection-jobs` | Lancer une collecte async. | Non documentee | `{url}` | `{job}`, status 202 |
-| GET | `/collector/collection-jobs/{job_id}` | Lire un job. | Non documentee | Path `job_id` | `{job}` ou 404 |
-| POST | `/collector/search-repositories` | Rechercher des datasets dans les repositories externes configures. | Non documentee | `{query}` | `{query, items: RepositorySearchResult[], warnings: RepositorySearchWarning[]}` |
-| GET | `/collector/collected-datasets` | Lister les datasets sauvegardes. | Non documentee | Aucune | `{items, saved=false, saved_count=0}` |
-
-### Interfaces externes
-
-| Interface | Systeme source | Protocole | Auth | Donnees echangees | Retry / timeout |
-| --- | --- | --- | --- | --- | --- |
-| DataCite `/dois` | DataCite | HTTPS JSON | Non documentee | DOI datasets, titres, publisher, sujets, score | Timeout 10 s via fetch JSON commun, pas de retry documente. |
-| CKAN `status_show` et `package_search` | Portails CKAN | HTTPS JSON | Non documentee | Status catalogue, packages, resources | Timeout 10 s, pas de retry documente. |
-| Dataverse `/api/search` | Portails Dataverse | HTTPS JSON | Non documentee | Resultats dataset, identifiants, descriptions | Cible TO-BE, adapter non confirme dans le code courant. |
-| WHO / World Bank APIs | Catalogues institutionnels | HTTPS JSON | A confirmer | Metadonnees datasets/indicateurs | Cible TO-BE, choix API et adapter a definir. |
-| Socrata Catalog API | `api.us.socrata.com` | HTTPS JSON | Non documentee | Resultats catalogue, metadata resources | Timeout 10 s, pas de retry documente. |
-| `data.json` / DCAT | Sites open data | HTTPS JSON | Non documentee | Datasets et distributions | Timeout 10 s, pas de retry documente. |
-| `robots.txt` / `sitemap.xml` | Sites generiques | HTTPS texte/XML | Non documentee | URLs candidates | Timeout 10 s, limites 10 sitemaps/1000 URLs. |
-| Pages HTML publiques | Sites generiques | HTTPS HTML | Non documentee | HTML jusqu'a 1 MB pour analyse URL | Timeout 10 s. |
-| Validation distributions | Liens fichiers/API | HEAD puis GET partiel | Non documentee | Headers, statut HTTP, echantillon partiel | Timeout 10 s, GET partiel 65 536 bytes. |
-
-## 15. Architecture du code
-
-```text
-project/
-├── backend/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── database.py
-│   │   └── routes/
-│   │       ├── sources.py
-│   │       └── collector.py
-│   ├── requirements.txt
-│   └── global_health.db
-├── collector/
-│   ├── classification/
-│   ├── discovery/
-│   ├── extraction/
-│   ├── storage/
-│   ├── validation/
-│   ├── config.py
-│   ├── fetch.py
-│   ├── repository_search.py
-│   └── main.py
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── styles.css
-│   ├── package.json
-│   └── vite.config.js
-├── tests/
-├── docs/
-└── pyproject.toml
-```
-
-Separation des responsabilites :
-
-- Backend : transport HTTP, validation request/response, persistance, orchestration jobs.
-- Collector : logique domaine, decouverte, extraction, scoring, validation.
-- Repository search : orchestration de recherche externe, adapters par famille d'API, normalisation en `RepositorySearchResult`.
-- Storage models : dataclasses partagees entre collecteur et backend.
-- Frontend : experience utilisateur et polling.
-- Tests : specification executable du comportement.
-
-## 16. Technologies
-
-| Domaine | Technologie | Version si connue | Justification |
+| Decision | Owner | Status | Needed outcome |
 | --- | --- | --- | --- |
-| Langage backend | Python | >= 3.9 | Configure dans `pyproject.toml`. |
-| API | FastAPI | Requirement >= 0.115 ; installe localement 0.128.8 | API REST rapide, validation Pydantic, background tasks. |
-| Validation modele | Pydantic | Installe localement 2.13.4 | Modeles request/response FastAPI. |
-| Serveur local | Uvicorn standard | Requirement >= 0.30 ; installe localement 0.39.0 | Execution ASGI locale. |
-| Base | SQLite | SQLite 3.x | Simple, locale, adaptee MVP. |
-| Frontend | React | 18.3.1 | UI reactive mono-page. |
-| Build frontend | Vite | 5.4.21 | Dev server et build rapides. |
-| Tests Python | pytest | >= 8.3 | 76 tests confirmes. |
-| Lint Python | ruff | >= 0.6 | Configure avec `E`, `F`, `I`, `B`, `UP`. |
-| Packaging | hatchling | >= 1.25 | Build backend/collector. |
-| CI/CD | Non documente | A confirmer | Aucun workflow CI observe. |
-| Monitoring | Non documente | A confirmer | A definir pour production. |
-
-## 17. Decisions techniques
-
-### Decision 1 - FastAPI pour l'API backend
-
-- Contexte : besoin d'exposer rapidement des endpoints JSON et redirects.
-- Options etudiees dans la documentation : aucune alternative documentee.
-- Solution retenue : FastAPI.
-- Raisons : modele deja implemente, Pydantic, tests directs des handlers.
-- Inconvenients : auth, rate limiting et production hardening non couverts.
-- Consequences : conserver FastAPI et ajouter les couches manquantes plutot que replateformer.
-
-### Decision 2 - SQLite pour le MVP
-
-- Contexte : catalogue local et persistance simple.
-- Solution retenue : SQLite.
-- Avantages : zero infrastructure, facile a tester, adapte au developpement local.
-- Inconvenients : migration de schema indispensable, limites multi-utilisateur et exploitation.
-- Consequences : garder SQLite pour MVP, mais definir un plan DB cible avant production.
-
-### Decision 3 - Collecteur generique avec adaptateurs
-
-- Contexte : sources variees, besoin d'eviter du code specifique dans le coeur.
-- Solution retenue : adaptateurs CKAN, Socrata, `data_json`, fallback generique.
-- Avantages : extensible, testable, priorise les metadonnees structurees.
-- Inconvenients : heuristiques imparfaites, couverture dependante des portails.
-- Consequences : ajouter les futures sources via adaptateurs, pas dans le classifier.
-
-### Decision 4 - Heuristiques deterministes
-
-- Contexte : besoin d'un MVP explicable.
-- Solution retenue : scoring par signaux explicites.
-- Avantages : transparent, testable, pas de dependance ML.
-- Inconvenients : precision non mesuree, vocabulaire sante limite.
-- Consequences : documenter les signaux et mesurer les faux positifs/faux negatifs.
-
-### Decision 5 - Rejet des bases historiques non versionnees
-
-- Contexte : eviter une migration implicite destructrice.
-- Solution retenue : si une base `user_version=0` contient des tables gerees, l'application refuse de migrer automatiquement.
-- Avantages : protege les donnees existantes.
-- Inconvenients : bloque le demarrage local avec la base actuelle.
-- Consequences : une migration historique explicite est prioritaire.
-
-### Decision 6 - Recherche repositories par config et adapters
-
-- Contexte : besoin d'interroger plusieurs catalogues externes sans multiplier les classes par site.
-- Solution retenue : separer `RepositoryConfig` (quoi interroger), adapter par famille d'API (comment interroger), orchestrateur `search_repository_metadata` (regrouper, valider, dedoublonner, trier).
-- Avantages : ajout d'un nouveau repository CKAN/Dataverse par simple configuration, contrat unique `search(query)`, frontend decouple des JSON externes.
-- Inconvenients : chaque nouvelle famille d'API necessite un adapter dedie ; les scores de relevance doivent etre normalises pour rester comparables.
-- Consequences : ajouter CKAN/Dataverse/WHO/World Bank via adapters de famille d'API, pas via `HDXProvider` ou `HarvardProvider` individuels. Pour le MVP DataCite-only, limiter le filtrage a la qualite minimale d'affichage ; reserver les regles strictes a la collecte et a l'ecriture DB.
-
-## 18. Securite
-
-Controles confirmes :
-
-- CORS autorise seulement `http://localhost:5173` et `http://127.0.0.1:5173`.
-- Les endpoints d'analyse URL acceptent seulement HTTP/HTTPS.
-- Les IP privees, loopback, link-local, multicast et reservees sont bloquees avant fetch.
-- Les payloads HTTP sont valides via Pydantic.
-- Les requetes SQL utilisent des parametres, pas de concatenation utilisateur directe sauf placeholders controles.
-
-Points a valider :
-
-- Authentification et autorisation inexistantes dans le code analyse.
-- Aucun role administrateur/utilisateur n'est documente.
-- Pas de rate limiting, quotas, CSRF ou protection API publique documentee.
-- Gestion des secrets non documentee.
-- HTTPS et reverse proxy non documentes.
-- Audit logs non documentes.
-- Politique de traitement des donnees personnelles non documentee.
-
-## 19. Gestion des erreurs
-
-- Erreurs de source reservee : `ReservedDataSourceKeyError`, convertie en HTTP 400.
-- Source inconnue : HTTP 404 sur `/sources/{id}/page`.
-- Erreurs fetch/analyse URL : `ValueError` convertie en HTTP 400.
-- Job inconnu : HTTP 404.
-- Erreurs provider recherche repositories : `ValueError` convertie en HTTP 502 dans l'endpoint courant.
-- Erreur de collecte asynchrone : capture large et stockage dans `collection_jobs.error`.
-- JSON stocke invalide dans les signaux : `StoredJSONError` explicite.
-- Validation distribution : resultat `ok=false` avec statut, headers et message d'erreur si disponible.
-
-Manques :
-
-- Pas de typologie d'erreurs standardisee cote API.
-- Pas de correlation id.
-- Pas de retry/backoff documente.
-- Pas encore de degradation partielle documentee pour la recherche multi-providers si un provider echoue.
-- Pas d'alerte exploitation.
-
-## 20. Logging, monitoring et observabilite
-
-Etat actuel :
-
-- Logger Python utilise dans `database.py` pour warnings de JSON `discovery_methods` invalide.
-- Jobs de collecte stockent status, message, error, compteurs et dates.
-- Endpoint `/health` disponible.
-
-TO-BE recommande :
-
-- Logs structures JSON avec request id/job id/source url.
-- Metriques : jobs lances, duree, accepted/rejected, invalid distributions, erreurs par adaptateur, temps de fetch, taux de validation.
-- Metriques recherche repositories : duree par provider, resultats par provider, erreurs provider, taux de dedoublonnage.
-- Dashboard exploitation pour statut collectes et erreurs recentes.
-- Alertes sur echecs repetes, schema DB invalide, hausse des timeouts, indisponibilite API.
-
-## 21. Performance et scalabilite
-
-Confirmations :
-
-- Timeout HTTP par defaut : 10 secondes.
-- Analyse URL limitee a 1 MB de HTML.
-- Sitemaps : 10 sitemaps max et 1000 URLs max dans le module sitemap.
-- Generic adapter limite par defaut a 50 URLs sitemap.
-- Collecte source : 5 pages max par source, 1 distribution max par dataset.
-- Validation : HEAD puis GET partiel de 65 536 bytes.
-
-Analyse :
-
-- Ces bornes protegent le MVP contre les collectes trop longues.
-- Les jobs FastAPI background tasks conviennent a une execution simple mais ne garantissent pas la reprise apres crash.
-- SQLite peut devenir limitant avec collectes concurrentes et ecritures frequentes.
-
-A confirmer :
-
-- Nombre de sources cible.
-- Frequence de re-collecte.
-- Nombre d'utilisateurs simultanes.
-- Acceptation d'un resultat partiel limite aux 5 premieres pages.
-
-## 22. Tests
-
-| Type de test | Objectif | Outil | Responsable |
-| --- | --- | --- | --- |
-| Tests base | Schema, seeds, migrations, contraintes, upserts, jobs, JSON stocke. | pytest | Developpeurs backend. |
-| Tests pipeline collecteur | Extraction, scoring, validation, collecte structuree/generique. | pytest | Developpeurs collecteur. |
-| Tests routes | Handlers FastAPI, erreurs 400/404, jobs. | pytest | Developpeurs backend. |
-| Tests adaptateurs | CKAN, Socrata, data.json, generic fallback. | pytest | Developpeurs collecteur. |
-| Tests recherche repositories | URL de recherche, normalisation provider, tri, erreurs route. | pytest | Developpeurs backend/collecteur. |
-| Tests sitemap | robots, parsing XML, scoring URL. | pytest | Developpeurs collecteur. |
-| Build frontend | Verifier compilation UI. | Vite build | Developpeurs frontend. |
-| Tests E2E | INFORMATION MANQUANTE | A definir | A definir. |
-| Tests securite/performance | INFORMATION MANQUANTE | A definir | A definir. |
-
-Validation locale du 2026-08-19 :
-
-- `76 passed in 0.39s`
-- Build frontend Vite reussi.
-
-Validation ciblee du 2026-08-21 :
-
-- `.venv/bin/pytest tests/test_repository_search.py tests/test_collector_routes.py -q` : `25 passed`.
-
-## 23. CI/CD
-
-Flux recommande a partir des controles existants :
-
-```text
-Developpeur
-    ↓
-Git branch / Pull Request
-    ↓
-Ruff
-    ↓
-Pytest
-    ↓
-Frontend build
-    ↓
-Review
-    ↓
-Deploy test
-    ↓
-Validation
-    ↓
-Production
-```
-
-Etat confirme : aucun workflow CI/CD n'a ete observe dans les fichiers analyses. A confirmer avant toute industrialisation.
-
-## 24. Environnements
-
-| Environnement | Usage | Infrastructure | Donnees | Acces |
-| --- | --- | --- | --- | --- |
-| Local | Developpement et tests. | `.venv`, FastAPI Uvicorn port 8001, Vite port 5173, SQLite locale. | Seeds WHO + donnees locales si DB presente. | Developpeur local. |
-| Development | A confirmer. | Non documente. | Non documente. | Non documente. |
-| Test / QA | A confirmer. | Non documente. | Non documente. | Non documente. |
-| Staging | A confirmer. | Non documente. | Non documente. | Non documente. |
-| Production | A confirmer. | Non documente. | Non documente. | Non documente. |
-
-## 25. Deploiement
-
-### Confirme localement
-
-- Backend :
-  - installer `backend/requirements.txt` ;
-  - lancer Uvicorn avec `PYTHONPATH=..` depuis `backend` ;
-  - port documente : `8001`.
-- Frontend :
-  - `VITE_API_BASE_URL=http://127.0.0.1:8001 npm run dev` ;
-  - port documente : `5173`.
-
-### A definir pour production
-
-- Packaging frontend statique.
-- Serveur ASGI et mode process manager.
-- Reverse proxy HTTPS.
-- Base cible et migrations.
-- Gestion des secrets/configuration.
-- Strategie rollback.
-- Sauvegardes DB.
-- Politique de purge jobs/resultats.
-
-## 26. Migration
-
-La migration est le sujet prioritaire.
-
-Etat confirme :
-
-- Le code courant attend `CURRENT_SCHEMA_VERSION = 1`.
-- La base locale a `PRAGMA user_version = 0`.
-- La base locale contient deja des tables gerees : `data_sources`, `collected_datasets`, `collected_distributions`, `collection_jobs`.
-- L'application refuse explicitement de migrer une base non versionnee contenant des tables gerees.
-
-Plan recommande :
-
-1. Sauvegarder `backend/global_health.db`.
-2. Documenter le schema historique exact.
-3. Ecrire une migration `0 historique -> 1` qui :
-   - cree `dataset_discovery_observations` ;
-   - ajoute les champs timestamps manquants ;
-   - ajoute `validation_attempted`, `last_checked_at` et les contraintes compatibles ;
-   - initialise `first_seen_at`/`last_seen_at` depuis `created_at`/`updated_at` quand possible ;
-   - renseigne une observation de decouverte initiale par dataset existant si source/discovery_method disponibles ;
-   - preserve les donnees existantes HDX/CDC.
-4. Tester la migration sur copie.
-5. Mettre `PRAGMA user_version = 1`.
-6. Mettre a jour README avec procedure.
-
-Alternative : exporter les donnees utiles, supprimer/regenerer la base, reimporter via API ou script controle.
-
-## 27. Dependances
-
-| Dependance | Type | Responsable | Criticite | Impact si indisponible |
-| --- | --- | --- | --- | --- |
-| FastAPI / Pydantic / Uvicorn | Bibliotheques backend | Equipe dev | Haute | API indisponible. |
-| SQLite | Stockage | Equipe dev/infra | Haute | Donnees catalogue et jobs indisponibles. |
-| React / Vite | Frontend | Equipe dev | Moyenne | UI indisponible, API utilisable manuellement. |
-| CKAN APIs | Source externe | Fournisseurs catalogues | Moyenne/haute | Decouverte structuree CKAN impossible. |
-| Socrata Catalog API | Source externe | Socrata / fournisseurs | Moyenne/haute | Decouverte Socrata impossible. |
-| `data.json` / DCAT | Source externe | Fournisseurs open data | Moyenne | Fallback necessaire via sitemap/HTML. |
-| Sites publics et sitemaps | Source externe | Fournisseurs web | Moyenne | Collecte incomplete ou impossible. |
-| Reseau internet sortant | Infrastructure | Infra | Haute | Analyse URL, discovery et validation impossibles. |
-| pytest / ruff | Qualite | Equipe dev | Moyenne | Baisse confiance livraison. |
-
-## 28. Risques
-
-| Risque | Probabilite | Impact | Criticite | Mitigation | Responsable |
-| --- | --- | --- | --- | --- | --- |
-| Base SQLite locale incompatible avec le code actuel | Elevee | Eleve | Critique | Migration historique ou recreation controlee. | Lead dev / architecte |
-| Absence d'auth si exposition hors local | Moyenne | Eleve | Elevee | Ajouter auth, roles, rate limiting avant production. | Securite / backend |
-| Heuristiques faux positifs/faux negatifs | Moyenne | Moyen | Moyenne | Jeu d'evaluation, revue humaine, enrichissement vocabulaire/adaptateurs. | Data owner / collecteur |
-| BackgroundTasks insuffisant pour jobs longs | Moyenne | Moyen/eleve | Moyenne | Queue dediee, retries, reprise apres crash. | Architecture |
-| Dependances externes indisponibles ou lentes | Elevee | Moyen | Moyenne | Timeouts, retries, cache, degradation controlee. | Backend / infra |
-| Recherche repositories bloquee par un provider indisponible | Moyenne | Moyen | Moyenne | Resultats partiels avec warning/logs, timeout par provider, tests d'erreur. | Backend / collecteur |
-| Donnees sensibles dans metadonnees externes | Faible/moyenne | Eleve | Moyenne | Validation legal/data governance, filtrage, politique retention. | DPO / data owner |
-| Pas de monitoring | Moyenne | Moyen | Moyenne | Logs structures, metriques et alertes. | Infra / backend |
-| Perimetre des sources non formalise | Moyenne | Moyen | Moyenne | Regles d'acceptation et workflow de validation. | Product owner |
-
-## 29. Alternatives etudiees
-
-Les alternatives ne sont pas documentees dans le projet. Les options suivantes sont des **deductions/propositions** pour les decisions restantes :
-
-| Sujet | Option A | Option B | Recommandation |
-| --- | --- | --- | --- |
-| Stockage | SQLite conserve | PostgreSQL ou DB serveur | SQLite pour MVP ; DB serveur si multi-user, scheduler ou production. |
-| Jobs | FastAPI BackgroundTasks | Queue dediee type Celery/RQ/worker | BackgroundTasks pour MVP ; queue si jobs longs/retries requis. |
-| Classification | Heuristiques deterministes | Modele ML/LLM | Conserver heuristiques jusqu'a mesure de performance ; envisager ML seulement avec dataset d'evaluation. |
-| Discovery | Adaptateurs generiques | Scrapers par site | Garder adaptateurs generiques ; ajouter adaptateurs specifiques uniquement si necessaire. |
-| Recherche repositories | Adapter par famille d'API + config | Provider par repository individuel | Retenir adapter par famille d'API ; nouveau site CKAN/Dataverse par config seulement. |
-| Migration | Migration in-place | Export/recreation/import | Migration in-place si preservation complete requise ; export/recreation si base locale non critique. |
-
-## 30. Plan d'implementation
-
-### Phase 1 - Stabilisation donnees
-
-- Objectif : rendre la base locale compatible.
-- Taches : backup, migration historique, tests migration, update README.
-- Livrable : base `user_version=1` compatible.
-
-### Phase 2 - Hardening backend
-
-- Objectif : fiabiliser API et erreurs.
-- Taches : schemas d'erreur, logs structures, correlation id, configuration env.
-- Livrable : API exploitable localement et prete test/QA.
-
-### Phase 3 - Gouvernance collecteur
-
-- Objectif : ameliorer qualite des resultats.
-- Taches : jeu de validation, seuils documentes, vocabulaire sante, regles officialite.
-- Livrable : criteres d'acceptation mesurables.
-
-### Phase 4 - Recherche repositories
-
-- Objectif : generaliser la recherche externe sans creer une classe par site.
-- Taches : `RepositoryConfig`, liste `DEFAULT_REPOSITORIES`, registry adapters, adapter CKAN, adapter Dataverse, validation URL minimale, dedoublonnage lorsque plusieurs providers sont actifs, gestion resultats partiels.
-- Livrable : recherche multi-repositories avec DataCite + au moins une famille d'API supplementaire.
-
-### Phase 5 - Frontend operationnel
-
-- Objectif : faciliter supervision et review.
-- Taches : details jobs, erreurs par source, affichage recherche repositories, export metadonnees, clarifier formats supportes.
-- Livrable : UI de pilotage catalogue.
-
-### Phase 6 - Securite et exploitation
-
-- Objectif : preparer environnement partage ou production.
-- Taches : auth, rate limiting, HTTPS, backup, monitoring, alertes.
-- Livrable : checklist production.
-
-### Phase 7 - CI/CD et deploiement
-
-- Objectif : automatiser validation et livraison.
-- Taches : pipeline ruff/pytest/build, artefacts, deploiement test/staging/prod.
-- Livrable : chaine CI/CD documentee.
-
-## 31. Questions ouvertes
-
-| ID | Question | Impact | Personne / equipe a consulter | Priorite |
-| --- | --- | --- | --- | --- |
-| Q1 | Faut-il migrer la base SQLite existante ou la recreer ? | Bloque le demarrage fiable avec la DB locale. | Lead dev / responsable data | Haute |
-| Q2 | Quel est l'environnement cible : local interne, serveur partage, production publique ? | Dimensionne securite, infra et CI/CD. | Responsables projet / infra | Haute |
-| Q3 | Quelles sources sont considerees officielles ou acceptables ? | Qualite du catalogue. | Product owner / data governance | Haute |
-| Q4 | Faut-il une authentification et des roles ? | Securite API et ajout de sources. | Securite / product owner | Haute |
-| Q5 | Quelle volumetrie et frequence de collecte viser ? | Choix SQLite vs DB serveur, background task vs queue. | Data owner / architecture | Haute |
-| Q6 | Quelle politique de retention pour jobs, observations et validations ? | Taille DB, audit, conformite. | DPO / infra / data owner | Moyenne |
-| Q7 | Quels indicateurs de qualite pour les heuristiques ? | Mesure faux positifs/faux negatifs. | Data owner / dev collecteur | Moyenne |
-| Q8 | Faut-il exposer une API d'administration complete ? | Périmètre frontend/backend. | Product owner | Moyenne |
-| Q9 | Quel monitoring minimum avant usage partage ? | Support et exploitation. | Infra / backend | Moyenne |
-| Q10 | Quels repositories doivent etre interroges par defaut et lesquels doivent etre optionnels ? | Cout reseau, qualite resultats, bruit et latence. | Product owner / data owner | Haute |
-| Q11 | Une erreur provider doit-elle bloquer toute la recherche ou retourner des resultats partiels ? | UX, fiabilite, observabilite. | Backend / product owner | Haute |
-
-## 32. Decisions necessaires des responsables
-
-- **DECISION NECESSAIRE** - Strategie de migration de `backend/global_health.db`.
-- **DECISION NECESSAIRE** - Environnement cible et niveau de production attendu.
-- **DECISION NECESSAIRE** - Politique d'authentification, roles et exposition reseau.
-- **DECISION NECESSAIRE** - Perimetre des sources officielles et non officielles.
-- **DECISION NECESSAIRE** - Base cible pour usage partage : SQLite conservee ou migration vers DB serveur.
-- **DECISION NECESSAIRE** - Strategie jobs : background tasks MVP ou worker/queue.
-- **DECISION NECESSAIRE** - Liste des repositories par defaut et politique de resultats partiels.
-- **DECISION NECESSAIRE** - CI/CD minimal obligatoire avant livraison.
-- **DECISION NECESSAIRE** - Monitoring, sauvegardes et retention.
-
-## Liste priorisee des informations a obtenir
-
-1. Decision migration/recreation de la base existante.
-2. Confirmation de l'environnement cible et du niveau de securite attendu.
-3. Liste des sources officielles et regles d'acceptation.
-4. Volumetrie cible et frequence des collectes.
-5. Repositories externes recherches par defaut.
-6. Responsables metier, techniques, securite et approbateurs.
-7. Strategie deploiement, CI/CD, monitoring et sauvegarde.
-8. Politique de retention et de conformite des metadonnees.
+| Meaning and allowed use of "official" | Policy owner | Unassigned / open | Approved source tiers and UI wording |
+| Repository candidate to collection workflow | Product + technical owner | Unassigned / open | Decide user action, validation gates, and persistence contract |
+| Multi-repository scope and Dataverse activation | Product/data owner | Unassigned / open | Approve providers, ordering, quotas, and benchmark |
+| Human-review workflow | Data-governance owner | Unassigned / open | Define triggers, roles, decisions, and audit retention |
+| Acceptable licences and restricted-access data | Legal/policy owner | Unassigned / open | Allow/review/deny policy |
+| Authentication and deployment boundary | Security/infra owner | Unassigned / open | Roles, identity provider, and exposed routes |
+| Durable job technology | Backend/infra owner | Unassigned / open | Queue, worker, retry, and recovery design |
+| Provider-independent LLM voting | ML/technical owner | Unassigned / open | Decide resilience requirement and evaluation plan |
+| Stable-release migration policy | Backend/data owner | Unassigned / open | Data-preserving migration and rollback process |
+
+No owner assignment or decision in this table is implied by the current code.
+The detailed provider proposal is isolated in
+[Multi-Repository Architecture](multi-repository-architecture.md).
+
+## 20. Current Limitations
+
+- repository search is not connected to collection/persistence;
+- repository relevance does not independently enforce global-health relevance;
+- source officiality and publisher authority are not enforced;
+- licence acceptance is not enforced;
+- normalized-URL-only deduplication does not model versions or mirrors;
+- background jobs are not durable outside the FastAPI process;
+- no human-review, publication status, or lifecycle workflow exists;
+- no CI/staging/production architecture is defined in code.
+
+These items belong to the [roadmap](roadmap.md), not to the current architecture
+description.
+
+## 21. Related Documents
+
+- [Onboarding](ONBOARDING.md)
+- [Collector Pipeline Diagram](collector-pipeline-diagram.md)
+- [Classification Architecture](classification-architecture.md)
+- [Database Schema Diagram](database-schema-diagram.md)
+- [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
+- [Roadmap](roadmap.md)
+- [Multi-Repository Architecture](multi-repository-architecture.md)
+- [ADR 0001 - PostgreSQL-only persistence](adr/0001-postgresql-only.md)

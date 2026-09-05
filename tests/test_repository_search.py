@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
+from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.repository_search import (
     INVALID_METADATA_MESSAGE,
     PROVIDER_UNAVAILABLE_MESSAGE,
     DataCiteRepositorySearchProvider,
     RepositorySearchResult,
-    _number,
     search_repository_metadata,
 )
 
@@ -26,22 +26,37 @@ def test_datacite_provider_builds_query_url_and_normalizes_results():
                         "titles": [{"title": "Malaria mortality estimates"}],
                         "descriptions": [
                             {
-                                "description": "<p>Annual mortality estimates by country.</p>",
+                                "description": (
+                                    "<p>Annual mortality estimates by age and sex.</p>"
+                                ),
                                 "descriptionType": "Abstract",
                             }
                         ],
                         "url": "https://example.org/datasets/malaria-mortality",
                         "publisher": {"name": "Global Health Repository"},
                         "publicationYear": 2025,
+                        "geoLocations": [
+                            {
+                                "geoLocationPlace": "Burkina Faso",
+                                "geoLocationCountry": "BF",
+                            }
+                        ],
                         "subjects": [
                             {"subject": "malaria"},
                             {"subject": "mortality"},
                         ],
+                        "sizes": ["12,000 records"],
+                        "rightsList": [
+                            {
+                                "rights": "Creative Commons Attribution 4.0",
+                                "rightsIdentifier": "CC-BY-4.0",
+                            }
+                        ],
+                        "formats": ["CSV"],
                         "types": {
                             "resourceTypeGeneral": "Dataset",
                             "resourceType": "Epidemiological dataset",
                         },
-                        "score": 0.93,
                     },
                 }
             ]
@@ -67,20 +82,58 @@ def test_datacite_provider_builds_query_url_and_normalizes_results():
     assert len(results) == 1
     result = results[0]
     assert result.title == "Malaria mortality estimates"
-    assert result.description == "Annual mortality estimates by country."
+    assert result.description == "Annual mortality estimates by age and sex."
     assert result.url == "https://example.org/datasets/malaria-mortality"
     assert result.source == "DataCite"
     assert result.publisher == "Global Health Repository"
     assert result.date == "2025"
     assert result.doi == "10.1234/malaria"
     assert result.keywords == ["malaria", "mortality"]
-    assert result.relevance_score == 0.93
+    assert tuple(result.metadata) == DATASET_METADATA_KEYS
     assert result.metadata == {
-        "provider": "datacite",
-        "datacite_id": "10.1234/malaria",
-        "resource_type": "Dataset",
-        "resource_subtype": "Epidemiological dataset",
-        "native_score": 0.93,
+        "Title": "Malaria mortality estimates",
+        "Geography": "Burkina Faso, BF",
+        "Date of publication": "2025",
+        "Dataset URL": "https://example.org/datasets/malaria-mortality",
+        "Disease(s)": "malaria",
+        "Size of dataset": "12,000 records",
+        "Demographic information": "age, sex",
+        "Sharing license": "Creative Commons Attribution 4.0, CC-BY-4.0",
+        "Modality of data": "tabular",
+        "Description of dataset": "Annual mortality estimates by age and sex.",
+    }
+
+
+def test_datacite_provider_uses_na_for_missing_search_result_metadata():
+    def fake_fetch_json(url):
+        return {
+            "data": [
+                {
+                    "id": "10.1234/minimal",
+                    "attributes": {
+                        "doi": "10.1234/minimal",
+                    },
+                }
+            ]
+        }
+
+    results = DataCiteRepositorySearchProvider(fetch_json=fake_fetch_json).search(
+        "minimal"
+    )
+
+    assert len(results) == 1
+    assert tuple(results[0].metadata) == DATASET_METADATA_KEYS
+    assert results[0].metadata == {
+        "Title": "NA",
+        "Geography": "NA",
+        "Date of publication": "NA",
+        "Dataset URL": "https://doi.org/10.1234/minimal",
+        "Disease(s)": "NA",
+        "Size of dataset": "NA",
+        "Demographic information": "NA",
+        "Sharing license": "NA",
+        "Modality of data": "NA",
+        "Description of dataset": "NA",
     }
 
 
@@ -108,7 +161,6 @@ def test_datacite_provider_uses_doi_resolver_when_landing_url_is_missing():
     assert results[0].doi == "10.1234/missing-url"
     assert results[0].publisher == "Repository Publisher"
     assert results[0].date == "2024-06-30"
-    assert results[0].relevance_score == 1.0
 
 
 def test_datacite_provider_uses_doi_resolver_when_landing_url_is_invalid():
@@ -151,7 +203,7 @@ def test_datacite_provider_fails_clearly_for_invalid_top_level_response():
         raise AssertionError("Expected ValueError.")
 
 
-def test_search_repository_metadata_sorts_provider_results_by_relevance():
+def test_search_repository_metadata_preserves_provider_result_order():
     class FakeProvider:
         name = "fake"
 
@@ -162,13 +214,11 @@ def test_search_repository_metadata_sorts_provider_results_by_relevance():
                     title="Lower",
                     url="https://example.org/lower",
                     source="Fake",
-                    relevance_score=0.4,
                 ),
                 RepositorySearchResult(
                     title="Higher",
                     url="https://example.org/higher",
                     source="Fake",
-                    relevance_score=0.9,
                 ),
             ]
 
@@ -178,13 +228,12 @@ def test_search_repository_metadata_sorts_provider_results_by_relevance():
     )
 
     results = response.results
-    assert [result.title for result in results] == ["Higher", "Lower"]
+    assert [result.title for result in results] == ["Lower", "Higher"]
+    assert [result.search_query for result in results] == [
+        "malaria mortality",
+        "malaria mortality",
+    ]
     assert response.warnings == []
-
-
-def test_number_rejects_boolean_values():
-    assert _number(True) is None
-    assert _number(False) is None
 
 
 def test_search_repository_metadata_filters_invalid_results_before_returning():
@@ -197,39 +246,38 @@ def test_search_repository_metadata_filters_invalid_results_before_returning():
                     title="Valid result",
                     url="https://example.org/valid",
                     source="Mixed",
-                    relevance_score=0.8,
                 ),
                 RepositorySearchResult(
                     title="",
                     url="https://example.org/missing-title",
                     source="Mixed",
-                    relevance_score=0.7,
                 ),
                 RepositorySearchResult(
                     title="Invalid URL",
                     url="javascript:alert(1)",
                     source="Mixed",
-                    relevance_score=0.7,
                 ),
                 RepositorySearchResult(
-                    title="Boolean score",
-                    url="https://example.org/boolean-score",
+                    title="Second valid result",
+                    url="https://example.org/second-valid",
                     source="Mixed",
-                    relevance_score=True,
                 ),
                 RepositorySearchResult(
-                    title="Out of range score",
-                    url="https://example.org/out-of-range-score",
+                    title="Third valid result",
+                    url="https://example.org/third-valid",
                     source="Mixed",
-                    relevance_score=1.2,
                 ),
             ]
 
     response = search_repository_metadata("malaria mortality", providers=[MixedProvider()])
     results = response.results
 
-    assert len(results) == 1
-    assert results[0].title == "Valid result"
+    assert len(results) == 3
+    assert [result.title for result in results] == [
+        "Valid result",
+        "Second valid result",
+        "Third valid result",
+    ]
     assert len(response.warnings) == 1
     assert response.warnings[0].provider is None
     assert response.warnings[0].message == INVALID_METADATA_MESSAGE
@@ -246,7 +294,6 @@ def test_search_repository_metadata_returns_partial_results_when_one_provider_fa
                     title="Available result",
                     url="https://example.org/available",
                     source="Successful",
-                    relevance_score=0.8,
                 )
             ]
 

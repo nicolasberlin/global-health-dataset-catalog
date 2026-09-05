@@ -6,15 +6,19 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import init_database
+from app.database import close_database_pool, init_database, open_database_pool
 from app.routes.collector import router as collector_router
 from app.routes.sources import router as sources_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    init_database()
-    yield
+    await open_database_pool()
+    try:
+        await init_database()
+        yield
+    finally:
+        await close_database_pool()
 
 
 app = FastAPI(title="Global Health API", version="0.1.0", lifespan=lifespan)

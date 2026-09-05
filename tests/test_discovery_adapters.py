@@ -41,6 +41,14 @@ def test_ckan_adapter_discovers_dataset_pages_and_resources():
                             "name": "cdc",
                             "title": "Centers for Disease Control and Prevention",
                         },
+                        "issued": "2024-02-01",
+                        "license_title": "CC-BY-4.0",
+                        "tags": [{"name": "covid"}],
+                        "extras": [
+                            {"key": "country", "value": "United States"},
+                            {"key": "dataset_size", "value": "24,000 records"},
+                            {"key": "demographics", "value": "age and sex"},
+                        ],
                         "resources": [
                             {
                                 "name": "CSV download",
@@ -74,7 +82,14 @@ def test_ckan_adapter_discovers_dataset_pages_and_resources():
     assert page.title == "COVID-19 Case Surveillance Public Use Data"
     assert page.description == "Public health dataset."
     assert page.publisher == "Centers for Disease Control and Prevention"
-    assert page.metadata == {
+    assert page.geography == ("United States",)
+    assert page.date_of_publication == "2024-02-01"
+    assert page.diseases == ("covid",)
+    assert page.size_of_dataset == "24,000 records"
+    assert page.demographic_information == ("age", "sex")
+    assert page.sharing_license == "CC-BY-4.0"
+    assert page.modality_of_data == ("tabular",)
+    assert page.discovery_metadata == {
         "ckan_id": "abc-123",
         "ckan_name": "covid-19-case-surveillance",
     }
@@ -143,6 +158,11 @@ def test_socrata_adapter_discovers_dataset_pages_and_api_resources():
                         "description": "Public health dataset.",
                         "attribution": "Centers for Disease Control and Prevention",
                         "type": "dataset",
+                        "country": "United States",
+                        "createdAt": "2024-03-01",
+                        "license": "Public Domain",
+                        "tags": ["covid", "age"],
+                        "size": "12,000 rows",
                     },
                     "metadata": {"domain": "data.cdc.gov"},
                     "permalink": "https://data.cdc.gov/d/abcd-1234",
@@ -179,7 +199,14 @@ def test_socrata_adapter_discovers_dataset_pages_and_api_resources():
     assert page.title == "COVID-19 Case Surveillance Public Use Data"
     assert page.description == "Public health dataset."
     assert page.publisher == "Centers for Disease Control and Prevention"
-    assert page.metadata == {
+    assert page.geography == ("United States",)
+    assert page.date_of_publication == "2024-03-01"
+    assert page.diseases == ("covid",)
+    assert page.size_of_dataset == "12,000 rows"
+    assert page.demographic_information == ("age",)
+    assert page.sharing_license == "Public Domain"
+    assert page.modality_of_data == ("tabular", "structured data")
+    assert page.discovery_metadata == {
         "socrata_id": "abcd-1234",
         "socrata_type": "dataset",
         "socrata_domain": "data.cdc.gov",
@@ -254,7 +281,10 @@ def test_data_json_adapter_discovers_dataset_pages_and_distributions():
                     "title": "Mortality by age and sex",
                     "description": "Official mortality health dataset.",
                     "publisher": {"name": "National Health Agency"},
-                    "keyword": ["health", "mortality"],
+                    "issued": "2025-05-01",
+                    "license": "CC-BY-4.0",
+                    "keyword": ["health", "malaria"],
+                    "spatial": ["France", "Germany"],
                     "landingPage": "https://agency.example.gov/datasets/mortality",
                     "distribution": [
                         {
@@ -262,6 +292,7 @@ def test_data_json_adapter_discovers_dataset_pages_and_distributions():
                             "downloadURL": "https://agency.example.gov/files/mortality.csv",
                             "mediaType": "text/csv",
                             "format": "CSV",
+                            "byteSize": 12345,
                         },
                         {
                             "title": "API endpoint",
@@ -304,10 +335,16 @@ def test_data_json_adapter_discovers_dataset_pages_and_distributions():
     assert page.title == "Mortality by age and sex"
     assert page.description == "Official mortality health dataset."
     assert page.publisher == "National Health Agency"
-    assert page.metadata == {
+    assert page.geography == ("France", "Germany")
+    assert page.date_of_publication == "2025-05-01"
+    assert page.diseases == ("malaria",)
+    assert page.size_of_dataset == "12345"
+    assert page.sharing_license == "CC-BY-4.0"
+    assert page.modality_of_data == ("tabular", "structured data")
+    assert page.discovery_metadata == {
         "data_json_url": "https://agency.example.gov/data.json",
         "identifier": "mortality-1",
-        "keywords": ["health", "mortality"],
+        "keywords": ["health", "malaria"],
     }
 
     assert [distribution.format for distribution in page.distributions] == ["CSV", "API", "JSON"]
@@ -501,4 +538,4 @@ def test_generic_website_adapter_discovers_sitemap_urls_before_source_url_fallba
     ]
     assert [page.discovery_method for page in pages] == ["sitemap", "sitemap"]
     assert pages[0].priority > pages[1].priority
-    assert pages[0].metadata["source_sitemap_url"] == "https://example.org/sitemap.xml"
+    assert pages[0].discovery_metadata["source_sitemap_url"] == "https://example.org/sitemap.xml"

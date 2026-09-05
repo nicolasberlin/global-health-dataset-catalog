@@ -1,56 +1,53 @@
+"""Socrata, data.json, and generic website discovery adapters."""
+
 from __future__ import annotations
 
-import json
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Protocol
-from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from collector.config import DEFAULT_CONFIG
+from collector.discovery.adapters.shared import (
+    EXCLUDED_RESOURCE_FORMATS,
+    DiscoveredPage,
+    JsonFetcher,
+    _dedupe,
+    _demographics_from_mapping,
+    _diseases_from_mapping,
+    _first_mapping_value,
+    _first_text,
+    _first_text_value,
+    _first_url,
+    _geography_from_mapping,
+    _json_ld_type_matches,
+    _mapping_dicts,
+    _modalities_from_distributions,
+    _modalities_from_format,
+    _normalize_format,
+    _publication_date_from_mapping,
+    _site_root,
+    _text,
+    _text_values,
+    _value_text,
+    fetch_json_url,
+)
 from collector.discovery.sitemap import TextFetcher, discover_sitemap_entries
 from collector.extraction.distributions import guess_format
-from collector.fetch import _ensure_public_http_url
 from collector.storage.models import DistributionCandidate
 from collector.url_utils import canonicalize_url
-
-JsonFetcher = Callable[[str], dict[str, object]]
-
-EXCLUDED_RESOURCE_FORMATS = {"HTML", "HTM", "PDF", "PNG", "JPG", "JPEG", "GIF", "SVG"}
-
-
-@dataclass(frozen=True)
-class DiscoveredPage:
-    url: str
-    discovery_method: str
-    priority: float = 0.0
-    title: str = ""
-    description: str = ""
-    publisher: str = ""
-    distributions: tuple[DistributionCandidate, ...] = ()
-    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class SocrataCatalogResult:
+    """Socrata resource and metadata sections used to build one result."""
+
     resource: dict[object, object]
     metadata: dict[object, object]
     permalink: str = ""
     link: str = ""
 
 
-class DiscoveryAdapter(Protocol):
-    name: str
-
-    def detect(self, source_url: str) -> bool:
-        ...
-
-    def discover(self, source_url: str) -> list[DiscoveredPage]:
-        ...
-
-
 class GenericWebsiteAdapter:
+    """Discover same-domain sitemap pages, falling back to the source page."""
+
     name = "generic_website"
 
     def __init__(
@@ -76,7 +73,7 @@ class GenericWebsiteAdapter:
                     url=entry.url,
                     discovery_method="sitemap",
                     priority=entry.priority,
-                    metadata={
+                    discovery_metadata={
                         **entry.metadata,
                         "source_sitemap_url": entry.source_sitemap_url,
                     },
@@ -93,71 +90,9 @@ class GenericWebsiteAdapter:
         ]
 
 
-class CKANAdapter:
-    name = "ckan"
-
-    def __init__(
-        self,
-        fetch_json: JsonFetcher | None = None,
-        rows: int = 5,
-    ) -> None:
-        self._fetch_json = fetch_json or fetch_json_url
-        self._rows = rows
-
-    def detect(self, source_url: str) -> bool:
-        try:
-            data = self._fetch_json(_ckan_action_url(source_url, "status_show"))
-        except ValueError:
-            return False
-
-        return data.get("success") is True and isinstance(data.get("result"), dict)
-
-    def discover(self, source_url: str) -> list[DiscoveredPage]:
-        data = self._fetch_json(
-            _ckan_action_url(
-                source_url,
-                "package_search",
-                _ckan_search_params(source_url, self._rows),
-            )
-        )
-        result = data.get("result")
-        if data.get("success") is not True or not isinstance(result, dict):
-            return []
-
-        packages = result.get("results")
-        if not isinstance(packages, list):
-            return []
-
-        discovered_pages: list[DiscoveredPage] = []
-        for package in packages:
-            if not isinstance(package, dict):
-                continue
-
-            dataset_url = _dataset_page_url(source_url, package)
-            if not dataset_url:
-                continue
-
-            distributions = tuple(_distribution_candidates(source_url, package))
-            discovered_pages.append(
-                DiscoveredPage(
-                    url=dataset_url,
-                    discovery_method=self.name,
-                    priority=0.9 if distributions else 0.75,
-                    title=_text(package.get("title")),
-                    description=_text(package.get("notes")),
-                    publisher=_publisher(package),
-                    distributions=distributions,
-                    metadata={
-                        "ckan_id": _text(package.get("id")),
-                        "ckan_name": _text(package.get("name")),
-                    },
-                )
-            )
-
-        return discovered_pages
-
-
 class SocrataAdapter:
+    """Detect Socrata portals and discover datasets through its catalog API."""
+
     name = "socrata"
 
     def __init__(
@@ -203,8 +138,48 @@ class SocrataAdapter:
                     title=_text(resource.get("name")),
                     description=_text(resource.get("description")),
                     publisher=_text(resource.get("attribution")),
+                    geography=tuple(
+                        _dedupe(
+                            [
+                                *_geography_from_mapping(resource),
+                                *_geography_from_mapping(result.metadata),
+                            ]
+                        )
+                    ),
+                    date_of_publication=(
+                        _publication_date_from_mapping(resource)
+                        or _publication_date_from_mapping(result.metadata)
+                    ),
+                    diseases=_diseases_from_mapping(resource, result.metadata),
+                    size_of_dataset=(
+                        _first_mapping_value(resource, "size", "content_size", "rows")
+                        or _first_mapping_value(result.metadata, "size", "content_size", "rows")
+                    ),
+                    demographic_information=_demographics_from_mapping(
+                        resource,
+                        result.metadata,
+                    ),
+                    sharing_license=(
+                        _first_mapping_value(
+                            resource,
+                            "license_title",
+                            "license",
+                            "license_id",
+                            "license_url",
+                            "rights",
+                        )
+                        or _first_mapping_value(
+                            result.metadata,
+                            "license_title",
+                            "license",
+                            "license_id",
+                            "license_url",
+                            "rights",
+                        )
+                    ),
+                    modality_of_data=_modalities_from_distributions(distributions),
                     distributions=distributions,
-                    metadata={
+                    discovery_metadata={
                         "socrata_id": socrata_id,
                         "socrata_type": _text(resource.get("type")),
                         "socrata_domain": _socrata_domain(source_url),
@@ -216,6 +191,8 @@ class SocrataAdapter:
 
 
 class DataJsonAdapter:
+    """Detect and discover datasets from a source's data.json catalog."""
+
     name = "data_json"
 
     def __init__(
@@ -257,8 +234,24 @@ class DataJsonAdapter:
                     title=_first_text(dataset, "title", "dct:title", "name"),
                     description=_first_text(dataset, "description", "dct:description"),
                     publisher=_data_json_publisher(dataset),
+                    geography=tuple(_geography_from_mapping(dataset)),
+                    date_of_publication=_publication_date_from_mapping(dataset),
+                    diseases=_diseases_from_mapping(dataset),
+                    size_of_dataset=_size_from_data_json_dataset(dataset),
+                    demographic_information=_demographics_from_mapping(dataset),
+                    sharing_license=_first_mapping_value(
+                        dataset,
+                        "license",
+                        "dct:license",
+                        "rights",
+                        "dct:rights",
+                    ),
+                    modality_of_data=_modalities_from_data_json_dataset(
+                        dataset,
+                        distributions,
+                    ),
                     distributions=distributions,
-                    metadata={
+                    discovery_metadata={
                         "data_json_url": data_json_url,
                         "identifier": _first_text(dataset, "identifier", "@id"),
                         "keywords": _text_values(dataset.get("keyword")),
@@ -270,151 +263,6 @@ class DataJsonAdapter:
                 break
 
         return discovered_pages
-
-
-def fetch_json_url(
-    url: str,
-    timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
-    max_bytes: int = 5_000_000,
-) -> dict[str, object]:
-    _ensure_public_http_url(url)
-
-    request = Request(
-        url,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": DEFAULT_CONFIG.user_agent,
-        },
-        method="GET",
-    )
-
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            body = response.read(max_bytes + 1)
-    except HTTPError as exception:
-        raise ValueError(f"JSON URL returned HTTP {exception.code}.") from exception
-    except (TimeoutError, URLError, OSError) as exception:
-        raise ValueError(f"Could not fetch JSON URL: {exception}") from exception
-
-    if len(body) > max_bytes:
-        raise ValueError("JSON response is too large for discovery.")
-
-    try:
-        data = json.loads(body.decode("utf-8"))
-    except json.JSONDecodeError as exception:
-        raise ValueError("JSON URL did not return valid JSON.") from exception
-
-    if not isinstance(data, dict):
-        raise ValueError("JSON URL did not return an object.")
-
-    return data
-
-
-def _ckan_action_url(
-    source_url: str,
-    action: str,
-    params: dict[str, str] | None = None,
-) -> str:
-    base_url = _ckan_site_root(source_url)
-    action_url = urljoin(base_url, f"api/3/action/{action}")
-    if not params:
-        return action_url
-
-    return f"{action_url}?{urlencode(params)}"
-
-
-def _ckan_site_root(source_url: str) -> str:
-    parts = urlsplit(source_url)
-    return urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
-
-
-def _ckan_search_params(source_url: str, rows: int) -> dict[str, str]:
-    supported_params = {"q", "fq", "sort"}
-    source_params = dict(parse_qsl(urlsplit(source_url).query))
-    params = {
-        key: value
-        for key, value in source_params.items()
-        if key in supported_params and value.strip()
-    }
-    params["rows"] = str(rows)
-    return params
-
-
-def _dataset_page_url(source_url: str, package: dict[object, object]) -> str:
-    name = _text(package.get("name"))
-    if name:
-        return canonicalize_url(f"dataset/{name}", _ckan_site_root(source_url))
-
-    package_id = _text(package.get("id"))
-    if package_id:
-        return canonicalize_url(f"dataset/{package_id}", _ckan_site_root(source_url))
-
-    return ""
-
-
-def _distribution_candidates(
-    source_url: str,
-    package: dict[object, object],
-) -> list[DistributionCandidate]:
-    resources = package.get("resources")
-    if not isinstance(resources, list):
-        return []
-
-    distributions: list[DistributionCandidate] = []
-    for resource in resources:
-        if not isinstance(resource, dict):
-            continue
-
-        resource_url = _text(resource.get("url"))
-        if not resource_url:
-            continue
-
-        resource_format = _normalize_format(_text(resource.get("format")))
-        mime_type = _text(resource.get("mimetype")) or _text(resource.get("mimetype_inner"))
-        anchor = _text(resource.get("name")) or _text(resource.get("description"))
-        guessed_format, extension = guess_format(resource_url, anchor=anchor, mime_type=mime_type)
-        format_name = resource_format or guessed_format
-
-        if format_name in EXCLUDED_RESOURCE_FORMATS:
-            continue
-
-        distributions.append(
-            DistributionCandidate(
-                url=canonicalize_url(resource_url, source_url),
-                format=format_name,
-                probability=0.95,
-                anchor=anchor,
-                extension=extension,
-                mime_type=mime_type,
-                same_domain=False,
-                signals={"ckan_resource": True},
-            )
-        )
-
-    return distributions
-
-
-def _publisher(package: dict[object, object]) -> str:
-    organization = package.get("organization")
-    if not isinstance(organization, dict):
-        return ""
-
-    return _text(organization.get("title")) or _text(organization.get("name"))
-
-
-def _normalize_format(value: str) -> str:
-    if not value:
-        return ""
-
-    normalized = value.strip().upper()
-    if normalized in {"N/A", "NA", "UNKNOWN"}:
-        return ""
-
-    return normalized
-
-
-def _text(value: object) -> str:
-    return value.strip() if isinstance(value, str) else ""
 
 
 def _socrata_catalog_url(
@@ -691,6 +539,43 @@ def _data_json_publisher(dataset: dict[object, object]) -> str:
     return _first_text_value(publisher)
 
 
+def _size_from_data_json_dataset(dataset: dict[object, object]) -> str:
+    direct_size = _first_mapping_value(
+        dataset,
+        "size",
+        "contentSize",
+        "content_size",
+        "dcat:byteSize",
+        "byteSize",
+    )
+    if direct_size:
+        return direct_size
+
+    sizes: list[str] = []
+    for distribution in _data_json_distribution_items(dataset):
+        for key in ("byteSize", "dcat:byteSize", "contentSize", "size"):
+            value = _value_text(distribution.get(key))
+            if value:
+                sizes.append(value)
+    return ", ".join(_dedupe(sizes))
+
+
+def _data_json_distribution_items(dataset: dict[object, object]) -> list[dict[object, object]]:
+    return _mapping_dicts(dataset.get("distribution") or dataset.get("dcat:distribution"))
+
+
+def _modalities_from_data_json_dataset(
+    dataset: dict[object, object],
+    distributions: tuple[DistributionCandidate, ...],
+) -> tuple[str, ...]:
+    values = list(_modalities_from_distributions(distributions))
+    for distribution in _data_json_distribution_items(dataset):
+        for key in ("format", "dct:format", "mediaType", "dcat:mediaType"):
+            for format_value in _text_values(distribution.get(key)):
+                values.extend(_modalities_from_format(format_value))
+    return tuple(_dedupe(values))
+
+
 def _data_json_dataset_matches_query(dataset: dict[object, object], query: str) -> bool:
     searchable_text = " ".join(
         [
@@ -706,72 +591,3 @@ def _data_json_dataset_matches_query(dataset: dict[object, object], query: str) 
 
 def _source_query(source_url: str) -> str:
     return _text(dict(parse_qsl(urlsplit(source_url).query)).get("q"))
-
-
-def _first_text(mapping: dict[object, object], *keys: str) -> str:
-    for key in keys:
-        value = _first_text_value(mapping.get(key))
-        if value:
-            return value
-
-    return ""
-
-
-def _first_text_value(value: object) -> str:
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, dict):
-        return _first_text(value, "@value", "value", "name", "title")
-    if isinstance(value, list):
-        for item in value:
-            text = _first_text_value(item)
-            if text:
-                return text
-
-    return ""
-
-
-def _text_values(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value.strip()] if value.strip() else []
-    if isinstance(value, dict):
-        text = _first_text_value(value)
-        return [text] if text else []
-    if isinstance(value, list):
-        return [
-            text
-            for item in value
-            for text in [_first_text_value(item)]
-            if text
-        ]
-
-    return []
-
-
-def _first_url(*values: object) -> str:
-    for value in values:
-        text = _first_text_value(value)
-        if text:
-            return text
-
-    return ""
-
-
-def _json_ld_type_matches(value: object, expected_type: str) -> bool:
-    return any(
-        item.rsplit(":", 1)[-1].lower() == expected_type.lower()
-        for item in _text_values(value)
-    )
-
-
-def _site_root(source_url: str) -> str:
-    parts = urlsplit(source_url)
-    return urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
-
-
-ADAPTERS: tuple[DiscoveryAdapter, ...] = (
-    CKANAdapter(),
-    SocrataAdapter(),
-    DataJsonAdapter(),
-    GenericWebsiteAdapter(),
-)
