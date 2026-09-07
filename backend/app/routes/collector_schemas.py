@@ -146,6 +146,30 @@ class CollectorRepositoryClassification(BaseModel):
         return self
 
 
+class CollectorCollectionJob(BaseModel):
+    id: int
+    source_url: str
+    status: str
+    saved_count: int
+    discovered_count: int = 0
+    analyzed_count: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
+    invalid_distribution_count: int = 0
+    discovery_methods: list[str] = Field(default_factory=list)
+    message: str = ""
+    error: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    finished_at: str = ""
+
+
+class CollectorAutomaticCollection(BaseModel):
+    state: Literal["pending", "running", "saved", "empty", "error"]
+    job: Optional[CollectorCollectionJob] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    error: str = Field(default="", max_length=2_000)
+
+
 class CollectorRepositorySearchItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -166,6 +190,7 @@ class CollectorRepositorySearchItem(BaseModel):
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
     classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    automatic_collection: Optional[CollectorAutomaticCollection] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
 
     @field_validator("metadata")
     @classmethod
@@ -258,24 +283,6 @@ class CollectorOnlineDatasetSearchResponse(BaseModel):
 
 class CollectorCollectionResponse(BaseModel):
     items: list[CollectorCollectedDataset]
-
-
-class CollectorCollectionJob(BaseModel):
-    id: int
-    source_url: str
-    status: str
-    saved_count: int
-    discovered_count: int = 0
-    analyzed_count: int = 0
-    accepted_count: int = 0
-    rejected_count: int = 0
-    invalid_distribution_count: int = 0
-    discovery_methods: list[str] = Field(default_factory=list)
-    message: str = ""
-    error: str = ""
-    created_at: str = ""
-    updated_at: str = ""
-    finished_at: str = ""
 
 
 class CollectorCollectionJobResponse(BaseModel):

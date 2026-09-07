@@ -9,11 +9,14 @@ from .db.collected_datasets import (
 )
 from .db.collection_completion import complete_collection_job
 from .db.collection_jobs import (
+    CollectionJobReservation,
     create_collection_job,
     get_collection_job,
     mark_collection_job_done,
     mark_collection_job_error,
     mark_collection_job_running,
+    mark_interrupted_collection_jobs_error,
+    reserve_automatic_collection_job,
 )
 from .db.connection import close_database_pool, open_database_pool
 from .db.schema import DATA_SOURCE_KEY_PATTERN_TEXT, init_database
@@ -34,6 +37,7 @@ from .db.sources import (
 
 __all__ = (
     "DATA_SOURCE_KEY_PATTERN_TEXT",
+    "CollectionJobReservation",
     "DuplicateDataSourceKeyError",
     "InvalidDataSourceKeyError",
     "InvalidDataSourceURLError",
@@ -50,6 +54,7 @@ __all__ = (
     "list_collected_datasets",
     "list_data_sources",
     "list_dataset_discovery_observations",
+    "mark_interrupted_collection_jobs_error",
     "mark_collection_job_done",
     "mark_collection_job_error",
     "mark_collection_job_running",
@@ -57,6 +62,7 @@ __all__ = (
     "normalize_data_source_page_url",
     "normalize_dataset_search_query",
     "open_database_pool",
+    "reserve_automatic_collection_job",
     "save_collected_datasets",
     "search_collected_datasets",
     "upsert_collector_data_source",

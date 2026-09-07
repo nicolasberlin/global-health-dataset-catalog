@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -1625,6 +1626,138 @@ async def test_collection_job_lifecycle(database):
 
     fetched = await database.get_collection_job(int(job["id"]))
     assert fetched == done
+
+
+async def test_automatic_collection_reservation_reuses_active_job_and_saved_result(
+    database,
+):
+    await database.init_database()
+    candidate_url = "https://repository.example.org/datasets/mortality"
+
+    reservations = await asyncio.gather(
+        *(database.reserve_automatic_collection_job(candidate_url) for _ in range(4))
+    )
+    first = next(reservation for reservation in reservations if reservation.created)
+    duplicate_pending = next(
+        reservation for reservation in reservations if not reservation.created
+    )
+
+    assert sum(reservation.created for reservation in reservations) == 1
+    assert {reservation.job["id"] for reservation in reservations} == {
+        first.job["id"]
+    }
+    assert first.created is True
+    assert first.already_collected is False
+    assert first.job is not None
+    assert duplicate_pending.created is False
+    assert duplicate_pending.job == first.job
+
+    job_id = int(first.job["id"])
+    await database.mark_collection_job_running(job_id)
+    duplicate_running = await database.reserve_automatic_collection_job(candidate_url)
+
+    assert duplicate_running.created is False
+    assert duplicate_running.job is not None
+    assert duplicate_running.job["id"] == job_id
+    assert duplicate_running.job["status"] == "running"
+
+    completed = await database.complete_collection_job(
+        job_id,
+        CollectionResult(datasets=[_mortality_dataset()]),
+    )
+    already_saved = await database.reserve_automatic_collection_job(candidate_url)
+
+    assert completed["status"] == "done"
+    assert completed["saved_count"] == 1
+    assert already_saved.already_collected is True
+    assert already_saved.created is False
+    assert already_saved.job is None
+
+    jobs = await _fetchall(
+        database,
+        "SELECT id FROM collection_jobs WHERE source_url = %s",
+        (candidate_url,),
+    )
+    assert len(jobs) == 1
+
+
+async def test_automatic_collection_reservation_normalizes_url_before_deduplication(
+    database,
+):
+    await database.init_database()
+
+    reservations = await asyncio.gather(
+        database.reserve_automatic_collection_job(
+            "https://repository.example.org/datasets/mortality?id=1&utm_source=a"
+        ),
+        database.reserve_automatic_collection_job(
+            "https://repository.example.org/datasets/mortality?utm_source=b&id=1#details"
+        ),
+    )
+
+    assert sum(reservation.created for reservation in reservations) == 1
+    assert {reservation.job["id"] for reservation in reservations} == {
+        reservations[0].job["id"]
+    }
+    assert {reservation.job["source_url"] for reservation in reservations} == {
+        "https://repository.example.org/datasets/mortality?id=1"
+    }
+
+
+async def test_interrupted_collection_jobs_are_marked_error_on_recovery(database):
+    await database.init_database()
+    pending = await database.create_collection_job(
+        "https://repository.example.org/datasets/pending"
+    )
+    running = await database.create_collection_job(
+        "https://repository.example.org/datasets/running"
+    )
+    await database.mark_collection_job_running(int(running["id"]))
+
+    recovered_count = await database.mark_interrupted_collection_jobs_error()
+
+    assert recovered_count == 2
+    for job_id in (pending["id"], running["id"]):
+        recovered = await database.get_collection_job(int(job_id))
+        assert recovered is not None
+        assert recovered["status"] == "error"
+        assert recovered["message"] == "Collecte interrompue."
+        assert recovered["error"] == "Collection interrupted by application restart."
+        assert recovered["finished_at"] != ""
+
+
+@pytest.mark.parametrize("terminal_state", ["empty", "error"])
+async def test_automatic_collection_reservation_allows_retry_after_terminal_job(
+    database,
+    terminal_state,
+):
+    await database.init_database()
+    candidate_url = f"https://repository.example.org/datasets/{terminal_state}"
+    first = await database.reserve_automatic_collection_job(candidate_url)
+    assert first.job is not None
+    first_job_id = int(first.job["id"])
+
+    if terminal_state == "empty":
+        await database.mark_collection_job_running(first_job_id)
+        completed = await database.complete_collection_job(
+            first_job_id,
+            CollectionResult(),
+        )
+        assert completed["status"] == "done"
+        assert completed["saved_count"] == 0
+    else:
+        failed = await database.mark_collection_job_error(
+            first_job_id,
+            "network failure",
+        )
+        assert failed["status"] == "error"
+
+    retry = await database.reserve_automatic_collection_job(candidate_url)
+
+    assert retry.created is True
+    assert retry.job is not None
+    assert retry.job["id"] != first_job_id
+    assert retry.job["status"] == "pending"
 
 
 async def test_complete_collection_job_rolls_back_datasets_when_one_save_fails(database):

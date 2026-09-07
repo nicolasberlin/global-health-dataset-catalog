@@ -10,8 +10,13 @@ from collector.extraction.dataset_metadata import (
 )
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
-from collector.fetch import FetchedPage
-from collector.main import analyze_discovered_page, analyze_html_page, collect_source_with_report
+from collector.fetch import FetchedPage, PageFetchError
+from collector.main import (
+    analyze_discovered_page,
+    analyze_html_page,
+    collect_repository_candidate_with_report,
+    collect_source_with_report,
+)
 from collector.storage.models import (
     CollectedDataset,
     DistributionCandidate,
@@ -543,6 +548,63 @@ def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():
     assert dataset.geography == ("Germany",)
     assert [distribution.format for distribution in dataset.distributions] == ["CSV"]
     assert dataset.validation_results[0].ok is True
+
+
+def test_collect_repository_candidate_analyzes_only_the_candidate_page():
+    candidate_url = "https://example.org/datasets/vaccination"
+
+    def fake_fetch_html(url):
+        assert url == candidate_url
+        return FetchedPage(
+            url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            html="""
+            <html>
+                <head><title>Vaccination health dataset</title></head>
+                <body>
+                    <p>Vaccination observations.</p>
+                    <a href="/files/vaccination.csv">Download CSV</a>
+                </body>
+            </html>
+            """,
+        )
+
+    def fake_validate(distribution):
+        return ValidationResult(
+            url=distribution.url,
+            final_url=distribution.url,
+            format=distribution.format,
+            ok=True,
+            http_status=200,
+            mime_type="text/csv",
+        )
+
+    result = collect_repository_candidate_with_report(
+        candidate_url,
+        fetch_html=fake_fetch_html,
+        validate=fake_validate,
+        classifier=AcceptingPageClassifier(),
+    )
+
+    assert len(result.datasets) == 1
+    assert result.datasets[0].dataset_url == candidate_url
+    assert result.datasets[0].discovery_method == "repository_search"
+    assert result.report.discovered_count == 1
+    assert result.report.discovery_methods == ("repository_search",)
+
+
+def test_collect_repository_candidate_propagates_page_fetch_errors():
+    def fake_fetch_html(url):
+        raise PageFetchError(f"Could not fetch URL: {url}")
+
+    with pytest.raises(PageFetchError, match="Could not fetch URL"):
+        collect_repository_candidate_with_report(
+            "https://example.org/datasets/unavailable",
+            fetch_html=fake_fetch_html,
+            classifier=AcceptingPageClassifier(),
+        )
 
 
 def test_collect_source_with_report_summarizes_discovery_analysis_and_validation():

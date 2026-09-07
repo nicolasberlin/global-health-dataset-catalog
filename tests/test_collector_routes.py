@@ -5,7 +5,7 @@ import threading
 import time
 
 import pytest
-from app.database import normalize_dataset_search_query
+from app.database import CollectionJobReservation, normalize_dataset_search_query
 from app.routes.collector import (
     _run_collection_job,
     classify_repository_result,
@@ -80,6 +80,68 @@ def _accepted_repository_ensemble(*, reason: str) -> dict[str, object]:
         "voters": voters,
         "failures": [],
     }
+
+
+def _rejected_repository_ensemble(*, reason: str) -> dict[str, object]:
+    voters = [
+        {
+            "voter_id": voter_id,
+            "accepted": False,
+            "relevance_label": "not_relevant",
+            "reason": reason,
+            "missing_information": [],
+        }
+        for voter_id in ("llm_a", "llm_b", "llm_c")
+    ]
+    return {
+        "votes_required": 2,
+        "minimum_successful_votes": 2,
+        "successful_votes": 3,
+        "failed_votes": 0,
+        "accepted_votes": 0,
+        "decision": "rejected",
+        "decision_reason": "rejected_by_majority",
+        "decision_voter_ids": ["llm_a", "llm_b", "llm_c"],
+        "voters": voters,
+        "failures": [],
+    }
+
+
+def _collection_job(
+    *,
+    job_id: int = 12,
+    status: str = "pending",
+    saved_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "id": job_id,
+        "source_url": "https://example.org/datasets/malaria-mortality",
+        "status": status,
+        "saved_count": saved_count,
+        "message": "Collecte en attente.",
+        "error": "",
+        "created_at": "2026-09-06 12:00:00",
+        "updated_at": "2026-09-06 12:00:00",
+        "finished_at": "",
+    }
+
+
+def _use_new_automatic_collection_reservation(
+    monkeypatch,
+    expected_url="https://example.org/datasets/malaria-mortality",
+) -> None:
+    async def fake_reserve(source_url):
+        assert source_url == expected_url
+        return CollectionJobReservation(
+            job={**_collection_job(), "source_url": source_url},
+            created=True,
+            already_collected=False,
+        )
+
+    monkeypatch.setattr(
+        "app.routes.collector.reserve_automatic_collection_job",
+        fake_reserve,
+    )
 
 
 async def test_collector_search_repositories_route_accepts_query_and_returns_results(
@@ -256,7 +318,11 @@ async def test_collector_search_datasets_falls_back_online_when_database_is_empt
         "app.routes.collector.build_default_repository_result_classifier",
         lambda: QueryCapturingClassifier(),
     )
-    await classify_repository_result(response.items[0])
+    _use_new_automatic_collection_reservation(
+        monkeypatch,
+        expected_url="https://example.org/online-malaria",
+    )
+    await classify_repository_result(response.items[0], BackgroundTasks())
 
     assert captured_queries == ["datasets about malaria mortality in France"]
 
@@ -349,6 +415,8 @@ async def test_collector_classify_repository_result_route_returns_classification
     monkeypatch,
 ):
     _use_accepting_repository_classifier(monkeypatch)
+    _use_new_automatic_collection_reservation(monkeypatch)
+    background_tasks = BackgroundTasks()
 
     response = await classify_repository_result(
         CollectorRepositorySearchItem(
@@ -373,7 +441,8 @@ async def test_collector_classify_repository_result_route_returns_classification
                 "Modality of data": "tabular",
                 "Description of dataset": "Annual mortality estimates by country.",
             },
-        )
+        ),
+        background_tasks,
     )
 
     assert response.title == "Malaria mortality estimates"
@@ -383,6 +452,156 @@ async def test_collector_classify_repository_result_route_returns_classification
     assert response.classification.reason == (
         "Malaria mortality estimates matches the search query."
     )
+    assert response.automatic_collection is not None
+    assert response.automatic_collection.state == "pending"
+    assert response.automatic_collection.job is not None
+    assert response.automatic_collection.job.id == 12
+    assert len(background_tasks.tasks) == 1
+
+
+async def test_collector_classify_rejected_result_does_not_create_collection_job(
+    monkeypatch,
+):
+    class RejectingRepositoryClassifier:
+        def classify(self, page):
+            return RepositoryClassification(
+                relevance_label="not_relevant",
+                reason="The candidate does not match the query.",
+                ensemble=_rejected_repository_ensemble(
+                    reason="The candidate does not match the query."
+                ),
+            )
+
+    async def fail_if_reserved(source_url):
+        raise AssertionError(f"Rejected candidate reserved unexpectedly: {source_url}")
+
+    monkeypatch.setattr(
+        "app.routes.collector.build_default_repository_result_classifier",
+        lambda: RejectingRepositoryClassifier(),
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.reserve_automatic_collection_job",
+        fail_if_reserved,
+    )
+    background_tasks = BackgroundTasks()
+
+    response = await classify_repository_result(
+        CollectorRepositorySearchItem(
+            title="Unrelated dataset",
+            url="https://example.org/datasets/unrelated",
+            source="DataCite",
+            search_query="malaria mortality",
+        ),
+        background_tasks,
+    )
+
+    assert response.classification is not None
+    assert response.classification.accepted is False
+    assert response.automatic_collection is None
+    assert background_tasks.tasks == []
+
+
+async def test_collector_classify_accepted_result_reuses_active_collection_job(
+    monkeypatch,
+):
+    _use_accepting_repository_classifier(monkeypatch)
+
+    async def fake_reserve(source_url):
+        return CollectionJobReservation(
+            job=_collection_job(status="running"),
+            created=False,
+            already_collected=False,
+        )
+
+    monkeypatch.setattr(
+        "app.routes.collector.reserve_automatic_collection_job",
+        fake_reserve,
+    )
+    background_tasks = BackgroundTasks()
+
+    response = await classify_repository_result(
+        CollectorRepositorySearchItem(
+            title="Malaria mortality estimates",
+            url="https://example.org/datasets/malaria-mortality",
+            source="DataCite",
+            search_query="malaria mortality",
+        ),
+        background_tasks,
+    )
+
+    assert response.automatic_collection is not None
+    assert response.automatic_collection.state == "running"
+    assert response.automatic_collection.job is not None
+    assert response.automatic_collection.job.id == 12
+    assert background_tasks.tasks == []
+
+
+async def test_collector_classify_accepted_saved_result_does_not_recollect(
+    monkeypatch,
+):
+    _use_accepting_repository_classifier(monkeypatch)
+
+    async def fake_reserve(source_url):
+        return CollectionJobReservation(
+            job=None,
+            created=False,
+            already_collected=True,
+        )
+
+    monkeypatch.setattr(
+        "app.routes.collector.reserve_automatic_collection_job",
+        fake_reserve,
+    )
+    background_tasks = BackgroundTasks()
+
+    response = await classify_repository_result(
+        CollectorRepositorySearchItem(
+            title="Malaria mortality estimates",
+            url="https://example.org/datasets/malaria-mortality",
+            source="DataCite",
+            search_query="malaria mortality",
+        ),
+        background_tasks,
+    )
+
+    assert response.automatic_collection is not None
+    assert response.automatic_collection.state == "saved"
+    assert response.automatic_collection.job is None
+    assert background_tasks.tasks == []
+
+
+async def test_collector_classify_keeps_acceptance_when_collection_reservation_fails(
+    monkeypatch,
+):
+    _use_accepting_repository_classifier(monkeypatch)
+
+    async def fail_reservation(source_url):
+        raise RuntimeError(f"Database unavailable for {source_url}")
+
+    monkeypatch.setattr(
+        "app.routes.collector.reserve_automatic_collection_job",
+        fail_reservation,
+    )
+    background_tasks = BackgroundTasks()
+
+    response = await classify_repository_result(
+        CollectorRepositorySearchItem(
+            title="Malaria mortality estimates",
+            url="https://example.org/datasets/malaria-mortality",
+            source="DataCite",
+            search_query="malaria mortality",
+        ),
+        background_tasks,
+    )
+
+    assert response.classification is not None
+    assert response.classification.accepted is True
+    assert response.automatic_collection is not None
+    assert response.automatic_collection.state == "error"
+    assert response.automatic_collection.error == (
+        "Automatic collection scheduling failed."
+    )
+    assert background_tasks.tasks == []
 
 
 async def test_collector_classify_repository_result_route_returns_502_when_classification_fails(
@@ -406,7 +625,8 @@ async def test_collector_classify_repository_result_route_returns_502_when_class
                 url="https://example.org/datasets/malaria-mortality",
                 source="DataCite",
                 search_query="malaria mortality",
-            )
+            ),
+            BackgroundTasks(),
         )
     except HTTPException as exception:
         assert exception.status_code == 502
@@ -455,7 +675,10 @@ async def test_collector_repository_classification_limits_backend_concurrency(
     )
 
     await asyncio.gather(
-        *(classify_repository_result(payload) for _request in range(4))
+        *(
+            classify_repository_result(payload, BackgroundTasks())
+            for _request in range(4)
+        )
     )
 
     assert maximum_active_calls == 2
@@ -468,7 +691,8 @@ async def test_collector_classify_repository_result_route_requires_search_query(
                 title="Malaria mortality estimates",
                 url="https://example.org/datasets/malaria-mortality",
                 source="DataCite",
-            )
+            ),
+            BackgroundTasks(),
         )
     except HTTPException as exception:
         assert exception.status_code == 400
@@ -704,6 +928,73 @@ async def test_run_collection_job_marks_done(monkeypatch):
     ]
 
 
+async def test_run_automatic_collection_job_uses_candidate_pipeline_and_completes_empty(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_collect_repository_candidate_with_report(source_url):
+        calls.append(("collect_candidate", source_url))
+        return CollectionResult(
+            report=CollectionReport(
+                discovered_count=1,
+                analyzed_count=1,
+                rejected_count=1,
+                invalid_distribution_count=1,
+                discovery_methods=("repository_search",),
+            )
+        )
+
+    def fail_if_source_collection_runs(source_url):
+        raise AssertionError(f"Whole-source collection ran unexpectedly: {source_url}")
+
+    async def fake_mark_collection_job_running(job_id):
+        calls.append(("running", job_id))
+        return {"id": job_id, "status": "running"}
+
+    async def fake_complete_collection_job(job_id, collection_result):
+        calls.append(
+            (
+                "complete",
+                job_id,
+                len(collection_result.datasets),
+                collection_result.report.discovery_methods,
+            )
+        )
+
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_running",
+        fake_mark_collection_job_running,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.collect_repository_candidate_with_report",
+        fake_collect_repository_candidate_with_report,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.collect_source_with_report",
+        fail_if_source_collection_runs,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.complete_collection_job",
+        fake_complete_collection_job,
+    )
+
+    await _run_collection_job(
+        12,
+        "https://example.org/datasets/malaria-mortality",
+        repository_candidate=True,
+    )
+
+    assert calls == [
+        ("running", 12),
+        (
+            "collect_candidate",
+            "https://example.org/datasets/malaria-mortality",
+        ),
+        ("complete", 12, 0, ("repository_search",)),
+    ]
+
+
 async def test_run_collection_job_stops_when_job_cannot_be_started(monkeypatch):
     calls = []
 
@@ -758,6 +1049,61 @@ async def test_run_collection_job_marks_errors(monkeypatch):
     await _run_collection_job(12, "https://catalog.example.org/")
 
     assert calls == [("running", 12), ("error", 12, "bad source")]
+
+
+async def test_collection_jobs_limit_backend_concurrency(monkeypatch):
+    active_calls = 0
+    maximum_active_calls = 0
+    counter_lock = threading.Lock()
+    worker_pair = threading.Barrier(2)
+
+    def fake_collect_source_with_report(source_url):
+        nonlocal active_calls, maximum_active_calls
+        with counter_lock:
+            active_calls += 1
+            maximum_active_calls = max(maximum_active_calls, active_calls)
+
+        worker_pair.wait(timeout=1)
+        time.sleep(0.02)
+
+        with counter_lock:
+            active_calls -= 1
+        return CollectionResult()
+
+    async def fake_mark_collection_job_running(job_id):
+        return {"id": job_id, "status": "running"}
+
+    async def fake_complete_collection_job(job_id, collection_result):
+        return {"id": job_id, "status": "done"}
+
+    async def fail_if_marked_error(job_id, error):
+        raise AssertionError(f"Job {job_id} failed unexpectedly: {error}")
+
+    monkeypatch.setattr(
+        "app.routes.collector.collect_source_with_report",
+        fake_collect_source_with_report,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_running",
+        fake_mark_collection_job_running,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.complete_collection_job",
+        fake_complete_collection_job,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.mark_collection_job_error",
+        fail_if_marked_error,
+    )
+
+    await asyncio.gather(
+        *(
+            _run_collection_job(job_id, f"https://catalog.example.org/{job_id}")
+            for job_id in range(1, 5)
+        )
+    )
+
+    assert maximum_active_calls == 2
 
 
 async def test_run_collection_job_marks_error_when_completion_fails(monkeypatch):

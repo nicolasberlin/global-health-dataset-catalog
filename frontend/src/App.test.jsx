@@ -137,12 +137,160 @@ describe('database-first dataset search', () => {
                             voters: [],
                         },
                     },
+                    automatic_collection: {
+                        state: 'saved',
+                        job: {
+                            id: 12,
+                            status: 'done',
+                            saved_count: 1,
+                        },
+                    },
                 }),
             );
         });
 
-        expect(await screen.findByText('Accepté 1/1')).toBeInTheDocument();
+        expect(await screen.findByText('Candidat accepté 1/1')).toBeInTheDocument();
+        expect(
+            screen.getByText('Dataset sauvegardé dans le catalogue local'),
+        ).toBeInTheDocument();
         expect(screen.getByText('Accord IA')).toBeInTheDocument();
+    });
+
+    it('polls automatic collection until the accepted candidate is saved', async () => {
+        const onlineItem = {
+            title: 'Online malaria dataset',
+            description: 'Annual observations.',
+            url: 'https://example.org/malaria',
+            source: 'DataCite',
+            search_query: 'malaria mortality',
+            publisher: 'Example Institute',
+            date: '2025',
+            doi: '',
+            keywords: ['malaria'],
+            metadata: {},
+        };
+        mockApi((url) => {
+            if (url.endsWith('/collector/search-datasets')) {
+                return Promise.resolve(
+                    jsonResponse({
+                        query: 'malaria mortality',
+                        origin: 'online',
+                        items: [onlineItem],
+                        warnings: [],
+                    }),
+                );
+            }
+            if (url.endsWith('/collector/classify-repository-result')) {
+                return Promise.resolve(
+                    jsonResponse({
+                        ...onlineItem,
+                        classification: {
+                            accepted: true,
+                            relevance_label: 'relevant',
+                            reason: 'Matches the query.',
+                            missing_information: [],
+                            ensemble: {
+                                successful_votes: 1,
+                                accepted_votes: 1,
+                                failed_votes: 0,
+                                decision_reason: 'enough_accept_votes',
+                                voters: [],
+                            },
+                        },
+                        automatic_collection: {
+                            state: 'pending',
+                            job: {
+                                id: 55,
+                                status: 'pending',
+                                saved_count: 0,
+                            },
+                        },
+                    }),
+                );
+            }
+            if (url.endsWith('/collector/collection-jobs/55')) {
+                return Promise.resolve(
+                    jsonResponse({
+                        job: {
+                            id: 55,
+                            status: 'done',
+                            saved_count: 1,
+                        },
+                    }),
+                );
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+        render(<App />);
+
+        submitSearch();
+
+        expect(
+            await screen.findByText('Collecte automatique en attente'),
+        ).toBeInTheDocument();
+        expect(
+            await screen.findByText('Dataset sauvegardé dans le catalogue local', {}, {
+                timeout: 2500,
+            }),
+        ).toBeInTheDocument();
+        expect(
+            global.fetch.mock.calls.some(([url]) =>
+                String(url).endsWith('/collector/collection-jobs/55'),
+            ),
+        ).toBe(true);
+    });
+
+    it('leaves rejected candidates unscheduled', async () => {
+        const onlineItem = {
+            title: 'Unrelated dataset',
+            description: 'Unrelated observations.',
+            url: 'https://example.org/unrelated',
+            source: 'DataCite',
+            search_query: 'malaria mortality',
+            publisher: '',
+            date: '',
+            doi: '',
+            keywords: [],
+            metadata: {},
+        };
+        mockApi((url) => {
+            if (url.endsWith('/collector/search-datasets')) {
+                return Promise.resolve(
+                    jsonResponse({
+                        query: 'malaria mortality',
+                        origin: 'online',
+                        items: [onlineItem],
+                        warnings: [],
+                    }),
+                );
+            }
+            if (url.endsWith('/collector/classify-repository-result')) {
+                return Promise.resolve(
+                    jsonResponse({
+                        ...onlineItem,
+                        classification: {
+                            accepted: false,
+                            relevance_label: 'not_relevant',
+                            reason: 'Does not match the query.',
+                            missing_information: [],
+                            ensemble: {},
+                        },
+                        automatic_collection: null,
+                    }),
+                );
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+        render(<App />);
+
+        submitSearch();
+
+        expect(await screen.findByText(/1 a été rejeté/)).toBeInTheDocument();
+        expect(
+            global.fetch.mock.calls.some(([url]) =>
+                String(url).includes('/collector/collection-jobs/'),
+            ),
+        ).toBe(false);
     });
 
     it('shows the loading and empty online states', async () => {
