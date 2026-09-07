@@ -136,6 +136,92 @@ export default function App() {
         );
     }
 
+    function updateRepositoryCandidateCollection(
+        runId,
+        candidateId,
+        automaticCollection,
+    ) {
+        if (repositorySearchRunRef.current !== runId) {
+            return;
+        }
+
+        setRepositoryCandidates((currentCandidates) =>
+            currentCandidates.map((candidate) =>
+                candidate.id === candidateId
+                    ? {
+                          ...candidate,
+                          item: {
+                              ...candidate.item,
+                              automatic_collection: automaticCollection,
+                          },
+                      }
+                    : candidate,
+            ),
+        );
+    }
+
+    async function pollAutomaticRepositoryCollection(
+        candidateId,
+        initialJob,
+        runId,
+        signal,
+    ) {
+        const maxAttempts = 80;
+
+        try {
+            for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                await wait(attempt === 0 ? 700 : 1500);
+                if (signal.aborted || repositorySearchRunRef.current !== runId) {
+                    return;
+                }
+
+                const job = await loadCollectionJob(initialJob.id);
+                if (job.status === 'done') {
+                    const state = job.saved_count > 0 ? 'saved' : 'empty';
+                    updateRepositoryCandidateCollection(runId, candidateId, {
+                        state,
+                        job,
+                    });
+                    if (state === 'saved') {
+                        await loadCollectedDatasets({ silent: true });
+                    }
+                    return;
+                }
+
+                if (job.status === 'error') {
+                    updateRepositoryCandidateCollection(runId, candidateId, {
+                        state: 'error',
+                        job,
+                    });
+                    return;
+                }
+
+                updateRepositoryCandidateCollection(runId, candidateId, {
+                    state: job.status,
+                    job,
+                });
+            }
+
+            throw new Error('La collecte automatique prend trop de temps.');
+        } catch (exception) {
+            if (isAbortError(exception) || signal.aborted) {
+                return;
+            }
+
+            updateRepositoryCandidateCollection(runId, candidateId, {
+                state: 'error',
+                job: {
+                    ...initialJob,
+                    status: 'error',
+                    error:
+                        exception instanceof Error
+                            ? exception.message
+                            : 'Impossible de suivre la collecte automatique.',
+                },
+            });
+        }
+    }
+
     async function classifyRepositoryCandidates(candidates, runId, abortController) {
         let nextCandidateIndex = 0;
         const { signal } = abortController;
@@ -182,6 +268,15 @@ export default function App() {
                         throw new Error('La réponse de classification est incomplète.');
                     }
 
+                    if (
+                        responsePayload.classification.accepted &&
+                        !responsePayload.automatic_collection
+                    ) {
+                        throw new Error(
+                            'La réponse de collecte automatique est incomplète.',
+                        );
+                    }
+
                     updateRepositoryCandidate(runId, candidate.id, {
                         item: responsePayload,
                         status: responsePayload.classification.accepted
@@ -189,6 +284,20 @@ export default function App() {
                             : 'rejected',
                         error: '',
                     });
+
+                    const automaticCollection = responsePayload.automatic_collection;
+                    if (
+                        responsePayload.classification.accepted &&
+                        ['pending', 'running'].includes(automaticCollection?.state) &&
+                        automaticCollection?.job?.id
+                    ) {
+                        void pollAutomaticRepositoryCollection(
+                            candidate.id,
+                            automaticCollection.job,
+                            runId,
+                            signal,
+                        );
+                    }
                 } catch (exception) {
                     if (isAbortError(exception) || signal.aborted) {
                         return;

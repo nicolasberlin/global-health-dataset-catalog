@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Union
@@ -18,10 +19,12 @@ from app.database import (
     mark_collection_job_error,
     mark_collection_job_running,
     normalize_dataset_search_query,
+    reserve_automatic_collection_job,
     search_collected_datasets,
 )
 from app.database import create_collection_job as db_create_collection_job
 from app.routes.collector_schemas import (
+    CollectorAutomaticCollection,
     CollectorCollectedDataset,
     CollectorCollectionJob,
     CollectorCollectionJobResponse,
@@ -55,7 +58,10 @@ from collector.classification.repository import (
     MAX_REPOSITORY_TITLE_CHARS,
 )
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
-from collector.main import collect_source_with_report
+from collector.main import (
+    collect_repository_candidate_with_report,
+    collect_source_with_report,
+)
 from collector.repository_search import (
     RepositorySearchResult,
     RepositorySearchWarning,
@@ -70,11 +76,21 @@ router = APIRouter(prefix="/collector", tags=["collector"])
 logger = logging.getLogger(__name__)
 
 REPOSITORY_CLASSIFICATION_MAX_CONCURRENCY = 2
+COLLECTION_MAX_CONCURRENCY = int(os.getenv("COLLECTION_MAX_CONCURRENCY", "2"))
+if COLLECTION_MAX_CONCURRENCY < 1:
+    raise RuntimeError("COLLECTION_MAX_CONCURRENCY must be greater than zero.")
+
 # A dedicated executor keeps the strict limit until synchronous LLM work really
 # finishes, even when the awaiting HTTP request is cancelled.
 _repository_classification_executor = ThreadPoolExecutor(
     max_workers=REPOSITORY_CLASSIFICATION_MAX_CONCURRENCY,
     thread_name_prefix="repository-classification",
+)
+# Collection includes network, page classification, and distribution validation.
+# Limiting it server-side protects every client, not only the React application.
+_collection_executor = ThreadPoolExecutor(
+    max_workers=COLLECTION_MAX_CONCURRENCY,
+    thread_name_prefix="collection",
 )
 
 
@@ -90,7 +106,11 @@ async def start_collection_job(
     """
 
     job = await db_create_collection_job(str(payload.url))
-    background_tasks.add_task(_run_collection_job, int(job["id"]), str(payload.url))
+    background_tasks.add_task(
+        _run_collection_job,
+        int(job["id"]),
+        str(job["source_url"]),
+    )
 
     return CollectorCollectionJobResponse(job=CollectorCollectionJob(**job))
 
@@ -197,10 +217,13 @@ async def _search_online_repositories(
 @router.post("/classify-repository-result")
 async def classify_repository_result(
     payload: CollectorRepositorySearchItem,
+    background_tasks: BackgroundTasks,
 ) -> CollectorRepositorySearchItem:
-    """Classify one transient repository candidate without persisting it.
+    """Classify one candidate and reserve validated collection when accepted.
 
-    Classifier failures are logged and exposed as a generic 502 response.
+    Classifier failures are logged and exposed as a generic 502 response. An
+    accepted repository decision never writes provider metadata directly; it
+    only schedules the existing page and distribution validation pipeline.
     """
 
     if not payload.search_query.strip():
@@ -222,10 +245,54 @@ async def classify_repository_result(
         )
         raise HTTPException(status_code=502, detail="Page classification failed.") from exception
 
-    return _collector_repository_search_item(classified_result)
+    automatic_collection = None
+    if classified_result.classification and classified_result.classification.accepted:
+        automatic_collection = await _reserve_automatic_collection(
+            str(classified_result.url),
+            background_tasks,
+        )
+
+    return _collector_repository_search_item(
+        classified_result,
+        automatic_collection=automatic_collection,
+    )
 
 
-async def _run_collection_job(job_id: int, source_url: str) -> None:
+async def _reserve_automatic_collection(
+    source_url: str,
+    background_tasks: BackgroundTasks,
+) -> CollectorAutomaticCollection:
+    """Reserve one collection job and schedule work only for a new reservation."""
+
+    try:
+        reservation = await reserve_automatic_collection_job(source_url)
+    except Exception:  # noqa: BLE001 - scheduling failures need a stable API error.
+        logger.exception(
+            "Automatic collection reservation failed for url=%s",
+            source_url,
+        )
+        return CollectorAutomaticCollection(
+            state="error",
+            error="Automatic collection scheduling failed.",
+        )
+
+    if reservation.already_collected:
+        return CollectorAutomaticCollection(state="saved")
+    if reservation.job is None:
+        raise RuntimeError("Automatic collection reservation returned no job.")
+
+    job = CollectorCollectionJob(**reservation.job)
+    if reservation.created:
+        background_tasks.add_task(_run_collection_job, job.id, job.source_url, True)
+
+    return CollectorAutomaticCollection(state=job.status, job=job)
+
+
+async def _run_collection_job(
+    job_id: int,
+    source_url: str,
+    repository_candidate: bool = False,
+) -> None:
     """Collect outside PostgreSQL, then persist datasets and completion atomically.
 
     Network and LLM work runs in a worker thread before the atomic completion
@@ -240,8 +307,14 @@ async def _run_collection_job(job_id: int, source_url: str) -> None:
         if running_job is None:
             return
 
-        collection_result = await asyncio.to_thread(
-            collect_source_with_report,
+        collect = (
+            collect_repository_candidate_with_report
+            if repository_candidate
+            else collect_source_with_report
+        )
+        collection_result = await asyncio.get_running_loop().run_in_executor(
+            _collection_executor,
+            collect,
             source_url,
         )
         await complete_collection_job(job_id, collection_result)
@@ -266,6 +339,7 @@ def _collector_repository_search_item(
     item: RepositorySearchResult,
     *,
     search_query: str | None = None,
+    automatic_collection: CollectorAutomaticCollection | None = None,
 ) -> CollectorRepositorySearchItem:
     data = asdict(item)
     if search_query is not None and not data.get("search_query"):
@@ -288,6 +362,7 @@ def _collector_repository_search_item(
         for keyword in data.get("keywords", [])[:MAX_REPOSITORY_KEYWORDS]
     ]
     data["metadata"] = _bounded_repository_metadata(data.get("metadata"))
+    data["automatic_collection"] = automatic_collection
     return CollectorRepositorySearchItem(**data)
 
 

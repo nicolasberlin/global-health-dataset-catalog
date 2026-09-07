@@ -569,6 +569,40 @@ p {
     -webkit-line-clamp: 4;
 }
 
+.repository-collection-status {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid #dbe4de;
+    border-radius: 6px;
+    background: #f7faf8;
+}
+
+.repository-collection-status strong,
+.repository-collection-status span {
+    display: block;
+}
+
+.repository-collection-status span {
+    color: #68766f;
+    font-size: 0.9rem;
+}
+
+.repository-collection-status--saved {
+    border-color: #8fbda7;
+    background: #f0f8f4;
+}
+
+.repository-collection-status--empty {
+    border-color: #d3b66f;
+    background: #fff9e9;
+}
+
+.repository-collection-status--error {
+    border-color: #dca49d;
+    background: #fff4f2;
+}
+
 .repository-card__footer {
     display: flex;
     flex-wrap: wrap;

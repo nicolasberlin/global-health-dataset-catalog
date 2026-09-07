@@ -62,6 +62,44 @@ function formatDecisionReason(reason) {
     return reasons[reason] ?? reason;
 }
 
+function automaticCollectionStatus(automaticCollection) {
+    const job = automaticCollection?.job;
+    const statuses = {
+        pending: {
+            title: 'Collecte automatique en attente',
+            detail: job?.id ? `Job #${job.id} créé.` : '',
+            tone: 'loading',
+        },
+        running: {
+            title: 'Collecte automatique en cours',
+            detail: job?.message || (job?.id ? `Job #${job.id} en cours.` : ''),
+            tone: 'loading',
+        },
+        saved: {
+            title: 'Dataset sauvegardé dans le catalogue local',
+            detail: job?.saved_count
+                ? `${job.saved_count} dataset(s) sauvegardé(s).`
+                : 'Ce dataset était déjà présent dans le catalogue.',
+            tone: 'saved',
+        },
+        empty: {
+            title: 'Collecte terminée sans fichier valide',
+            detail: 'Aucun fichier de données téléchargeable et valide n’a été trouvé.',
+            tone: 'empty',
+        },
+        error: {
+            title: 'Échec de la collecte automatique',
+            detail:
+                automaticCollection?.error ||
+                job?.error ||
+                'La page ou ses fichiers n’ont pas pu être collectés.',
+            tone: 'error',
+        },
+    };
+
+    return statuses[automaticCollection?.state] ?? null;
+}
+
 export default function RepositoryAcceptedCard({ candidate }) {
     const { item } = candidate;
     const classification = item.classification;
@@ -69,6 +107,7 @@ export default function RepositoryAcceptedCard({ candidate }) {
     const acceptedVotes = getAcceptedVoteCount(classification);
     const totalVotes = getTotalVoteCount(classification);
     const voters = Array.isArray(ensemble?.voters) ? ensemble.voters : [];
+    const collectionStatus = automaticCollectionStatus(item.automatic_collection);
     const agreementLabel =
         acceptedVotes === null || totalVotes === null
             ? ''
@@ -79,7 +118,7 @@ export default function RepositoryAcceptedCard({ candidate }) {
             <div className="repository-card__top">
                 <span className="repository-source-pill">{item.source}</span>
                 <span className="repository-status-pill repository-status-pill--accepted">
-                    Accepté{agreementLabel}
+                    Candidat accepté{agreementLabel}
                 </span>
             </div>
 
@@ -113,6 +152,16 @@ export default function RepositoryAcceptedCard({ candidate }) {
                             )}
                         </strong>
                     </span>
+                </div>
+            ) : null}
+
+            {collectionStatus ? (
+                <div
+                    className={`repository-collection-status repository-collection-status--${collectionStatus.tone}`}
+                    role="status"
+                >
+                    <strong>{collectionStatus.title}</strong>
+                    {collectionStatus.detail ? <span>{collectionStatus.detail}</span> : null}
                 </div>
             ) : null}
 

@@ -79,9 +79,8 @@ def collect_source_with_report(
     accepted page are probed. A page enters the result only after classifier
     acceptance and at least one successful distribution validation.
 
-    The returned result is not saved here. Classifier or validation errors
-    propagate to the caller; an HTML fetch reported as ``ValueError`` is
-    treated as a rejected candidate.
+    The returned result is not saved here. Fetch, classifier, and validation
+    errors propagate to the caller instead of being counted as rejections.
     """
 
     collected_datasets: list[CollectedDataset] = []
@@ -128,6 +127,43 @@ def collect_source_with_report(
     )
 
 
+def collect_repository_candidate_with_report(
+    candidate_url: str,
+    config: CollectorConfig = DEFAULT_CONFIG,
+    fetch_html: FetchHTMLFunction = fetch_public_html,
+    validate: ValidateDistributionFunction = validate_distribution,
+    classifier: PageClassifier | None = None,
+) -> CollectionResult:
+    """Collect one repository landing page through the normal validation gates.
+
+    Repository candidates are individual records, so this wrapper prevents the
+    generic discovery adapter from replacing that URL with an entire site
+    sitemap. Provider metadata is deliberately not passed into collection.
+    """
+
+    normalized_url = normalize_http_url(candidate_url)
+    if normalized_url is None:
+        raise ValueError("Repository candidate URL must be a valid HTTP(S) URL.")
+
+    def discover_candidate(_: str) -> list[DiscoveredPage]:
+        return [
+            DiscoveredPage(
+                url=normalized_url,
+                discovery_method="repository_search",
+                priority=1.0,
+            )
+        ]
+
+    return collect_source_with_report(
+        normalized_url,
+        config=config,
+        discover=discover_candidate,
+        fetch_html=fetch_html,
+        validate=validate,
+        classifier=classifier,
+    )
+
+
 def _collect_discovered_page_with_report(
     discovered_page: DiscoveredPage,
     config: CollectorConfig,
@@ -143,13 +179,7 @@ def _collect_discovered_page_with_report(
     if _has_structured_discovery_metadata(discovered_page):
         dataset = analyze_discovered_page(discovered_page, config, page_classifier)
     else:
-        try:
-            fetched_page = fetch_html(discovered_page.url)
-        except ValueError:
-            # An inaccessible landing page is a candidate rejection; other
-            # failures remain exceptional and abort the collection run.
-            return None, 0
-
+        fetched_page = fetch_html(discovered_page.url)
         dataset = analyze_html_page(
             fetched_page.final_url,
             fetched_page.html,
