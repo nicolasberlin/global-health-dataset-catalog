@@ -309,9 +309,26 @@ Headers and a small sample may refine the detected format. This is an
 availability/type probe, not a complete file download or content audit.
 
 Untrusted HTTP requests for HTML, JSON, sitemaps, and distributions pass through
-`open_public_http_url()`. It rejects private/local destinations before opening
-and revalidates every redirect destination, mitigating direct and redirect-based
-SSRF against local services.
+`open_public_http_url()`. Each connection resolves the destination once, rejects
+the complete answer if any address is non-public, and opens a socket directly
+to a validated numeric address. Retries only use that answer; every redirect
+creates a new validated connection, including redirects to the same hostname.
+The original hostname is retained for HTTP Host, TLS SNI, and certificate
+verification. Environment and explicit proxies are disabled. The conservative
+address policy also rejects CGNAT and IPv6 transition/translation ranges.
+
+The production container installs an independent nftables output policy before
+starting the API. Only DNS to configured resolvers, TCP 5432 to the resolved
+`postgres` service, replies to incoming connections, necessary IPv6 neighbour
+discovery, and public TCP 80/443 are allowed. Operators can block additional
+CIDRs with `EGRESS_BLOCKED_CIDRS`. Bootstrap fails closed if the firewall cannot
+be installed, then starts the API as UID/GID 10001 with all capabilities removed.
+This container policy does not apply to a Python process started on the host.
+
+Traefik routes require HTTPS and a configured hostname, with HTTP redirection
+and HSTS. PostgreSQL has no published port and uses an internal database network.
+The external Traefik still needs working entrypoints and certificates; see
+[Secure Deployment](DEPLOYMENT.md) for setup and runtime verification.
 
 Dataset identity validation is deliberately separate from network safety.
 `normalize_http_url()` accepts only normalized HTTP(S) URLs with a hostname and
@@ -604,9 +621,11 @@ contract.
 | Medium | PostgreSQL tests can be skipped locally | DB regressions may escape a non-DB test run | Require `TEST_DATABASE_URL` in CI |
 | Low | Volatile test counts in documentation | Counts become stale as tests change | Keep a verification date and update counts during review |
 
-The security correction for private distribution URLs and redirect-based SSRF is
-implemented; it is no longer listed as an open risk. DNS resolution and network
-egress policy should still receive production infrastructure review.
+The HTTP transport pins validated DNS addresses, and the production container
+enforces an independent egress policy. Public deployment still requires checking
+the real Traefik certificate, inbound firewall and any internally routed public
+CIDRs. When PostgreSQL is recreated with new addresses, restart the API to
+refresh its narrow database exception. See [Secure Deployment](DEPLOYMENT.md).
 
 ## 19. Open Decisions
 

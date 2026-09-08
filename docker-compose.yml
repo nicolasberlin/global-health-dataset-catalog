@@ -12,11 +12,20 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik
-      - traefik.http.routers.ai-commons.entrypoints=web
-      - traefik.http.routers.ai-commons.rule=PathPrefix(`/ai-commons`)
+      - traefik.http.routers.ai-commons.entrypoints=websecure
+      - traefik.http.routers.ai-commons.tls=true
+      - traefik.http.routers.ai-commons.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.ai-commons.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons`)
       - traefik.http.routers.ai-commons.priority=10
       - traefik.http.middlewares.strip-ai-commons.stripprefix.prefixes=/ai-commons
-      - traefik.http.routers.ai-commons.middlewares=strip-ai-commons
+      - traefik.http.middlewares.ai-commons-hsts.headers.stsseconds=31536000
+      - traefik.http.routers.ai-commons.middlewares=strip-ai-commons,ai-commons-hsts
+      - traefik.http.routers.ai-commons-http.entrypoints=web
+      - traefik.http.routers.ai-commons-http.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons`)
+      - traefik.http.routers.ai-commons-http.middlewares=ai-commons-https
+      - traefik.http.routers.ai-commons-http.service=noop@internal
+      - traefik.http.middlewares.ai-commons-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.ai-commons-https.redirectscheme.permanent=true
       - traefik.http.services.ai-commons.loadbalancer.server.port=5173
 
   ai-commons-api:
@@ -33,20 +42,33 @@ services:
       API_COLLECTION_REQUESTS_PER_MINUTE: ${API_COLLECTION_REQUESTS_PER_MINUTE:-5}
       API_SOURCE_CREATION_REQUESTS_PER_MINUTE: ${API_SOURCE_CREATION_REQUESTS_PER_MINUTE:-10}
       COLLECTION_MAX_CONCURRENCY: ${COLLECTION_MAX_CONCURRENCY:-2}
+      EGRESS_BLOCKED_CIDRS: ${EGRESS_BLOCKED_CIDRS:-}
+    # Bootstrap installs the firewall, then drops all capabilities and root.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - SETUID
+      - SETGID
+      - SETPCAP
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - traefik
-      - default
+      - database
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik
-      - traefik.http.routers.ai-commons-api.entrypoints=web
-      - traefik.http.routers.ai-commons-api.rule=PathPrefix(`/ai-commons/api`)
+      - traefik.http.routers.ai-commons-api.entrypoints=websecure
+      - traefik.http.routers.ai-commons-api.tls=true
+      - traefik.http.routers.ai-commons-api.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.ai-commons-api.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons/api`)
       - traefik.http.routers.ai-commons-api.priority=100
       - traefik.http.middlewares.strip-ai-commons-api.stripprefix.prefixes=/ai-commons/api
-      - traefik.http.routers.ai-commons-api.middlewares=strip-ai-commons-api
+      - traefik.http.routers.ai-commons-api.middlewares=strip-ai-commons-api,ai-commons-hsts
       - traefik.http.services.ai-commons-api.loadbalancer.server.port=8001
 
   postgres:
@@ -55,8 +77,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-global_health}
       POSTGRES_USER: ${POSTGRES_USER:-global_health}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting PostgreSQL}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - database
+    labels:
+      - traefik.enable=false
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -69,5 +93,7 @@ volumes:
   postgres-data:
 
 networks:
+  database:
+    internal: true
   traefik:
     external: true

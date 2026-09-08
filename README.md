@@ -88,7 +88,7 @@ source .env.local
 ### Start PostgreSQL
 
 ```bash
-docker compose up -d postgres
+docker compose -f docker-compose.local.yml up -d postgres
 ```
 
 ### Start the Backend
@@ -120,6 +120,11 @@ Open `http://127.0.0.1:5173/`.
 Enter the token configured for `local-user` in the runtime **Jeton API** field.
 The token is stored only in that browser tab's `sessionStorage`; it is not a
 Vite build variable and must never be compiled into the frontend.
+
+The local Compose file publishes PostgreSQL only on `127.0.0.1`. The main
+`docker-compose.yml` is for HTTPS deployment behind the external Traefik and
+does not publish PostgreSQL. See [Secure deployment](docs/DEPLOYMENT.md) for
+the required domain, certificates, and container egress policy.
 
 For a more detailed setup and troubleshooting guide, read
 [Developer Onboarding](docs/ONBOARDING.md).
@@ -208,6 +213,7 @@ Detailed documentation:
 - [Collector Pipeline](docs/collector-pipeline-diagram.md)
 - [Classification Architecture](docs/classification-architecture.md)
 - [Database Schema](docs/database-schema-diagram.md)
+- [Secure Deployment](docs/DEPLOYMENT.md)
 - [Proposed Multi-Repository Architecture](docs/props/multi-repository-architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [ADR 0001: PostgreSQL Only](docs/adr/0001-postgresql-only.md)

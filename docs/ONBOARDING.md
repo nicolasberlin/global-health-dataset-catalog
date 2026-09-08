@@ -125,13 +125,13 @@ Important:
 ### Start PostgreSQL
 
 ```bash
-docker compose up -d postgres
+docker compose -f docker-compose.local.yml up -d postgres
 ```
 
 Check its status:
 
 ```bash
-docker compose ps
+docker compose -f docker-compose.local.yml ps
 ```
 
 ### Start the Backend
@@ -170,6 +170,11 @@ Expected response:
 ```
 
 A successful health check only confirms that the backend process is running. It does not test EPFL RCP or every external dependency.
+
+Local development uses loopback HTTP and the standalone local Compose file.
+For remote access, use the HTTPS deployment and egress configuration in
+[Secure Deployment](DEPLOYMENT.md). The main Compose file requires `PUBLIC_HOST`
+and an external Traefik; it does not publish a PostgreSQL host port.
 
 ### Start the Frontend
 
@@ -371,8 +376,8 @@ Never include the API key when sharing an error message.
 Check:
 
 ```bash
-docker compose ps
-docker compose logs postgres
+docker compose -f docker-compose.local.yml ps
+docker compose -f docker-compose.local.yml logs postgres
 ```
 
 Confirm that `DATABASE_URL` uses the same password as `POSTGRES_PASSWORD`.

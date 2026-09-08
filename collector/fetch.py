@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import ssl
 from dataclasses import dataclass
+from http.client import HTTPConnection
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import (
+    HTTPHandler,
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+)
 
 from collector.config import DEFAULT_CONFIG
+from collector.network_policy import is_public_address
 
 
 class PageFetchError(RuntimeError):
@@ -67,25 +77,88 @@ def fetch_public_html(
 
 
 def _ensure_public_http_url(url: str) -> None:
-    """Reject non-HTTP URLs and blocked local or special-purpose addresses."""
+    """Validate URL syntax and literal IPs; DNS is checked at connection time."""
 
+    if "\\" in url or any(ord(character) <= 32 or ord(character) == 127 for character in url):
+        raise ValueError("URL contains invalid characters.")
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http and https URLs can be analyzed.")
     if not parsed.hostname:
         raise ValueError("URL must include a hostname.")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("URL credentials are not supported.")
+    if "%" in parsed.hostname:
+        raise ValueError("Scoped or percent-encoded hostnames are not supported.")
+    if parsed.port == 0:
+        raise ValueError("URL port must be between 1 and 65535.")
 
-    for address_info in socket.getaddrinfo(parsed.hostname, None):
-        ip_address = ipaddress.ip_address(address_info[4][0])
-        if (
-            ip_address.is_private
-            or ip_address.is_loopback
-            or ip_address.is_link_local
-            or ip_address.is_multicast
-            or ip_address.is_reserved
-            or ip_address.is_unspecified
+    try:
+        address = ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        return  # A hostname is resolved once, by _connect_public.
+    if not is_public_address(address):
+        raise ValueError("Private or local network URLs cannot be fetched.")
+
+
+def _connect_public(host: str, port: int, timeout: float) -> socket.socket:
+    """Connect only to numeric addresses from one fully validated DNS answer."""
+
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    if not addresses:
+        raise OSError("DNS returned no addresses.")
+    for family, _, _, _, sockaddr in addresses:
+        if family not in {socket.AF_INET, socket.AF_INET6} or not is_public_address(
+            ipaddress.ip_address(sockaddr[0])
         ):
             raise ValueError("Private or local network URLs cannot be fetched.")
+
+    last_error = OSError("No public address could be reached.")
+    for family, socktype, proto, _, sockaddr in addresses:
+        connection = None
+        try:
+            connection = socket.socket(family, socktype, proto)
+            connection.settimeout(timeout)
+            # sockaddr contains a numeric IP, never the hostname. No second DNS lookup.
+            connection.connect(sockaddr)
+            return connection
+        except OSError as exception:
+            last_error = exception
+            if connection is not None:
+                connection.close()
+    raise last_error
+
+
+class _PublicHTTPConnection(HTTPConnection):
+    def connect(self):
+        if self._tunnel_host:
+            raise ValueError("HTTP tunnels are not supported.")
+        self.sock = _connect_public(self.host, self.port, self.timeout)
+
+
+class _PublicHTTPSConnection(_PublicHTTPConnection):
+    default_port = 443
+
+    def connect(self):
+        # Build the context before opening a socket so context failures cannot leak it.
+        context = ssl.create_default_context()
+        context.set_alpn_protocols(["http/1.1"])
+        super().connect()
+        try:
+            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+        except Exception:
+            self.close()
+            raise
+
+
+class _PublicHTTPHandler(HTTPHandler):
+    def http_open(self, request):
+        return self.do_open(_PublicHTTPConnection, request)
+
+
+class _PublicHTTPSHandler(HTTPSHandler):
+    def https_open(self, request):
+        return self.do_open(_PublicHTTPSConnection, request)
 
 
 class _PublicHTTPRedirectHandler(HTTPRedirectHandler):
@@ -93,7 +166,11 @@ class _PublicHTTPRedirectHandler(HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         _ensure_public_http_url(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None and req.get_method() == "HEAD":
+            # urllib otherwise turns HEAD probes into GET requests on redirects.
+            redirected.method = "HEAD"
+        return redirected
 
 
 def open_public_http_url(request: Request, *, timeout: float):
@@ -103,7 +180,14 @@ def open_public_http_url(request: Request, *, timeout: float):
     either convert them to a rejected probe or abort their operation.
     """
     _ensure_public_http_url(request.full_url)
-    return build_opener(_PublicHTTPRedirectHandler()).open(request, timeout=timeout)
+    if request.has_proxy() or request._tunnel_host:
+        raise ValueError("Explicit proxies are not supported for public URL fetching.")
+    return build_opener(
+        ProxyHandler({}),
+        _PublicHTTPHandler(),
+        _PublicHTTPSHandler(),
+        _PublicHTTPRedirectHandler(),
+    ).open(request, timeout=timeout)
 
 
 def _decode_html(body: bytes, content_type: str) -> str:
