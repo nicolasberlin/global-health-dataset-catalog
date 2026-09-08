@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | Current architecture |
-| Last verified | 2026-09-06 |
+| Last verified | 2026-09-08 |
 | Runtime | React/Vite, FastAPI, Python collector, PostgreSQL |
 
 This document describes the system that exists now. Proposed product,
@@ -33,7 +33,8 @@ a production review workflow.
 
 ```mermaid
 flowchart LR
-    Browser["React/Vite frontend"] --> API["FastAPI"]
+    Browser["React/Vite frontend"] --> Auth["Bearer authentication"]
+    Auth --> API["FastAPI"]
     API --> Search["Repository search service"]
     Search --> DataCite["DataCite API"]
     API --> RepoLLM["Repository EPFL RCP classifier"]
@@ -61,7 +62,8 @@ The runtime has four main ownership boundaries:
 
 ## 3. Frontend Capabilities
 
-`frontend/src/App.jsx` coordinates three extracted sections:
+`frontend/src/App.jsx` coordinates three extracted sections and runtime API
+access:
 
 - `RepositorySearchSection.jsx` searches repository metadata and shows candidate
   counts, progressive classification, warnings, rejected results, and errors;
@@ -75,11 +77,20 @@ workers. An accepted external candidate reserves an automatic collection job;
 its card separately shows candidate acceptance and collection state. The
 frontend polls active jobs and distinguishes pending/running, saved, completed
 without a valid file, and failed outcomes. Successful jobs refresh the persisted
-dataset list. Manual source collection uses the same job-status endpoint.
+dataset list. Manual source collection uses the same job-status endpoint. The
+user enters an access token at runtime; the browser keeps it in `sessionStorage`
+and sends it only to protected API routes. No token is compiled through a
+`VITE_*` build variable.
 
 There is no obsolete manual pasted-HTML collector flow in the current UI.
 
 ## 4. HTTP API Inventory
+
+`POST /sources` and all listed `/collector` routes except
+`GET /collector/collected-datasets` require a configured Bearer token. Protected
+searches are owned by the token's stable owner ID. Missing or invalid
+credentials return HTTP 401; exhausted per-minute quotas return HTTP 429 with a
+`Retry-After` header.
 
 | Method | Route | Current behavior |
 | --- | --- | --- |
@@ -87,26 +98,32 @@ There is no obsolete manual pasted-HTML collector flow in the current UI.
 | GET | `/sources` | Lists configured source records |
 | POST | `/sources` | Creates a source after Pydantic and DB validation |
 | GET | `/sources/{source_id}/page` | Redirects to the configured source URL |
-| POST | `/collector/search-repositories` | Searches repository providers and returns normalized candidates/warnings |
-| POST | `/collector/classify-repository-result` | Classifies one candidate and returns its automatic collection reservation when accepted |
+| POST | `/collector/repository-candidates/{candidate_id}/classify` | Atomically reserves and classifies one persisted candidate; no client metadata is accepted |
 | POST | `/collector/collection-jobs` | Creates and schedules a background collection job |
 | GET | `/collector/collection-jobs/{job_id}` | Returns job status and counters |
 | GET | `/collector/collected-datasets` | Lists persisted datasets and distributions |
 | POST | `/collector/search-datasets` | Searches collected datasets first, then repository providers on no match |
 
 FastAPI background tasks are process-local. On startup, the single-process MVP
-marks jobs left `pending` or `running` by the previous process as interrupted so
-they can be retried. There is still no durable worker queue, retry scheduler, or
-multi-process job ownership mechanism; this startup recovery is not safe for a
+marks running searches, jobs left `pending` or `running`, and candidates left
+`classifying` by the previous process as errors. Candidate retries must be
+explicit. There is still no durable worker queue, retry scheduler, or
+multi-process ownership mechanism; this startup recovery is not safe for a
 multi-worker deployment.
 
 ### How Repository Search and Source Collection Relate
 
-`POST /collector/search-datasets` queries PostgreSQL first. Only when the local
-query has no match does repository search call external providers. A positive
-repository classification then reserves a collection job for that candidate
-URL. It does not persist DataCite metadata: the job fetches the landing page and
-uses the normal page-classification and distribution-validation gates before
+`POST /collector/search-datasets` first authenticates and consumes the owner's
+search quota, then creates an owned durable `search_sessions` row and queries
+collected datasets. Only when the local query has no match does it
+call external providers and atomically persist normalized results in
+`repository_candidates`. The frontend submits only `candidate_id`; the backend
+reloads the candidate and original query only when its session has the same
+owner. An eligible classification consumes that owner's classification quota
+before the LLM call. A positive decision reserves a candidate-linked collection
+job. DataCite metadata is never
+copied into `collected_datasets`: the job fetches the landing page and uses the
+normal page-classification and distribution-validation gates before
 `complete_collection_job()` may write a dataset.
 
 ```mermaid
@@ -115,10 +132,11 @@ flowchart LR
     PostgreSQL --> Match{"Local match?"}
     Match -->|yes| Local["Return persisted datasets"]
     Match -->|no| External["Search external repositories"]
-    External --> RepoClassify["Classify candidate relevance"]
+    External --> PersistCandidate["Persist search session + candidates"]
+    PersistCandidate --> RepoClassify["Classify persisted candidate by ID"]
     RepoClassify -->|rejected| Display["Display rejected candidate"]
-    RepoClassify -->|accepted| NormalizeURL["Normalize candidate URL"]
-    NormalizeURL --> Reserve["Reserve or reuse collection job"]
+    RepoClassify -->|accepted| CandidateJob["Reserve or reuse candidate-linked job"]
+    CandidateJob --> Reserve["Schedule collection when newly created"]
     Reserve -. reservation failure .-> ScheduleError["Return accepted result + collection error"]
     Reserve --> Validation["Page classification + distribution validation"]
     Validation -->|valid dataset| PostgreSQL
@@ -129,7 +147,9 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Query["User query"] --> SearchRoute["POST /collector/search-datasets"]
+    Query["User query + Bearer token"] --> Authenticate["Authenticate owner"]
+    Authenticate --> SearchQuota["Consume repository-search quota"]
+    SearchQuota --> SearchRoute["POST /collector/search-datasets"]
     SearchRoute --> LocalNormalize["Remove catalog-generic terms<br/>for local lookup only"]
     LocalNormalize --> LocalSearch["PostgreSQL english weighted full-text search"]
     LocalSearch --> LocalMatch{"Local match?"}
@@ -137,17 +157,21 @@ flowchart TD
     LocalMatch -->|no| Service["search_repository_metadata()"]
     Service --> Provider["DataCite provider"]
     Provider --> Filter["Require title + HTTP(S) URL"]
-    Filter --> UI["Candidates in React state"]
-    UI --> ClassifyRoute["POST /collector/classify-repository-result"]
-    ClassifyRoute --> RepoClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
+    Filter --> Persist["Save repository_candidates<br/>complete search session"]
+    Persist --> UI["Return search_id + candidate_id"]
+    UI --> ClassifyRoute["Authenticate candidate owner<br/>no metadata body"]
+    ClassifyRoute --> ClassifyQuota["Consume classification quota<br/>before eligible LLM work"]
+    ClassifyQuota --> ReserveClassify["pending -> classifying<br/>atomic compare-and-set"]
+    ReserveClassify --> Reload["Reload query + metadata from PostgreSQL"]
+    Reload --> RepoClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
     RepoClassifier --> Decision{"Positive structured decision?"}
     Decision -->|no| Rejected["Display rejected candidate; no job"]
-    Decision -->|yes| NormalizeURL["Normalize HTTP(S) identity URL"]
-    NormalizeURL --> Reserve["reserve_automatic_collection_job(URL)"]
+    Decision -->|yes| StoreAccepted["Persist accepted decision"]
+    StoreAccepted --> Reserve["reserve_repository_candidate_collection_job(candidate_id)"]
     Reserve --> Saved{"Normalized URL already collected?"}
     Saved -->|yes| Catalogued["Return state=saved"]
-    Saved -->|no, active job| Reuse["Return existing pending/running job"]
-    Saved -->|no active job| Pending["Create pending job"]
+    Saved -->|no, pending/running job| Reuse["Return active job"]
+    Saved -->|no active job| Pending["Create new candidate-linked pending job"]
     Pending --> CandidatePipeline["Collect only the candidate landing page"]
     CandidatePipeline --> Gates["Normal page + distribution validation gates"]
     Gates --> Outcome{"Collection outcome"}
@@ -161,7 +185,10 @@ the highest weight, followed by description, publisher/geography, then hosting
 platform/uploader/dataset URL. Results are ordered by relevance and `updated_at`.
 The catalog-specific normalizer removes only `data`, `dataset`, and `database`;
 the PostgreSQL `english` configuration handles language stop words and stemming.
-The original query remains unchanged for responses, DataCite, LLMs, and the UI.
+The original query remains unchanged in `search_sessions` and is used for
+responses, DataCite, LLMs, and the UI. The browser cannot replace candidate
+metadata or the query at classification time, and another authenticated owner
+receives a not-found response for that candidate ID.
 Database errors return HTTP 500 and never trigger an online fallback. This
 pre-stable full-text configuration change has no upgrade migration; an older
 local database must be recreated. Search is currently optimized for primarily
@@ -191,7 +218,7 @@ directly into `collected_datasets`.
 ```mermaid
 flowchart TD
     Manual["POST /collector/collection-jobs"] --> Pending["Create pending job"]
-    Automatic["Accepted repository candidate"] --> AutoPending["Reserve new pending job by candidate URL"]
+    Automatic["Accepted repository candidate"] --> AutoPending["Reserve or reuse candidate-linked job"]
     AutoPending --> Running
     Pending --> Running["Mark running"]
     Running --> Bounded["Backend collection executor<br/>configured concurrency"]
@@ -301,6 +328,8 @@ schema contains:
 
 - `schema_migrations`;
 - `data_sources`;
+- `search_sessions`;
+- `repository_candidates`;
 - `collection_jobs`;
 - `collected_datasets`;
 - `collected_distributions`;
@@ -311,13 +340,36 @@ schema contains:
 update the existing record and create a discovery observation. This is not
 semantic deduplication by DOI, title, version, or mirror relationship.
 
-Automatic collection normalizes the candidate URL before reservation, then
-serializes check-and-create operations for that identity with a PostgreSQL
-transaction-scoped advisory lock. It reuses an
-existing `pending` or `running` job and skips collection when the URL is already
-the stored dataset URL or the source URL of a previous saved observation.
-Terminal empty and failed jobs permit a later retry. This requires no schema
-change and does not extend deduplication beyond exact normalized URLs.
+`search_sessions` owns the original query and its local/online terminal state.
+`repository_candidates` stores bounded provider metadata and the atomic
+`pending -> classifying -> accepted|rejected|error` state machine. A uniqueness
+constraint deduplicates `(search_session_id, source, url)` within a search.
+
+Automatic collection locks the accepted candidate before checking prior work.
+`collection_jobs.kind` distinguishes manual source work from repository
+candidate work, and `repository_candidate_id` links the latter to its candidate.
+A partial unique index prevents multiple active jobs for the same candidate;
+an URL-level advisory lock and second partial index prevent candidates from
+different searches creating concurrent jobs for the same normalized URL. The
+reservation reuses only active `pending` or `running` jobs and skips collection
+when the URL was already saved. If the dataset remains absent, an `error` job or
+a `done` job with no saved dataset permits a new pending job; terminal rows are
+retained as attempt history. Dataset deduplication remains based on normalized
+dataset URL.
+
+This pre-release schema change modifies the initial schema only. No upgrade
+migration is provided; an older local database must be recreated. The schema
+checks reject a database marked current when these new tables are absent.
+
+`search_sessions.owner_id` is the authorization boundary for repository
+candidates. It comes only from server-side token configuration, never from a
+request body. Candidate reads, state transitions, and automatic collection
+reservation join through the session and require the same owner ID.
+`api_rate_limits` stores one atomic fixed-minute counter per owner and operation;
+the window resets in the same upsert, so historical minute rows do not
+accumulate. `_schedule_collection_job()` is the single in-process
+scheduling boundary that a durable queue can replace without changing the
+classification contract.
 
 The complete schema is shown in
 [Database Schema Diagram](database-schema-diagram.md). PostgreSQL-only startup
@@ -331,6 +383,11 @@ and the decision not to migrate the historical SQLite data are recorded in
 | `DATABASE_URL` | Yes for backend | PostgreSQL connection |
 | `RCP_API_KEY` | Yes for classification | EPFL RCP authentication |
 | `RCP_CLASSIFIER_MODEL` | No | RCP model; defaults to `deepseek-ai/DeepSeek-V4-Flash-0731` |
+| `API_ACCESS_TOKENS` | Yes for backend | JSON object mapping stable owner IDs to unique Bearer tokens of 32-512 characters |
+| `API_SEARCH_REQUESTS_PER_MINUTE` | No | Search quota per owner; defaults to `10` |
+| `API_CLASSIFICATION_REQUESTS_PER_MINUTE` | No | LLM classification quota per owner; defaults to `20` |
+| `API_COLLECTION_REQUESTS_PER_MINUTE` | No | Manual collection-start quota per owner; defaults to `5` |
+| `API_SOURCE_CREATION_REQUESTS_PER_MINUTE` | No | Source-creation quota per owner; defaults to `10` |
 | `COLLECTION_MAX_CONCURRENCY` | No | Concurrent collection runs per backend process; defaults to `2` |
 | `VITE_API_BASE_URL` | No | Frontend API base; defaults to `http://127.0.0.1:8001` |
 | `TEST_DATABASE_URL` | No | Enables PostgreSQL integration tests |
@@ -362,15 +419,21 @@ crawling. The limits below are code defaults, not production capacity targets.
 | Repository candidate classifications | 2 concurrent classifications | frontend workers and backend executor |
 | Repository LLM calls | up to 2 concurrently | 2 classifications x 1 EPFL RCP call |
 | Collection runs | 2 concurrently per backend process by default | dedicated backend executor |
+| Repository searches | 10/minute per owner by default | atomic PostgreSQL fixed-minute quota |
+| Repository classifications | 20/minute per owner by default | atomic PostgreSQL fixed-minute quota |
+| Manual collection starts | 5/minute per owner by default | atomic PostgreSQL fixed-minute quota |
+| Source creation | 10/minute per owner by default | atomic PostgreSQL fixed-minute quota |
 | Page text sent to a page LLM | 4,000 characters | `MAX_PAGE_TEXT_CHARS` |
 | Distributions sent to a page LLM | 10 | `MAX_DISTRIBUTIONS` |
 | Repository query | 300 characters | repository classification contract |
 | Repository metadata JSON | 100,000 bytes | route bounding logic |
 
 Network bodies are read one byte beyond their limit to detect overflow; an
-overflow fails the affected operation. Distribution validation reads only a bounded sample when a partial
-`GET` is needed. These limits reduce memory and latency risk but do not provide
-global request-rate limiting or per-user quotas.
+overflow fails the affected operation. Distribution validation reads only a
+bounded sample when a partial `GET` is needed. These limits reduce memory and
+latency risk. Per-owner quotas protect application-level costly operations;
+infrastructure-level connection and bandwidth limits remain a deployment
+responsibility.
 
 Availability expectations are intentionally local-MVP level:
 
@@ -399,7 +462,7 @@ collected page.
 
 Dataverse is intentionally absent from this matrix because it is not registered
 at runtime. Its proposed integration is described in
-[Multi-Repository Architecture](multi-repository-architecture.md).
+[Multi-Repository Architecture](props/multi-repository-architecture.md).
 
 ## 14. Seed and Upsert Rules
 
@@ -453,6 +516,9 @@ and does not change job state.
 
 Implemented controls include:
 
+- server-configured Bearer authentication for costly and mutating routes;
+- search-session ownership enforced in candidate SQL reads and transitions;
+- atomic PostgreSQL quotas per owner and operation;
 - Pydantic validation and bounded repository payload fields;
 - JSON-only EPFL RCP responses with an embedded schema plus local validation;
 - untrusted prompt fields treated as evidence, not instructions;
@@ -463,26 +529,34 @@ Implemented controls include:
 
 Current limitations include:
 
-- no authentication or authorization;
+- static tokens are an MVP identity mechanism, without OAuth/OIDC, expiry,
+  roles, self-service revocation, or institutional single sign-on;
+- authenticated users share source and collection-job records; only repository
+  sessions and candidates have per-owner authorization;
 - permissive local-development CORS origins only;
 - no source allowlist or complete trust-tier enforcement;
 - no enforced license policy;
 - no automated privacy/sensitivity review;
 - no production secret-management or audit-log design.
 
-Policy requirements that exceed current enforcement are explicit in the
-[Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md).
+Policy requirements that exceed current enforcement remain tracked in the
+[roadmap](roadmap.md).
 
 ## 16. Error Handling and Observability
 
 Repository provider failures produce sanitized API warnings for partial success.
-Repository classification failures return HTTP 502 and are logged with source
-and URL context. If an accepted classification cannot reserve its job, the
-classification is preserved and the response contains automatic collection
-state `error`. Fetch, classifier, and validation exceptions attempt to mark the
-job `error`; if PostgreSQL itself is unavailable, that status write can also
-fail. A successfully fetched and analyzed candidate retained without a valid
-dataset is represented by the frontend as a completed empty collection.
+Repository classification failures are stored on the candidate, return HTTP
+502, and require `retry=true` for another attempt. If persisting a successful
+classification decision fails, the route makes a separate best-effort transition
+from `classifying` to `error` before returning HTTP 500. Search failures after
+session creation likewise make a best-effort terminal `error` update, including
+failures while completing a local result or bounding external candidates. If an
+accepted classification cannot reserve its job, the classification is preserved
+and the response contains automatic collection state `error`. Fetch, classifier,
+and validation exceptions attempt to mark the job `error`; if PostgreSQL itself
+is unavailable, any of these recovery writes can also fail. A successfully
+fetched and analyzed candidate without a valid dataset is represented as a
+completed empty collection.
 
 Collection jobs persist counters, messages, errors, discovery methods, and
 timestamps. Application logging exists, but there is no metrics backend,
@@ -497,9 +571,8 @@ safe HTTP fetching.
 Last verified locally:
 
 ```text
-pytest without PostgreSQL: 171 passed, 50 skipped
-pytest with PostgreSQL: 221 passed
-frontend tests: 11 passed
+pytest with PostgreSQL: 245 passed
+frontend tests: 14 passed
 ruff: passed
 frontend build: passed
 ```
@@ -520,7 +593,7 @@ contract.
 
 | Priority | Risk | Current exposure | Mitigation or next control |
 | --- | --- | --- | --- |
-| High | Unauthenticated mutation/collection routes | Any caller that can reach the API can add a source or start work | Keep deployment private until authentication and authorization exist |
+| Medium | Static access tokens are not a production identity system | Tokens have no expiry or roles and source/job records are shared | Keep tokens unique and secret for the MVP; replace them with institutional OAuth/OIDC and role-based authorization before broad multi-user use |
 | High | Process-local background jobs | Single-process startup marks interrupted jobs as errors, but multi-worker ownership and durable execution remain unsupported | Introduce a durable queue, leases, retries, and multi-worker recovery |
 | High | Repository relevance mistaken for catalogue approval | Repository acceptance precedes and differs from page/file validation | Keep candidate and collection states distinct; persist only through collection gates |
 | High | Source authority, licence, and sensitivity not enforced | Technically valid records may still be unsuitable for publication | Implement policy gates and human review before public catalogue claims |
@@ -550,7 +623,7 @@ egress policy should still receive production infrastructure review.
 
 No owner assignment or decision in this table is implied by the current code.
 The detailed provider proposal is isolated in
-[Multi-Repository Architecture](multi-repository-architecture.md).
+[Multi-Repository Architecture](props/multi-repository-architecture.md).
 
 ## 20. Current Limitations
 
@@ -571,7 +644,6 @@ description.
 - [Collector Pipeline Diagram](collector-pipeline-diagram.md)
 - [Classification Architecture](classification-architecture.md)
 - [Database Schema Diagram](database-schema-diagram.md)
-- [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
 - [Roadmap](roadmap.md)
-- [Multi-Repository Architecture](multi-repository-architecture.md)
+- [Multi-Repository Architecture](props/multi-repository-architecture.md)
 - [ADR 0001 - PostgreSQL-only persistence](adr/0001-postgresql-only.md)

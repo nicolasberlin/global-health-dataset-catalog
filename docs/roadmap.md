@@ -12,7 +12,7 @@ risk and dependency, not by a committed delivery date.
   relevance as publication approval;
 - enforce health relevance, dataset identity, provenance, usable distribution,
   source tier, licence, and sensitivity gates from the
-  [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md);
+  the planned dataset collection and quality policy;
 - store review status, reviewer decisions, policy exceptions, and decision
   timestamps;
 - distinguish candidate, accepted, published, stale, and withdrawn records.
@@ -27,7 +27,7 @@ risk and dependency, not by a committed delivery date.
 
 ## 3. Repository Coverage
 
-Detailed design: [Multi-Repository Architecture](multi-repository-architecture.md).
+Detailed design: [Multi-Repository Architecture](props/multi-repository-architecture.md).
 
 - add providers only through `repository_search/providers/`;
 - define provider timeouts, quotas, and normalized provenance requirements;
@@ -46,7 +46,8 @@ Detailed design: [Multi-Repository Architecture](multi-repository-architecture.m
 
 ## 5. Production Architecture
 
-- add authentication and role-based authorization;
+- replace static MVP tokens with institutional authentication and role-based
+  authorization;
 - replace process-local FastAPI background tasks with a durable queue and worker;
 - define retries, idempotency, cancellation, and dead-letter handling;
 - deploy PostgreSQL with backups, migrations, pooling, and least-privilege roles;

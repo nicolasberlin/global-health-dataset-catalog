@@ -7,6 +7,15 @@ import SourceCatalogSection from './components/SourceCatalogSection.jsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 const REPOSITORY_CLASSIFICATION_CONCURRENCY = 2;
+const API_TOKEN_STORAGE_KEY = 'global-health-api-token';
+
+function storedApiToken() {
+    try {
+        return window.sessionStorage.getItem(API_TOKEN_STORAGE_KEY) ?? '';
+    } catch {
+        return '';
+    }
+}
 
 function normalizeSearchValue(value) {
     return String(value ?? '')
@@ -38,12 +47,9 @@ function isAbortError(exception) {
     );
 }
 
-function repositoryCandidateId(item, index) {
-    return `${item.source}:${item.url}:${index}`;
-}
-
 export default function App() {
     const repositorySearchRunRef = useRef(0);
+    const repositorySearchIdRef = useRef(null);
     const repositorySearchAbortRef = useRef(null);
     const [sources, setSources] = useState([]);
     const [collectedDatasets, setCollectedDatasets] = useState([]);
@@ -67,6 +73,50 @@ export default function App() {
     const [repositorySearching, setRepositorySearching] = useState(false);
     const [repositoryHasSearched, setRepositoryHasSearched] = useState(false);
     const [agreementFilter, setAgreementFilter] = useState('all');
+    const [apiToken, setApiToken] = useState(storedApiToken);
+    const [apiTokenInput, setApiTokenInput] = useState('');
+    const [apiTokenError, setApiTokenError] = useState('');
+    const apiTokenRef = useRef(apiToken);
+
+    function saveApiToken(event) {
+        event.preventDefault();
+        const normalizedToken = apiTokenInput.trim();
+        if (!normalizedToken) {
+            setApiTokenError('Saisis un jeton API.');
+            return;
+        }
+
+        window.sessionStorage.setItem(API_TOKEN_STORAGE_KEY, normalizedToken);
+        apiTokenRef.current = normalizedToken;
+        setApiToken(normalizedToken);
+        setApiTokenInput('');
+        setApiTokenError('');
+    }
+
+    function removeApiToken() {
+        repositorySearchRunRef.current += 1;
+        repositorySearchAbortRef.current?.abort();
+        window.sessionStorage.removeItem(API_TOKEN_STORAGE_KEY);
+        apiTokenRef.current = '';
+        setApiToken('');
+        setApiTokenInput('');
+        setApiTokenError('');
+    }
+
+    async function protectedFetch(url, options = {}) {
+        const currentToken = apiTokenRef.current;
+        if (!currentToken) {
+            throw new Error('Un jeton API est requis pour cette opération.');
+        }
+
+        return fetch(url, {
+            ...options,
+            headers: {
+                ...(options.headers ?? {}),
+                Authorization: `Bearer ${currentToken}`,
+            },
+        });
+    }
 
     async function loadSources() {
         try {
@@ -124,8 +174,11 @@ export default function App() {
         };
     }, []);
 
-    function updateRepositoryCandidate(runId, candidateId, update) {
-        if (repositorySearchRunRef.current !== runId) {
+    function updateRepositoryCandidate(runId, searchId, candidateId, update) {
+        if (
+            repositorySearchRunRef.current !== runId ||
+            repositorySearchIdRef.current !== searchId
+        ) {
             return;
         }
 
@@ -138,10 +191,14 @@ export default function App() {
 
     function updateRepositoryCandidateCollection(
         runId,
+        searchId,
         candidateId,
         automaticCollection,
     ) {
-        if (repositorySearchRunRef.current !== runId) {
+        if (
+            repositorySearchRunRef.current !== runId ||
+            repositorySearchIdRef.current !== searchId
+        ) {
             return;
         }
 
@@ -164,6 +221,7 @@ export default function App() {
         candidateId,
         initialJob,
         runId,
+        searchId,
         signal,
     ) {
         const maxAttempts = 80;
@@ -171,14 +229,18 @@ export default function App() {
         try {
             for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
                 await wait(attempt === 0 ? 700 : 1500);
-                if (signal.aborted || repositorySearchRunRef.current !== runId) {
+                if (
+                    signal.aborted ||
+                    repositorySearchRunRef.current !== runId ||
+                    repositorySearchIdRef.current !== searchId
+                ) {
                     return;
                 }
 
                 const job = await loadCollectionJob(initialJob.id);
                 if (job.status === 'done') {
                     const state = job.saved_count > 0 ? 'saved' : 'empty';
-                    updateRepositoryCandidateCollection(runId, candidateId, {
+                    updateRepositoryCandidateCollection(runId, searchId, candidateId, {
                         state,
                         job,
                     });
@@ -189,14 +251,14 @@ export default function App() {
                 }
 
                 if (job.status === 'error') {
-                    updateRepositoryCandidateCollection(runId, candidateId, {
+                    updateRepositoryCandidateCollection(runId, searchId, candidateId, {
                         state: 'error',
                         job,
                     });
                     return;
                 }
 
-                updateRepositoryCandidateCollection(runId, candidateId, {
+                updateRepositoryCandidateCollection(runId, searchId, candidateId, {
                     state: job.status,
                     job,
                 });
@@ -208,7 +270,7 @@ export default function App() {
                 return;
             }
 
-            updateRepositoryCandidateCollection(runId, candidateId, {
+            updateRepositoryCandidateCollection(runId, searchId, candidateId, {
                 state: 'error',
                 job: {
                     ...initialJob,
@@ -222,12 +284,21 @@ export default function App() {
         }
     }
 
-    async function classifyRepositoryCandidates(candidates, runId, abortController) {
+    async function classifyRepositoryCandidates(
+        candidates,
+        runId,
+        searchId,
+        abortController,
+    ) {
         let nextCandidateIndex = 0;
         const { signal } = abortController;
 
         async function classificationWorker() {
-            while (repositorySearchRunRef.current === runId && !signal.aborted) {
+            while (
+                repositorySearchRunRef.current === runId &&
+                repositorySearchIdRef.current === searchId &&
+                !signal.aborted
+            ) {
                 const candidateIndex = nextCandidateIndex;
                 nextCandidateIndex += 1;
 
@@ -236,20 +307,16 @@ export default function App() {
                 }
 
                 const candidate = candidates[candidateIndex];
-                updateRepositoryCandidate(runId, candidate.id, {
+                updateRepositoryCandidate(runId, searchId, candidate.id, {
                     status: 'classifying',
                     error: '',
                 });
 
                 try {
-                    const response = await fetch(
-                        `${API_BASE_URL}/collector/classify-repository-result`,
+                    const response = await protectedFetch(
+                        `${API_BASE_URL}/collector/repository-candidates/${candidate.id}/classify`,
                         {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify(candidate.item),
                             signal,
                         },
                     );
@@ -269,6 +336,13 @@ export default function App() {
                     }
 
                     if (
+                        responsePayload.candidate_id !== candidate.id ||
+                        responsePayload.search_id !== searchId
+                    ) {
+                        throw new Error('La réponse de classification ne correspond plus.');
+                    }
+
+                    if (
                         responsePayload.classification.accepted &&
                         !responsePayload.automatic_collection
                     ) {
@@ -277,7 +351,7 @@ export default function App() {
                         );
                     }
 
-                    updateRepositoryCandidate(runId, candidate.id, {
+                    updateRepositoryCandidate(runId, searchId, candidate.id, {
                         item: responsePayload,
                         status: responsePayload.classification.accepted
                             ? 'accepted'
@@ -295,6 +369,7 @@ export default function App() {
                             candidate.id,
                             automaticCollection.job,
                             runId,
+                            searchId,
                             signal,
                         );
                     }
@@ -303,7 +378,7 @@ export default function App() {
                         return;
                     }
 
-                    updateRepositoryCandidate(runId, candidate.id, {
+                    updateRepositoryCandidate(runId, searchId, candidate.id, {
                         status: 'error',
                         error:
                             exception instanceof Error
@@ -348,6 +423,7 @@ export default function App() {
         repositorySearchAbortRef.current?.abort();
         const abortController = new AbortController();
         repositorySearchRunRef.current = runId;
+        repositorySearchIdRef.current = null;
         repositorySearchAbortRef.current = abortController;
         setRepositorySearching(true);
         setRepositoryHasSearched(true);
@@ -360,7 +436,7 @@ export default function App() {
 
         let classificationStarted = false;
         try {
-            const response = await fetch(`${API_BASE_URL}/collector/search-datasets`, {
+            const response = await protectedFetch(`${API_BASE_URL}/collector/search-datasets`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -383,6 +459,12 @@ export default function App() {
             if (!['database', 'online'].includes(responsePayload?.origin)) {
                 throw new Error('La réponse de recherche est incomplète.');
             }
+            if (typeof responsePayload?.search_id !== 'string') {
+                throw new Error('La réponse de recherche est incomplète.');
+            }
+
+            const searchId = responsePayload.search_id;
+            repositorySearchIdRef.current = searchId;
 
             setRepositoryOrigin(responsePayload.origin);
             if (responsePayload.origin === 'database') {
@@ -393,17 +475,24 @@ export default function App() {
                 return;
             }
 
-            const candidates = (Array.isArray(responsePayload.items)
+            const onlineItems = Array.isArray(responsePayload.items)
                 ? responsePayload.items
-                : []
-            ).map((item, index) => ({
-                id: repositoryCandidateId(item, index),
-                item: {
-                    ...item,
-                    search_query: item.search_query || query,
-                },
-                status: 'pending',
-                error: '',
+                : [];
+            if (
+                onlineItems.some(
+                    (item) =>
+                        typeof item?.candidate_id !== 'string' ||
+                        item.search_id !== searchId,
+                )
+            ) {
+                throw new Error('La réponse de recherche est incomplète.');
+            }
+
+            const candidates = onlineItems.map((item) => ({
+                id: item.candidate_id,
+                item,
+                status: item.classification_status ?? 'pending',
+                error: item.classification_error ?? '',
             }));
 
             setRepositoryCandidates(candidates);
@@ -413,7 +502,12 @@ export default function App() {
 
             if (candidates.length > 0) {
                 classificationStarted = true;
-                void classifyRepositoryCandidates(candidates, runId, abortController);
+                void classifyRepositoryCandidates(
+                    candidates,
+                    runId,
+                    searchId,
+                    abortController,
+                );
             }
         } catch (exception) {
             if (isAbortError(exception) || abortController.signal.aborted) {
@@ -442,7 +536,9 @@ export default function App() {
     }
 
     async function loadCollectionJob(jobId) {
-        const response = await fetch(`${API_BASE_URL}/collector/collection-jobs/${jobId}`);
+        const response = await protectedFetch(
+            `${API_BASE_URL}/collector/collection-jobs/${jobId}`,
+        );
         if (!response.ok) {
             const errorPayload = await response.json().catch(() => null);
             throw new Error(errorPayload?.detail ?? 'Impossible de lire le statut de collecte.');
@@ -492,7 +588,7 @@ export default function App() {
             setCollectionNotice(null);
             setActiveCollectionJob(null);
 
-            const response = await fetch(`${API_BASE_URL}/collector/collection-jobs`, {
+            const response = await protectedFetch(`${API_BASE_URL}/collector/collection-jobs`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -666,6 +762,32 @@ export default function App() {
                     </button>
                 </div>
             </header>
+
+            <section className="api-access-bar" aria-label="Accès API protégé">
+                <div className="api-access-status">
+                    <strong>Accès API</strong>
+                    <span>{apiToken ? 'Jeton actif pour cette session' : 'Jeton requis'}</span>
+                </div>
+                <form className="api-access-form" onSubmit={saveApiToken}>
+                    <label htmlFor="api-token">Jeton API</label>
+                    <input
+                        id="api-token"
+                        type="password"
+                        autoComplete="off"
+                        value={apiTokenInput}
+                        onChange={(event) => setApiTokenInput(event.target.value)}
+                    />
+                    <button type="submit" className="secondary-button">
+                        Enregistrer
+                    </button>
+                    {apiToken ? (
+                        <button type="button" onClick={removeApiToken}>
+                            Retirer
+                        </button>
+                    ) : null}
+                </form>
+                {apiTokenError ? <p className="api-access-error">{apiTokenError}</p> : null}
+            </section>
 
             <section className="summary-grid" aria-label="Résumé du catalogue">
                 <article className="metric-card">

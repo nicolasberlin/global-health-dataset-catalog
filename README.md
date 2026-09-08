@@ -1,204 +1,231 @@
 # Global Health Dataset Catalog
 
-Small React + FastAPI app for discovering and cataloging health dataset pages.
-Some seeded sources are official organizations, but the application does not
-currently enforce official publisher status for every collected record.
+A React, FastAPI, and PostgreSQL application for discovering, classifying, validating, and cataloguing global health dataset pages.
 
-The tagged `v0.1.0-no-collector` release is the stable catalogue-only baseline.
-The collector does not download or store datasets themselves. It extracts
-dataset page metadata, classifies pages through EPFL RCP, finds possible
-data distributions, and validates download/API links lightly.
+The application stores dataset metadata and links. It does not download or retain complete dataset files.
 
-## Structure
+## Overview
 
-- `backend/app/main.py`: FastAPI app setup, CORS, startup, and router registration
-- `backend/app/database.py`: compatibility facade for the async PostgreSQL DB layer
-- `backend/app/db/*.py`: DB connection, schema, sources, collected datasets, jobs, and JSON serialization
-- `backend/app/routes/sources.py`: `/sources` API routes for dataset page links
-- `collector/`: generic collector modules for extraction, classification, validation, and discovery
-- `frontend/src/App.jsx`: React UI that reads and displays dataset links
-- `tests/test_database.py`: database structure and seed test
-- `tests/test_collector_pipeline.py`: collector extraction, classification, and validation tests
+The project is under active development.
 
-## Documentation
+The current application can:
 
-- [`docs/ONBOARDING.md`](docs/ONBOARDING.md): concise developer setup and code-reading guide
-- [`docs/technical-design-document.md`](docs/technical-design-document.md): current technical design
-- [`docs/collector-pipeline-diagram.md`](docs/collector-pipeline-diagram.md): current runtime flows
-- [`docs/classification-architecture.md`](docs/classification-architecture.md): LLM contracts, prompts, and voting
-- [`docs/database-schema-diagram.md`](docs/database-schema-diagram.md): current PostgreSQL schema
-- [`docs/dataset-collection-and-quality-policy.md`](docs/dataset-collection-and-quality-policy.md): draft collection and quality policy
-- [`docs/roadmap.md`](docs/roadmap.md): proposed product and production work
-- [`docs/multi-repository-architecture.md`](docs/multi-repository-architecture.md): proposed multi-provider search design
-- [`docs/adr/0001-postgresql-only.md`](docs/adr/0001-postgresql-only.md): PostgreSQL migration decision
+- search previously collected datasets in PostgreSQL;
+- fall back to external repository search when no local result is found;
+- classify repository results and dataset pages through EPFL RCP;
+- discover pages from CKAN, Socrata, data.json/DCAT, and websites;
+- validate candidate download and API links;
+- persist accepted datasets and their distributions.
 
-## Collector
+The catalogue contains seeded official sources, but the application does not yet guarantee that every collected dataset comes from an official publisher.
 
-Current MVP layer:
+## Architecture
 
-- extracts a normalized page snapshot from HTML;
-- extracts normalized dataset and health evidence for LLM classification;
-- accepts a page when the EPFL RCP classifier returns `accepted=true`;
-- detects known publishers, hosting platforms, and uploaders when possible;
-- extracts likely CSV, XLSX, JSON, ZIP, API, and download distributions;
-- ignores PDF as a dataset distribution by default;
-- validates distributions with `HEAD` first, then partial `GET` fallback.
-- discovers structured CKAN, Socrata, and `data.json`/DCAT catalogues first,
-  then uses `robots.txt`/`sitemap.xml` as the generic website fallback before
-  analyzing pages.
-
-The collector is intentionally site-agnostic. Site-specific logic should live in
-future adapters, not in the core extractor or classifier.
-
-## Backend
-
-Install dependencies:
-
-```bash
-cd backend
-../.venv/bin/pip install -r requirements.txt
+```text
+React frontend
+      |
+      v
+FastAPI backend
+      |
+      +-- PostgreSQL search and persistence
+      +-- External repository search
+      +-- Background collection jobs
+      |
+      v
+Collector
+      |
+      +-- Discovery and extraction
+      +-- EPFL RCP classification
+      +-- Distribution validation
 ```
 
-Start PostgreSQL locally:
+## Quick start
+
+### Requirements
+
+- Python 3.9 or newer
+- Node.js 20 or newer
+- Docker
+- An EPFL RCP API key
+- One private API access token of at least 32 characters
+
+### Install Dependencies
+
+From the repository root:
 
 ```bash
-export POSTGRES_PASSWORD='change-me-locally'
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+npm --prefix frontend install
+```
+
+### Configure the Environment
+
+Create or update `.env.local`:
+
+```bash
+export POSTGRES_PASSWORD="change-me-locally"
+export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
+
+export RCP_API_KEY="your-rcp-api-key"
+export RCP_CLASSIFIER_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
+export COLLECTION_MAX_CONCURRENCY="2"
+
+# The JSON key is the stable owner ID; the value is that user's private token.
+export API_ACCESS_TOKENS='{"local-user":"replace-with-at-least-32-random-characters"}'
+
+export VITE_API_BASE_URL="http://127.0.0.1:8001"
+```
+
+Load the variables:
+
+```bash
+source .env.local
+```
+
+`.env.local` is ignored by Git. Never commit passwords or API keys.
+
+### Start PostgreSQL
+
+```bash
 docker compose up -d postgres
 ```
 
-Configure the API database URL:
-
-```bash
-export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
-```
-
-Configure the EPFL RCP classifier:
-
-```bash
-export RCP_API_KEY="your-rcp-api-key"
-export RCP_CLASSIFIER_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
-```
-
-`RCP_CLASSIFIER_MODEL` is optional and defaults to
-`deepseek-ai/DeepSeek-V4-Flash-0731`.
-The default page and repository classifiers each make one synchronous EPFL RCP
-Chat Completions call.
-
-The PostgreSQL database is managed by the application. It must be empty on
-first startup; the backend creates the current schema, stores its version in
-`schema_migrations`, and applies the default system seeds. Partial PostgreSQL
-schemas or hand-modified application tables are not migrated automatically.
-
-Run the API:
+### Start the Backend
 
 ```bash
 cd backend
-DATABASE_URL="$DATABASE_URL" PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app --reload --reload-dir . --reload-dir ../collector --port 8001
+PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app \
+  --reload \
+  --reload-dir . \
+  --reload-dir ../collector \
+  --port 8001
 ```
 
-Useful endpoints:
+The API is available at:
 
-```txt
-GET  /health
-GET  /sources
-POST /sources
-GET  /sources/{id}/page
-POST /collector/collection-jobs
-GET  /collector/collection-jobs/{job_id}
-GET  /collector/collected-datasets
-POST /collector/search-datasets
-POST /collector/search-repositories
-POST /collector/classify-repository-result
-```
+- `http://127.0.0.1:8001`
+- `http://127.0.0.1:8001/docs`
 
-`POST /collector/search-datasets` searches PostgreSQL first. Matching collected
-datasets are returned with `origin: "database"` and do not trigger repository or
-LLM calls. When there is no local match, the route returns repository candidates
-with `origin: "online"`; the frontend then classifies them progressively. The
-older `/collector/search-repositories` endpoint remains available for direct
-online-only searches.
+### Start the Frontend
 
-Only the PostgreSQL lookup uses a reduced query: the catalog-generic terms
-`data`, `dataset`, and `database` are removed, while PostgreSQL's `english`
-dictionary handles grammatical words and lexical variants. The original query
-is preserved for API responses, DataCite, LLM classification, and display. Local
-search currently targets primarily English metadata; complete bilingual search
-is not implemented.
-
-The current development schema includes a weighted PostgreSQL full-text GIN
-index using the `english` configuration. No upgrade migration is provided;
-recreate a local database created with an earlier version of schema 1 or with
-the previous `simple` search vector.
-
-Example:
+In another terminal, from the repository root:
 
 ```bash
-curl -i http://127.0.0.1:8001/sources
+source .env.local
+npm --prefix frontend run dev
 ```
 
-Add a source page:
+Open `http://127.0.0.1:5173/`.
+Enter the token configured for `local-user` in the runtime **Jeton API** field.
+The token is stored only in that browser tab's `sessionStorage`; it is not a
+Vite build variable and must never be compiled into the frontend.
+
+For a more detailed setup and troubleshooting guide, read
+[Developer Onboarding](docs/ONBOARDING.md).
+
+## Main workflows
+
+Repository search and source collection are connected workflows:
+
+```text
+Repository search
+    -> authenticate and consume the owner's search quota
+    -> search PostgreSQL first
+    -> search DataCite when no local result exists
+    -> persist the owned search session and external candidates
+    -> classify owned candidates by server-generated ID and quota
+    -> automatically collect accepted candidates
+    -> persist only datasets that pass page and distribution validation
+
+Source collection
+    -> can start from an accepted repository candidate
+    -> can also start manually from a configured source
+    -> dataset-page classification
+    -> distribution validation
+    -> PostgreSQL persistence
+```
+
+## API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Check that the backend process is running |
+| `POST` | `/collector/search-datasets` | Search PostgreSQL, then external repositories |
+| `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Classify one persisted external candidate |
+| `POST` | `/collector/collection-jobs` | Start a source collection job |
+| `GET` | `/collector/collection-jobs/{id}` | Read collection progress |
+| `GET` | `/collector/collected-datasets` | List persisted datasets |
+
+All routes in the table except `/health` and `/collector/collected-datasets`
+require `Authorization: Bearer <token>`. `POST /sources` is protected as well.
+Search and classification quotas are counted per configured owner in
+PostgreSQL; optional environment overrides are documented in the TDD.
+
+Interactive API documentation:
+
+- Swagger UI: `http://127.0.0.1:8001/docs`
+- ReDoc: `http://127.0.0.1:8001/redoc`
+- OpenAPI schema: `http://127.0.0.1:8001/openapi.json`
+
+## Project structure
+
+```text
+backend/app/                 FastAPI routes, PostgreSQL access, orchestration
+collector/                   Discovery, classification, validation
+frontend/src/                React interface
+tests/                       Python tests
+docs/                        Architecture, policy, decisions, onboarding
+```
+
+## Tests
+
+Run the standard checks from the repository root:
 
 ```bash
-curl -i -X POST http://127.0.0.1:8001/sources \
-  -H "Content-Type: application/json" \
-  -d '{"source_key":"who_data_portal","name":"WHO Data","description":"WHO data portal","theme":"General","page_url":"https://platform.who.int/data"}'
-```
-
-Start an asynchronous collection job:
-
-```bash
-curl -i -X POST http://127.0.0.1:8001/collector/collection-jobs \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://data.humdata.org/?q=health"}'
-```
-
-Poll the collection job:
-
-```bash
-curl -i http://127.0.0.1:8001/collector/collection-jobs/1
-```
-
-Collection jobs include discovery counters such as `discovered_count`,
-`analyzed_count`, `accepted_count`, `rejected_count`,
-`invalid_distribution_count`, and `discovery_methods`.
-
-List saved collected datasets:
-
-```bash
-curl -i http://127.0.0.1:8001/collector/collected-datasets
-```
-
-## Frontend
-
-Run the React app against the backend on port `8001`:
-
-```bash
-cd frontend
-VITE_API_BASE_URL=http://127.0.0.1:8001 npm run dev
-```
-
-If `VITE_API_BASE_URL` is not set, the frontend also defaults to
-`http://127.0.0.1:8001`.
-
-Open:
-
-```txt
-http://127.0.0.1:5173/
-```
-
-The frontend supports repository search with progressive LLM classification,
-source collection jobs, and inspection of saved datasets and distributions.
-
-## Checks
-
-```bash
-.venv/bin/python -m ruff check .
-TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/python -m pytest
+.venv/bin/ruff check .
+.venv/bin/pytest
 npm --prefix frontend test
 npm --prefix frontend run build
+git diff --check
 ```
 
-Database tests create and drop an isolated PostgreSQL schema per test. If
-`TEST_DATABASE_URL` is not set, PostgreSQL-specific tests are skipped. If
-`TEST_DATABASE_URL` is set but PostgreSQL is unreachable, tests fail so a broken
-CI database setup cannot pass silently.
+To include PostgreSQL integration tests:
+
+```bash
+TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
+```
+
+## Documentation
+
+Start with:
+
+1. [Developer Onboarding](docs/ONBOARDING.md)
+2. [Technical Design](docs/technical-design-document.md)
+
+Detailed documentation:
+
+- [Collector Pipeline](docs/collector-pipeline-diagram.md)
+- [Classification Architecture](docs/classification-architecture.md)
+- [Database Schema](docs/database-schema-diagram.md)
+- [Proposed Multi-Repository Architecture](docs/props/multi-repository-architecture.md)
+- [Roadmap](docs/roadmap.md)
+- [ADR 0001: PostgreSQL Only](docs/adr/0001-postgresql-only.md)
+
+## Development notes
+
+- Repository search sessions and provider candidates are persisted for trusted
+  classification and auditability. Provider metadata is never inserted directly
+  into `collected_datasets`: accepted candidates still pass page classification
+  and distribution validation before catalogue persistence.
+- Repository relevance classification does not independently guarantee health relevance.
+- Source authority and licensing policies are not fully enforced.
+- Dataset deduplication currently uses the normalized dataset URL.
+- Background jobs are process-local. Single-process startup marks interrupted
+  jobs and candidate classifications as errors, but there is no durable worker
+  queue or multi-worker ownership.
+- Static per-user Bearer tokens, search-session ownership, and PostgreSQL
+  request quotas protect costly and mutating routes. This MVP mechanism is not
+  an OAuth/OIDC login system and should be replaced by an institutional identity
+  provider before broader multi-user production use.
+- Production monitoring and human review workflows are not implemented.

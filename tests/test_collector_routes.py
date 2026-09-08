@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from dataclasses import asdict, replace
+from uuid import UUID
 
 import pytest
 from app.database import CollectionJobReservation, normalize_dataset_search_query
@@ -12,15 +14,16 @@ from app.routes.collector import (
     list_collected,
     read_collection_job,
     search_datasets,
-    search_repositories,
     start_collection_job,
 )
 from app.routes.collector_schemas import (
     CollectorCollectedDataset,
+    CollectorRepositoryCandidateClassificationRequest,
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorURLRequest,
 )
+from app.security import APIPrincipal
 from fastapi import BackgroundTasks, HTTPException
 
 from collector.classification.page import PageClassificationError
@@ -28,7 +31,6 @@ from collector.classification.repository import RepositoryClassification
 from collector.repository_search import (
     RepositorySearchResponse,
     RepositorySearchResult,
-    RepositorySearchWarning,
 )
 from collector.storage.models import (
     CollectedDataset,
@@ -38,6 +40,23 @@ from collector.storage.models import (
 )
 
 pytestmark = pytest.mark.anyio
+
+SEARCH_ID = UUID("11111111-1111-4111-8111-111111111111")
+CANDIDATE_ID = UUID("22222222-2222-4222-8222-222222222222")
+PRINCIPAL = APIPrincipal(owner_id="test-user")
+
+
+@pytest.fixture(autouse=True)
+def bypass_api_quota(monkeypatch):
+    async def allow_request(principal, operation):
+        assert principal == PRINCIPAL
+        assert operation in {
+            "repository_search",
+            "repository_classification",
+            "collection_start",
+        }
+
+    monkeypatch.setattr("app.routes.collector.enforce_api_quota", allow_request)
 
 
 def _use_accepting_repository_classifier(monkeypatch):
@@ -116,6 +135,8 @@ def _collection_job(
     return {
         "id": job_id,
         "source_url": "https://example.org/datasets/malaria-mortality",
+        "kind": "repository_candidate",
+        "repository_candidate_id": CANDIDATE_ID,
         "status": status,
         "saved_count": saved_count,
         "message": "Collecte en attente.",
@@ -126,90 +147,120 @@ def _collection_job(
     }
 
 
-def _use_new_automatic_collection_reservation(
-    monkeypatch,
-    expected_url="https://example.org/datasets/malaria-mortality",
-) -> None:
-    async def fake_reserve(source_url):
-        assert source_url == expected_url
+def _candidate(
+    *,
+    title: str = "Malaria mortality estimates",
+    url: str = "https://example.org/datasets/malaria-mortality",
+    status: str = "pending",
+    classification: RepositoryClassification | None = None,
+    error: str = "",
+    search_query: str = "malaria mortality",
+) -> dict[str, object]:
+    return {
+        "id": CANDIDATE_ID,
+        "search_session_id": SEARCH_ID,
+        "search_query": search_query,
+        "title": title,
+        "description": "Annual mortality estimates by country.",
+        "url": url,
+        "source": "DataCite",
+        "publisher": "Global Health Repository",
+        "publication_date": "2025",
+        "doi": "10.1234/example",
+        "keywords": ["malaria", "mortality"],
+        "metadata": {"Title": title, "Geography": "France"},
+        "classification_status": status,
+        "classification": asdict(classification) if classification else None,
+        "error": error,
+        "created_at": "2026-09-06T12:00:00+00:00",
+        "updated_at": "2026-09-06T12:00:00+00:00",
+    }
+
+
+def _use_new_automatic_collection_reservation(monkeypatch) -> None:
+    async def fake_reserve(candidate_id, owner_id):
+        assert candidate_id == CANDIDATE_ID
+        assert owner_id == PRINCIPAL.owner_id
         return CollectionJobReservation(
-            job={**_collection_job(), "source_url": source_url},
+            job=_collection_job(),
             created=True,
             already_collected=False,
         )
 
     monkeypatch.setattr(
-        "app.routes.collector.reserve_automatic_collection_job",
+        "app.routes.collector.reserve_repository_candidate_collection_job",
         fake_reserve,
     )
 
 
-async def test_collector_search_repositories_route_accepts_query_and_returns_results(
-    monkeypatch,
-):
-    def fake_search_repository_metadata(query):
-        assert query == "malaria mortality"
-        return RepositorySearchResponse(
-            results=[
-                RepositorySearchResult(
-                    title="Malaria mortality estimates",
-                    description="Annual mortality estimates by country.",
-                    url="https://example.org/datasets/malaria-mortality",
-                    source="DataCite",
-                    publisher="Global Health Repository",
-                    date="2025",
-                    doi="10.1234/example",
-                    keywords=["malaria", "mortality"],
-                    metadata={
-                        "Title": "Malaria mortality estimates",
-                        "Geography": "France",
-                        "Date of publication": "2025",
-                        "Dataset URL": "https://example.org/datasets/malaria-mortality",
-                        "Disease(s)": "malaria",
-                        "Size of dataset": "NA",
-                        "Demographic information": "NA",
-                        "Sharing license": "CC-BY-4.0",
-                        "Modality of data": "tabular",
-                        "Description of dataset": "Annual mortality estimates by country.",
-                    },
-                )
-            ],
-            warnings=[
-                RepositorySearchWarning(
-                    provider="HDX",
-                    message="This source could not be searched.",
-                )
-            ],
+def _use_candidate_persistence(monkeypatch, *, candidate=None) -> None:
+    current = candidate or _candidate()
+
+    async def fake_get(candidate_id, owner_id):
+        assert candidate_id == CANDIDATE_ID
+        assert owner_id == PRINCIPAL.owner_id
+        return current
+
+    async def fake_start(candidate_id, owner_id, *, retry=False):
+        assert candidate_id == CANDIDATE_ID
+        assert owner_id == PRINCIPAL.owner_id
+        assert retry is False
+        return {**current, "classification_status": "classifying"}
+
+    async def fake_complete(candidate_id, owner_id, classification):
+        assert candidate_id == CANDIDATE_ID
+        assert owner_id == PRINCIPAL.owner_id
+        return _candidate(
+            title=str(current["title"]),
+            url=str(current["url"]),
+            status="accepted" if classification.accepted else "rejected",
+            classification=classification,
         )
 
+    monkeypatch.setattr("app.routes.collector.get_repository_candidate", fake_get)
+    monkeypatch.setattr("app.routes.collector.start_candidate_classification", fake_start)
     monkeypatch.setattr(
-        "app.routes.collector.search_repository_metadata",
-        fake_search_repository_metadata,
+        "app.routes.collector.complete_candidate_classification",
+        fake_complete,
     )
 
-    response = await search_repositories(
-        CollectorRepositorySearchRequest(query=" malaria mortality ")
-    )
 
-    assert response.query == "malaria mortality"
-    assert len(response.items) == 1
-    item = response.items[0]
-    assert item.title == "Malaria mortality estimates"
-    assert item.source == "DataCite"
-    assert item.search_query == "malaria mortality"
-    assert item.publisher == "Global Health Repository"
-    assert item.date == "2025"
-    assert item.doi == "10.1234/example"
-    assert item.keywords == ["malaria", "mortality"]
-    assert item.classification is None
-    assert len(response.warnings) == 1
-    assert response.warnings[0].provider == "HDX"
-    assert response.warnings[0].message == "This source could not be searched."
+def _use_search_persistence(monkeypatch) -> None:
+    async def fake_create(query, owner_id):
+        assert owner_id == PRINCIPAL.owner_id
+        return {"id": SEARCH_ID, "query": query}
+
+    async def fake_complete(search_id, owner_id, **kwargs):
+        assert search_id == SEARCH_ID
+        assert owner_id == PRINCIPAL.owner_id
+        return {"id": search_id, **kwargs}
+
+    async def fake_save(search_id, owner_id, candidates, *, status):
+        assert search_id == SEARCH_ID
+        assert owner_id == PRINCIPAL.owner_id
+        return [
+            {
+                **_candidate(title=item.title, url=item.url),
+                "search_query": item.search_query,
+                "source": item.source,
+                "description": item.description,
+            }
+            for item in candidates
+        ]
+
+    monkeypatch.setattr("app.routes.collector.create_search_session", fake_create)
+    monkeypatch.setattr("app.routes.collector.complete_search_session", fake_complete)
+    monkeypatch.setattr(
+        "app.routes.collector.complete_search_session_with_repository_candidates",
+        fake_save,
+    )
 
 
 async def test_collector_search_datasets_returns_local_results_without_provider_call(
     monkeypatch,
 ):
+    _use_search_persistence(monkeypatch)
+
     async def fake_search_collected_datasets(query):
         assert query == "about malaria mortality in France"
         return [
@@ -248,9 +299,8 @@ async def test_collector_search_datasets_returns_local_results_without_provider_
     )
 
     response = await search_datasets(
-        CollectorRepositorySearchRequest(
-            query=" datasets about malaria mortality in France "
-        )
+        CollectorRepositorySearchRequest(query=" datasets about malaria mortality in France "),
+        PRINCIPAL,
     )
 
     assert response.origin == "database"
@@ -260,9 +310,50 @@ async def test_collector_search_datasets_returns_local_results_without_provider_
     assert response.items[0].distributions[0].format == "CSV"
 
 
+async def test_collector_search_datasets_marks_session_error_when_local_completion_fails(
+    monkeypatch,
+):
+    _use_search_persistence(monkeypatch)
+    completion_calls = []
+
+    async def local_result(query):
+        return [object()]
+
+    async def fail_then_record(search_id, owner_id, **kwargs):
+        completion_calls.append((search_id, owner_id, kwargs))
+        if len(completion_calls) == 1:
+            raise RuntimeError("Local completion unavailable")
+        return {"id": search_id, **kwargs}
+
+    monkeypatch.setattr("app.routes.collector.search_collected_datasets", local_result)
+    monkeypatch.setattr("app.routes.collector.complete_search_session", fail_then_record)
+
+    with pytest.raises(HTTPException) as error:
+        await search_datasets(
+            CollectorRepositorySearchRequest(query="malaria mortality"),
+            PRINCIPAL,
+        )
+
+    assert error.value.status_code == 500
+    assert completion_calls == [
+        (SEARCH_ID, PRINCIPAL.owner_id, {"origin": "database"}),
+        (
+            SEARCH_ID,
+            PRINCIPAL.owner_id,
+            {
+                "origin": "database",
+                "status": "error",
+                "error": "Local completion unavailable",
+            },
+        ),
+    ]
+
+
 async def test_collector_search_datasets_falls_back_online_when_database_is_empty(
     monkeypatch,
 ):
+    _use_search_persistence(monkeypatch)
+
     async def fake_search_collected_datasets(query):
         assert query == "about malaria mortality in France"
         return []
@@ -289,17 +380,15 @@ async def test_collector_search_datasets_falls_back_online_when_database_is_empt
     )
 
     response = await search_datasets(
-        CollectorRepositorySearchRequest(
-            query="datasets about malaria mortality in France"
-        )
+        CollectorRepositorySearchRequest(query="datasets about malaria mortality in France"),
+        PRINCIPAL,
     )
 
     assert response.origin == "online"
     assert response.items[0].source == "DataCite"
     assert response.query == "datasets about malaria mortality in France"
-    assert response.items[0].search_query == (
-        "datasets about malaria mortality in France"
-    )
+    assert response.search_id == SEARCH_ID
+    assert response.items[0].candidate_id == CANDIDATE_ID
 
     captured_queries = []
 
@@ -318,18 +407,84 @@ async def test_collector_search_datasets_falls_back_online_when_database_is_empt
         "app.routes.collector.build_default_repository_result_classifier",
         lambda: QueryCapturingClassifier(),
     )
-    _use_new_automatic_collection_reservation(
+    _use_candidate_persistence(
         monkeypatch,
-        expected_url="https://example.org/online-malaria",
+        candidate=_candidate(
+            title="Online malaria dataset",
+            url="https://example.org/online-malaria",
+            search_query="datasets about malaria mortality in France",
+        ),
     )
-    await classify_repository_result(response.items[0], BackgroundTasks())
+    _use_new_automatic_collection_reservation(monkeypatch)
+    await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
 
     assert captured_queries == ["datasets about malaria mortality in France"]
+
+
+async def test_collector_search_datasets_marks_session_error_when_bounding_fails(
+    monkeypatch,
+):
+    _use_search_persistence(monkeypatch)
+    completion_calls = []
+
+    async def empty_database(query):
+        return []
+
+    def repository_result(query):
+        return RepositorySearchResponse(
+            results=[
+                RepositorySearchResult(
+                    title="Malaria dataset",
+                    url="https://example.org/malaria",
+                    source="DataCite",
+                )
+            ]
+        )
+
+    def fail_bounding(item, *, search_query):
+        raise ValueError("Invalid provider metadata")
+
+    async def record_completion(search_id, owner_id, **kwargs):
+        completion_calls.append((search_id, owner_id, kwargs))
+        return {"id": search_id, **kwargs}
+
+    async def fail_if_candidates_saved(*args, **kwargs):
+        raise AssertionError("Candidates must not be saved after bounding fails")
+
+    monkeypatch.setattr("app.routes.collector.search_collected_datasets", empty_database)
+    monkeypatch.setattr("app.routes.collector.search_repository_metadata", repository_result)
+    monkeypatch.setattr("app.routes.collector._bounded_repository_result", fail_bounding)
+    monkeypatch.setattr("app.routes.collector.complete_search_session", record_completion)
+    monkeypatch.setattr(
+        "app.routes.collector.complete_search_session_with_repository_candidates",
+        fail_if_candidates_saved,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await search_datasets(
+            CollectorRepositorySearchRequest(query="malaria mortality"),
+            PRINCIPAL,
+        )
+
+    assert error.value.status_code == 500
+    assert completion_calls == [
+        (
+            SEARCH_ID,
+            PRINCIPAL.owner_id,
+            {
+                "origin": "online",
+                "status": "error",
+                "error": "Invalid provider metadata",
+            },
+        )
+    ]
 
 
 async def test_collector_search_datasets_skips_local_search_for_generic_terms(
     monkeypatch,
 ):
+    _use_search_persistence(monkeypatch)
+
     async def fail_if_database_called(query):
         raise AssertionError(f"Database called unexpectedly for {query!r}")
 
@@ -347,7 +502,8 @@ async def test_collector_search_datasets_skips_local_search_for_generic_terms(
     )
 
     response = await search_datasets(
-        CollectorRepositorySearchRequest(query="data datasets databases")
+        CollectorRepositorySearchRequest(query="data datasets databases"),
+        PRINCIPAL,
     )
 
     assert response.origin == "online"
@@ -374,6 +530,8 @@ def test_normalize_dataset_search_query(query, expected):
 async def test_collector_search_datasets_does_not_fallback_on_database_error(
     monkeypatch,
 ):
+    _use_search_persistence(monkeypatch)
+
     async def failing_database_search(query):
         raise RuntimeError("PostgreSQL unavailable")
 
@@ -395,7 +553,8 @@ async def test_collector_search_datasets_does_not_fallback_on_database_error(
 
     with pytest.raises(HTTPException) as error:
         await search_datasets(
-            CollectorRepositorySearchRequest(query="malaria mortality")
+            CollectorRepositorySearchRequest(query="malaria mortality"),
+            PRINCIPAL,
         )
 
     assert error.value.status_code == 500
@@ -405,45 +564,47 @@ async def test_collector_search_datasets_does_not_fallback_on_database_error(
 
 async def test_collector_search_datasets_requires_non_blank_query():
     with pytest.raises(HTTPException) as error:
-        await search_datasets(CollectorRepositorySearchRequest(query="   "))
+        await search_datasets(CollectorRepositorySearchRequest(query="   "), PRINCIPAL)
 
     assert error.value.status_code == 400
     assert error.value.detail == "Search query is required"
+
+
+async def test_collector_search_quota_blocks_work_before_database_or_provider(
+    monkeypatch,
+):
+    async def reject_quota(principal, operation):
+        assert principal == PRINCIPAL
+        assert operation == "repository_search"
+        raise HTTPException(status_code=429, detail="quota exceeded")
+
+    async def fail_if_session_created(query, owner_id):
+        raise AssertionError(f"Session created unexpectedly for {query!r}, {owner_id!r}")
+
+    monkeypatch.setattr("app.routes.collector.enforce_api_quota", reject_quota)
+    monkeypatch.setattr(
+        "app.routes.collector.create_search_session",
+        fail_if_session_created,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await search_datasets(
+            CollectorRepositorySearchRequest(query="malaria mortality"),
+            PRINCIPAL,
+        )
+
+    assert error.value.status_code == 429
 
 
 async def test_collector_classify_repository_result_route_returns_classification(
     monkeypatch,
 ):
     _use_accepting_repository_classifier(monkeypatch)
+    _use_candidate_persistence(monkeypatch)
     _use_new_automatic_collection_reservation(monkeypatch)
     background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(
-        CollectorRepositorySearchItem(
-            title="Malaria mortality estimates",
-            description="Annual mortality estimates by country.",
-            url="https://example.org/datasets/malaria-mortality",
-            source="DataCite",
-            search_query="malaria mortality",
-            publisher="Global Health Repository",
-            date="2025",
-            doi="10.1234/example",
-            keywords=["malaria", "mortality"],
-            metadata={
-                "Title": "Malaria mortality estimates",
-                "Geography": "France",
-                "Date of publication": "2025",
-                "Dataset URL": "https://example.org/datasets/malaria-mortality",
-                "Disease(s)": "malaria",
-                "Size of dataset": "NA",
-                "Demographic information": "NA",
-                "Sharing license": "CC-BY-4.0",
-                "Modality of data": "tabular",
-                "Description of dataset": "Annual mortality estimates by country.",
-            },
-        ),
-        background_tasks,
-    )
+    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
 
     assert response.title == "Malaria mortality estimates"
     assert response.classification is not None
@@ -459,6 +620,29 @@ async def test_collector_classify_repository_result_route_returns_classification
     assert len(background_tasks.tasks) == 1
 
 
+async def test_collector_classification_quota_blocks_llm_call(monkeypatch):
+    _use_candidate_persistence(monkeypatch)
+
+    async def reject_quota(principal, operation):
+        assert principal == PRINCIPAL
+        assert operation == "repository_classification"
+        raise HTTPException(status_code=429, detail="quota exceeded")
+
+    def fail_if_classifier_built():
+        raise AssertionError("LLM classifier built after quota rejection")
+
+    monkeypatch.setattr("app.routes.collector.enforce_api_quota", reject_quota)
+    monkeypatch.setattr(
+        "app.routes.collector.build_default_repository_result_classifier",
+        fail_if_classifier_built,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+
+    assert error.value.status_code == 429
+
+
 async def test_collector_classify_rejected_result_does_not_create_collection_job(
     monkeypatch,
 ):
@@ -472,28 +656,28 @@ async def test_collector_classify_rejected_result_does_not_create_collection_job
                 ),
             )
 
-    async def fail_if_reserved(source_url):
-        raise AssertionError(f"Rejected candidate reserved unexpectedly: {source_url}")
+    async def fail_if_reserved(candidate_id, owner_id):
+        assert owner_id == PRINCIPAL.owner_id
+        raise AssertionError(f"Rejected candidate reserved unexpectedly: {candidate_id}")
 
     monkeypatch.setattr(
         "app.routes.collector.build_default_repository_result_classifier",
         lambda: RejectingRepositoryClassifier(),
     )
     monkeypatch.setattr(
-        "app.routes.collector.reserve_automatic_collection_job",
+        "app.routes.collector.reserve_repository_candidate_collection_job",
         fail_if_reserved,
+    )
+    _use_candidate_persistence(
+        monkeypatch,
+        candidate=_candidate(
+            title="Unrelated dataset",
+            url="https://example.org/datasets/unrelated",
+        ),
     )
     background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(
-        CollectorRepositorySearchItem(
-            title="Unrelated dataset",
-            url="https://example.org/datasets/unrelated",
-            source="DataCite",
-            search_query="malaria mortality",
-        ),
-        background_tasks,
-    )
+    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
 
     assert response.classification is not None
     assert response.classification.accepted is False
@@ -505,8 +689,11 @@ async def test_collector_classify_accepted_result_reuses_active_collection_job(
     monkeypatch,
 ):
     _use_accepting_repository_classifier(monkeypatch)
+    _use_candidate_persistence(monkeypatch)
 
-    async def fake_reserve(source_url):
+    async def fake_reserve(candidate_id, owner_id):
+        assert candidate_id == CANDIDATE_ID
+        assert owner_id == PRINCIPAL.owner_id
         return CollectionJobReservation(
             job=_collection_job(status="running"),
             created=False,
@@ -514,20 +701,12 @@ async def test_collector_classify_accepted_result_reuses_active_collection_job(
         )
 
     monkeypatch.setattr(
-        "app.routes.collector.reserve_automatic_collection_job",
+        "app.routes.collector.reserve_repository_candidate_collection_job",
         fake_reserve,
     )
     background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(
-        CollectorRepositorySearchItem(
-            title="Malaria mortality estimates",
-            url="https://example.org/datasets/malaria-mortality",
-            source="DataCite",
-            search_query="malaria mortality",
-        ),
-        background_tasks,
-    )
+    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
 
     assert response.automatic_collection is not None
     assert response.automatic_collection.state == "running"
@@ -540,8 +719,11 @@ async def test_collector_classify_accepted_saved_result_does_not_recollect(
     monkeypatch,
 ):
     _use_accepting_repository_classifier(monkeypatch)
+    _use_candidate_persistence(monkeypatch)
 
-    async def fake_reserve(source_url):
+    async def fake_reserve(candidate_id, owner_id):
+        assert candidate_id == CANDIDATE_ID
+        assert owner_id == PRINCIPAL.owner_id
         return CollectionJobReservation(
             job=None,
             created=False,
@@ -549,20 +731,12 @@ async def test_collector_classify_accepted_saved_result_does_not_recollect(
         )
 
     monkeypatch.setattr(
-        "app.routes.collector.reserve_automatic_collection_job",
+        "app.routes.collector.reserve_repository_candidate_collection_job",
         fake_reserve,
     )
     background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(
-        CollectorRepositorySearchItem(
-            title="Malaria mortality estimates",
-            url="https://example.org/datasets/malaria-mortality",
-            source="DataCite",
-            search_query="malaria mortality",
-        ),
-        background_tasks,
-    )
+    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
 
     assert response.automatic_collection is not None
     assert response.automatic_collection.state == "saved"
@@ -574,33 +748,25 @@ async def test_collector_classify_keeps_acceptance_when_collection_reservation_f
     monkeypatch,
 ):
     _use_accepting_repository_classifier(monkeypatch)
+    _use_candidate_persistence(monkeypatch)
 
-    async def fail_reservation(source_url):
-        raise RuntimeError(f"Database unavailable for {source_url}")
+    async def fail_reservation(candidate_id, owner_id):
+        assert owner_id == PRINCIPAL.owner_id
+        raise RuntimeError(f"Database unavailable for {candidate_id}")
 
     monkeypatch.setattr(
-        "app.routes.collector.reserve_automatic_collection_job",
+        "app.routes.collector.reserve_repository_candidate_collection_job",
         fail_reservation,
     )
     background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(
-        CollectorRepositorySearchItem(
-            title="Malaria mortality estimates",
-            url="https://example.org/datasets/malaria-mortality",
-            source="DataCite",
-            search_query="malaria mortality",
-        ),
-        background_tasks,
-    )
+    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
 
     assert response.classification is not None
     assert response.classification.accepted is True
     assert response.automatic_collection is not None
     assert response.automatic_collection.state == "error"
-    assert response.automatic_collection.error == (
-        "Automatic collection scheduling failed."
-    )
+    assert response.automatic_collection.error == ("Automatic collection scheduling failed.")
     assert background_tasks.tasks == []
 
 
@@ -616,26 +782,61 @@ async def test_collector_classify_repository_result_route_returns_502_when_class
         "app.routes.collector.build_default_repository_result_classifier",
         lambda: FailingClassifier(),
     )
+    _use_candidate_persistence(monkeypatch)
+    recorded_errors = []
+
+    async def fake_fail(candidate_id, owner_id, error):
+        assert owner_id == PRINCIPAL.owner_id
+        recorded_errors.append((candidate_id, error))
+        return _candidate(status="error", error=error)
+
+    monkeypatch.setattr("app.routes.collector.fail_candidate_classification", fake_fail)
     caplog.set_level("ERROR", logger="app.routes.collector")
 
     try:
-        await classify_repository_result(
-            CollectorRepositorySearchItem(
-                title="Malaria mortality estimates",
-                url="https://example.org/datasets/malaria-mortality",
-                source="DataCite",
-                search_query="malaria mortality",
-            ),
-            BackgroundTasks(),
-        )
+        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
     except HTTPException as exception:
         assert exception.status_code == 502
         assert exception.detail == "Page classification failed."
         assert "DataCite" in caplog.text
         assert "https://example.org/datasets/malaria-mortality" in caplog.text
         assert "LLM classification failed." in caplog.text
+        assert recorded_errors == [(CANDIDATE_ID, "LLM classification failed.")]
     else:
         raise AssertionError("Expected HTTPException.")
+
+
+async def test_collector_classification_persistence_failure_marks_candidate_error(
+    monkeypatch,
+):
+    _use_accepting_repository_classifier(monkeypatch)
+    _use_candidate_persistence(monkeypatch)
+    recorded_errors = []
+
+    async def fail_completion(candidate_id, owner_id, classification):
+        raise RuntimeError("PostgreSQL write failed")
+
+    async def record_failure(candidate_id, owner_id, error):
+        recorded_errors.append((candidate_id, owner_id, error))
+        return _candidate(status="error", error=error)
+
+    monkeypatch.setattr(
+        "app.routes.collector.complete_candidate_classification",
+        fail_completion,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.fail_candidate_classification",
+        record_failure,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Candidate classification could not be saved."
+    assert recorded_errors == [
+        (CANDIDATE_ID, PRINCIPAL.owner_id, "PostgreSQL write failed")
+    ]
 
 
 async def test_collector_repository_classification_limits_backend_concurrency(
@@ -657,7 +858,12 @@ async def test_collector_repository_classification_limits_backend_concurrency(
 
         with counter_lock:
             active_calls -= 1
-        return result
+        classification = RepositoryClassification(
+            relevance_label="not_relevant",
+            reason="Not relevant.",
+            ensemble=_rejected_repository_ensemble(reason="Not relevant."),
+        )
+        return replace(result, classification=classification)
 
     monkeypatch.setattr(
         "app.routes.collector.classify_one_repository_result",
@@ -667,43 +873,61 @@ async def test_collector_repository_classification_limits_backend_concurrency(
         "app.routes.collector.build_default_repository_result_classifier",
         lambda: object(),
     )
-    payload = CollectorRepositorySearchItem(
-        title="Malaria mortality estimates",
-        url="https://example.org/datasets/malaria-mortality",
-        source="DataCite",
-        search_query="malaria mortality",
+    candidate_ids = [UUID(int=index + 10) for index in range(4)]
+
+    async def fake_get(candidate_id, owner_id):
+        assert owner_id == PRINCIPAL.owner_id
+        return {**_candidate(), "id": candidate_id}
+
+    async def fake_start(candidate_id, owner_id, *, retry=False):
+        assert owner_id == PRINCIPAL.owner_id
+        return {**_candidate(status="classifying"), "id": candidate_id}
+
+    async def fake_complete(candidate_id, owner_id, classification):
+        assert owner_id == PRINCIPAL.owner_id
+        return {
+            **_candidate(status="rejected", classification=classification),
+            "id": candidate_id,
+        }
+
+    monkeypatch.setattr("app.routes.collector.get_repository_candidate", fake_get)
+    monkeypatch.setattr("app.routes.collector.start_candidate_classification", fake_start)
+    monkeypatch.setattr(
+        "app.routes.collector.complete_candidate_classification",
+        fake_complete,
     )
 
     await asyncio.gather(
         *(
-            classify_repository_result(payload, BackgroundTasks())
-            for _request in range(4)
+            classify_repository_result(candidate_id, BackgroundTasks(), PRINCIPAL)
+            for candidate_id in candidate_ids
         )
     )
 
     assert maximum_active_calls == 2
 
 
-async def test_collector_classify_repository_result_route_requires_search_query():
-    try:
-        await classify_repository_result(
-            CollectorRepositorySearchItem(
-                title="Malaria mortality estimates",
-                url="https://example.org/datasets/malaria-mortality",
-                source="DataCite",
-            ),
-            BackgroundTasks(),
-        )
-    except HTTPException as exception:
-        assert exception.status_code == 400
-        assert exception.detail == "Search query is required"
-    else:
-        raise AssertionError("Expected HTTPException.")
+async def test_collector_classify_repository_result_returns_not_found(monkeypatch):
+    async def fake_get(candidate_id, owner_id):
+        assert owner_id == PRINCIPAL.owner_id
+        return None
+
+    monkeypatch.setattr("app.routes.collector.get_repository_candidate", fake_get)
+
+    with pytest.raises(HTTPException) as error:
+        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+
+    assert error.value.status_code == 404
 
 
 async def test_collector_search_repositories_route_returns_bad_gateway_for_provider_errors(
     monkeypatch,
 ):
+    _use_search_persistence(monkeypatch)
+
+    async def empty_database(query):
+        return []
+
     def fake_search_repository_metadata(query):
         raise ValueError("Could not fetch JSON URL: timeout")
 
@@ -711,10 +935,15 @@ async def test_collector_search_repositories_route_returns_bad_gateway_for_provi
         "app.routes.collector.search_repository_metadata",
         fake_search_repository_metadata,
     )
+    monkeypatch.setattr(
+        "app.routes.collector.search_collected_datasets",
+        empty_database,
+    )
 
     try:
-        await search_repositories(
-            CollectorRepositorySearchRequest(query="malaria mortality")
+        await search_datasets(
+            CollectorRepositorySearchRequest(query="malaria mortality"),
+            PRINCIPAL,
         )
     except HTTPException as exception:
         assert exception.status_code == 502
@@ -746,6 +975,8 @@ def test_collector_repository_item_rejects_oversized_llm_input(
     value,
 ):
     item_data = {
+        "candidate_id": CANDIDATE_ID,
+        "search_id": SEARCH_ID,
         "title": "Malaria mortality estimates",
         "url": "https://example.org/datasets/malaria-mortality",
         "source": "DataCite",
@@ -759,10 +990,19 @@ def test_collector_repository_item_rejects_oversized_llm_input(
 def test_collector_repository_item_rejects_incomplete_classification_contract():
     with pytest.raises(ValueError):
         CollectorRepositorySearchItem(
+            candidate_id=CANDIDATE_ID,
+            search_id=SEARCH_ID,
             title="Malaria mortality estimates",
             url="https://example.org/datasets/malaria-mortality",
             source="DataCite",
             classification={"accepted": True},
+        )
+
+
+def test_candidate_classification_request_rejects_browser_metadata():
+    with pytest.raises(ValueError):
+        CollectorRepositoryCandidateClassificationRequest(
+            url="https://attacker.example/dataset",
         )
 
 
@@ -807,6 +1047,7 @@ async def test_collector_start_collection_job_route_enqueues_background_task(mon
     response = await start_collection_job(
         CollectorURLRequest(url="https://catalog.example.org"),
         background_tasks,
+        PRINCIPAL,
     )
 
     assert response.job.id == 12
@@ -837,7 +1078,7 @@ async def test_collector_read_collection_job_route_returns_status(monkeypatch):
 
     monkeypatch.setattr("app.routes.collector.get_collection_job", fake_get_collection_job)
 
-    response = await read_collection_job(12)
+    response = await read_collection_job(12, PRINCIPAL)
 
     assert response.job.id == 12
     assert response.job.status == "done"
@@ -853,7 +1094,7 @@ async def test_collector_read_collection_job_route_returns_not_found(monkeypatch
     monkeypatch.setattr("app.routes.collector.get_collection_job", fake_get_collection_job)
 
     try:
-        await read_collection_job(404)
+        await read_collection_job(404, PRINCIPAL)
     except HTTPException as exception:
         assert exception.status_code == 404
         assert exception.detail == "Collection job not found"

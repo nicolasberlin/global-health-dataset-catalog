@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App.jsx';
+
+const SEARCH_ID = '11111111-1111-4111-8111-111111111111';
+const CANDIDATE_ID = '22222222-2222-4222-8222-222222222222';
 
 function jsonResponse(payload, { ok = true, status = 200 } = {}) {
     return {
@@ -31,8 +34,13 @@ function submitSearch(query = 'malaria mortality') {
     fireEvent.click(screen.getByRole('button', { name: 'Rechercher' }));
 }
 
+beforeEach(() => {
+    window.sessionStorage.setItem('global-health-api-token', 'frontend-test-token');
+});
+
 afterEach(() => {
     cleanup();
+    window.sessionStorage.clear();
     vi.restoreAllMocks();
 });
 
@@ -42,6 +50,7 @@ describe('database-first dataset search', () => {
             if (url.endsWith('/collector/search-datasets')) {
                 return Promise.resolve(
                     jsonResponse({
+                        search_id: SEARCH_ID,
                         query: 'malaria mortality',
                         origin: 'database',
                         warnings: [],
@@ -75,7 +84,7 @@ describe('database-first dataset search', () => {
         expect(screen.queryByText(/votes favorables/)).not.toBeInTheDocument();
         expect(
             global.fetch.mock.calls.some(([url]) =>
-                String(url).endsWith('/collector/classify-repository-result'),
+                String(url).includes('/collector/repository-candidates/'),
             ),
         ).toBe(false);
     });
@@ -86,11 +95,13 @@ describe('database-first dataset search', () => {
             resolveClassification = resolve;
         });
         const onlineItem = {
+            candidate_id: CANDIDATE_ID,
+            search_id: SEARCH_ID,
             title: 'Online malaria dataset',
             description: 'Annual observations.',
             url: 'https://example.org/malaria',
             source: 'DataCite',
-            search_query: 'malaria mortality',
+            classification_status: 'pending',
             publisher: 'Example Institute',
             date: '2025',
             doi: '',
@@ -101,6 +112,7 @@ describe('database-first dataset search', () => {
             if (url.endsWith('/collector/search-datasets')) {
                 return Promise.resolve(
                     jsonResponse({
+                        search_id: SEARCH_ID,
                         query: 'malaria mortality',
                         origin: 'online',
                         items: [onlineItem],
@@ -108,7 +120,11 @@ describe('database-first dataset search', () => {
                     }),
                 );
             }
-            if (url.endsWith('/collector/classify-repository-result')) {
+            if (
+                url.endsWith(
+                    `/collector/repository-candidates/${CANDIDATE_ID}/classify`,
+                )
+            ) {
                 return classificationResponse;
             }
             throw new Error(`Unexpected request: ${url}`);
@@ -154,15 +170,24 @@ describe('database-first dataset search', () => {
             screen.getByText('Dataset sauvegardé dans le catalogue local'),
         ).toBeInTheDocument();
         expect(screen.getByText('Accord IA')).toBeInTheDocument();
+        const classificationCall = global.fetch.mock.calls.find(([url]) =>
+            String(url).includes(`/repository-candidates/${CANDIDATE_ID}/classify`),
+        );
+        expect(classificationCall?.[1]?.body).toBeUndefined();
+        expect(classificationCall?.[1]?.headers?.Authorization).toBe(
+            'Bearer frontend-test-token',
+        );
     });
 
     it('polls automatic collection until the accepted candidate is saved', async () => {
         const onlineItem = {
+            candidate_id: CANDIDATE_ID,
+            search_id: SEARCH_ID,
             title: 'Online malaria dataset',
             description: 'Annual observations.',
             url: 'https://example.org/malaria',
             source: 'DataCite',
-            search_query: 'malaria mortality',
+            classification_status: 'pending',
             publisher: 'Example Institute',
             date: '2025',
             doi: '',
@@ -173,6 +198,7 @@ describe('database-first dataset search', () => {
             if (url.endsWith('/collector/search-datasets')) {
                 return Promise.resolve(
                     jsonResponse({
+                        search_id: SEARCH_ID,
                         query: 'malaria mortality',
                         origin: 'online',
                         items: [onlineItem],
@@ -180,7 +206,11 @@ describe('database-first dataset search', () => {
                     }),
                 );
             }
-            if (url.endsWith('/collector/classify-repository-result')) {
+            if (
+                url.endsWith(
+                    `/collector/repository-candidates/${CANDIDATE_ID}/classify`,
+                )
+            ) {
                 return Promise.resolve(
                     jsonResponse({
                         ...onlineItem,
@@ -242,11 +272,13 @@ describe('database-first dataset search', () => {
 
     it('leaves rejected candidates unscheduled', async () => {
         const onlineItem = {
+            candidate_id: CANDIDATE_ID,
+            search_id: SEARCH_ID,
             title: 'Unrelated dataset',
             description: 'Unrelated observations.',
             url: 'https://example.org/unrelated',
             source: 'DataCite',
-            search_query: 'malaria mortality',
+            classification_status: 'pending',
             publisher: '',
             date: '',
             doi: '',
@@ -257,6 +289,7 @@ describe('database-first dataset search', () => {
             if (url.endsWith('/collector/search-datasets')) {
                 return Promise.resolve(
                     jsonResponse({
+                        search_id: SEARCH_ID,
                         query: 'malaria mortality',
                         origin: 'online',
                         items: [onlineItem],
@@ -264,7 +297,11 @@ describe('database-first dataset search', () => {
                     }),
                 );
             }
-            if (url.endsWith('/collector/classify-repository-result')) {
+            if (
+                url.endsWith(
+                    `/collector/repository-candidates/${CANDIDATE_ID}/classify`,
+                )
+            ) {
                 return Promise.resolve(
                     jsonResponse({
                         ...onlineItem,
@@ -312,6 +349,7 @@ describe('database-first dataset search', () => {
         await act(async () => {
             resolveSearch(
                 jsonResponse({
+                    search_id: SEARCH_ID,
                     query: 'malaria mortality',
                     origin: 'online',
                     items: [],
@@ -343,5 +381,63 @@ describe('database-first dataset search', () => {
 
         expect(await screen.findByText('Recherche impossible')).toBeInTheDocument();
         expect(screen.getByText('Database search failed.')).toBeInTheDocument();
+    });
+});
+
+describe('protected API access', () => {
+    it('requires a runtime token and never starts a protected request without one', async () => {
+        window.sessionStorage.clear();
+        mockApi((url) => {
+            throw new Error(`Unexpected protected request: ${url}`);
+        });
+        render(<App />);
+
+        submitSearch();
+
+        expect(
+            await screen.findByText('Un jeton API est requis pour cette opération.'),
+        ).toBeInTheDocument();
+        expect(
+            global.fetch.mock.calls.some(([url]) =>
+                String(url).endsWith('/collector/search-datasets'),
+            ),
+        ).toBe(false);
+    });
+
+    it('uses a token entered at runtime for protected requests', async () => {
+        window.sessionStorage.clear();
+        mockApi((url) => {
+            if (url.endsWith('/collector/search-datasets')) {
+                return Promise.resolve(
+                    jsonResponse({
+                        search_id: SEARCH_ID,
+                        query: 'malaria mortality',
+                        origin: 'database',
+                        items: [],
+                    }),
+                );
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+        render(<App />);
+
+        fireEvent.change(screen.getByLabelText('Jeton API'), {
+            target: { value: 'runtime-test-token' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+        submitSearch();
+
+        await waitFor(() => {
+            expect(
+                global.fetch.mock.calls.some(
+                    ([url, options]) =>
+                        String(url).endsWith('/collector/search-datasets') &&
+                        options?.headers?.Authorization === 'Bearer runtime-test-token',
+                ),
+            ).toBe(true);
+        });
+        expect(window.sessionStorage.getItem('global-health-api-token')).toBe(
+            'runtime-test-token',
+        );
     });
 });

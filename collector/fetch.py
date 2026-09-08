@@ -12,6 +12,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from collector.config import DEFAULT_CONFIG
 
 
+class PageFetchError(RuntimeError):
+    """Raised when an HTML page could not be retrieved for classification."""
+
+
 @dataclass(frozen=True)
 class FetchedPage:
     url: str
@@ -30,8 +34,8 @@ def fetch_public_html(
 
     The initial URL and every redirect are checked by
     ``open_public_http_url``. Reading one byte beyond ``max_bytes`` detects an
-    oversized response; HTTP and transport failures are converted to
-    ``ValueError`` for the collection pipeline.
+    oversized response; HTTP and transport failures are reported as
+    ``PageFetchError`` so they cannot be mistaken for semantic rejection.
     """
 
     request = Request(
@@ -48,7 +52,7 @@ def fetch_public_html(
             content_type = response.headers.get("Content-Type", "")
             body = response.read(max_bytes + 1)
             if len(body) > max_bytes:
-                raise ValueError("HTML response is too large for the collector test panel.")
+                raise PageFetchError("HTML response is too large for collection.")
             return FetchedPage(
                 url=url,
                 final_url=response.geturl(),
@@ -57,9 +61,9 @@ def fetch_public_html(
                 content_type=content_type,
             )
     except HTTPError as exception:
-        raise ValueError(f"URL returned HTTP {exception.code}.") from exception
+        raise PageFetchError(f"URL returned HTTP {exception.code}.") from exception
     except (TimeoutError, URLError, OSError) as exception:
-        raise ValueError(f"Could not fetch URL: {exception}") from exception
+        raise PageFetchError(f"Could not fetch URL: {exception}") from exception
 
 
 def _ensure_public_http_url(url: str) -> None:

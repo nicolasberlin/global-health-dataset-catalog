@@ -1,4 +1,54 @@
 services:
+  ai-commons:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /ai-commons/api
+        VITE_PUBLIC_BASE: /ai-commons/
+    depends_on:
+      - ai-commons-api
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik
+      - traefik.http.routers.ai-commons.entrypoints=web
+      - traefik.http.routers.ai-commons.rule=PathPrefix(`/ai-commons`)
+      - traefik.http.routers.ai-commons.priority=10
+      - traefik.http.middlewares.strip-ai-commons.stripprefix.prefixes=/ai-commons
+      - traefik.http.routers.ai-commons.middlewares=strip-ai-commons
+      - traefik.http.services.ai-commons.loadbalancer.server.port=5173
+
+  ai-commons-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-global_health}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting the application}@postgres:5432/${POSTGRES_DB:-global_health}
+      RCP_API_KEY: ${RCP_API_KEY:?Set RCP_API_KEY before starting the application}
+      RCP_CLASSIFIER_MODEL: ${RCP_CLASSIFIER_MODEL:-deepseek-ai/DeepSeek-V4-Flash-0731}
+      API_ACCESS_TOKENS: ${API_ACCESS_TOKENS:?Set API_ACCESS_TOKENS before starting the application}
+      API_SEARCH_REQUESTS_PER_MINUTE: ${API_SEARCH_REQUESTS_PER_MINUTE:-10}
+      API_CLASSIFICATION_REQUESTS_PER_MINUTE: ${API_CLASSIFICATION_REQUESTS_PER_MINUTE:-20}
+      API_COLLECTION_REQUESTS_PER_MINUTE: ${API_COLLECTION_REQUESTS_PER_MINUTE:-5}
+      API_SOURCE_CREATION_REQUESTS_PER_MINUTE: ${API_SOURCE_CREATION_REQUESTS_PER_MINUTE:-10}
+      COLLECTION_MAX_CONCURRENCY: ${COLLECTION_MAX_CONCURRENCY:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - traefik
+      - default
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik
+      - traefik.http.routers.ai-commons-api.entrypoints=web
+      - traefik.http.routers.ai-commons-api.rule=PathPrefix(`/ai-commons/api`)
+      - traefik.http.routers.ai-commons-api.priority=100
+      - traefik.http.middlewares.strip-ai-commons-api.stripprefix.prefixes=/ai-commons/api
+      - traefik.http.routers.ai-commons-api.middlewares=strip-ai-commons-api
+      - traefik.http.services.ai-commons-api.loadbalancer.server.port=8001
+
   postgres:
     image: postgres:16
     environment:
@@ -17,3 +67,7 @@ services:
 
 volumes:
   postgres-data:
+
+networks:
+  traefik:
+    external: true

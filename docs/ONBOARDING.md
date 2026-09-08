@@ -1,357 +1,453 @@
-# Global Health Dataset Catalog - Onboarding
+# Developer Onboarding
 
-> Last verified: 2026-09-04.
+This guide helps a new contributor install, run, test, and safely modify the Global Health Dataset Catalog.
 
-This guide is the shortest path from a fresh checkout to understanding and
-running the application. Detailed contracts and diagrams live in the
-[documentation index](../README.md#documentation).
+For detailed architectural contracts, use the documents linked from the
+[README](../README.md#documentation). This guide focuses on practical development work.
 
-## 1. Project in 30 Seconds
+## 1. What You Need to Understand First
 
-The project discovers health dataset candidates, classifies them with one
-DeepSeek model hosted through EPFL RCP, validates data links, and stores eligible
-collection results in
-PostgreSQL.
+The application has two entry points that converge on the same collection
+pipeline.
 
-It has two distinct user flows:
-
-1. **Repository search** queries DataCite and classifies each returned record for
-   relevance to the user's query. Accepted results are displayed as candidates;
-   they are not persisted.
-2. **Source collection** discovers records from a configured source, classifies
-   each record as an individual health dataset, validates at least one file or
-   API distribution, and persists successful results.
-
-The word "official" is not an enforced quality guarantee. The seed catalogue
-contains official organizations, but arbitrary sources can be added and no full
-source-trust policy is implemented yet.
-
-## 2. Runtime Architecture
+### Repository Search
 
 ```text
-React/Vite frontend
-        |
-        v
-FastAPI routes
-        |
-        +--> repository search and repository EPFL RCP classification
-        |
-        +--> background collection job
-                  |
-                  +--> discovery adapters
-                  +--> page EPFL RCP classification
-                  +--> distribution validation
-                  +--> atomic PostgreSQL completion
+User query
+    -> PostgreSQL search
+    -> external repository fallback when no local result exists
+    -> persistent search session and candidates
+    -> EPFL RCP relevance classification
+    -> accepted candidates enter automatic collection
+    -> results and collection status displayed in the frontend
 ```
 
-Main ownership boundaries:
+External repository metadata is persisted as an auditable candidate, not as a
+catalogue dataset. The browser classifies it by `candidate_id`; the backend
+reloads the authoritative query and metadata from PostgreSQL. An accepted
+candidate reaches `collected_datasets` only if the normal page-classification
+and distribution-validation gates produce a valid collected dataset.
 
-- `frontend/src/`: repository search, source catalogue, job progress, and saved
-  dataset views;
-- `backend/app/routes/`: HTTP contracts and background-job orchestration;
-- `backend/app/db/`: PostgreSQL connection, schema, jobs, and persistence;
-- `collector/discovery/`: structured and generic discovery adapters;
-- `collector/classification/`: LLM clients, prompts, classifiers, and ensembles;
-- `collector/repository_search/`: DataCite search, normalization, filtering, and
-  repository-result classification;
-- `collector/validation/`: lightweight file/API link validation.
-
-For diagrams, see [Collector Pipeline Diagram](collector-pipeline-diagram.md),
-[Classification Architecture](classification-architecture.md), and
-[Database Schema Diagram](database-schema-diagram.md).
-
-## 3. Repository Structure
+### Source Collection
 
 ```text
-backend/
-  app/
-    main.py
-    database.py                 compatibility facade
-    db/
-      connection.py
-      schema.py
-      sources.py
-      collection_jobs.py
-      collection_completion.py
-      collected_datasets.py
-    routes/
-      sources.py
-      collector.py
-
-collector/
-  main.py                       source collection pipeline
-  fetch.py                      SSRF-protected public HTTP fetch
-  classification/
-    factory.py
-    ensemble.py
-    llm_client.py
-    page_llm_classifier.py
-    repository_llm_classifier.py
-    prompts.py
-  discovery/
-    adapters/
-    sitemap.py
-  repository_search/
-    models.py
-    filtering.py
-    service.py
-    providers/datacite.py
-  validation/downloads.py
-
-frontend/src/
-  App.jsx
-  components/
-    RepositorySearchSection.jsx
-    RepositoryAcceptedCard.jsx
-    RepositoryProgressCard.jsx
-    SourceCatalogSection.jsx
-    CollectedDatasetsSection.jsx
-
-tests/
+Configured source              Accepted repository candidate
+    -> discover several pages      -> open only the candidate landing page
+                    \              /
+                     -> metadata extraction
+                     -> EPFL RCP page classification
+                     -> distribution validation
+                     -> PostgreSQL persistence
 ```
 
-## 4. Repository Search
-
-`POST /collector/search-datasets` first calls
-`app.database.search_collected_datasets()`. PostgreSQL searches title,
-description, publisher, hosting platform, uploader, geography, and dataset URL
-with weighted full-text ranking. Before this lookup only, the backend removes
-the catalog-generic terms `data`, `dataset`, and `database`; PostgreSQL's
-`english` dictionary handles grammatical words and stemming. A local match is
-returned immediately with `origin: "database"`, including its distributions,
-without repository or LLM calls.
-
-When PostgreSQL returns no match, the route calls
-`repository_search/service.py:search_repository_metadata()` and returns
-`origin: "online"`. The legacy online-only endpoint
-`POST /collector/search-repositories` remains available.
-
-The original user query is retained in API responses and is passed unchanged to
-DataCite and repository LLM classification. Local search is currently optimized
-for primarily English metadata; full bilingual search is not implemented.
-
-Current behavior:
-
-1. DataCite is the only default provider.
-2. The provider requests `resource-type-id=dataset` and sorts by relevance.
-3. Results without a title or syntactically valid HTTP(S) URL are removed.
-4. A provider failure is logged and returned as a warning when another provider
-   succeeds. If every provider fails, the request fails.
-5. For `online` results, the frontend progressively calls
-   `POST /collector/classify-repository-result` for each candidate.
-6. One valid EPFL RCP response decides the classification.
-7. `relevant` and `somewhat_relevant` are positive repository votes.
-
-The repository prompt evaluates relevance to the search query. It does not
-independently establish health relevance, source trust, file availability, or
-publication eligibility. Repository candidates are not written to PostgreSQL.
-
-There is intentionally no schema migration for full-text configuration changes.
-Recreate an older local schema-1 database, including one built with the previous
-`simple` vector, before starting this version.
-
-## 5. Source Discovery
-
-`POST /collector/collection-jobs` creates a background job. The collector then
-calls `collect_source_with_report()` in `collector/main.py`.
-
-Discovery prefers structured metadata from CKAN, Socrata, and data.json/DCAT
-before generic HTML and sitemap fallbacks. Dataverse is not registered in the
-active adapter tuple and remains future work. The collector limits how many
-pages and distributions it analyzes using `CollectorConfig`. Adapter-specific
-behavior belongs in `collector/discovery/`, not in the core classifier.
-
-## 6. LLM Classification
-
-Classification is implemented, not a future feature. Two separate classifiers
-use the configured DeepSeek model through EPFL RCP:
-
-- `EnsembleRepositoryRelevanceClassifier` judges query relevance for repository
-  candidates;
-- `EnsemblePageClassifier` judges whether a discovered page is an individual,
-  health-relevant dataset.
-
-The compatibility audit wrappers both use:
+A discovered page is persisted only when:
 
 ```text
-votes_required = 1
-minimum_successful_votes = 1
-```
-
-Each classification makes one synchronous EPFL RCP call. A failed or malformed
-response is
-therefore a classification error; there is no model fallback or majority vote.
-
-See [Classification Architecture](classification-architecture.md) for exact
-prompts, payloads, output schemas, failure handling, and parameter traces.
-
-## 7. Distribution Validation
-
-After page acceptance, the collector validates candidate files and APIs:
-
-1. send `HEAD`;
-2. use a bounded partial `GET` when `HEAD` is unsupported or inconclusive;
-3. require an HTTP status from 200 through 399;
-4. reject HTML responses for non-API distributions;
-5. infer a format from headers or a small body sample when possible.
-
-This verifies lightweight accessibility, not scientific correctness or complete
-file integrity. The project does not download and retain dataset files.
-
-All untrusted collector fetches use the public-HTTP guard in
-`collector/fetch.py`. Initial URLs and every redirect are checked so private,
-loopback, link-local, multicast, reserved, and unspecified addresses are
-blocked.
-
-Dataset identity URLs have a separate, non-network validation. `url_utils.py`
-normalizes only absolute HTTP(S) URLs with a hostname and valid port, and rejects
-credentials, control characters, and ambiguous backslashes. HTML canonicals are
-used only when they have the same hostname as the fetched page; otherwise the
-page URL is retained. `CollectedDataset` enforces this invariant for every
-discovery path before persistence.
-
-## 8. Persistence Decision
-
-A discovered result reaches PostgreSQL only when:
-
-```text
-the EPFL RCP page classifier returned accepted=true
+the page classifier accepts it
 AND
-at least one considered distribution validated successfully
+at least one distribution validates successfully
 ```
 
-Collection and LLM calls run outside a database transaction. Once the complete
-`CollectionResult` exists, `complete_collection_job()` opens one PostgreSQL
-transaction, upserts every eligible dataset, and marks the job `done`. Any
-persistence failure rolls back both the dataset writes and the `done` status.
+## 2. Prerequisites
 
-Datasets are deduplicated only by exact normalized `dataset_url`. DOI-, title-,
-version-, and mirror-aware deduplication are not implemented.
+Install:
 
-## 9. Database
+- Python 3.9 or newer;
+- Node.js 20 or newer;
+- Docker;
+- Git.
 
-The application is PostgreSQL-only and requires `DATABASE_URL`. At startup it:
+You also need an EPFL RCP API key.
+Generate a separate random API access token for each developer or service that
+may run searches, classifications, or collections.
 
-1. opens the async connection pool;
-2. checks `schema_migrations`;
-3. creates the current schema only for an empty database;
-4. inserts system seed sources.
-
-It deliberately refuses obsolete or partially managed schemas. Historical
-SQLite behavior is documented in
-[ADR 0001](adr/0001-postgresql-only.md), not in this runtime guide.
-
-## 10. HTTP API
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/health` | Process health response |
-| GET | `/sources` | List configured sources |
-| POST | `/sources` | Add a source |
-| GET | `/sources/{id}/page` | Redirect to source page |
-| POST | `/collector/search-repositories` | Search DataCite metadata |
-| POST | `/collector/classify-repository-result` | Classify one candidate |
-| POST | `/collector/collection-jobs` | Start source collection |
-| GET | `/collector/collection-jobs/{id}` | Read job status |
-| GET | `/collector/collected-datasets` | List persisted datasets |
-
-## 11. Run Locally
+## 3. Install the Project
 
 From the repository root:
 
 ```bash
-export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
-export POSTGRES_PASSWORD="change-me-locally"
-docker compose up -d postgres
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+npm --prefix frontend install
+```
 
+Confirm that the main tools are available:
+
+```bash
+.venv/bin/python --version
+npm --version
+docker --version
+```
+
+## 4. Configure Local Environment Variables
+
+Create or update `.env.local` in the repository root:
+
+```bash
+export POSTGRES_PASSWORD="change-me-locally"
 export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
+
 export RCP_API_KEY="your-rcp-api-key"
 export RCP_CLASSIFIER_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
+
+export API_ACCESS_TOKENS='{"local-user":"replace-with-at-least-32-random-characters"}'
+
+# Maximum synchronous collection runs per backend process.
+export COLLECTION_MAX_CONCURRENCY="2"
+
+export VITE_API_BASE_URL="http://127.0.0.1:8001"
 ```
 
-The model variable is optional and defaults to
-`deepseek-ai/DeepSeek-V4-Flash-0731`.
-
-Backend:
+Load the file before starting the backend:
 
 ```bash
+source .env.local
+```
+
+Verify that the required variables exist without printing their values:
+
+```bash
+test -n "$DATABASE_URL" && echo "DATABASE_URL loaded"
+test -n "$RCP_API_KEY" && echo "RCP_API_KEY loaded"
+test -n "$API_ACCESS_TOKENS" && echo "API_ACCESS_TOKENS loaded"
+```
+
+Important:
+
+- use `RCP_API_KEY`, not `DEEPSEEK_API_KEY`;
+- keep each `API_ACCESS_TOKENS` owner ID stable and each token unique;
+- restart the backend after changing an environment variable;
+- never commit `.env.local`;
+- never paste an API key into source code, tests, logs, or documentation.
+
+## 5. Start the Application
+
+### Start PostgreSQL
+
+```bash
+docker compose up -d postgres
+```
+
+Check its status:
+
+```bash
+docker compose ps
+```
+
+### Start the Backend
+
+From the repository root:
+
+```bash
+source .env.local
 cd backend
-DATABASE_URL="$DATABASE_URL" PYTHONPATH=.. \
-  ../.venv/bin/python -m uvicorn app.main:app --reload --port 8001
+
+PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app \
+  --reload \
+  --reload-dir . \
+  --reload-dir ../collector \
+  --port 8001
 ```
 
-Frontend, in another terminal:
+Keep this terminal open.
+
+The backend fails closed at startup if `API_ACCESS_TOKENS` is absent or
+invalid. After starting the frontend, enter your token in **Jeton API**. The
+browser keeps it in `sessionStorage` for the current tab and sends it as a
+Bearer token; do not define it as a `VITE_*` variable because Vite variables are
+included in the public JavaScript bundle.
+
+Verify the backend:
 
 ```bash
-cd frontend
-VITE_API_BASE_URL=http://127.0.0.1:8001 npm run dev
+curl -i http://127.0.0.1:8001/health
 ```
 
-Open `http://127.0.0.1:5173/`.
+Expected response:
 
-## 12. Tests and Checks
+```json
+{"status": "ok"}
+```
+
+A successful health check only confirms that the backend process is running. It does not test EPFL RCP or every external dependency.
+
+### Start the Frontend
+
+In another terminal, from the repository root:
 
 ```bash
-.venv/bin/ruff check .
+source .env.local
+npm --prefix frontend run dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173/
+```
+
+## 6. Verify EPFL RCP Through the Application
+
+Use the repository search field with a query such as:
+
+```text
+malaria mortality dataset
+```
+
+When no local result exists, the application should:
+
+1. search the configured external repository;
+2. persist the search and candidate metadata;
+3. submit only candidate IDs for EPFL RCP classification;
+4. automatically collect accepted candidates through the normal validation gates;
+5. progressively display classification and collection status.
+
+Watch the backend terminal during this test. RCP errors are logged there.
+
+The current default factory uses one RCP voter. The ensemble implementation still supports multiple voters, but a genuine `2/3` majority requires three configured voters. See
+[Classification Architecture](classification-architecture.md) for the current voting contract.
+
+## 7. Code Tour
+
+### Frontend
+
+Start with:
+
+```text
+frontend/src/App.jsx
+frontend/src/components/RepositorySearchSection.jsx
+frontend/src/components/RepositoryAcceptedCard.jsx
+frontend/src/components/SourceCatalogSection.jsx
+frontend/src/components/CollectedDatasetsSection.jsx
+```
+
+The frontend owns interface state, progressive repository classification, source collection progress, and result display.
+
+### Backend
+
+Start with:
+
+```text
+backend/app/main.py
+backend/app/security.py
+backend/app/routes/collector.py
+backend/app/routes/sources.py
+backend/app/db/
+```
+
+Repository search persistence is implemented in
+`backend/app/db/search_sessions.py` and
+`backend/app/db/repository_candidates.py`. Candidate classification transitions
+are atomic, owned by the authenticated search principal, and errored candidates
+require an explicit retry. `backend/app/db/api_quotas.py` applies atomic
+fixed-minute quotas before costly operations.
+
+The backend owns HTTP validation, PostgreSQL access, background-job orchestration, and response mapping.
+
+### Collector
+
+Start with:
+
+```text
+collector/main.py
+collector/discovery/
+collector/classification/
+collector/validation/
+collector/fetch.py
+```
+
+The collector owns discovery, extraction, LLM classification, distribution validation, and protected outbound requests. It does not directly own the final PostgreSQL transaction.
+
+## 8. Where to Make a Change
+
+| Goal | Main location |
+| --- | --- |
+| Change repository search behavior | `collector/repository_search/` |
+| Add a repository provider | `collector/repository_search/providers/` |
+| Change page discovery | `collector/discovery/` |
+| Add a discovery adapter | `collector/discovery/adapters/` |
+| Change LLM prompts | `collector/classification/prompts.py` |
+| Change the default LLM provider or voters | `collector/classification/factory.py` |
+| Change EPFL RCP configuration | `collector/classification/providers/epfl_rcp.py` |
+| Change classification validation | `page_llm_classifier.py` or `repository_llm_classifier.py` |
+| Change distribution checks | `collector/validation/downloads.py` |
+| Change network protections | `collector/fetch.py` |
+| Change API routes | `backend/app/routes/` |
+| Change persistence | `backend/app/db/` |
+| Change the interface | `frontend/src/` |
+
+Keep provider-specific behavior in provider modules. Do not place RCP-specific request logic inside the generic classifier or domain models.
+
+## 9. Testing Strategy
+
+### Python Unit and API Tests
+
+```bash
 .venv/bin/pytest
-npm --prefix frontend test
-npm --prefix frontend run build
 ```
 
-Last verified without `TEST_DATABASE_URL`: **164 passed, 47 skipped**. With a
-local PostgreSQL database: **211 passed**. Frontend: **4 tests passed**. Run the
-complete database suite with:
+### PostgreSQL Integration Tests
 
 ```bash
 TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
 ```
 
-Test counts are observations, not a permanent contract; update this line when
-the suite changes.
+PostgreSQL tests create isolated schemas. If `TEST_DATABASE_URL` is not set, those tests are skipped.
 
-## 13. Current Limits
+### Code Quality
 
-| Limit | Current value |
-| --- | ---: |
-| Outbound request timeout | 10 seconds |
-| Pages analyzed per source | 5 |
-| Distributions validated per dataset | 1 |
-| Distribution partial-GET sample | 65,536 bytes |
-| HTML response | 1,000,000 bytes |
-| JSON or sitemap response | 5,000,000 bytes |
-| Sitemaps traversed per source | 10 |
-| Sitemap URLs returned by the active generic adapter | 50 |
-| Sitemap utility hard cap | 1,000 |
+```bash
+.venv/bin/ruff check .
+git diff --check
+```
 
-- repository search candidates are display-only and are not fed automatically
-  into source collection;
-- repository classification does not independently enforce health relevance;
-- source authority and the word "official" are not enforced;
-- licensing is extracted when available but no allow/deny policy is enforced;
-- duplicate handling uses exact normalized dataset URLs only;
-- authentication, production deployment, monitoring, scheduled revalidation,
-  and human review workflows are not implemented.
+### Frontend Tests and Build
 
-The proposed controls are tracked in the
-[Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
-and [Roadmap](roadmap.md).
+```bash
+npm --prefix frontend test
+npm --prefix frontend run build
+```
 
-## 14. Recommended Reading Order
+### Before Submitting a Change
+
+Run:
+
+```bash
+.venv/bin/ruff check .
+TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
+npm --prefix frontend test
+npm --prefix frontend run build
+git diff --check
+```
+
+Do not document an exact permanent number of tests. The number changes as the project evolves.
+
+## 10. Common Problems
+
+### Port 8001 Is Already in Use
+
+Error:
+
+```text
+[Errno 48] Address already in use
+```
+
+Find the existing process:
+
+```bash
+lsof -nP -iTCP:8001 -sTCP:LISTEN
+```
+
+Prefer stopping the old backend with `Ctrl+C` in its original terminal. Then restart it after loading `.env.local`.
+
+### Every RCP Classification Fails
+
+Check that the expected variable exists:
+
+```bash
+source .env.local
+test -n "$RCP_API_KEY" && echo "RCP key loaded" || echo "RCP key missing"
+```
+
+Confirm that the variable is named `RCP_API_KEY`. A key stored under `DEEPSEEK_API_KEY` is not read by the RCP provider.
+
+Restart the backend after correcting the file.
+
+Typical meanings:
+
+- HTTP 400: unsupported request field, invalid payload, or invalid model name;
+- HTTP 401 from FastAPI: missing or invalid application Bearer token;
+- HTTP 429 from FastAPI: the owner's application quota is exhausted; respect
+  the `Retry-After` header;
+- HTTP 401 or 403 logged from RCP: invalid RCP key or missing RCP permission;
+- HTTP 404: incorrect endpoint or unavailable model;
+- timeout: RCP or network did not respond within the configured limit;
+- invalid JSON: the model response did not satisfy the classification contract.
+
+Never include the API key when sharing an error message.
+
+### PostgreSQL Does Not Start
+
+Check:
+
+```bash
+docker compose ps
+docker compose logs postgres
+```
+
+Confirm that `DATABASE_URL` uses the same password as `POSTGRES_PASSWORD`.
+
+### The Database Schema Is Rejected
+
+The application initializes an empty PostgreSQL database automatically. It does not repair arbitrary partial or obsolete schemas.
+
+The current pre-release baseline includes owned `search_sessions`,
+`repository_candidates`, `api_rate_limits`, and candidate-linked
+`collection_jobs`. No upgrade migration is provided for an older local schema;
+recreate the local database.
+
+For migration decisions, consult:
+
+- [Database Schema](database-schema-diagram.md)
+- [ADR 0001](adr/0001-postgresql-only.md)
+
+Do not delete or recreate a database containing important data without explicit approval.
+
+### Frontend Changes Do Not Appear
+
+Confirm that the frontend development server is running and reload the page. If the API address changed, restart the frontend after updating `VITE_API_BASE_URL`.
+
+## 11. Development Rules
+
+When changing the project:
+
+1. Identify the owning module before editing.
+2. Add or update tests with the implementation.
+3. Keep secrets outside the repository.
+4. Preserve bounded network reads and URL safety checks.
+5. Do not silently convert provider failures into accepted or rejected datasets.
+6. Update the source-of-truth technical document when a contract changes.
+7. Link to technical documentation instead of copying it into multiple files.
+
+## 12. Recommended Reading Order
+
+For a new contributor:
 
 1. `README.md`
-2. `frontend/src/App.jsx` and `frontend/src/components/`
+2. `frontend/src/App.jsx`
 3. `backend/app/routes/collector.py`
 4. `collector/main.py`
 5. `collector/repository_search/service.py`
-6. `collector/classification/factory.py` and `ensemble.py`
+6. `collector/classification/factory.py`
 7. `collector/classification/prompts.py`
-8. `collector/validation/downloads.py` and `collector/fetch.py`
+8. `collector/validation/downloads.py`
 9. `backend/app/db/collection_completion.py`
-10. tests corresponding to the code being changed
+10. tests related to the component being changed
 
-The mental model to retain is:
+For detailed behavior:
+
+- [Technical Design](technical-design-document.md)
+- [Collector Pipeline](collector-pipeline-diagram.md)
+- [Classification Architecture](classification-architecture.md)
+- [Database Schema](database-schema-diagram.md)
+- [Roadmap](roadmap.md)
+
+## 13. Mental Model to Keep
 
 ```text
-repository search = candidate relevance and display, without persistence
-source collection = accepted page + valid distribution -> eligible dataset -> storage
+Repository search
+    = authenticate a configured owner and consume a search quota
+    + search PostgreSQL first
+    + find external candidates when no local result exists
+    + persist the owned search and candidates
+    + authorize and classify trusted server-side metadata by candidate ID
+    + reserve a candidate-linked collection job for accepted candidates
+
+Source collection
+    = process a configured source or one accepted repository candidate
+    + accept eligible datasets
+    + validate distributions
+    + persist results
 ```
+
+When unsure where behavior belongs, find the document or module that owns the contract instead of duplicating the rule elsewhere.

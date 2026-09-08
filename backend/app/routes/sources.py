@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
@@ -15,6 +17,7 @@ from app.database import (
     list_data_sources,
     normalize_data_source_key,
 )
+from app.security import APIPrincipal, enforce_api_quota, require_api_principal
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -60,7 +63,11 @@ async def list_sources() -> DataSourcesResponse:
 
 
 @router.post("", status_code=201)
-async def create_source(source: DataSourceCreate) -> DataSource:
+async def create_source(
+    source: DataSourceCreate,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+) -> DataSource:
+    await enforce_api_quota(principal, "source_creation")
     try:
         saved_source = await create_data_source(
             source.source_key,

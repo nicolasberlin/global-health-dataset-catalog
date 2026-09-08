@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .db.api_quotas import APIQuotaDecision, consume_api_quota
 from .db.collected_datasets import (
     list_collected_datasets,
     list_dataset_discovery_observations,
@@ -16,10 +17,24 @@ from .db.collection_jobs import (
     mark_collection_job_error,
     mark_collection_job_running,
     mark_interrupted_collection_jobs_error,
-    reserve_automatic_collection_job,
+    reserve_repository_candidate_collection_job,
 )
 from .db.connection import close_database_pool, open_database_pool
+from .db.repository_candidates import (
+    complete_candidate_classification,
+    complete_search_session_with_repository_candidates,
+    fail_candidate_classification,
+    get_repository_candidate,
+    mark_interrupted_candidate_classifications_error,
+    save_repository_candidates,
+    start_candidate_classification,
+)
 from .db.schema import DATA_SOURCE_KEY_PATTERN_TEXT, init_database
+from .db.search_sessions import (
+    complete_search_session,
+    create_search_session,
+    mark_interrupted_search_sessions_error,
+)
 from .db.serialization import StoredJSONError, StoredTimestampError
 from .db.sources import (
     DuplicateDataSourceKeyError,
@@ -36,6 +51,7 @@ from .db.sources import (
 )
 
 __all__ = (
+    "APIQuotaDecision",
     "DATA_SOURCE_KEY_PATTERN_TEXT",
     "CollectionJobReservation",
     "DuplicateDataSourceKeyError",
@@ -46,15 +62,24 @@ __all__ = (
     "StoredTimestampError",
     "close_database_pool",
     "complete_collection_job",
+    "complete_candidate_classification",
+    "complete_search_session",
+    "complete_search_session_with_repository_candidates",
+    "consume_api_quota",
     "create_collection_job",
+    "create_search_session",
     "create_data_source",
+    "fail_candidate_classification",
     "get_collection_job",
+    "get_repository_candidate",
     "get_data_source",
     "init_database",
     "list_collected_datasets",
     "list_data_sources",
     "list_dataset_discovery_observations",
     "mark_interrupted_collection_jobs_error",
+    "mark_interrupted_search_sessions_error",
+    "mark_interrupted_candidate_classifications_error",
     "mark_collection_job_done",
     "mark_collection_job_error",
     "mark_collection_job_running",
@@ -62,9 +87,11 @@ __all__ = (
     "normalize_data_source_page_url",
     "normalize_dataset_search_query",
     "open_database_pool",
-    "reserve_automatic_collection_job",
+    "reserve_repository_candidate_collection_job",
+    "save_repository_candidates",
     "save_collected_datasets",
     "search_collected_datasets",
+    "start_candidate_classification",
     "upsert_collector_data_source",
     "upsert_data_source",
 )

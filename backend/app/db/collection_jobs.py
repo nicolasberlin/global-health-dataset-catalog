@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
@@ -10,6 +11,7 @@ from collector.url_utils import require_http_url
 
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
+from .search_sessions import _normalized_owner_id
 from .serialization import (
     _deserialize_discovery_methods,
     _format_optional_timestamp,
@@ -20,7 +22,7 @@ from .serialization import (
 
 @dataclass(frozen=True)
 class CollectionJobReservation:
-    """Result of atomically reserving automatic collection for one URL."""
+    """Result of atomically reserving collection for one repository candidate."""
 
     job: dict[str, object] | None
     created: bool
@@ -38,20 +40,41 @@ async def create_collection_job(source_url: str) -> dict[str, object]:
     return _collection_job_to_dict(row)
 
 
-async def reserve_automatic_collection_job(
-    source_url: str,
+async def reserve_repository_candidate_collection_job(
+    candidate_id: UUID,
+    owner_id: str,
 ) -> CollectionJobReservation:
-    """Create one pending job unless the URL is saved or already being collected.
+    """Create one pending job unless the accepted candidate is already handled.
 
-    The advisory lock makes the check-and-insert sequence idempotent under
-    concurrent repository-classification requests without changing the schema.
-    Terminal empty or failed jobs do not block a later retry.
+    Locking the candidate serializes the check-and-insert sequence, while the
+    partial unique index independently enforces one active job per candidate.
+    Only pending or running jobs block a new attempt; terminal jobs remain as
+    immutable attempt history.
     """
 
-    source_url = require_http_url(source_url)
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         async with connection.transaction():
+            candidate = await _fetchone(
+                connection,
+                """
+                SELECT candidate.id, candidate.url, candidate.classification_status
+                FROM repository_candidates AS candidate
+                JOIN search_sessions AS session
+                  ON session.id = candidate.search_session_id
+                WHERE candidate.id = %s AND session.owner_id = %s
+                FOR UPDATE OF candidate
+                """,
+                (candidate_id, _normalized_owner_id(owner_id)),
+            )
+            if candidate is None:
+                raise ValueError("Repository candidate not found.")
+            if str(candidate["classification_status"]) != "accepted":
+                raise ValueError("Only an accepted candidate can be collected.")
+
+            source_url = require_http_url(str(candidate["url"]))
+            # Different searches can persist different candidate IDs for the
+            # same URL, so URL-level serialization is also required.
             await connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                 (source_url,),
@@ -73,6 +96,8 @@ async def reserve_automatic_collection_job(
                     ) AS already_collected,
                     active_job.id,
                     active_job.source_url,
+                    active_job.kind,
+                    active_job.repository_candidate_id,
                     active_job.status,
                     active_job.saved_count,
                     active_job.discovered_count,
@@ -88,17 +113,22 @@ async def reserve_automatic_collection_job(
                     active_job.finished_at
                 FROM (VALUES (1)) AS singleton(value)
                 LEFT JOIN LATERAL (
-                    SELECT id, source_url, status, saved_count, discovered_count,
+                    SELECT id, source_url, kind, repository_candidate_id,
+                           status, saved_count, discovered_count,
                            analyzed_count, accepted_count, rejected_count,
                            invalid_distribution_count, discovery_methods, message,
                            error, created_at, updated_at, finished_at
                     FROM collection_jobs
-                    WHERE source_url = %s AND status IN ('pending', 'running')
+                    WHERE (
+                        repository_candidate_id = %s
+                        OR (kind = 'repository_candidate' AND source_url = %s)
+                    )
+                      AND status IN ('pending', 'running')
                     ORDER BY id DESC
                     LIMIT 1
                 ) AS active_job ON TRUE
                 """,
-                (source_url, source_url, source_url),
+                (source_url, source_url, candidate_id, source_url),
             )
             if reservation_state is None:
                 raise RuntimeError("Automatic collection lookup returned no row.")
@@ -116,7 +146,12 @@ async def reserve_automatic_collection_job(
                     already_collected=False,
                 )
 
-            new_job = await _insert_collection_job(connection, source_url)
+            new_job = await _insert_collection_job(
+                connection,
+                source_url,
+                kind="repository_candidate",
+                repository_candidate_id=candidate_id,
+            )
             if new_job is None:
                 raise RuntimeError("Collection job insert did not return a row.")
             return CollectionJobReservation(
@@ -156,18 +191,24 @@ async def mark_interrupted_collection_jobs_error() -> int:
 async def _insert_collection_job(
     connection: AsyncConnection[DictRow],
     source_url: str,
+    *,
+    kind: str = "source",
+    repository_candidate_id: UUID | None = None,
 ) -> Row | None:
     return await _fetchone(
         connection,
         """
-        INSERT INTO collection_jobs (source_url, status, message)
-        VALUES (%s, 'pending', 'Collecte en attente.')
-        RETURNING id, source_url, status, saved_count, discovered_count,
+        INSERT INTO collection_jobs (
+            source_url, kind, repository_candidate_id, status, message
+        )
+        VALUES (%s, %s, %s, 'pending', 'Collecte en attente.')
+        RETURNING id, source_url, kind, repository_candidate_id,
+                  status, saved_count, discovered_count,
                   analyzed_count, accepted_count, rejected_count,
                   invalid_distribution_count, discovery_methods, message,
                   error, created_at, updated_at, finished_at
         """,
-        (source_url,),
+        (source_url, kind, repository_candidate_id),
     )
 
 
@@ -199,7 +240,8 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
                 updated_at = NOW(),
                 finished_at = NULL
             WHERE id = %s AND status = 'pending'
-            RETURNING id, source_url, status, saved_count, discovered_count,
+            RETURNING id, source_url, kind, repository_candidate_id,
+                      status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
                       invalid_distribution_count, discovery_methods, message,
                       error, created_at, updated_at, finished_at
@@ -244,7 +286,8 @@ async def _mark_collection_job_done(
             updated_at = NOW(),
             finished_at = NOW()
         WHERE id = %s AND status = 'running'
-        RETURNING id, source_url, status, saved_count, discovered_count,
+        RETURNING id, source_url, kind, repository_candidate_id,
+                  status, saved_count, discovered_count,
                   analyzed_count, accepted_count, rejected_count,
                   invalid_distribution_count, discovery_methods, message,
                   error, created_at, updated_at, finished_at
@@ -280,7 +323,8 @@ async def mark_collection_job_error(
                 updated_at = NOW(),
                 finished_at = NOW()
             WHERE id = %s AND status IN ('pending', 'running')
-            RETURNING id, source_url, status, saved_count, discovered_count,
+            RETURNING id, source_url, kind, repository_candidate_id,
+                      status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
                       invalid_distribution_count, discovery_methods, message,
                       error, created_at, updated_at, finished_at
@@ -295,7 +339,8 @@ async def _get_collection_job_row(connection, job_id: int) -> Row | None:
     return await _fetchone(
         connection,
         """
-        SELECT id, source_url, status, saved_count, discovered_count,
+        SELECT id, source_url, kind, repository_candidate_id,
+               status, saved_count, discovered_count,
                analyzed_count, accepted_count, rejected_count,
                invalid_distribution_count, discovery_methods, message, error,
                created_at, updated_at, finished_at
@@ -326,6 +371,12 @@ def _collection_job_to_dict(row: Row) -> dict[str, object]:
     return {
         "id": int(row["id"]),
         "source_url": str(row["source_url"]),
+        "kind": str(row["kind"]),
+        "repository_candidate_id": (
+            UUID(str(row["repository_candidate_id"]))
+            if row["repository_candidate_id"] is not None
+            else None
+        ),
         "status": str(row["status"]),
         "saved_count": int(row["saved_count"]),
         "discovered_count": int(row["discovered_count"]),

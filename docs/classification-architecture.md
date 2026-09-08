@@ -1,8 +1,6 @@
 # Classification Architecture
 
-> Last verified: 2026-09-05. See the
-> [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
-> for acceptance rules that are proposed but not yet fully enforced.
+> Last verified: 2026-09-07.
 
 This document describes every runtime module under `collector/classification/`,
 the values exchanged between them, and the two classification flows. Private
@@ -201,7 +199,8 @@ response raises `PageClassificationError`; there is no fallback voter.
 
 ```mermaid
 sequenceDiagram
-    participant Route as POST classify-repository-result
+    participant Route as POST repository-candidates/{id}/classify
+    participant DB as PostgreSQL
     participant Service as repository_search/service.py
     participant Factory as factory.py
     participant Ensemble as EnsembleRepositoryRelevanceClassifier
@@ -209,6 +208,8 @@ sequenceDiagram
     participant Client as HTTPJSONLLMClient
     participant API as EPFL RCP Chat Completions API
 
+    Route->>DB: reserve pending -> classifying
+    DB-->>Route: persisted query and candidate metadata
     Route->>Factory: build_default_repository_result_classifier()
     Route->>Service: classify_repository_result(result, classifier)
     Service->>Service: _repository_result_page(result)
@@ -226,7 +227,13 @@ sequenceDiagram
     Ensemble->>Ensemble: select label among decision-supporting votes
     Ensemble-->>Service: final RepositoryClassification
     Service-->>Route: RepositorySearchResult with classification
+    Route->>DB: persist accepted or rejected decision
 ```
+
+The route accepts no candidate metadata from the browser. It reconstructs the
+`RepositorySearchResult` from `repository_candidates` and the original query in
+`search_sessions`. A model or parsing failure is stored as candidate `error`
+and can be retried only explicitly; it is not converted to a negative label.
 
 For repository results, `relevant` and `somewhat_relevant` are positive votes.
 `not_relevant` and `insufficient_information` are negative votes. When labels
