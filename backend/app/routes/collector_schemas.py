@@ -25,11 +25,7 @@ from collector.classification.repository import (
 )
 
 
-class CollectorURLRequest(BaseModel):
-    url: HttpUrl
-
-
-# Query-driven repository search endpoint, separate from the collector test flow.
+# Query-driven repository search endpoint.
 class CollectorRepositorySearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS)
 

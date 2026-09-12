@@ -1,6 +1,6 @@
 # Product and Production Roadmap
 
-> Status: proposed work, not current architecture. Last reviewed 2026-09-02.
+> Status: proposed work, not current architecture. Last reviewed 2026-09-11.
 
 This document keeps future work separate from the current
 [Technical Design Document](technical-design-document.md). Items are ordered by
@@ -41,8 +41,8 @@ Detailed design: [Multi-Repository Architecture](props/multi-repository-architec
 - create a labeled evaluation set and measure precision, recall, disagreement,
   failure rates, latency, and cost;
 - add a human-review path for uncertainty and policy triggers;
-- decide whether provider-level independence or a fallback model is required
-  instead of relying on one DeepSeek model.
+- decide whether provider-level independence or fallback models are required;
+  the current three-model ensemble still depends on one EPFL RCP endpoint.
 
 ## 5. Production Architecture
 

@@ -5,62 +5,6 @@ from __future__ import annotations
 import json
 
 
-def _build_openai_responses_request_body(
-    payload: dict[str, object],
-    model: str,
-) -> dict[str, object]:
-    return _build_responses_request_body(
-        payload,
-        model,
-        system_prompt=_system_prompt(),
-        schema_name="global_health_page_classification",
-        schema=_classification_schema(),
-        strict=True,
-    )
-
-
-def _build_openai_repository_relevance_request_body(
-    payload: dict[str, object],
-    model: str,
-) -> dict[str, object]:
-    return _build_responses_request_body(
-        payload,
-        model,
-        system_prompt=_repository_relevance_system_prompt(),
-        schema_name="repository_result_relevance_classification",
-        schema=_repository_relevance_schema(),
-        strict=True,
-    )
-
-
-def _build_deepseek_responses_request_body(
-    payload: dict[str, object],
-    model: str,
-) -> dict[str, object]:
-    return _build_responses_request_body(
-        payload,
-        model,
-        system_prompt=_system_prompt(),
-        schema_name="global_health_page_classification",
-        schema=_classification_schema(),
-        strict=False,
-    )
-
-
-def _build_deepseek_repository_relevance_request_body(
-    payload: dict[str, object],
-    model: str,
-) -> dict[str, object]:
-    return _build_responses_request_body(
-        payload,
-        model,
-        system_prompt=_repository_relevance_system_prompt(),
-        schema_name="repository_result_relevance_classification",
-        schema=_repository_relevance_schema(),
-        strict=False,
-    )
-
-
 def _build_epfl_rcp_chat_completions_request_body(
     payload: dict[str, object],
     model: str,
@@ -109,49 +53,6 @@ def _build_chat_completions_request_body(
             },
         ],
         "response_format": {"type": "json_object"},
-    }
-
-
-def _build_responses_request_body(
-    payload: dict[str, object],
-    model: str,
-    *,
-    system_prompt: str,
-    schema_name: str,
-    schema: dict[str, object],
-    strict: bool,
-) -> dict[str, object]:
-    output_format: dict[str, object] = {
-        "type": "json_schema",
-        "name": schema_name,
-        "schema": schema,
-    }
-    if strict:
-        output_format["strict"] = True
-
-    return {
-        "model": model,
-        "input": [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": system_prompt,
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": json.dumps(payload, ensure_ascii=True),
-                    }
-                ],
-            },
-        ],
-        "text": {"format": output_format},
     }
 
 

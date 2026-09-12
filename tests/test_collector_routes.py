@@ -14,14 +14,12 @@ from app.routes.collector import (
     list_collected,
     read_collection_job,
     search_datasets,
-    start_collection_job,
 )
 from app.routes.collector_schemas import (
     CollectorCollectedDataset,
     CollectorRepositoryCandidateClassificationRequest,
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
-    CollectorURLRequest,
 )
 from app.security import APIPrincipal
 from fastapi import BackgroundTasks, HTTPException
@@ -53,7 +51,6 @@ def bypass_api_quota(monkeypatch):
         assert operation in {
             "repository_search",
             "repository_classification",
-            "collection_start",
         }
 
     monkeypatch.setattr("app.routes.collector.enforce_api_quota", allow_request)
@@ -139,7 +136,7 @@ def _collection_job(
         "repository_candidate_id": CANDIDATE_ID,
         "status": status,
         "saved_count": saved_count,
-        "message": "Collecte en attente.",
+        "message": "Collection pending.",
         "error": "",
         "created_at": "2026-09-06 12:00:00",
         "updated_at": "2026-09-06 12:00:00",
@@ -1022,37 +1019,13 @@ def test_collected_dataset_response_rejects_non_http_dataset_url():
         )
 
 
-async def test_collector_start_collection_job_route_enqueues_background_task(monkeypatch):
-    async def fake_create_collection_job(source_url):
-        assert source_url == "https://catalog.example.org/"
-        return {
-            "id": 12,
-            "source_url": source_url,
-            "status": "pending",
-            "saved_count": 0,
-            "message": "Collecte en attente.",
-            "error": "",
-            "created_at": "2026-08-16 12:00:00",
-            "updated_at": "2026-08-16 12:00:00",
-            "finished_at": "",
-        }
+async def test_manual_source_collection_endpoint_is_removed():
+    from app.main import app
+    from starlette.routing import Match
 
-    background_tasks = BackgroundTasks()
-
-    monkeypatch.setattr(
-        "app.routes.collector.db_create_collection_job",
-        fake_create_collection_job,
-    )
-
-    response = await start_collection_job(
-        CollectorURLRequest(url="https://catalog.example.org"),
-        background_tasks,
-        PRINCIPAL,
-    )
-
-    assert response.job.id == 12
-    assert response.job.status == "pending"
-    assert len(background_tasks.tasks) == 1
+    scope = {"type": "http", "method": "POST", "path": "/collector/collection-jobs"}
+    assert all(route.matches(scope)[0] == Match.NONE for route in app.routes)
+    assert "/collector/collection-jobs" not in app.openapi()["paths"]
 
 
 async def test_collector_read_collection_job_route_returns_status(monkeypatch):
@@ -1069,7 +1042,7 @@ async def test_collector_read_collection_job_route_returns_status(monkeypatch):
             "rejected_count": 3,
             "invalid_distribution_count": 1,
             "discovery_methods": ["sitemap"],
-            "message": "2 dataset(s) sauvegardé(s).",
+            "message": "2 dataset(s) saved.",
             "error": "",
             "created_at": "2026-08-16 12:00:00",
             "updated_at": "2026-08-16 12:01:00",

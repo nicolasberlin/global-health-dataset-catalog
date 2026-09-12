@@ -176,7 +176,7 @@ async def mark_interrupted_collection_jobs_error() -> int:
             """
             UPDATE collection_jobs
             SET status = 'error',
-                message = 'Collecte interrompue.',
+                message = 'Collection interrupted.',
                 error = 'Collection interrupted by application restart.',
                 updated_at = NOW(),
                 finished_at = NOW()
@@ -201,7 +201,7 @@ async def _insert_collection_job(
         INSERT INTO collection_jobs (
             source_url, kind, repository_candidate_id, status, message
         )
-        VALUES (%s, %s, %s, 'pending', 'Collecte en attente.')
+        VALUES (%s, %s, %s, 'pending', 'Collection pending.')
         RETURNING id, source_url, kind, repository_candidate_id,
                   status, saved_count, discovered_count,
                   analyzed_count, accepted_count, rejected_count,
@@ -235,7 +235,7 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
                 rejected_count = 0,
                 invalid_distribution_count = 0,
                 discovery_methods = '[]'::jsonb,
-                message = 'Collecte en cours.',
+                message = 'Collection in progress.',
                 error = '',
                 updated_at = NOW(),
                 finished_at = NULL
@@ -318,7 +318,7 @@ async def mark_collection_job_error(
             """
             UPDATE collection_jobs
             SET status = 'error',
-                message = 'Collecte échouée.',
+                message = 'Collection failed.',
                 error = %s,
                 updated_at = NOW(),
                 finished_at = NOW()
@@ -395,9 +395,9 @@ def _collection_job_to_dict(row: Row) -> dict[str, object]:
 
 def _collection_job_done_message(saved_count: int, report: CollectionReport) -> str:
     if saved_count:
-        return f"{saved_count} dataset(s) sauvegardé(s)."
+        return f"{saved_count} dataset(s) saved."
     if report.discovered_count == 0:
-        return "Aucune URL candidate découverte."
+        return "No candidate URL was discovered."
     if report.analyzed_count == 0:
-        return "Aucune page analysée."
-    return "Aucun dataset santé avec fichier valide trouvé."
+        return "No page was analyzed."
+    return "No health dataset with a valid file was found."

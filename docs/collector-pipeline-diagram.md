@@ -91,21 +91,12 @@ an exception is stored as job `error`. A later accepted request creates a new
 attempt after either terminal outcome if the dataset is still absent. The old
 terminal row is retained as attempt history.
 
-## Manual Source Collection
+## Collection Entry Point
 
-```mermaid
-flowchart TD
-    Start["POST /collector/collection-jobs"] --> Pending["Create kind=source job"]
-    Pending --> Schedule["_schedule_collection_job()"]
-    Schedule --> Discover["collect_source_with_report()"]
-    Discover --> Pages["Bounded discovery and page analysis"]
-    Pages --> Gates["Page classification + distribution validation"]
-    Gates --> Complete["complete_collection_job()"]
-```
-
-Manual and candidate collection share validation and atomic completion. They
-differ only in discovery scope: a configured source can discover several pages,
-while a repository job analyzes exactly its candidate landing page.
+The website starts collection automatically for accepted repository candidates.
+Source administration and manual source collection have been removed from the
+website, including the former `POST /collector/collection-jobs` endpoint.
+The source discovery library remains available for maintenance outside the UI.
 
 ## Limits And Execution
 

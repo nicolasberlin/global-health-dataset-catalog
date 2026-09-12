@@ -28,10 +28,10 @@ function mockApi(searchHandler) {
 }
 
 function submitSearch(query = 'malaria mortality') {
-    fireEvent.change(screen.getByLabelText('Rechercher un dataset santé'), {
+    fireEvent.change(screen.getByLabelText('Search for a health dataset'), {
         target: { value: query },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Rechercher' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 }
 
 beforeEach(() => {
@@ -42,9 +42,41 @@ afterEach(() => {
     cleanup();
     window.sessionStorage.clear();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
 });
 
 describe('database-first dataset search', () => {
+    it('offers search and catalog without manual collection and filters search results', async () => {
+        vi.stubEnv('VITE_API_AUTH_MODE', 'local');
+        const items = [
+            { id: 1, title: 'Malaria Senegal', description: 'Mortality', geography: ['Senegal'], dataset_url: 'https://example.org/1', distributions: [{ url: 'https://example.org/1.csv', format: 'CSV' }] },
+            { id: 2, title: 'Malaria France', description: 'Cases', geography: ['France'], dataset_url: 'https://example.org/2', distributions: [{ url: 'https://example.org/2.json', format: 'JSON' }] },
+            { id: 3, title: 'Vaccination Senegal', description: 'Coverage', geography: ['Senegal'], dataset_url: 'https://example.org/3', distributions: [{ url: 'https://example.org/3.csv', format: 'CSV' }] },
+        ];
+        mockApi(() => Promise.resolve(jsonResponse({
+            search_id: SEARCH_ID, query: 'health', origin: 'database', warnings: [], items,
+        })));
+        render(<App />);
+        expect(screen.queryByText('API connected')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Administration' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Collect', hidden: true })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Catalog' }));
+        expect(screen.getByRole('heading', { name: 'Catalog' })).toBeVisible();
+        expect(global.fetch.mock.calls.some(([url]) => String(url).endsWith('/sources'))).toBe(false);
+        fireEvent.click(screen.getByRole('button', { name: 'Search datasets' }));
+        submitSearch('health');
+        expect(await screen.findByRole('heading', { name: 'Malaria Senegal' })).toBeVisible();
+        fireEvent.change(screen.getByLabelText('Country or area'), { target: { value: 'Senegal' } });
+        expect(screen.queryByRole('heading', { name: 'Malaria France' })).not.toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'malaria' } });
+        expect(screen.queryByRole('heading', { name: 'Vaccination Senegal' })).not.toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'JSON' } });
+        expect(screen.getByText('No results match these filters.')).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+        expect(screen.getByRole('heading', { name: 'Malaria France' })).toBeVisible();
+        expect(screen.getByRole('heading', { name: 'Vaccination Senegal' })).toBeVisible();
+    });
+
     it('shows local results immediately without classification controls or calls', async () => {
         mockApi((url) => {
             if (url.endsWith('/collector/search-datasets')) {
@@ -76,11 +108,11 @@ describe('database-first dataset search', () => {
         submitSearch();
 
         expect(await screen.findByText('Local malaria dataset')).toBeInTheDocument();
-        expect(screen.getByText('Déjà dans la base')).toBeInTheDocument();
+        expect(screen.getByText('In the catalog')).toBeInTheDocument();
         expect(
-            screen.getByText('Résultats trouvés dans le catalogue local'),
+            screen.getByText('Results found in the local catalog'),
         ).toBeInTheDocument();
-        expect(screen.queryByText('Accord IA')).not.toBeInTheDocument();
+        expect(screen.queryByText('AI agreement')).not.toBeInTheDocument();
         expect(screen.queryByText(/votes favorables/)).not.toBeInTheDocument();
         expect(
             global.fetch.mock.calls.some(([url]) =>
@@ -133,8 +165,8 @@ describe('database-first dataset search', () => {
 
         submitSearch();
 
-        expect(await screen.findByText('Analyse IA…')).toBeInTheDocument();
-        expect(screen.getByText('Aucun résultat local')).toBeInTheDocument();
+        expect(await screen.findByText('AI analysis…')).toBeInTheDocument();
+        expect(screen.getByText('No local results')).toBeInTheDocument();
 
         await act(async () => {
             resolveClassification(
@@ -165,11 +197,11 @@ describe('database-first dataset search', () => {
             );
         });
 
-        expect(await screen.findByText('Candidat accepté 1/1')).toBeInTheDocument();
+        expect(await screen.findByText('Accepted candidate 1/1')).toBeInTheDocument();
         expect(
-            screen.getByText('Dataset sauvegardé dans le catalogue local'),
+            screen.getByText('Dataset saved to the local catalog'),
         ).toBeInTheDocument();
-        expect(screen.getByText('Accord IA')).toBeInTheDocument();
+        expect(screen.getByText('AI agreement')).toBeInTheDocument();
         const classificationCall = global.fetch.mock.calls.find(([url]) =>
             String(url).includes(`/repository-candidates/${CANDIDATE_ID}/classify`),
         );
@@ -256,10 +288,10 @@ describe('database-first dataset search', () => {
         submitSearch();
 
         expect(
-            await screen.findByText('Collecte automatique en attente'),
+            await screen.findByText('Automatic collection pending'),
         ).toBeInTheDocument();
         expect(
-            await screen.findByText('Dataset sauvegardé dans le catalogue local', {}, {
+            await screen.findByText('Dataset saved to the local catalog', {}, {
                 timeout: 2500,
             }),
         ).toBeInTheDocument();
@@ -322,7 +354,7 @@ describe('database-first dataset search', () => {
 
         submitSearch();
 
-        expect(await screen.findByText(/1 a été rejeté/)).toBeInTheDocument();
+        expect(await screen.findByText(/1 was rejected/)).toBeInTheDocument();
         expect(
             global.fetch.mock.calls.some(([url]) =>
                 String(url).includes('/collector/collection-jobs/'),
@@ -344,7 +376,7 @@ describe('database-first dataset search', () => {
         render(<App />);
 
         submitSearch();
-        expect(await screen.findByText('Recherche des candidats')).toBeInTheDocument();
+        expect(await screen.findByText('Searching for candidates')).toBeInTheDocument();
 
         await act(async () => {
             resolveSearch(
@@ -359,7 +391,7 @@ describe('database-first dataset search', () => {
         });
 
         expect(
-            await screen.findByText('Aucun dataset accepté pour cette recherche.'),
+            await screen.findByText('No dataset was accepted for this search.'),
         ).toBeInTheDocument();
     });
 
@@ -379,12 +411,30 @@ describe('database-first dataset search', () => {
 
         submitSearch();
 
-        expect(await screen.findByText('Recherche impossible')).toBeInTheDocument();
+        expect(await screen.findByText('Search failed')).toBeInTheDocument();
         expect(screen.getByText('Database search failed.')).toBeInTheDocument();
     });
 });
 
 describe('protected API access', () => {
+    it('allows local searches without displaying or sending a token', async () => {
+        vi.stubEnv('VITE_API_AUTH_MODE', 'local');
+        window.sessionStorage.clear();
+        mockApi(() => Promise.resolve(jsonResponse({
+            search_id: SEARCH_ID, query: 'malaria mortality', origin: 'database',
+            items: [], candidates: [], warnings: [],
+        })));
+        render(<App />);
+        expect(screen.queryByLabelText('API token')).not.toBeInTheDocument();
+        submitSearch();
+        await waitFor(() => {
+            const call = global.fetch.mock.calls.find(([url]) =>
+                String(url).endsWith('/collector/search-datasets'));
+            expect(call).toBeDefined();
+            expect(call[1]?.headers?.Authorization).toBeUndefined();
+        });
+    });
+
     it('requires a runtime token and never starts a protected request without one', async () => {
         window.sessionStorage.clear();
         mockApi((url) => {
@@ -395,7 +445,7 @@ describe('protected API access', () => {
         submitSearch();
 
         expect(
-            await screen.findByText('Un jeton API est requis pour cette opération.'),
+            await screen.findByText('An API token is required for this operation.'),
         ).toBeInTheDocument();
         expect(
             global.fetch.mock.calls.some(([url]) =>
@@ -421,10 +471,10 @@ describe('protected API access', () => {
         });
         render(<App />);
 
-        fireEvent.change(screen.getByLabelText('Jeton API'), {
+        fireEvent.change(screen.getByLabelText('API token'), {
             target: { value: 'runtime-test-token' },
         });
-        fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         submitSearch();
 
         await waitFor(() => {

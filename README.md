@@ -67,12 +67,17 @@ Create or update `.env.local`:
 export POSTGRES_PASSWORD="change-me-locally"
 export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
 
-export RCP_API_KEY="your-rcp-api-key"
-export RCP_CLASSIFIER_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
+export RCP_DEEPSEEK_API_KEY="your-rcp-api-key"
+export RCP_DEEPSEEK_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
+export RCP_GEMMA_MEDITRON_API_KEY="your-separate-meditron-rcp-api-key"
+export RCP_GEMMA_MEDITRON_MODEL="EPFLiGHT/Gemma-3-27B-MeditronFO"
+export RCP_APERTUS_MEDITRON_API_KEY="$RCP_GEMMA_MEDITRON_API_KEY"
+export RCP_APERTUS_MEDITRON_MODEL="EPFLiGHT/Apertus-70B-MeditronFO"
 export COLLECTION_MAX_CONCURRENCY="2"
 
-# The JSON key is the stable owner ID; the value is that user's private token.
-export API_ACCESS_TOKENS='{"local-user":"replace-with-at-least-32-random-characters"}'
+# Local development: no token entry, backend bound to loopback only.
+export API_AUTH_MODE="local"
+export VITE_API_AUTH_MODE="local"
 
 export VITE_API_BASE_URL="http://127.0.0.1:8001"
 ```
@@ -84,6 +89,16 @@ source .env.local
 ```
 
 `.env.local` is ignored by Git. Never commit passwords or API keys.
+
+Page and repository classification each call three models in parallel: DeepSeek,
+Gemma Meditron, and Apertus Meditron. Acceptance requires two positive votes and
+three usable responses. Any model error fails classification rather than
+silently removing a voter. Each model has its own model and credential variables;
+the example explicitly reuses the Gemma key for Apertus. All three use the same
+client, prompt per flow, parser, and error handling. The EPFL RCP Chat Completions
+endpoint, which must serve these model IDs and support the JSON response mode.
+This makes three inference requests per classification instead of one; existing
+request quotas still count application operations, not individual model calls.
 
 ### Start PostgreSQL
 
@@ -99,6 +114,7 @@ PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app \
   --reload \
   --reload-dir . \
   --reload-dir ../collector \
+  --host 127.0.0.1 --no-proxy-headers \
   --port 8001
 ```
 
@@ -117,7 +133,14 @@ npm --prefix frontend run dev
 ```
 
 Open `http://127.0.0.1:5173/`.
-Enter the token configured for `local-user` in the runtime **Jeton API** field.
+Local mode opens directly without a token. Run the backend on `127.0.0.1`
+with `--no-proxy-headers`; local access rejects remote clients and foreign browser
+origins. All local searches belong to `local-user`, with quotas still enforced.
+The frontend local mode applies only to the development server.
+
+Public deployments retain the default `API_AUTH_MODE=token` and require
+`API_ACCESS_TOKENS` (a JSON mapping of owner IDs to private tokens).
+Never enable local mode behind a public reverse proxy.
 The token is stored only in that browser tab's `sessionStorage`; it is not a
 Vite build variable and must never be compiled into the frontend.
 
@@ -131,7 +154,7 @@ For a more detailed setup and troubleshooting guide, read
 
 ## Main workflows
 
-Repository search and source collection are connected workflows:
+Repository search and automatic candidate collection are connected workflows:
 
 ```text
 Repository search
@@ -143,9 +166,8 @@ Repository search
     -> automatically collect accepted candidates
     -> persist only datasets that pass page and distribution validation
 
-Source collection
-    -> can start from an accepted repository candidate
-    -> can also start manually from a configured source
+Automatic collection
+    -> starts from an accepted repository candidate
     -> dataset-page classification
     -> distribution validation
     -> PostgreSQL persistence
@@ -153,12 +175,16 @@ Source collection
 
 ## API
 
+The website offers Search and Catalog views. Source administration and manual
+source collection are not exposed by the website; the former
+`POST /collector/collection-jobs` endpoint has been removed. Automatic collection
+and its progress endpoint remain available. Existing datasets are preserved.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Check that the backend process is running |
 | `POST` | `/collector/search-datasets` | Search PostgreSQL, then external repositories |
 | `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Classify one persisted external candidate |
-| `POST` | `/collector/collection-jobs` | Start a source collection job |
 | `GET` | `/collector/collection-jobs/{id}` | Read collection progress |
 | `GET` | `/collector/collected-datasets` | List persisted datasets |
 

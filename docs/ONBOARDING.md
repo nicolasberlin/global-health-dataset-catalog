@@ -87,8 +87,12 @@ Create or update `.env.local` in the repository root:
 export POSTGRES_PASSWORD="change-me-locally"
 export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
 
-export RCP_API_KEY="your-rcp-api-key"
-export RCP_CLASSIFIER_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
+export RCP_DEEPSEEK_API_KEY="your-rcp-api-key"
+export RCP_DEEPSEEK_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
+export RCP_GEMMA_MEDITRON_API_KEY="your-separate-meditron-rcp-api-key"
+export RCP_GEMMA_MEDITRON_MODEL="EPFLiGHT/Gemma-3-27B-MeditronFO"
+export RCP_APERTUS_MEDITRON_API_KEY="$RCP_GEMMA_MEDITRON_API_KEY"
+export RCP_APERTUS_MEDITRON_MODEL="EPFLiGHT/Apertus-70B-MeditronFO"
 
 export API_ACCESS_TOKENS='{"local-user":"replace-with-at-least-32-random-characters"}'
 
@@ -108,13 +112,15 @@ Verify that the required variables exist without printing their values:
 
 ```bash
 test -n "$DATABASE_URL" && echo "DATABASE_URL loaded"
-test -n "$RCP_API_KEY" && echo "RCP_API_KEY loaded"
+test -n "$RCP_DEEPSEEK_API_KEY" && echo "RCP_DEEPSEEK_API_KEY loaded"
+test -n "$RCP_GEMMA_MEDITRON_API_KEY" && echo "RCP_GEMMA_MEDITRON_API_KEY loaded"
+test -n "$RCP_APERTUS_MEDITRON_API_KEY" && echo "RCP_APERTUS_MEDITRON_API_KEY loaded"
 test -n "$API_ACCESS_TOKENS" && echo "API_ACCESS_TOKENS loaded"
 ```
 
 Important:
 
-- use `RCP_API_KEY`, not `DEEPSEEK_API_KEY`;
+- use `RCP_DEEPSEEK_API_KEY`, not `DEEPSEEK_API_KEY`;
 - keep each `API_ACCESS_TOKENS` owner ID stable and each token unique;
 - restart the backend after changing an environment variable;
 - never commit `.env.local`;
@@ -152,7 +158,7 @@ PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app \
 Keep this terminal open.
 
 The backend fails closed at startup if `API_ACCESS_TOKENS` is absent or
-invalid. After starting the frontend, enter your token in **Jeton API**. The
+invalid. After starting the frontend, enter your token in **API token**. The
 browser keeps it in `sessionStorage` for the current tab and sends it as a
 Bearer token; do not define it as a `VITE_*` variable because Vite variables are
 included in the public JavaScript bundle.
@@ -209,7 +215,11 @@ When no local result exists, the application should:
 
 Watch the backend terminal during this test. RCP errors are logged there.
 
-The current default factory uses one RCP voter. The ensemble implementation still supports multiple voters, but a genuine `2/3` majority requires three configured voters. See
+The default factory uses three concurrent RCP voters: DeepSeek, Gemma Meditron,
+and Apertus Meditron. Two positive votes out of three are required. All three
+responses must be usable; a missing key, timeout or invalid response fails the
+classification. Each model uses its own credential variable; the example assigns
+the same key value to both Meditron variables. All three share one implementation. See
 [Classification Architecture](classification-architecture.md) for the current voting contract.
 
 ## 7. Code Tour
@@ -222,11 +232,11 @@ Start with:
 frontend/src/App.jsx
 frontend/src/components/RepositorySearchSection.jsx
 frontend/src/components/RepositoryAcceptedCard.jsx
-frontend/src/components/SourceCatalogSection.jsx
 frontend/src/components/CollectedDatasetsSection.jsx
 ```
 
-The frontend owns interface state, progressive repository classification, source collection progress, and result display.
+The frontend owns interface state, progressive repository classification,
+automatic candidate-collection progress, and result display.
 
 ### Backend
 
@@ -351,10 +361,15 @@ Check that the expected variable exists:
 
 ```bash
 source .env.local
-test -n "$RCP_API_KEY" && echo "RCP key loaded" || echo "RCP key missing"
+test -n "$RCP_DEEPSEEK_API_KEY" && echo "RCP key loaded" || echo "RCP key missing"
 ```
 
-Confirm that the variable is named `RCP_API_KEY`. A key stored under `DEEPSEEK_API_KEY` is not read by the RCP provider.
+Confirm that the variable is named `RCP_DEEPSEEK_API_KEY`. A key stored under `DEEPSEEK_API_KEY` is not read by the RCP provider.
+
+Also set `RCP_GEMMA_MEDITRON_API_KEY` and `RCP_APERTUS_MEDITRON_API_KEY`.
+Check that each key can access its model on the same EPFL RCP endpoint. Model names
+can be overridden using `RCP_GEMMA_MEDITRON_MODEL` and
+`RCP_APERTUS_MEDITRON_MODEL`. Neither Meditron voter falls back to the DeepSeek key.
 
 Restart the backend after correcting the file.
 
@@ -448,8 +463,8 @@ Repository search
     + authorize and classify trusted server-side metadata by candidate ID
     + reserve a candidate-linked collection job for accepted candidates
 
-Source collection
-    = process a configured source or one accepted repository candidate
+Automatic collection in the website
+    = process one accepted repository candidate
     + accept eligible datasets
     + validate distributions
     + persist results

@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import CollectedDatasetsSection from './components/CollectedDatasetsSection.jsx';
-import { getAcceptedVoteCount } from './components/RepositoryAcceptedCard.jsx';
+import { getAcceptedVoteCount, getTotalVoteCount } from './components/RepositoryAcceptedCard.jsx';
 import RepositorySearchSection from './components/RepositorySearchSection.jsx';
-import SourceCatalogSection from './components/SourceCatalogSection.jsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 const REPOSITORY_CLASSIFICATION_CONCURRENCY = 2;
@@ -15,13 +14,6 @@ function storedApiToken() {
     } catch {
         return '';
     }
-}
-
-function normalizeSearchValue(value) {
-    return String(value ?? '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase();
 }
 
 function wait(milliseconds) {
@@ -48,21 +40,14 @@ function isAbortError(exception) {
 }
 
 export default function App() {
+    const [activeView, setActiveView] = useState('search');
+    const LOCAL_ACCESS = import.meta.env.DEV && import.meta.env.VITE_API_AUTH_MODE === 'local';
     const repositorySearchRunRef = useRef(0);
     const repositorySearchIdRef = useRef(null);
     const repositorySearchAbortRef = useRef(null);
-    const [sources, setSources] = useState([]);
     const [collectedDatasets, setCollectedDatasets] = useState([]);
-    const [selectedTheme, setSelectedTheme] = useState('All');
-    const [searchTerm, setSearchTerm] = useState('');
-    const [loading, setLoading] = useState(true);
-    const [loaded, setLoaded] = useState(false);
-    const [error, setError] = useState('');
     const [collectedLoading, setCollectedLoading] = useState(true);
     const [collectedError, setCollectedError] = useState('');
-    const [collectingSourceId, setCollectingSourceId] = useState(null);
-    const [collectionNotice, setCollectionNotice] = useState(null);
-    const [activeCollectionJob, setActiveCollectionJob] = useState(null);
     const [repositoryQuery, setRepositoryQuery] = useState('');
     const [repositoryResultQuery, setRepositoryResultQuery] = useState('');
     const [repositoryOrigin, setRepositoryOrigin] = useState(null);
@@ -82,7 +67,7 @@ export default function App() {
         event.preventDefault();
         const normalizedToken = apiTokenInput.trim();
         if (!normalizedToken) {
-            setApiTokenError('Saisis un jeton API.');
+            setApiTokenError('Enter an API token.');
             return;
         }
 
@@ -104,9 +89,10 @@ export default function App() {
     }
 
     async function protectedFetch(url, options = {}) {
+        if (LOCAL_ACCESS) return fetch(url, options);
         const currentToken = apiTokenRef.current;
         if (!currentToken) {
-            throw new Error('Un jeton API est requis pour cette opération.');
+            throw new Error('An API token is required for this operation.');
         }
 
         return fetch(url, {
@@ -118,28 +104,6 @@ export default function App() {
         });
     }
 
-    async function loadSources() {
-        try {
-            setLoading(true);
-            setError('');
-
-            const response = await fetch(`${API_BASE_URL}/sources`);
-            if (!response.ok) {
-                throw new Error('Impossible de récupérer les datasets.');
-            }
-
-            const data = await response.json();
-            setSources(data.items ?? []);
-            setLoaded(true);
-        } catch (exception) {
-            setSources([]);
-            setError(exception instanceof Error ? exception.message : 'Erreur inconnue');
-            setLoaded(true);
-        } finally {
-            setLoading(false);
-        }
-    }
-
     async function loadCollectedDatasets({ silent = false } = {}) {
         try {
             if (!silent) {
@@ -149,14 +113,14 @@ export default function App() {
 
             const response = await fetch(`${API_BASE_URL}/collector/collected-datasets`);
             if (!response.ok) {
-                throw new Error('Impossible de récupérer les datasets collectés.');
+                throw new Error('Unable to load catalog datasets.');
             }
 
             const data = await response.json();
             setCollectedDatasets(data.items ?? []);
         } catch (exception) {
             setCollectedDatasets([]);
-            setCollectedError(exception instanceof Error ? exception.message : 'Erreur inconnue');
+            setCollectedError(exception instanceof Error ? exception.message : 'Unknown error');
         } finally {
             if (!silent) {
                 setCollectedLoading(false);
@@ -165,7 +129,6 @@ export default function App() {
     }
 
     useEffect(() => {
-        loadSources();
         loadCollectedDatasets();
 
         return () => {
@@ -264,7 +227,7 @@ export default function App() {
                 });
             }
 
-            throw new Error('La collecte automatique prend trop de temps.');
+            throw new Error('Automatic collection is taking too long.');
         } catch (exception) {
             if (isAbortError(exception) || signal.aborted) {
                 return;
@@ -278,7 +241,7 @@ export default function App() {
                     error:
                         exception instanceof Error
                             ? exception.message
-                            : 'Impossible de suivre la collecte automatique.',
+                            : 'Unable to track automatic collection.',
                 },
             });
         }
@@ -326,20 +289,20 @@ export default function App() {
                         throw new Error(
                             getResponseError(
                                 responsePayload,
-                                'La classification IA a échoué.',
+                                'AI classification failed.',
                             ),
                         );
                     }
 
                     if (typeof responsePayload?.classification?.accepted !== 'boolean') {
-                        throw new Error('La réponse de classification est incomplète.');
+                        throw new Error('The classification response is incomplete.');
                     }
 
                     if (
                         responsePayload.candidate_id !== candidate.id ||
                         responsePayload.search_id !== searchId
                     ) {
-                        throw new Error('La réponse de classification ne correspond plus.');
+                        throw new Error('The classification response no longer matches this search.');
                     }
 
                     if (
@@ -347,7 +310,7 @@ export default function App() {
                         !responsePayload.automatic_collection
                     ) {
                         throw new Error(
-                            'La réponse de collecte automatique est incomplète.',
+                            'The automatic collection response is incomplete.',
                         );
                     }
 
@@ -383,7 +346,7 @@ export default function App() {
                         error:
                             exception instanceof Error
                                 ? exception.message
-                                : 'Erreur de classification.',
+                                : 'Classification error.',
                     });
                 }
             }
@@ -415,7 +378,7 @@ export default function App() {
         const query = repositoryQuery.trim();
 
         if (!query) {
-            setRepositoryError('Saisis une recherche avant de continuer.');
+            setRepositoryError('Enter a search query to continue.');
             return;
         }
 
@@ -448,7 +411,7 @@ export default function App() {
 
             if (!response.ok) {
                 throw new Error(
-                    getResponseError(responsePayload, 'La recherche repository a échoué.'),
+                    getResponseError(responsePayload, 'Repository search failed.'),
                 );
             }
 
@@ -457,10 +420,10 @@ export default function App() {
             }
 
             if (!['database', 'online'].includes(responsePayload?.origin)) {
-                throw new Error('La réponse de recherche est incomplète.');
+                throw new Error('The search response is incomplete.');
             }
             if (typeof responsePayload?.search_id !== 'string') {
-                throw new Error('La réponse de recherche est incomplète.');
+                throw new Error('The search response is incomplete.');
             }
 
             const searchId = responsePayload.search_id;
@@ -485,7 +448,7 @@ export default function App() {
                         item.search_id !== searchId,
                 )
             ) {
-                throw new Error('La réponse de recherche est incomplète.');
+                throw new Error('The search response is incomplete.');
             }
 
             const candidates = onlineItems.map((item) => ({
@@ -519,7 +482,7 @@ export default function App() {
             }
 
             setRepositoryError(
-                exception instanceof Error ? exception.message : 'Erreur de recherche.',
+                exception instanceof Error ? exception.message : 'Search error.',
             );
         } finally {
             if (repositorySearchRunRef.current === runId) {
@@ -541,119 +504,12 @@ export default function App() {
         );
         if (!response.ok) {
             const errorPayload = await response.json().catch(() => null);
-            throw new Error(errorPayload?.detail ?? 'Impossible de lire le statut de collecte.');
+            throw new Error(errorPayload?.detail ?? 'Unable to read collection status.');
         }
 
         const data = await response.json();
         return data.job;
     }
-
-    async function pollCollectionJob(jobId, sourceName) {
-        const maxAttempts = 80;
-
-        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-            await wait(attempt === 0 ? 700 : 1500);
-
-            const job = await loadCollectionJob(jobId);
-            setActiveCollectionJob(job);
-
-            if (job.status === 'done') {
-                await loadCollectedDatasets({ silent: true });
-                setCollectionNotice({
-                    tone: job.saved_count > 0 ? 'ok' : 'empty',
-                    message:
-                        job.saved_count > 0
-                            ? `${job.saved_count} dataset(s) sauvegardé(s) depuis ${sourceName}.`
-                            : `Aucun dataset santé avec fichier valide trouvé pour ${sourceName}.`,
-                });
-                return;
-            }
-
-            if (job.status === 'error') {
-                throw new Error(job.error || 'Collecte échouée.');
-            }
-
-            setCollectionNotice({
-                tone: 'loading',
-                message: `Job #${job.id}: ${job.message || 'collecte en cours.'}`,
-            });
-        }
-
-        throw new Error('La collecte prend trop de temps. Réessaie plus tard.');
-    }
-
-    async function collectSource(source) {
-        try {
-            setCollectingSourceId(source.id);
-            setCollectionNotice(null);
-            setActiveCollectionJob(null);
-
-            const response = await protectedFetch(`${API_BASE_URL}/collector/collection-jobs`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    url: source.page_url,
-                }),
-            });
-
-            if (!response.ok) {
-                const errorPayload = await response.json().catch(() => null);
-                throw new Error(errorPayload?.detail ?? 'Impossible de collecter cette source.');
-            }
-
-            const data = await response.json();
-            setActiveCollectionJob(data.job);
-            setCollectionNotice({
-                tone: 'loading',
-                message: `Job #${data.job.id}: collecte lancée pour ${source.name}.`,
-            });
-            await pollCollectionJob(data.job.id, source.name);
-        } catch (exception) {
-            setCollectionNotice({
-                tone: 'error',
-                message: exception instanceof Error ? exception.message : 'Erreur inconnue',
-            });
-        } finally {
-            setCollectingSourceId(null);
-        }
-    }
-
-    const themes = useMemo(
-        () => ['All', ...Array.from(new Set(sources.map((source) => source.theme))).sort()],
-        [sources],
-    );
-
-    const filteredSources = useMemo(() => {
-        const normalizedSearchTerm = normalizeSearchValue(searchTerm.trim());
-
-        return sources.filter((source) => {
-            const matchesTheme = selectedTheme === 'All' || source.theme === selectedTheme;
-            const matchesSearch =
-                normalizedSearchTerm.length === 0 ||
-                normalizeSearchValue(
-                    [
-                        source.source_key,
-                        source.name,
-                        source.description,
-                        source.theme,
-                        source.page_url,
-                    ].join(' '),
-                ).includes(normalizedSearchTerm);
-
-            return matchesTheme && matchesSearch;
-        });
-    }, [searchTerm, selectedTheme, sources]);
-
-    const collectedDistributionCount = useMemo(
-        () =>
-            collectedDatasets.reduce(
-                (total, dataset) => total + (dataset.distributions?.length ?? 0),
-                0,
-            ),
-        [collectedDatasets],
-    );
 
     const repositoryStatusCounts = useMemo(
         () =>
@@ -694,6 +550,7 @@ export default function App() {
                 }
 
                 return (
+                    getTotalVoteCount(candidate.item.classification) === 3 &&
                     getAcceptedVoteCount(candidate.item.classification) ===
                     Number(agreementFilter)
                 );
@@ -711,65 +568,31 @@ export default function App() {
         repositoryStatusCounts.pending > 0 ||
         repositoryStatusCounts.classifying > 0;
 
-    const themeCount = themes.length > 0 ? themes.length - 1 : 0;
-    const statusTone = error ? 'error' : loading ? 'loading' : 'ok';
-    const statusLabel = error ? 'Erreur API' : loading ? 'Chargement' : 'API connectée';
-    const selectedThemeLabel = selectedTheme === 'All' ? 'Tous les thèmes' : selectedTheme;
-
-    const emptyState = useMemo(() => {
-        if (loading) {
-            return {
-                title: 'Chargement du catalogue',
-                description: 'Lecture des sources depuis l’API.',
-            };
-        }
-
-        if (error) {
-            return {
-                title: 'Impossible de charger le catalogue',
-                description: error,
-            };
-        }
-
-        if (loaded && sources.length === 0) {
-            return {
-                title: 'Aucune source enregistrée',
-                description: 'Le backend répond, mais aucune source n’est encore enregistrée.',
-            };
-        }
-
-        return {
-            title: 'Aucun résultat',
-            description: 'Aucune source ne correspond au filtre actuel.',
-        };
-    }, [error, loaded, loading, sources.length]);
-
     return (
         <main className="app-shell">
             <header className="app-header">
                 <div className="title-block">
                     <span className="eyebrow">Global Health</span>
                     <h1>Dataset Catalog</h1>
-                    <p>Pages officielles de datasets santé, organisées par source et par thème.</p>
+                    <p>Find health datasets and access their source files.</p>
                 </div>
 
-                <div className={`api-status api-status--${statusTone}`}>
-                    <span>{statusLabel}</span>
-                    <strong>{loading ? 'Synchronisation...' : `${sources.length} sources`}</strong>
-                    <small>{API_BASE_URL}</small>
-                    <button type="button" onClick={loadSources} disabled={loading}>
-                        {loading ? 'Chargement...' : 'Actualiser'}
-                    </button>
-                </div>
             </header>
 
-            <section className="api-access-bar" aria-label="Accès API protégé">
+            <nav className="catalog-navigation" aria-label="Catalog navigation">
+                <button type="button" aria-pressed={activeView === 'search'}
+                    onClick={() => setActiveView('search')}>Search datasets</button>
+                <button type="button" aria-pressed={activeView === 'catalog'}
+                    onClick={() => setActiveView('catalog')}>Catalog</button>
+            </nav>
+
+            {!LOCAL_ACCESS && <section className="api-access-bar" aria-label="Protected API access">
                 <div className="api-access-status">
-                    <strong>Accès API</strong>
-                    <span>{apiToken ? 'Jeton actif pour cette session' : 'Jeton requis'}</span>
+                    <strong>API access</strong>
+                    <span>{apiToken ? 'Token active for this session' : 'Token required'}</span>
                 </div>
                 <form className="api-access-form" onSubmit={saveApiToken}>
-                    <label htmlFor="api-token">Jeton API</label>
+                    <label htmlFor="api-token">API token</label>
                     <input
                         id="api-token"
                         type="password"
@@ -778,41 +601,20 @@ export default function App() {
                         onChange={(event) => setApiTokenInput(event.target.value)}
                     />
                     <button type="submit" className="secondary-button">
-                        Enregistrer
+                        Save
                     </button>
                     {apiToken ? (
                         <button type="button" onClick={removeApiToken}>
-                            Retirer
+                            Remove
                         </button>
                     ) : null}
                 </form>
                 {apiTokenError ? <p className="api-access-error">{apiTokenError}</p> : null}
-            </section>
+            </section>}
 
-            <section className="summary-grid" aria-label="Résumé du catalogue">
-                <article className="metric-card">
-                    <span>Sources</span>
-                    <strong>{sources.length}</strong>
-                    <small>pages référencées</small>
-                </article>
-                <article className="metric-card metric-card--accent">
-                    <span>Thèmes</span>
-                    <strong>{themeCount}</strong>
-                    <small>catégories actives</small>
-                </article>
-                <article className="metric-card">
-                    <span>Résultats</span>
-                    <strong>{filteredSources.length}</strong>
-                    <small>{selectedThemeLabel}</small>
-                </article>
-                <article className="metric-card metric-card--muted">
-                    <span>Collectés</span>
-                    <strong>{collectedDatasets.length}</strong>
-                    <small>{collectedDistributionCount} fichiers valides</small>
-                </article>
-            </section>
-
+            <div hidden={activeView !== 'search'}>
             <RepositorySearchSection
+                collectedDatasets={collectedDatasets}
                 acceptedRepositoryCandidates={acceptedRepositoryCandidates}
                 agreementFilter={agreementFilter}
                 inProgressRepositoryCandidates={inProgressRepositoryCandidates}
@@ -832,33 +634,16 @@ export default function App() {
                 setAgreementFilter={setAgreementFilter}
                 setRepositoryQuery={setRepositoryQuery}
             />
+            </div>
 
-            <SourceCatalogSection
-                activeCollectionJob={activeCollectionJob}
-                apiBaseUrl={API_BASE_URL}
-                collectSource={collectSource}
-                collectingSourceId={collectingSourceId}
-                collectionNotice={collectionNotice}
-                emptyState={emptyState}
-                error={error}
-                filteredSources={filteredSources}
-                loadSources={loadSources}
-                loading={loading}
-                searchTerm={searchTerm}
-                selectedTheme={selectedTheme}
-                setSearchTerm={setSearchTerm}
-                setSelectedTheme={setSelectedTheme}
-                sources={sources}
-                statusTone={statusTone}
-                themes={themes}
-            />
-
+            <div hidden={activeView !== 'catalog'}>
             <CollectedDatasetsSection
                 collectedDatasets={collectedDatasets}
                 collectedError={collectedError}
                 collectedLoading={collectedLoading}
                 loadCollectedDatasets={loadCollectedDatasets}
             />
+            </div>
 
         </main>
     );

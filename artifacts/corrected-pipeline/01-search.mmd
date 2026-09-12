@@ -1,0 +1,24 @@
+flowchart TD
+    A(["User clicks Search"])
+    A --> B["Frontend : searchRepositories"]
+    B --> C["POST /collector/search-datasets"]
+    C --> D["Identify the user<br/>Check the search quota"]
+    D --> E["create_search_session<br/>Store the original query and its owner"]
+    E --> F["normalize_dataset_search_query<br/>For local search only"]
+    F --> G["search_collected_datasets<br/>Search PostgreSQL"]
+    G --> H{"Local results?"}
+    G -.->|"PostgreSQL error"| ERR["Search failed<br/>Return to frontend — no DataCite call"]
+    H -->|"Yes"| I["Complete the session<br/>origin = database"]
+    I --> J["Frontend: display local datasets"]
+    J --> END1(["End search"])
+    H -->|"No"| K["_search_online_repositories<br/>With the original query"]
+    K --> L["search_repository_metadata"]
+    L --> M["DataCiteRepositorySearchProvider.search<br/>Up to 10 candidates"]
+    M --> N["Filter and bound metadata"]
+    N --> O["PostgreSQL transaction<br/>Store repository_candidates<br/>Complete the session: completed or partial"]
+    O --> P["Return origin = online<br/>search_id + candidate_id + warnings"]
+    L -.->|"Provider failure"| ERR2["Session failed<br/>Return to frontend"]
+    O -.->|"Persistence failure"| ERR2
+    P --> Q{"At least one candidate?"}
+    Q -->|"No"| END2(["Display no results"])
+    Q -->|"Yes"| NEXT(["BLOCK 2 — Classify each candidate"])

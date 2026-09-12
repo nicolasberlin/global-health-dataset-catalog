@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | Current architecture |
-| Last verified | 2026-09-08 |
+| Last verified | 2026-09-11 |
 | Runtime | React/Vite, FastAPI, Python collector, PostgreSQL |
 
 This document describes the system that exists now. Proposed product,
@@ -18,9 +18,8 @@ The application helps a technical user:
 - search DataCite for dataset candidates relevant to a query;
 - inspect progressive EPFL RCP relevance decisions;
 - automatically collect accepted external candidates through the normal gates;
-- maintain a catalogue of source portals;
-- launch asynchronous collection jobs against those sources;
-- discover candidate dataset records and distributions;
+- inspect repository candidates and their collection progress;
+- discover candidate distributions from accepted landing pages;
 - classify records as individual health-relevant datasets;
 - validate file/API links lightly;
 - inspect datasets persisted in PostgreSQL.
@@ -43,7 +42,7 @@ flowchart LR
     Collector --> Discovery["Discovery adapters"]
     Collector --> PageLLM["Page EPFL RCP classifier"]
     Collector --> Validation["Distribution validation"]
-    RepoLLM --> RCP["EPFL RCP Chat Completions API<br/>DeepSeek V4 Flash 0731"]
+    RepoLLM --> RCP["EPFL RCP Chat Completions API<br/>DeepSeek + Gemma Meditron + Apertus Meditron"]
     PageLLM --> RCP
     Collector --> Result["CollectionResult"]
     Result --> Completion["Backend complete_collection_job()"]
@@ -55,20 +54,18 @@ The runtime has four main ownership boundaries:
 
 | Area | Responsibility | Main paths |
 | --- | --- | --- |
-| Frontend | Search, progressive status, source collection, saved-result display | `frontend/src/App.jsx`, `frontend/src/components/` |
+| Frontend | Search, progressive status, automatic collection tracking, saved-result display | `frontend/src/App.jsx`, `frontend/src/components/` |
 | Backend | HTTP contracts, validation, job orchestration | `backend/app/main.py`, `backend/app/routes/` |
 | Collector | Discovery, extraction, classification, validation | `collector/` |
 | Database | Schema, sources, jobs, atomic completion, upserts | `backend/app/db/` |
 
 ## 3. Frontend Capabilities
 
-`frontend/src/App.jsx` coordinates three extracted sections and runtime API
+`frontend/src/App.jsx` coordinates Search and Catalog sections and runtime API
 access:
 
 - `RepositorySearchSection.jsx` searches repository metadata and shows candidate
   counts, progressive classification, warnings, rejected results, and errors;
-- `SourceCatalogSection.jsx` filters configured sources and starts collection
-  jobs;
 - `CollectedDatasetsSection.jsx` lists persisted datasets, distributions, and
   validation information.
 
@@ -77,8 +74,8 @@ workers. An accepted external candidate reserves an automatic collection job;
 its card separately shows candidate acceptance and collection state. The
 frontend polls active jobs and distinguishes pending/running, saved, completed
 without a valid file, and failed outcomes. Successful jobs refresh the persisted
-dataset list. Manual source collection uses the same job-status endpoint. The
-user enters an access token at runtime; the browser keeps it in `sessionStorage`
+dataset list. There is no source administration view or manual collection-start
+endpoint. In token mode the user enters an access token at runtime; the browser keeps it in `sessionStorage`
 and sends it only to protected API routes. No token is compiled through a
 `VITE_*` build variable.
 
@@ -99,7 +96,6 @@ credentials return HTTP 401; exhausted per-minute quotas return HTTP 429 with a
 | POST | `/sources` | Creates a source after Pydantic and DB validation |
 | GET | `/sources/{source_id}/page` | Redirects to the configured source URL |
 | POST | `/collector/repository-candidates/{candidate_id}/classify` | Atomically reserves and classifies one persisted candidate; no client metadata is accepted |
-| POST | `/collector/collection-jobs` | Creates and schedules a background collection job |
 | GET | `/collector/collection-jobs/{job_id}` | Returns job status and counters |
 | GET | `/collector/collected-datasets` | Lists persisted datasets and distributions |
 | POST | `/collector/search-datasets` | Searches collected datasets first, then repository providers on no match |
@@ -163,7 +159,7 @@ flowchart TD
     ClassifyRoute --> ClassifyQuota["Consume classification quota<br/>before eligible LLM work"]
     ClassifyQuota --> ReserveClassify["pending -> classifying<br/>atomic compare-and-set"]
     ReserveClassify --> Reload["Reload query + metadata from PostgreSQL"]
-    Reload --> RepoClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
+    Reload --> RepoClassifier["EPFL RCP ensemble<br/>2 positive votes, 3 usable responses"]
     RepoClassifier --> Decision{"Positive structured decision?"}
     Decision -->|no| Rejected["Display rejected candidate; no job"]
     Decision -->|yes| StoreAccepted["Persist accepted decision"]
@@ -217,17 +213,12 @@ directly into `collected_datasets`.
 
 ```mermaid
 flowchart TD
-    Manual["POST /collector/collection-jobs"] --> Pending["Create pending job"]
     Automatic["Accepted repository candidate"] --> AutoPending["Reserve or reuse candidate-linked job"]
-    AutoPending --> Running
-    Pending --> Running["Mark running"]
+    AutoPending --> Running["Mark running"]
     Running --> Bounded["Backend collection executor<br/>configured concurrency"]
-    Bounded --> Scope{"Collection scope"}
-    Scope -->|manual source| Discover["discover_source()"]
-    Scope -->|repository candidate| Single["Use exactly one DiscoveredPage"]
-    Discover --> Analyze["Analyze bounded discovered pages"]
-    Single --> Analyze
-    Analyze --> PageClassifier["EPFL RCP classifier in 1-voter audit wrapper"]
+    Bounded --> Single["Use exactly one DiscoveredPage"]
+    Single --> Analyze["Analyze candidate landing page"]
+    Analyze --> PageClassifier["Three EPFL RCP voters"]
     PageClassifier --> Accepted{"Valid response with accepted=true?"}
     Accepted -->|no| Reject["Count rejected"]
     Accepted -->|yes| Validate["Validate bounded distributions"]
@@ -249,9 +240,9 @@ inside one transaction. A failed write rolls back the entire completion.
 whereas an unexpected classifier or validation exception fails the job.
 
 Automatic repository collection substitutes a single `DiscoveredPage` with
-`discovery_method=repository_search` for broad source discovery. All later
-steps, limits, classifiers, download checks, persistence, and error handling are
-the same as manual source collection.
+`discovery_method=repository_search` for broad source discovery. It then uses
+the same page-analysis, classification, download-check, persistence, and error
+handling primitives as the collector pipeline.
 
 ## 7. Discovery
 
@@ -273,12 +264,17 @@ metadata and URL utilities remain in shared collector modules.
 
 ## 8. Classification
 
-All default classification calls use `RCP_API_KEY` and the EPFL RCP
-Chat Completions API. `RCP_CLASSIFIER_MODEL` selects the model and defaults to
-`deepseek-ai/DeepSeek-V4-Flash-0731`. Calls remain synchronous. Both
-classifiers use one-voter compatibility wrappers with
-`votes_required=1` and `minimum_successful_votes=1` so the existing API audit
-shape remains stable.
+Both default classifiers run three concurrent calls through EPFL RCP's
+Chat Completions API. DeepSeek uses `RCP_DEEPSEEK_API_KEY` and `RCP_DEEPSEEK_MODEL`
+(default `deepseek-ai/DeepSeek-V4-Flash-0731`). Gemma and Apertus use
+`RCP_GEMMA_MEDITRON_API_KEY` and `RCP_APERTUS_MEDITRON_API_KEY`, respectively,
+with model variables `RCP_GEMMA_MEDITRON_MODEL`
+(default `EPFLiGHT/Gemma-3-27B-MeditronFO`) and `RCP_APERTUS_MEDITRON_MODEL`
+(default `EPFLiGHT/Apertus-70B-MeditronFO`). Each HTTP call is synchronous but
+the ensemble runs its voters in separate threads. Both classifiers use
+`votes_required=2` and `minimum_successful_votes=3`; any unavailable or malformed
+vote fails classification. The existing audit shape holds all three votes.
+Model availability and credentials must be verified on the deployment endpoint.
 
 The classifiers are intentionally separate:
 
@@ -291,7 +287,7 @@ Repository relevance responses use a strict conditional contract.
 `missing_information` must contain at least one nonempty item when the label is
 `insufficient_information`, and must be empty for every other label. A response
 that violates this relationship is a classification error rather than being
-silently rewritten. With one model there is no fallback vote.
+silently rewritten. Errors never silently reduce the configured voter count.
 
 Exact prompts, payloads, schemas, aggregation, and failure behavior are described
 in [Classification Architecture](classification-architecture.md).
@@ -398,12 +394,15 @@ and the decision not to migrate the historical SQLite data are recorded in
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes for backend | PostgreSQL connection |
-| `RCP_API_KEY` | Yes for classification | EPFL RCP authentication |
-| `RCP_CLASSIFIER_MODEL` | No | RCP model; defaults to `deepseek-ai/DeepSeek-V4-Flash-0731` |
+| `RCP_DEEPSEEK_API_KEY` | Yes for classification | EPFL RCP authentication |
+| `RCP_DEEPSEEK_MODEL` | No | DeepSeek voter model; defaults to `deepseek-ai/DeepSeek-V4-Flash-0731` |
+| `RCP_GEMMA_MEDITRON_API_KEY` | Yes for classification | Gemma RCP credential |
+| `RCP_APERTUS_MEDITRON_API_KEY` | Yes for classification | Apertus RCP credential; may have the same value as Gemma's |
+| `RCP_GEMMA_MEDITRON_MODEL` | No | Defaults to `EPFLiGHT/Gemma-3-27B-MeditronFO` |
+| `RCP_APERTUS_MEDITRON_MODEL` | No | Defaults to `EPFLiGHT/Apertus-70B-MeditronFO` |
 | `API_ACCESS_TOKENS` | Yes for backend | JSON object mapping stable owner IDs to unique Bearer tokens of 32-512 characters |
 | `API_SEARCH_REQUESTS_PER_MINUTE` | No | Search quota per owner; defaults to `10` |
 | `API_CLASSIFICATION_REQUESTS_PER_MINUTE` | No | LLM classification quota per owner; defaults to `20` |
-| `API_COLLECTION_REQUESTS_PER_MINUTE` | No | Manual collection-start quota per owner; defaults to `5` |
 | `API_SOURCE_CREATION_REQUESTS_PER_MINUTE` | No | Source-creation quota per owner; defaults to `10` |
 | `COLLECTION_MAX_CONCURRENCY` | No | Concurrent collection runs per backend process; defaults to `2` |
 | `VITE_API_BASE_URL` | No | Frontend API base; defaults to `http://127.0.0.1:8001` |
@@ -434,11 +433,10 @@ crawling. The limits below are code defaults, not production capacity targets.
 | DataCite search results | 10/query | provider `page_size` |
 | CKAN/Socrata/data.json rows | 5/discovery call | adapter `rows` defaults |
 | Repository candidate classifications | 2 concurrent classifications | frontend workers and backend executor |
-| Repository LLM calls | up to 2 concurrently | 2 classifications x 1 EPFL RCP call |
+| Repository LLM calls | up to 6 concurrently | 2 classifications x 3 EPFL RCP calls |
 | Collection runs | 2 concurrently per backend process by default | dedicated backend executor |
 | Repository searches | 10/minute per owner by default | atomic PostgreSQL fixed-minute quota |
 | Repository classifications | 20/minute per owner by default | atomic PostgreSQL fixed-minute quota |
-| Manual collection starts | 5/minute per owner by default | atomic PostgreSQL fixed-minute quota |
 | Source creation | 10/minute per owner by default | atomic PostgreSQL fixed-minute quota |
 | Page text sent to a page LLM | 4,000 characters | `MAX_PAGE_TEXT_CHARS` |
 | Distributions sent to a page LLM | 10 | `MAX_DISTRIBUTIONS` |
@@ -616,7 +614,7 @@ contract.
 | High | Source authority, licence, and sensitivity not enforced | Technically valid records may still be unsuitable for publication | Implement policy gates and human review before public catalogue claims |
 | Medium | One distribution validated by default | A valid secondary file can be missed | Validate ranked alternatives within a bounded budget |
 | Medium | Normalized-URL-only duplicate identity | DOI-equivalent versions and mirrors can create separate records | Add persistent identifiers and version/mirror relationships |
-| Medium | One LLM model and provider | Provider/account outage stops classification | Decide whether fallback models or provider diversity are required |
+| Medium | Three LLM models on one provider | RCP outage or any failed voter stops classification under the three-response quorum | Monitor per-model reliability and evaluate provider diversity if needed |
 | Medium | External APIs have no retries | Transient failures can fail detection, search, or jobs | Add bounded retry/backoff with idempotent behavior |
 | Medium | PostgreSQL tests can be skipped locally | DB regressions may escape a non-DB test run | Require `TEST_DATABASE_URL` in CI |
 | Low | Volatile test counts in documentation | Counts become stale as tests change | Keep a verification date and update counts during review |

@@ -288,6 +288,7 @@ def _with_valid_distributions_and_report(
 
     valid_distributions: list[DistributionCandidate] = []
     validation_results: list[ValidationResult] = []
+    validated_keys: set[tuple[str, str]] = set()
     invalid_count = 0
 
     # Classification sees extracted candidates first; this separate limit
@@ -298,7 +299,14 @@ def _with_valid_distributions_and_report(
             invalid_count += 1
             continue
 
-        valid_distributions.append(distribution)
+        # Persistence pairs a distribution and its validation by URL and format.
+        # Keep the verified format when headers or sampled bytes refine the guess.
+        validated_distribution = replace(distribution, format=validation_result.format)
+        key = (validated_distribution.url, validated_distribution.format)
+        if key in validated_keys:
+            continue
+        validated_keys.add(key)
+        valid_distributions.append(validated_distribution)
         validation_results.append(validation_result)
 
     if not valid_distributions:

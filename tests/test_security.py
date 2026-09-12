@@ -10,12 +10,38 @@ from app.security import (
     require_api_principal,
     validate_api_security_configuration,
 )
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 
 pytestmark = pytest.mark.anyio
 
 VALID_TOKEN = "test-token-with-at-least-thirty-two-characters"
+
+
+def _request(host="127.0.0.1", origin="http://127.0.0.1:5173", hostname="127.0.0.1"):
+    return Request({
+        "type": "http", "scheme": "http", "path": "/", "query_string": b"",
+        "client": (host, 1234), "server": ("127.0.0.1", 8001),
+        "headers": [(b"host", hostname.encode()), (b"origin", origin.encode())],
+    })
+
+
+async def test_local_access_needs_no_token(monkeypatch):
+    monkeypatch.setenv("API_AUTH_MODE", "local")
+    monkeypatch.delenv("API_ACCESS_TOKENS", raising=False)
+    validate_api_security_configuration()
+    assert await require_api_principal(None, _request()) == APIPrincipal("local-user")
+
+
+@pytest.mark.parametrize("overrides", [
+    {"host": "192.168.1.10"}, {"origin": "https://evil.example"},
+    {"hostname": "evil.example"},
+])
+async def test_local_access_rejects_remote_clients_and_browser_origins(monkeypatch, overrides):
+    monkeypatch.setenv("API_AUTH_MODE", "local")
+    with pytest.raises(HTTPException) as error:
+        await require_api_principal(None, _request(**overrides))
+    assert error.value.status_code == 403
 
 
 def _configure_access_token(monkeypatch) -> None:
@@ -29,7 +55,7 @@ async def test_bearer_token_authenticates_configured_owner(monkeypatch):
     _configure_access_token(monkeypatch)
 
     principal = await require_api_principal(
-        HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_TOKEN)
+        HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_TOKEN), _request()
     )
 
     assert principal == APIPrincipal(owner_id="test-user")
@@ -49,7 +75,7 @@ async def test_bearer_token_rejects_missing_or_invalid_credentials(
     _configure_access_token(monkeypatch)
 
     with pytest.raises(HTTPException) as error:
-        await require_api_principal(credentials)
+        await require_api_principal(credentials, _request())
 
     assert error.value.status_code == 401
     assert error.value.headers == {"WWW-Authenticate": "Bearer"}
@@ -73,7 +99,6 @@ def test_costly_and_mutating_routes_declare_bearer_authentication():
         ("/sources", "post"),
         ("/collector/search-datasets", "post"),
         ("/collector/repository-candidates/{candidate_id}/classify", "post"),
-        ("/collector/collection-jobs", "post"),
         ("/collector/collection-jobs/{job_id}", "get"),
     )
 

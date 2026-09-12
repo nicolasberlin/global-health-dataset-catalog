@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from typing import Annotated, Literal, Optional
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.db.api_quotas import consume_api_quota
@@ -16,14 +16,12 @@ from app.db.api_quotas import consume_api_quota
 APIQuotaOperation = Literal[
     "repository_search",
     "repository_classification",
-    "collection_start",
     "source_creation",
 ]
 
 _QUOTA_ENVIRONMENT_VARIABLES: dict[APIQuotaOperation, tuple[str, int]] = {
     "repository_search": ("API_SEARCH_REQUESTS_PER_MINUTE", 10),
     "repository_classification": ("API_CLASSIFICATION_REQUESTS_PER_MINUTE", 20),
-    "collection_start": ("API_COLLECTION_REQUESTS_PER_MINUTE", 5),
     "source_creation": ("API_SOURCE_CREATION_REQUESTS_PER_MINUTE", 10),
 }
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -39,7 +37,8 @@ class APIPrincipal:
 def validate_api_security_configuration() -> None:
     """Fail startup when authentication or quota configuration is unsafe."""
 
-    _configured_access_tokens()
+    if not _local_access_enabled():
+        _configured_access_tokens()
     for operation in _QUOTA_ENVIRONMENT_VARIABLES:
         _quota_limit(operation)
 
@@ -49,8 +48,23 @@ async def require_api_principal(
         Optional[HTTPAuthorizationCredentials],  # noqa: UP045 - evaluated on Python 3.9.
         Depends(_bearer_scheme),
     ],
+    request: Request,
 ) -> APIPrincipal:
     """Authenticate one configured Bearer token without exposing token values."""
+
+    if _local_access_enabled():
+        local_hosts = {"127.0.0.1", "::1", "localhost"}
+        origin = request.headers.get("origin")
+        if (
+            request.client is None
+            or request.client.host not in {"127.0.0.1", "::1"}
+            or request.url.hostname not in local_hosts
+            or origin not in {None, "http://127.0.0.1:5173", "http://localhost:5173"}
+            or request.headers.get("x-forwarded-for")
+            or request.headers.get("forwarded")
+        ):
+            raise HTTPException(status_code=403, detail="Local access only.")
+        return APIPrincipal(owner_id="local-user")
 
     if (
         credentials is None
@@ -106,6 +120,13 @@ async def enforce_api_quota(
         detail="API request quota exceeded.",
         headers={"Retry-After": str(decision.retry_after_seconds)},
     )
+
+
+def _local_access_enabled() -> bool:
+    mode = os.environ.get("API_AUTH_MODE", "token")
+    if mode not in {"token", "local"}:
+        raise RuntimeError("API_AUTH_MODE must be token or local.")
+    return mode == "local"
 
 
 def _configured_access_tokens() -> dict[str, str]:

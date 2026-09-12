@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from collector.classification.page import PageClassification, PageClassificationError
+from collector.config import CollectorConfig
 from collector.discovery.adapters import DiscoveredPage
 from collector.extraction.dataset_metadata import (
     DATASET_METADATA_KEYS,
@@ -314,10 +315,10 @@ def test_collector_rejects_non_health_non_dataset_page():
 
 
 def test_analyze_html_page_uses_llm_default_classifier(monkeypatch):
-    monkeypatch.setenv("RCP_CLASSIFIER_MODEL", "deepseek-test-model")
-    monkeypatch.delenv("RCP_API_KEY", raising=False)
+    monkeypatch.setenv("RCP_DEEPSEEK_MODEL", "deepseek-test-model")
+    monkeypatch.delenv("RCP_DEEPSEEK_API_KEY", raising=False)
 
-    with pytest.raises(PageClassificationError, match="RCP_API_KEY"):
+    with pytest.raises(PageClassificationError, match="RCP_DEEPSEEK_API_KEY"):
         analyze_html_page("https://example.org/data/catalog", DATASET_HTML)
 
 
@@ -484,6 +485,94 @@ def test_collect_source_uses_structured_discovery_metadata_without_fetching_html
         "https://data.example.org/mortality.csv"
     ]
     assert [validation.ok for validation in dataset.validation_results] == [True]
+
+
+@pytest.mark.parametrize(
+    ("resource_url", "initial_format", "content_type", "expected_format"),
+    [
+        ("https://example.org/api/mortality", "API", "application/json", "JSON"),
+        ("https://example.org/download?id=123", "UNKNOWN", "text/csv", "CSV"),
+    ],
+)
+def test_collect_source_retains_verified_distribution_format(
+    resource_url, initial_format, content_type, expected_format,
+):
+    distribution = DistributionCandidate(
+        url=resource_url,
+        format=initial_format,
+        probability=0.95,
+        anchor="Download mortality data",
+        signals={"schema_distribution": True},
+    )
+
+    def fake_probe(url, **kwargs):
+        return HTTPProbe(
+            url=url,
+            final_url=f"https://data.example.org/mortality.{expected_format.lower()}",
+            status_code=200,
+            headers={"content-type": content_type},
+        )
+
+    result = collect_source_with_report(
+        "https://example.org/catalog",
+        discover=lambda _: [
+            DiscoveredPage(
+                url="https://example.org/datasets/mortality",
+                discovery_method="data_json",
+                title="Mortality health dataset",
+                distributions=(distribution,),
+            )
+        ],
+        validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
+        classifier=AcceptingPageClassifier(),
+    )
+
+    assert len(result.datasets) == 1
+    collected = result.datasets[0]
+    retained = collected.distributions[0]
+    validation = collected.validation_results[0]
+    assert retained.format == validation.format == expected_format
+    assert retained.url == validation.url == resource_url
+    assert validation.ok is True
+    assert retained.anchor == distribution.anchor
+    assert retained.signals == distribution.signals
+    assert distribution.format == initial_format
+
+
+def test_collect_source_deduplicates_distributions_after_format_validation():
+    resource_url = "https://example.org/api/mortality"
+
+    def fake_probe(url, **kwargs):
+        return HTTPProbe(
+            url=url,
+            final_url=url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+        )
+
+    result = collect_source_with_report(
+        "https://example.org/catalog",
+        config=CollectorConfig(max_distributions_per_dataset=2),
+        discover=lambda _: [
+            DiscoveredPage(
+                url="https://example.org/datasets/mortality",
+                discovery_method="data_json",
+                title="Mortality health dataset",
+                distributions=(
+                    DistributionCandidate(url=resource_url, format="API", probability=0.95),
+                    DistributionCandidate(url=resource_url, format="JSON", probability=0.9),
+                ),
+            )
+        ],
+        validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
+        classifier=AcceptingPageClassifier(),
+    )
+
+    collected = result.datasets[0]
+    assert len(collected.distributions) == len(collected.validation_results) == 1
+    assert collected.distributions[0].format == "JSON"
+    assert collected.validation_results[0].format == "JSON"
+    assert result.report.invalid_distribution_count == 0
 
 
 def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():

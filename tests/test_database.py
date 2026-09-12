@@ -12,6 +12,8 @@ from app.db import serialization as db_serialization
 from psycopg import sql as pg_sql
 
 from collector.classification.repository import RepositoryClassification
+from collector.config import CollectorConfig
+from collector.main import collect_repository_candidate_with_report
 from collector.repository_search import RepositorySearchResult
 from collector.storage.models import (
     CollectedDataset,
@@ -20,6 +22,7 @@ from collector.storage.models import (
     DistributionCandidate,
     ValidationResult,
 )
+from collector.validation.downloads import validate_distribution
 
 pytestmark = pytest.mark.anyio
 
@@ -1659,11 +1662,11 @@ async def test_collection_job_lifecycle(database):
     assert job["saved_count"] == 0
     assert job["discovered_count"] == 0
     assert job["discovery_methods"] == []
-    assert job["message"] == "Collecte en attente."
+    assert job["message"] == "Collection pending."
 
     running = await database.mark_collection_job_running(int(job["id"]))
     assert running["status"] == "running"
-    assert running["message"] == "Collecte en cours."
+    assert running["message"] == "Collection in progress."
 
     done = await database.mark_collection_job_done(
         int(job["id"]),
@@ -1685,7 +1688,7 @@ async def test_collection_job_lifecycle(database):
     assert done["rejected_count"] == 2
     assert done["invalid_distribution_count"] == 1
     assert done["discovery_methods"] == ["ckan", "sitemap"]
-    assert done["message"] == "3 dataset(s) sauvegardé(s)."
+    assert done["message"] == "3 dataset(s) saved."
     assert done["finished_at"] != ""
 
     fetched = await database.get_collection_job(int(job["id"]))
@@ -2013,7 +2016,7 @@ async def test_interrupted_collection_jobs_are_marked_error_on_recovery(database
         recovered = await database.get_collection_job(int(job_id))
         assert recovered is not None
         assert recovered["status"] == "error"
-        assert recovered["message"] == "Collecte interrompue."
+        assert recovered["message"] == "Collection interrupted."
         assert recovered["error"] == "Collection interrupted by application restart."
         assert recovered["finished_at"] != ""
 
@@ -2080,6 +2083,67 @@ async def test_automatic_collection_reservation_retries_after_terminal_job(
     )
     assert attempts[1]["id"] == retry.job["id"]
     assert attempts[1]["status"] == "pending"
+
+
+async def test_complete_collection_job_saves_refined_distribution_formats(database):
+    from collector.classification.page import PageClassification
+    from collector.fetch import FetchedPage
+    from collector.storage.models import HTTPProbe
+
+    await database.init_database()
+    candidate_url = "https://catalog.example.org/datasets/mortality"
+    resource_url = "https://catalog.example.org/api/mortality"
+
+    class AcceptingClassifier:
+        def classify(self, page, distributions):
+            assert {item.format for item in distributions} == {"API", "JSON"}
+            return PageClassification(accepted=True, dataset_signals={"source": "test"})
+
+    def fake_fetch_html(url):
+        return FetchedPage(
+            url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            html=f"""
+                <html><head><title>Mortality health data</title>
+                <script type="application/ld+json">
+                {{"@type": "Dataset", "distribution": {{
+                    "contentUrl": "{resource_url}", "encodingFormat": "application/json"
+                }}}}
+                </script></head><body>
+                <a href="{resource_url}">API export</a>
+                </body></html>
+            """,
+        )
+
+    def fake_probe(url, **kwargs):
+        return HTTPProbe(
+            url=url,
+            final_url=url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+        )
+
+    collection_result = collect_repository_candidate_with_report(
+        candidate_url,
+        config=CollectorConfig(max_distributions_per_dataset=2),
+        fetch_html=fake_fetch_html,
+        validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
+        classifier=AcceptingClassifier(),
+    )
+    job = await database.create_collection_job(candidate_url)
+    await database.mark_collection_job_running(job["id"])
+    completed = await database.complete_collection_job(job["id"], collection_result)
+
+    assert completed["status"] == "done"
+    assert completed["saved_count"] == 1
+    saved = (await database.list_collected_datasets())[0]
+    assert len(saved.distributions) == len(saved.validation_results) == 1
+    assert saved.distributions[0].format == saved.validation_results[0].format == "JSON"
+    assert saved.distributions[0].url == saved.validation_results[0].url == resource_url
+    assert saved.validation_results[0].ok is True
+    assert saved.distributions[0].last_checked_at
 
 
 async def test_complete_collection_job_rolls_back_datasets_when_one_save_fails(database):
@@ -2175,6 +2239,6 @@ async def test_collection_job_records_errors(database):
     failed = await database.mark_collection_job_error(int(job["id"]), "network timeout")
 
     assert failed["status"] == "error"
-    assert failed["message"] == "Collecte échouée."
+    assert failed["message"] == "Collection failed."
     assert failed["error"] == "network timeout"
     assert failed["finished_at"] != ""

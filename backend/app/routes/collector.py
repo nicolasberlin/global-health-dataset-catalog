@@ -30,7 +30,6 @@ from app.database import (
     search_collected_datasets,
     start_candidate_classification,
 )
-from app.database import create_collection_job as db_create_collection_job
 from app.routes.collector_schemas import (
     CollectorAutomaticCollection,
     CollectorCollectedDataset,
@@ -44,7 +43,6 @@ from app.routes.collector_schemas import (
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorRepositorySearchWarning,
-    CollectorURLRequest,
     CollectorValidation,
 )
 from app.security import APIPrincipal, enforce_api_quota, require_api_principal
@@ -101,25 +99,6 @@ _collection_executor = ThreadPoolExecutor(
     max_workers=COLLECTION_MAX_CONCURRENCY,
     thread_name_prefix="collection",
 )
-
-
-@router.post("/collection-jobs", status_code=202)
-async def start_collection_job(
-    payload: CollectorURLRequest,
-    background_tasks: BackgroundTasks,
-    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
-) -> CollectorCollectionJobResponse:
-    """Persist a pending job and schedule network and LLM work in-process.
-
-    The 202 response is returned before collection finishes. FastAPI executes
-    the task in the application process; this is not a durable external queue.
-    """
-
-    await enforce_api_quota(principal, "collection_start")
-    job = await db_create_collection_job(str(payload.url))
-    response_job = CollectorCollectionJob(**job)
-    _schedule_collection_job(background_tasks, response_job)
-    return CollectorCollectionJobResponse(job=response_job)
 
 
 @router.get("/collection-jobs/{job_id}")
