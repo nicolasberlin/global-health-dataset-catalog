@@ -1,3 +1,5 @@
+import DatasetAccessDetails from './DatasetAccessDetails.jsx';
+
 function getHostname(url) {
     try {
         return new URL(url).hostname;
@@ -28,7 +30,7 @@ export function getAcceptedVoteCount(classification) {
     return null;
 }
 
-function getTotalVoteCount(classification) {
+export function getTotalVoteCount(classification) {
     const ensemble = getEnsembleSummary(classification);
     const successfulVotes = Number(ensemble?.successful_votes);
     const failedVotes = Number(ensemble?.failed_votes);
@@ -43,10 +45,10 @@ function getTotalVoteCount(classification) {
 
 function formatRepositoryRelevanceLabel(label) {
     const labels = {
-        relevant: 'Pertinent',
-        somewhat_relevant: 'Partiellement pertinent',
-        not_relevant: 'Non pertinent',
-        insufficient_information: 'Information insuffisante',
+        relevant: 'Relevant',
+        somewhat_relevant: 'Somewhat relevant',
+        not_relevant: 'Not relevant',
+        insufficient_information: 'Insufficient information',
     };
 
     return labels[label] ?? String(label ?? '').replaceAll('_', ' ').toLowerCase();
@@ -54,9 +56,9 @@ function formatRepositoryRelevanceLabel(label) {
 
 function formatDecisionReason(reason) {
     const reasons = {
-        enough_accept_votes: 'accord suffisant',
-        rejected_by_majority: 'rejet à la majorité',
-        insufficient_accept_votes: 'accord insuffisant',
+        enough_accept_votes: 'enough positive votes',
+        rejected_by_majority: 'rejected by majority',
+        insufficient_accept_votes: 'not enough positive votes',
     };
 
     return reasons[reason] ?? reason;
@@ -66,33 +68,33 @@ function automaticCollectionStatus(automaticCollection) {
     const job = automaticCollection?.job;
     const statuses = {
         pending: {
-            title: 'Collecte automatique en attente',
-            detail: job?.id ? `Job #${job.id} créé.` : '',
+            title: 'Automatic collection pending',
+            detail: '',
             tone: 'loading',
         },
         running: {
-            title: 'Collecte automatique en cours',
-            detail: job?.message || (job?.id ? `Job #${job.id} en cours.` : ''),
+            title: 'Automatic collection in progress',
+            detail: 'Checking data links.',
             tone: 'loading',
         },
         saved: {
-            title: 'Dataset sauvegardé dans le catalogue local',
+            title: 'Dataset saved to the local catalog',
             detail: job?.saved_count
-                ? `${job.saved_count} dataset(s) sauvegardé(s).`
-                : 'Ce dataset était déjà présent dans le catalogue.',
+                ? `${job.saved_count} dataset(s) saved.`
+                : 'This dataset was already in the catalog.',
             tone: 'saved',
         },
         empty: {
-            title: 'Collecte terminée sans fichier valide',
-            detail: 'Aucun fichier de données téléchargeable et valide n’a été trouvé.',
+            title: 'Collection completed without a valid file',
+            detail: 'No valid downloadable data file was found.',
             tone: 'empty',
         },
         error: {
-            title: 'Échec de la collecte automatique',
+            title: 'Automatic collection failed',
             detail:
                 automaticCollection?.error ||
                 job?.error ||
-                'La page ou ses fichiers n’ont pas pu être collectés.',
+                'The page or its files could not be collected.',
             tone: 'error',
         },
     };
@@ -118,12 +120,12 @@ export default function RepositoryAcceptedCard({ candidate }) {
             <div className="repository-card__top">
                 <span className="repository-source-pill">{item.source}</span>
                 <span className="repository-status-pill repository-status-pill--accepted">
-                    Candidat accepté{agreementLabel}
+                    Accepted candidate{agreementLabel}
                 </span>
             </div>
 
             <h3>{item.title}</h3>
-            <p>{item.description || 'Description non disponible.'}</p>
+            <p>{item.description || 'Description unavailable.'}</p>
 
             {(item.publisher || item.date) && (
                 <dl className="repository-facts">
@@ -145,7 +147,7 @@ export default function RepositoryAcceptedCard({ candidate }) {
             {classification?.relevance_label ? (
                 <div className="repository-decision-row">
                     <span>
-                        Pertinence IA
+                        AI relevance
                         <strong>
                             {formatRepositoryRelevanceLabel(
                                 classification.relevance_label,
@@ -165,18 +167,19 @@ export default function RepositoryAcceptedCard({ candidate }) {
                 </div>
             ) : null}
 
+            <DatasetAccessDetails item={item} />
             <div className="repository-card__link-row">
                 <span>{getHostname(item.url)}</span>
                 <a href={item.url} target="_blank" rel="noreferrer">
-                    Ouvrir le dataset
+                    Open dataset page
                 </a>
             </div>
 
             {ensemble ? (
                 <details className="repository-ai-details">
-                    <summary>Détails IA</summary>
+                    <summary>AI details</summary>
                     <p>
-                        {acceptedVotes ?? 0}/{totalVotes ?? 1} votes favorables
+                        {acceptedVotes ?? 0}/{totalVotes ?? 1} positive votes
                         {ensemble.decision_reason
                             ? ` · ${formatDecisionReason(ensemble.decision_reason)}`
                             : ''}
@@ -192,7 +195,7 @@ export default function RepositoryAcceptedCard({ candidate }) {
                                         ) : null}
                                     </span>
                                     <strong>
-                                        {voter.accepted ? 'Accepte' : 'Refuse'}
+                                        {voter.accepted ? 'Accepts' : 'Rejects'}
                                         {voter.relevance_label
                                             ? ` · ${formatRepositoryRelevanceLabel(
                                                   voter.relevance_label,

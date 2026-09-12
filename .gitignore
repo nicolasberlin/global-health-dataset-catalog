@@ -4,11 +4,13 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.codex-build/
 build/
 dist/
 *.egg-info/
 *.db
 .DS_Store
+~$*.pptx
 .env
 .env.*
 key.txt

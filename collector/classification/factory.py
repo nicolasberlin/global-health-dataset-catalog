@@ -10,6 +10,9 @@ from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.page import PageClassifier
 from collector.classification.page_llm_classifier import LLMPageClassifier
 from collector.classification.providers.epfl_rcp import (
+    DEFAULT_APERTUS_MEDITRON_MODEL,
+    DEFAULT_DEEPSEEK_RCP_MODEL,
+    DEFAULT_GEMMA_MEDITRON_MODEL,
     epfl_rcp_chat_completions_provider_config,
     epfl_rcp_repository_relevance_provider_config,
 )
@@ -18,48 +21,76 @@ from collector.classification.repository_llm_classifier import (
     LLMRepositoryRelevanceClassifier,
 )
 
+# Each voter has a stable audit ID, an independently configurable model, and
+# an explicit credential source. No model has implicit configuration or key fallback.
+_DEFAULT_VOTERS = (
+    ("epfl_rcp", "RCP_DEEPSEEK_MODEL", DEFAULT_DEEPSEEK_RCP_MODEL, "RCP_DEEPSEEK_API_KEY"),
+    (
+        "epfl_rcp_gemma_meditron",
+        "RCP_GEMMA_MEDITRON_MODEL",
+        DEFAULT_GEMMA_MEDITRON_MODEL,
+        "RCP_GEMMA_MEDITRON_API_KEY",
+    ),
+    (
+        "epfl_rcp_apertus_meditron",
+        "RCP_APERTUS_MEDITRON_MODEL",
+        DEFAULT_APERTUS_MEDITRON_MODEL,
+        "RCP_APERTUS_MEDITRON_API_KEY",
+    ),
+)
+
 
 def build_default_page_classifier() -> PageClassifier:
-    """Build the single-voter EPFL RCP page classifier used by collection.
+    """Build three parallel voters with a two-out-of-three acceptance threshold.
 
-    Both thresholds are one, so a missing key, provider failure, timeout, or
-    unusable response fails classification instead of falling back or voting
-    to reject.
+    Require all three responses to be usable: credential, transport or parsing
+    failures must remain classification errors rather than semantic rejections.
     """
     return EnsemblePageClassifier(
         [
             (
-                "epfl_rcp",
+                voter_id,
                 LLMPageClassifier(
                     client=HTTPJSONLLMClient(
-                        provider=epfl_rcp_chat_completions_provider_config(),
+                        provider=epfl_rcp_chat_completions_provider_config(
+                            name=voter_id,
+                            model_env_var=model_env_var,
+                            default_model=default_model,
+                            api_key_env_var=api_key_env_var,
+                        ),
                     ),
                 ),
             )
+            for voter_id, model_env_var, default_model, api_key_env_var in _DEFAULT_VOTERS
         ],
-        votes_required=1,
-        minimum_successful_votes=1,
+        votes_required=2,
+        minimum_successful_votes=3,
     )
 
 
 def build_default_repository_result_classifier() -> RepositoryResultClassifier:
-    """Build the single-voter EPFL RCP classifier used by repository search.
+    """Build the same three-model ensemble for repository query relevance.
 
-    With one required successful vote, provider and response errors propagate
-    as classification failures; only a valid relevance label can accept or
-    reject the candidate.
+    Two positive votes are required, and all three models must return usable
+    responses. The page and repository prompts remain separate.
     """
     return EnsembleRepositoryRelevanceClassifier(
         [
             (
-                "epfl_rcp",
+                voter_id,
                 LLMRepositoryRelevanceClassifier(
                     client=HTTPJSONLLMClient(
-                        provider=epfl_rcp_repository_relevance_provider_config(),
+                        provider=epfl_rcp_repository_relevance_provider_config(
+                            name=voter_id,
+                            model_env_var=model_env_var,
+                            default_model=default_model,
+                            api_key_env_var=api_key_env_var,
+                        ),
                     ),
                 ),
             )
+            for voter_id, model_env_var, default_model, api_key_env_var in _DEFAULT_VOTERS
         ],
-        votes_required=1,
-        minimum_successful_votes=1,
+        votes_required=2,
+        minimum_successful_votes=3,
     )

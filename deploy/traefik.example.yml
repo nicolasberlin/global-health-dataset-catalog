@@ -1,0 +1,26 @@
+# Merge into the external Traefik's STATIC configuration; adjust email/storage.
+# Mount a persistent /letsencrypt directory writable by Traefik.
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: traefik
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: replace-with-your-operations-email@example.org
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web

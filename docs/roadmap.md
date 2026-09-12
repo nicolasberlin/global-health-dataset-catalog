@@ -1,6 +1,6 @@
 # Product and Production Roadmap
 
-> Status: proposed work, not current architecture. Last reviewed 2026-09-02.
+> Status: proposed work, not current architecture. Last reviewed 2026-09-11.
 
 This document keeps future work separate from the current
 [Technical Design Document](technical-design-document.md). Items are ordered by
@@ -12,7 +12,7 @@ risk and dependency, not by a committed delivery date.
   relevance as publication approval;
 - enforce health relevance, dataset identity, provenance, usable distribution,
   source tier, licence, and sensitivity gates from the
-  [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md);
+  the planned dataset collection and quality policy;
 - store review status, reviewer decisions, policy exceptions, and decision
   timestamps;
 - distinguish candidate, accepted, published, stale, and withdrawn records.
@@ -27,7 +27,7 @@ risk and dependency, not by a committed delivery date.
 
 ## 3. Repository Coverage
 
-Detailed design: [Multi-Repository Architecture](multi-repository-architecture.md).
+Detailed design: [Multi-Repository Architecture](props/multi-repository-architecture.md).
 
 - add providers only through `repository_search/providers/`;
 - define provider timeouts, quotas, and normalized provenance requirements;
@@ -41,12 +41,13 @@ Detailed design: [Multi-Repository Architecture](multi-repository-architecture.m
 - create a labeled evaluation set and measure precision, recall, disagreement,
   failure rates, latency, and cost;
 - add a human-review path for uncertainty and policy triggers;
-- decide whether provider-level independence or a fallback model is required
-  instead of relying on one DeepSeek model.
+- decide whether provider-level independence or fallback models are required;
+  the current three-model ensemble still depends on one EPFL RCP endpoint.
 
 ## 5. Production Architecture
 
-- add authentication and role-based authorization;
+- replace static MVP tokens with institutional authentication and role-based
+  authorization;
 - replace process-local FastAPI background tasks with a durable queue and worker;
 - define retries, idempotency, cancellation, and dead-letter handling;
 - deploy PostgreSQL with backups, migrations, pooling, and least-privilege roles;

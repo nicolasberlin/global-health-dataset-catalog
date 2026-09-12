@@ -16,40 +16,6 @@ RequestBodyBuilder = Callable[[dict[str, object], str], dict[str, object]]
 ResponseTextExtractor = Callable[[object], str]
 
 
-def extract_responses_output_text(response_payload: object) -> str:
-    """Extract generated text from an OpenAI-compatible Responses envelope."""
-    if not isinstance(response_payload, dict):
-        raise PageClassificationError("LLM response must be a JSON object.")
-
-    output_text = response_payload.get("output_text")
-    if isinstance(output_text, str) and output_text.strip():
-        return output_text
-
-    output = response_payload.get("output")
-    if isinstance(output, list):
-        for output_item in output:
-            if not isinstance(output_item, dict):
-                continue
-            if output_item.get("type") not in (None, "message"):
-                continue
-
-            content = output_item.get("content")
-            if not isinstance(content, list):
-                continue
-
-            for content_item in content:
-                if not isinstance(content_item, dict):
-                    continue
-                if content_item.get("type") not in (None, "output_text"):
-                    continue
-
-                text = content_item.get("text")
-                if isinstance(text, str) and text.strip():
-                    return text
-
-    raise PageClassificationError("LLM response did not include classification text.")
-
-
 def extract_chat_completions_message_text(response_payload: object) -> str:
     """Extract assistant text from an OpenAI-compatible Chat Completions envelope."""
     if not isinstance(response_payload, dict):

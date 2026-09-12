@@ -17,11 +17,11 @@ export default function RepositoryProgressCard({ candidate }) {
                     className={`repository-status-pill repository-status-pill--${status}`}
                     role="status"
                 >
-                    {status === 'classifying' ? 'Analyse IA…' : 'En attente'}
+                    {status === 'classifying' ? 'AI analysis…' : 'Waiting'}
                 </span>
             </div>
             <h3>{item.title}</h3>
-            <p>{item.description || 'Description non disponible.'}</p>
+            <p>{item.description || 'Description unavailable.'}</p>
             <div className="repository-card__footer">
                 <span>{item.publisher || getHostname(item.url)}</span>
                 {item.date ? <small>{item.date}</small> : null}

@@ -1,0 +1,29 @@
+flowchart TD
+    A(["BLOCK 2 — Stored candidates"])
+    A --> B["Frontend: classifyRepositoryCandidates<br/>Up to 2 candidates concurrently"]
+    B --> C["POST /collector/<br/>repository-candidates/{candidate_id}/classify"]
+    C --> D["Identify the user<br/>Load the user's candidate from PostgreSQL"]
+    D --> E{"Candidate state?"}
+    E -->|"pending, or error with retry=true"| F["Check the classification quota<br/>start_candidate_classification<br/>Atomic reservation"]
+    E -->|"accepted"| ACCEPT
+    E -->|"rejected"| REJECT
+    E -->|"classifying, or error without retry"| CONFLICT["Return HTTP 409<br/>In progress or explicit retry required"]
+    F --> G["If reserved: rebuild<br/>RepositorySearchResult, then PageSnapshot<br/>from stored data"]
+    G --> H["LLM relevance classification<br/>Compare metadata with the original query<br/>3-model vote"]
+    H --> I{"Candidate accepted?"}
+    H -.->|"Model or response error"| ERR["Store classification_status = error<br/>Return to frontend"]
+    I -->|"No"| REJECT["Store or return rejected<br/>No collection"]
+    I -->|"Yes"| SAVE["Store classification_status = accepted"]
+    SAVE --> ACCEPT["_reserve_automatic_collection"]
+    SAVE -.->|"Persistence failure"| ERR
+    ACCEPT --> R["reserve_repository_candidate_collection_job<br/>Atomic reservation by candidate and URL"]
+    R -.->|"Reservation failure"| SCHEDERR["Return automatic_collection.state = error"]
+    R --> J{"URL already associated<br/>with a saved dataset?"}
+    J -->|"Yes"| SAVED["Return state = saved<br/>No new collection"]
+    J -->|"No"| K{"Existing pending or running job?"}
+    K -->|"Yes"| EXIST["Return the active job<br/>Do not schedule another job"]
+    K -->|"No"| NEW["Create collection_jobs<br/>kind = repository_candidate<br/>status = pending"]
+    NEW --> SCHEDULE["_schedule_collection_job<br/>background_tasks.add_task"]
+    SCHEDULE --> NEXT(["BLOCK 3 — Run collection"])
+    EXIST --> FOLLOW["Frontend: track the existing job<br/>See tracking in block 3"]
+    SCHEDULE -.->|"HTTP response before job completion"| FOLLOW

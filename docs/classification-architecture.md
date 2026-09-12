@@ -1,8 +1,6 @@
 # Classification Architecture
 
-> Last verified: 2026-09-05. See the
-> [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
-> for acceptance rules that are proposed but not yet fully enforced.
+> Default ensemble updated: 2026-09-10. Provider access requires deployment verification.
 
 This document describes every runtime module under `collector/classification/`,
 the values exchanged between them, and the two classification flows. Private
@@ -23,10 +21,7 @@ flowchart LR
     Ensemble["ensemble.py<br/>parallel voters and aggregation"]
     Client["llm_client.py<br/>generic HTTP JSON client"]
     RCP["providers/epfl_rcp.py<br/>default provider adapter"]
-    DeepSeek["providers/deepseek.py<br/>optional direct provider adapter"]
-    OpenAI["providers/openai.py<br/>optional provider adapter"]
     Prompts["prompts.py<br/>prompts and JSON schemas"]
-    Facade["llm.py<br/>compatibility re-exports"]
     Models["storage/models.py<br/>PageSnapshot and DistributionCandidate"]
 
     Main --> Factory
@@ -49,16 +44,6 @@ flowchart LR
     Ensemble --> Models
     RCP --> Client
     RCP --> Prompts
-    DeepSeek --> Client
-    DeepSeek --> Prompts
-    OpenAI --> Client
-    OpenAI --> Prompts
-    Facade -. "re-exports only" .-> Client
-    Facade -. "re-exports only" .-> RCP
-    Facade -. "re-exports only" .-> DeepSeek
-    Facade -. "re-exports only" .-> OpenAI
-    Facade -. "re-exports only" .-> PageAdapter
-    Facade -. "re-exports only" .-> RepoAdapter
 ```
 
 `classification/__init__.py` and `classification/providers/__init__.py` are
@@ -151,16 +136,38 @@ classDiagram
     HTTPJSONLLMClient --> LLMProviderConfig
     LLMPageClassifier --> HTTPJSONLLMClient
     LLMRepositoryRelevanceClassifier --> HTTPJSONLLMClient
-    EnsemblePageClassifier o-- LLMPageClassifier : one default voter
-    EnsembleRepositoryRelevanceClassifier o-- LLMRepositoryRelevanceClassifier : one default voter
+    EnsemblePageClassifier o-- LLMPageClassifier : three default voters
+    EnsembleRepositoryRelevanceClassifier o-- LLMRepositoryRelevanceClassifier : three default voters
     LLMPageClassifier --> PageClassification
     LLMRepositoryRelevanceClassifier --> RepositoryClassification
 ```
 
-The default factory creates one **EPFL RCP voter** using
-`deepseek-ai/DeepSeek-V4-Flash-0731` by default. The ensemble classes remain
-as compatibility and audit wrappers, both configured with thresholds 1 and 1.
-The OpenAI provider adapter remains available but is not selected by default.
+The default factory creates three concurrent **EPFL RCP voters** for both flows:
+
+| Audit ID | Default model | Model environment variable | Credential variable |
+| --- | --- | --- | --- |
+| `epfl_rcp` | `deepseek-ai/DeepSeek-V4-Flash-0731` | `RCP_DEEPSEEK_MODEL` | `RCP_DEEPSEEK_API_KEY` |
+| `epfl_rcp_gemma_meditron` | `EPFLiGHT/Gemma-3-27B-MeditronFO` | `RCP_GEMMA_MEDITRON_MODEL` | `RCP_GEMMA_MEDITRON_API_KEY` |
+| `epfl_rcp_apertus_meditron` | `EPFLiGHT/Apertus-70B-MeditronFO` | `RCP_APERTUS_MEDITRON_MODEL` | `RCP_APERTUS_MEDITRON_API_KEY` |
+
+All use `https://inference-rcp.epfl.ch/v1/chat/completions`. Each flow sends the
+same bounded evidence and its own classification prompt to all three voters.
+All entries pass through the same factory loop, provider builder, HTTP client,
+and response parser. Provider builders require explicit configuration for every
+model, with no implicit DeepSeek default. The historical `epfl_rcp` audit ID is
+retained for continuity; it has no special execution behavior.
+Two positive votes are required, and all three responses must be usable.
+Missing keys, HTTP errors, timeouts, or invalid JSON fail classification, even
+when the other two votes are positive. There is no fallback to the old key or
+silent single-model mode. HTTP timeouts remain 20 seconds per voter.
+
+The model IDs are taken from the official
+[Gemma](https://huggingface.co/EPFLiGHT/Gemma-3-27B-MeditronFO) and
+[Apertus](https://huggingface.co/EPFLiGHT/Apertus-70B-MeditronFO) model cards.
+Their publication does not guarantee availability or JSON-mode compatibility
+on the RCP deployment; those require checking with the configured credentials.
+All three models use the EPFL RCP adapter. Direct OpenAI and DeepSeek adapters
+and the compatibility export module have been removed.
 
 ## Page Classification Flow
 
@@ -169,15 +176,15 @@ sequenceDiagram
     participant Caller as collector/main.py
     participant Factory as factory.py
     participant Ensemble as EnsemblePageClassifier
-    participant Voter as 1 x LLMPageClassifier
+    participant Voter as 3 x LLMPageClassifier
     participant Client as HTTPJSONLLMClient
     participant Provider as providers/epfl_rcp.py
     participant API as EPFL RCP Chat Completions API
 
     Caller->>Factory: build_default_page_classifier()
-    Factory-->>Caller: one-voter wrapper, thresholds 1 and 1
+    Factory-->>Caller: three voters, acceptance 2 and quorum 3
     Caller->>Ensemble: classify(page, distributions)
-    Ensemble->>Voter: classify(page, distributions)
+    Ensemble->>Voter: classify(page, distributions) concurrently
     Voter->>Voter: _build_llm_payload(...)
     Voter->>Client: classify_page(payload)
     Client->>Provider: use configured request_body_builder
@@ -187,33 +194,36 @@ sequenceDiagram
     Client-->>Voter: raw classification dict
     Voter->>Voter: _parse_page_classification(...)
     Voter-->>Ensemble: PageClassification
-    Ensemble->>Ensemble: require 1 successful vote
-    Ensemble->>Ensemble: accepted when accepted_votes >= 1
+    Ensemble->>Ensemble: require 3 successful votes
+    Ensemble->>Ensemble: accepted when accepted_votes >= 2
     Ensemble->>Ensemble: build the dataset audit summary
     Ensemble-->>Caller: final PageClassification
 ```
 
-The wrapper still uses the generic ensemble implementation, but its default
-voter list contains one EPFL RCP classifier. A failed or malformed model
-response raises `PageClassificationError`; there is no fallback voter.
+The generic ensemble runs all three RCP classifiers in parallel and preserves
+configured voter order in the audit. A failed or malformed model response
+raises `PageClassificationError`; there is no fallback voter.
 
 ## Repository Classification Flow
 
 ```mermaid
 sequenceDiagram
-    participant Route as POST classify-repository-result
+    participant Route as POST repository-candidates/{id}/classify
+    participant DB as PostgreSQL
     participant Service as repository_search/service.py
     participant Factory as factory.py
     participant Ensemble as EnsembleRepositoryRelevanceClassifier
-    participant Voter as 1 x LLMRepositoryRelevanceClassifier
+    participant Voter as 3 x LLMRepositoryRelevanceClassifier
     participant Client as HTTPJSONLLMClient
     participant API as EPFL RCP Chat Completions API
 
+    Route->>DB: reserve pending -> classifying
+    DB-->>Route: persisted query and candidate metadata
     Route->>Factory: build_default_repository_result_classifier()
     Route->>Service: classify_repository_result(result, classifier)
     Service->>Service: _repository_result_page(result)
     Service->>Ensemble: classify(PageSnapshot)
-    Ensemble->>Voter: classify(page)
+    Ensemble->>Voter: classify(page) concurrently for 3 voters
     Voter->>Voter: _build_repository_relevance_payload(page)
     Voter->>Client: classify_page(payload)
     Client->>API: POST prompt and JSON schema
@@ -222,11 +232,17 @@ sequenceDiagram
     Voter->>Voter: validate and construct RepositoryClassification
     Voter-->>Ensemble: classification
     Ensemble->>Ensemble: derive accepted from each label
-    Ensemble->>Ensemble: accept when the single vote is positive
+    Ensemble->>Ensemble: require 3 usable votes, accept with at least 2 positive
     Ensemble->>Ensemble: select label among decision-supporting votes
     Ensemble-->>Service: final RepositoryClassification
     Service-->>Route: RepositorySearchResult with classification
+    Route->>DB: persist accepted or rejected decision
 ```
+
+The route accepts no candidate metadata from the browser. It reconstructs the
+`RepositorySearchResult` from `repository_candidates` and the original query in
+`search_sessions`. A model or parsing failure is stored as candidate `error`
+and can be retried only explicitly; it is not converted to a negative label.
 
 For repository results, `relevant` and `somewhat_relevant` are positive votes.
 `not_relevant` and `insufficient_information` are negative votes. When labels
@@ -257,15 +273,14 @@ a `PageClassificationError`, and there is no fallback voter.
 
 | Function | Parameters | Returns | Calls and reuse |
 |---|---|---|---|
-| `build_default_page_classifier` | none | `PageClassifier` | Constructs one EPFL RCP provider config, HTTP client, and `LLMPageClassifier`; wraps it in `EnsemblePageClassifier(1, 1)` for the existing audit contract. |
-| `build_default_repository_result_classifier` | none | `RepositoryResultClassifier` | Constructs the corresponding EPFL RCP repository classifier in `EnsembleRepositoryRelevanceClassifier(1, 1)`. |
+| `build_default_page_classifier` | none | `PageClassifier` | Constructs three RCP clients with separate model settings and explicit credential sources; returns an ensemble with acceptance threshold 2 and quorum 3. |
+| `build_default_repository_result_classifier` | none | `RepositoryResultClassifier` | Constructs the corresponding three-voter repository ensemble with acceptance threshold 2 and quorum 3. |
 
 ### `llm_client.py`
 
 | Function or method | Parameters | Returns | Role |
 |---|---|---|---|
 | `LLMPageClassificationClient.classify_page` | normalized `payload` | raw classification `dict` | Protocol shared by both concrete LLM classifiers. |
-| `extract_responses_output_text` | decoded Responses API envelope | output text | Accepts top-level `output_text` or nested message `output_text`; ignores preceding DeepSeek `reasoning_text`. |
 | `extract_chat_completions_message_text` | decoded Chat Completions envelope | output text | Extracts the assistant text from `choices[].message.content`; used by EPFL RCP. |
 | `HTTPJSONLLMClient.__init__` | `provider`, optional `api_key`, `model`, `timeout_seconds`, injectable `request` | client | Explicit key/model override environment lookup. The injectable request makes network behavior testable. |
 | `HTTPJSONLLMClient.classify_page` | `payload` | decoded classification object | Resolves API key, builds headers and request body, performs POST, decodes provider response, extracts text, parses the second JSON layer, and rejects non-object output. |
@@ -282,9 +297,6 @@ finds the model's textual JSON output in the provider response.
 |---|---|---|---|
 | `epfl_rcp_chat_completions_provider_config` | display `name`, model env name, default model | `LLMProviderConfig` | Selects EPFL RCP authentication, Chat Completions endpoint, page builder, and response extractor. |
 | `epfl_rcp_repository_relevance_provider_config` | same parameters | `LLMProviderConfig` | Selects the EPFL RCP repository relevance builder. |
-| `deepseek_responses_provider_config` | display `name`, model env name, default model | `LLMProviderConfig` | Selects DeepSeek authentication, endpoint, page builder, and shared Responses extractor. |
-| `deepseek_repository_relevance_provider_config` | same parameters | `LLMProviderConfig` | Selects the DeepSeek repository relevance builder. |
-| OpenAI and direct DeepSeek provider functions | same parameters | `LLMProviderConfig` | Remain available for explicit use but are not selected by the default factory. |
 
 ### `prompts.py`
 
@@ -293,11 +305,6 @@ finds the model's textual JSON output in the provider response.
 | `_build_epfl_rcp_chat_completions_request_body` | page `payload`, `model` | EPFL RCP request body | Adds page system prompt, user JSON, embedded schema, and JSON-object response mode. |
 | `_build_epfl_rcp_repository_relevance_request_body` | repository `payload`, `model` | EPFL RCP request body | Adds repository prompt, user JSON, embedded schema, and JSON-object response mode. |
 | `_build_chat_completions_request_body` | payload, model, prompt, schema | Chat Completions body | Centralizes `messages`, the embedded schema instruction, and JSON-object response mode. |
-| `_build_openai_responses_request_body` | page `payload`, `model` | OpenAI request body | Adds page system prompt, user JSON, and strict page JSON schema. |
-| `_build_openai_repository_relevance_request_body` | repository `payload`, `model` | OpenAI request body | Adds repository relevance prompt and strict repository schema. |
-| `_build_deepseek_responses_request_body` | page `payload`, `model` | DeepSeek request body | Reuses the page prompt and schema without the undocumented OpenAI `strict` flag. |
-| `_build_deepseek_repository_relevance_request_body` | repository `payload`, `model` | DeepSeek request body | Reuses the repository prompt and schema without the `strict` flag. |
-| `_build_responses_request_body` | payload, model, prompt, schema options | Responses API body | Centralizes the common system/user messages and JSON-schema output shape. |
 | `_system_prompt` | none | string | Defines an accepted page as an individual, health-relevant dataset/resource/API dataset and treats page data as untrusted evidence. |
 | `_repository_relevance_system_prompt` | none | string | Defines relevance to the user query, four labels, missing-information behavior, and prompt-injection protection. |
 | `_classification_schema` | none | JSON Schema | Requires `accepted` and `dataset_signals`, with exact `reason` and `evidence` strings. |
@@ -357,11 +364,10 @@ The value-object methods and accessors are also active parts of the contract:
 | `_VoteOutcome` | `voter_id`, optional page vote, optional error | Represents exactly one successful page vote or one page-voter failure. |
 | `_RepositoryVoteOutcome` | `voter_id`, optional repository vote, optional error | Equivalent repository-voter result. |
 
-### Compatibility and package files
+### Package files
 
 | File | Runtime effect |
 |---|---|
-| `llm.py` | Imports and re-exports the public client, provider, and concrete-classifier names. It contains no classification branch of its own. Existing imports can keep using this facade while new code imports the owning module directly. |
 | `classification/__init__.py` | Declares the classification package and contains only its package description. |
 | `providers/__init__.py` | Declares the provider-adapter package; it currently does not re-export provider names. |
 
@@ -389,7 +395,7 @@ The value-object methods and accessors are also active parts of the contract:
 
 ```mermaid
 flowchart LR
-    ModelEnv["RCP_CLASSIFIER_MODEL"] --> Load["HTTPJSONLLMClient._request_body"] --> Model["configured or default model"]
+    ModelEnv["per-voter model environment variable"] --> Load["HTTPJSONLLMClient._request_body"] --> Model["configured or default model"]
     Model --> Builder["request_body_builder payload plus model"] --> APIBody["EPFL RCP body.model"]
 
     VoterId["voter_id"] --> Pair["voter tuple"] --> Outcome["vote or failure outcome"] --> Audit["decision_voter_ids, voters, failures"]
@@ -398,7 +404,7 @@ flowchart LR
 
     Query["search_query"] --> RepoPage["PageSnapshot.search_query"] --> RepoPayload["repository payload"] --> Label["relevance_label"] --> Derived["derived accepted boolean"] --> RepoDecision["ensemble RepositoryClassification"]
 
-    Thresholds["votes_required=1 and minimum_successful_votes=1"] --> Validate["_validate_voting_thresholds"] --> Both["both audit wrappers"]
+    Thresholds["votes_required=2 and minimum_successful_votes=3"] --> Validate["_validate_voting_thresholds"] --> Both["both ensembles"]
 ```
 
 The important distinction is:
@@ -425,8 +431,10 @@ The important distinction is:
 5. Both payload builders apply field-specific string limits. The page payload
    also caps heading count, page text, and distribution count; the repository
    payload separately bounds its query, normalized metadata, and result fields.
-6. The default uses one DeepSeek model through the EPFL RCP endpoint and API-key
-   path. There is no provider or model fallback, so any failed or malformed
-   response fails that classification.
-7. The repository route allows two classifications at once. Each starts one
-   EPFL RCP call, so at most two repository LLM HTTP calls run concurrently.
+6. The default uses DeepSeek and two Meditron models through the EPFL RCP endpoint,
+   with one explicit credential variable per model. Any failed or malformed response fails
+   that classification; all three successful votes are required before deciding.
+7. The repository route allows two classifications at once. Each starts three
+   EPFL RCP calls, so at most six repository LLM HTTP calls run concurrently.
+   Page collection has its own concurrency budget. Existing operation quotas
+   do not count the three individual HTTP calls separately.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Annotated, Any, Literal, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
@@ -24,13 +25,15 @@ from collector.classification.repository import (
 )
 
 
-class CollectorURLRequest(BaseModel):
-    url: HttpUrl
-
-
-# Query-driven repository search endpoint, separate from the collector test flow.
+# Query-driven repository search endpoint.
 class CollectorRepositorySearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS)
+
+
+class CollectorRepositoryCandidateClassificationRequest(BaseModel):
+    """Empty body contract that rejects browser-supplied candidate metadata."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 RepositoryKeyword = Annotated[str, Field(max_length=MAX_REPOSITORY_KEYWORD_CHARS)]
@@ -149,6 +152,8 @@ class CollectorRepositoryClassification(BaseModel):
 class CollectorCollectionJob(BaseModel):
     id: int
     source_url: str
+    kind: Literal["source", "repository_candidate"] = "source"
+    repository_candidate_id: Optional[UUID] = None  # noqa: UP045
     status: str
     saved_count: int
     discovered_count: int = 0
@@ -173,14 +178,12 @@ class CollectorAutomaticCollection(BaseModel):
 class CollectorRepositorySearchItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    candidate_id: UUID
+    search_id: UUID
     title: str = Field(max_length=MAX_REPOSITORY_TITLE_CHARS)
     description: str = Field(default="", max_length=MAX_REPOSITORY_DESCRIPTION_CHARS)
     url: HttpUrl
     source: str = Field(max_length=MAX_REPOSITORY_SOURCE_CHARS)
-    search_query: str = Field(
-        default="",
-        max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS,
-    )
     publisher: str = Field(default="", max_length=MAX_REPOSITORY_PUBLISHER_CHARS)
     date: str = Field(default="", max_length=MAX_REPOSITORY_DATE_CHARS)
     doi: str = Field(default="", max_length=MAX_REPOSITORY_DOI_CHARS)
@@ -189,8 +192,14 @@ class CollectorRepositorySearchItem(BaseModel):
         max_length=MAX_REPOSITORY_KEYWORDS,
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
+    classification_status: Literal[
+        "pending", "classifying", "accepted", "rejected", "error"
+    ] = "pending"
     classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    classification_error: str = Field(default="", max_length=2_000)
     automatic_collection: Optional[CollectorAutomaticCollection] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    created_at: str = ""
+    updated_at: str = ""
 
     @field_validator("metadata")
     @classmethod
@@ -215,12 +224,6 @@ class CollectorRepositorySearchItem(BaseModel):
 class CollectorRepositorySearchWarning(BaseModel):
     message: str
     provider: Optional[str] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
-
-
-class CollectorRepositorySearchResponse(BaseModel):
-    query: str
-    items: list[CollectorRepositorySearchItem] = Field(default_factory=list)
-    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
 
 
 class CollectorDistribution(BaseModel):
@@ -268,6 +271,7 @@ class CollectorCollectedDataset(BaseModel):
 
 
 class CollectorDatabaseDatasetSearchResponse(BaseModel):
+    search_id: UUID
     query: str
     origin: Literal["database"] = "database"
     items: list[CollectorCollectedDataset] = Field(default_factory=list)
@@ -275,6 +279,7 @@ class CollectorDatabaseDatasetSearchResponse(BaseModel):
 
 
 class CollectorOnlineDatasetSearchResponse(BaseModel):
+    search_id: UUID
     query: str
     origin: Literal["online"] = "online"
     items: list[CollectorRepositorySearchItem] = Field(default_factory=list)

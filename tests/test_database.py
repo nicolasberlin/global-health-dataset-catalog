@@ -11,6 +11,10 @@ from app.db import schema as db_schema
 from app.db import serialization as db_serialization
 from psycopg import sql as pg_sql
 
+from collector.classification.repository import RepositoryClassification
+from collector.config import CollectorConfig
+from collector.main import collect_repository_candidate_with_report
+from collector.repository_search import RepositorySearchResult
 from collector.storage.models import (
     CollectedDataset,
     CollectionReport,
@@ -18,6 +22,7 @@ from collector.storage.models import (
     DistributionCandidate,
     ValidationResult,
 )
+from collector.validation.downloads import validate_distribution
 
 pytestmark = pytest.mark.anyio
 
@@ -26,9 +31,14 @@ SCHEMA_TABLES = (
     "data_sources",
     "collected_datasets",
     "collected_distributions",
+    "search_sessions",
+    "api_rate_limits",
+    "repository_candidates",
     "dataset_discovery_observations",
     "collection_jobs",
 )
+
+TEST_OWNER_ID = "test-user"
 
 
 async def _schema_version(database) -> int:
@@ -74,6 +84,49 @@ async def _insert_minimal_dataset(database, suffix: str = "") -> int:
             ),
         )
     return int(row["id"])
+
+
+async def _create_repository_candidate(
+    database,
+    *,
+    query: str = "malaria mortality France",
+    url: str = "https://repository.example.org/datasets/mortality",
+):
+    session = await database.create_search_session(query, TEST_OWNER_ID)
+    candidates = await database.complete_search_session_with_repository_candidates(
+        session["id"],
+        TEST_OWNER_ID,
+        [
+            RepositorySearchResult(
+                title="Malaria mortality estimates",
+                description="Annual estimates by country.",
+                url=url,
+                source="DataCite",
+                search_query=query,
+                publisher="Health Institute",
+                date="2025",
+                doi="10.1234/example",
+                keywords=["malaria", "mortality"],
+                metadata={"Geography": "France"},
+            )
+        ],
+        status="completed",
+    )
+    return session, candidates[0]
+
+
+async def _accept_repository_candidate(database, candidate_id):
+    started = await database.start_candidate_classification(candidate_id, TEST_OWNER_ID)
+    assert started is not None
+    return await database.complete_candidate_classification(
+        candidate_id,
+        TEST_OWNER_ID,
+        RepositoryClassification(
+            relevance_label="relevant",
+            reason="The metadata matches the query.",
+            ensemble={},
+        ),
+    )
 
 
 async def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
@@ -492,6 +545,20 @@ async def test_init_database_rejects_current_version_with_missing_managed_tables
 
     assert "data_sources" in str(error.value)
     assert "collection_jobs" in str(error.value)
+
+
+async def test_init_database_rejects_missing_repository_persistence_index(database):
+    await database.init_database()
+    await _execute(
+        database,
+        "DROP INDEX collection_jobs_active_repository_url_idx",
+    )
+
+    with pytest.raises(RuntimeError, match="repository persistence contracts") as error:
+        await database.init_database()
+
+    assert "collection_jobs_active_repository_url_idx" in str(error.value)
+    assert "Recreate the local database" in str(error.value)
 
 
 async def test_init_database_rejects_current_version_with_obsolete_columns(database):
@@ -1595,11 +1662,11 @@ async def test_collection_job_lifecycle(database):
     assert job["saved_count"] == 0
     assert job["discovered_count"] == 0
     assert job["discovery_methods"] == []
-    assert job["message"] == "Collecte en attente."
+    assert job["message"] == "Collection pending."
 
     running = await database.mark_collection_job_running(int(job["id"]))
     assert running["status"] == "running"
-    assert running["message"] == "Collecte en cours."
+    assert running["message"] == "Collection in progress."
 
     done = await database.mark_collection_job_done(
         int(job["id"]),
@@ -1621,21 +1688,216 @@ async def test_collection_job_lifecycle(database):
     assert done["rejected_count"] == 2
     assert done["invalid_distribution_count"] == 1
     assert done["discovery_methods"] == ["ckan", "sitemap"]
-    assert done["message"] == "3 dataset(s) sauvegardé(s)."
+    assert done["message"] == "3 dataset(s) saved."
     assert done["finished_at"] != ""
 
     fetched = await database.get_collection_job(int(job["id"]))
     assert fetched == done
 
 
+async def test_repository_search_session_persists_original_query_and_candidates(database):
+    await database.init_database()
+
+    session, candidate = await _create_repository_candidate(database)
+    stored = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
+
+    assert session["status"] == "running"
+    assert candidate["search_session_id"] == session["id"]
+    assert stored == candidate
+    assert stored["search_query"] == "malaria mortality France"
+    assert stored["metadata"] == {"Geography": "France"}
+    assert stored["classification_status"] == "pending"
+
+    session_rows = await _fetchall(
+        database,
+        "SELECT origin, status, finished_at FROM search_sessions WHERE id = %s",
+        (session["id"],),
+    )
+    assert session_rows[0]["origin"] == "online"
+    assert session_rows[0]["status"] == "completed"
+    assert session_rows[0]["finished_at"] is not None
+
+
+async def test_repository_candidate_is_visible_only_to_its_search_owner(database):
+    await database.init_database()
+    _, candidate = await _create_repository_candidate(database)
+
+    assert (
+        await database.get_repository_candidate(candidate["id"], "different-user")
+        is None
+    )
+    assert (
+        await database.start_candidate_classification(
+            candidate["id"],
+            "different-user",
+        )
+        is None
+    )
+
+    accepted = await _accept_repository_candidate(database, candidate["id"])
+    with pytest.raises(ValueError, match="not found"):
+        await database.reserve_repository_candidate_collection_job(
+            accepted["id"],
+            "different-user",
+        )
+
+
+async def test_api_rate_limit_is_atomic_and_scoped_by_owner_and_operation(database):
+    await database.init_database()
+
+    decisions = await asyncio.gather(
+        *(
+            database.consume_api_quota(
+                TEST_OWNER_ID,
+                "repository_classification",
+                limit=2,
+            )
+            for _ in range(6)
+        )
+    )
+
+    assert sum(decision.allowed for decision in decisions) == 2
+    assert all(decision.retry_after_seconds >= 1 for decision in decisions)
+    assert (
+        await database.consume_api_quota(
+            "different-user",
+            "repository_classification",
+            limit=2,
+        )
+    ).allowed
+    assert (
+        await database.consume_api_quota(
+            TEST_OWNER_ID,
+            "repository_search",
+            limit=2,
+        )
+    ).allowed
+
+
+async def test_interrupted_search_session_is_closed_on_recovery(database):
+    await database.init_database()
+    session = await database.create_search_session("malaria mortality", TEST_OWNER_ID)
+
+    recovered_count = await database.mark_interrupted_search_sessions_error()
+    rows = await _fetchall(
+        database,
+        "SELECT status, error, finished_at FROM search_sessions WHERE id = %s",
+        (session["id"],),
+    )
+
+    assert recovered_count == 1
+    assert rows[0]["status"] == "error"
+    assert rows[0]["error"] == "Search interrupted by application restart."
+    assert rows[0]["finished_at"] is not None
+
+
+async def test_repository_candidate_classification_reservation_is_atomic(database):
+    await database.init_database()
+    _, candidate = await _create_repository_candidate(database)
+
+    reservations = await asyncio.gather(
+        *(
+            database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+            for _request in range(4)
+        )
+    )
+
+    assert sum(reservation is not None for reservation in reservations) == 1
+    stored = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
+    assert stored["classification_status"] == "classifying"
+
+
+async def test_repository_candidate_batch_rolls_back_on_invalid_metadata(database):
+    await database.init_database()
+    session = await database.create_search_session("malaria mortality", TEST_OWNER_ID)
+
+    with pytest.raises(db_serialization.StoredJSONError):
+        await database.complete_search_session_with_repository_candidates(
+            session["id"],
+            TEST_OWNER_ID,
+            [
+                RepositorySearchResult(
+                    title="Valid candidate",
+                    url="https://example.org/valid",
+                    source="DataCite",
+                ),
+                RepositorySearchResult(
+                    title="Invalid candidate",
+                    url="https://example.org/invalid",
+                    source="DataCite",
+                    metadata={"invalid": object()},
+                ),
+            ],
+            status="completed",
+        )
+
+    rows = await _fetchall(
+        database,
+        "SELECT id FROM repository_candidates WHERE search_session_id = %s",
+        (session["id"],),
+    )
+    session_rows = await _fetchall(
+        database,
+        "SELECT status FROM search_sessions WHERE id = %s",
+        (session["id"],),
+    )
+    assert rows == []
+    assert session_rows[0]["status"] == "running"
+
+
+async def test_repository_candidate_error_requires_explicit_retry(database):
+    await database.init_database()
+    _, candidate = await _create_repository_candidate(database)
+    await database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+    failed = await database.fail_candidate_classification(
+        candidate["id"],
+        TEST_OWNER_ID,
+        "DeepSeek unavailable",
+    )
+
+    assert failed["classification_status"] == "error"
+    assert (
+        await database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+        is None
+    )
+    retried = await database.start_candidate_classification(
+        candidate["id"],
+        TEST_OWNER_ID,
+        retry=True,
+    )
+    assert retried is not None
+    assert retried["classification_status"] == "classifying"
+    assert retried["error"] == ""
+
+
+async def test_interrupted_candidate_classification_is_made_retryable(database):
+    await database.init_database()
+    _, candidate = await _create_repository_candidate(database)
+    await database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+
+    recovered_count = await database.mark_interrupted_candidate_classifications_error()
+    recovered = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
+
+    assert recovered_count == 1
+    assert recovered["classification_status"] == "error"
+    assert recovered["error"] == "Classification interrupted by application restart."
+
+
 async def test_automatic_collection_reservation_reuses_active_job_and_saved_result(
     database,
 ):
     await database.init_database()
-    candidate_url = "https://repository.example.org/datasets/mortality"
+    _, candidate = await _create_repository_candidate(database)
+    accepted = await _accept_repository_candidate(database, candidate["id"])
 
     reservations = await asyncio.gather(
-        *(database.reserve_automatic_collection_job(candidate_url) for _ in range(4))
+        *(
+            database.reserve_repository_candidate_collection_job(
+                accepted["id"],
+                TEST_OWNER_ID,
+            )
+            for _ in range(4)
+        )
     )
     first = next(reservation for reservation in reservations if reservation.created)
     duplicate_pending = next(
@@ -1654,7 +1916,10 @@ async def test_automatic_collection_reservation_reuses_active_job_and_saved_resu
 
     job_id = int(first.job["id"])
     await database.mark_collection_job_running(job_id)
-    duplicate_running = await database.reserve_automatic_collection_job(candidate_url)
+    duplicate_running = await database.reserve_repository_candidate_collection_job(
+        accepted["id"],
+        TEST_OWNER_ID,
+    )
 
     assert duplicate_running.created is False
     assert duplicate_running.job is not None
@@ -1665,7 +1930,10 @@ async def test_automatic_collection_reservation_reuses_active_job_and_saved_resu
         job_id,
         CollectionResult(datasets=[_mortality_dataset()]),
     )
-    already_saved = await database.reserve_automatic_collection_job(candidate_url)
+    already_saved = await database.reserve_repository_candidate_collection_job(
+        accepted["id"],
+        TEST_OWNER_ID,
+    )
 
     assert completed["status"] == "done"
     assert completed["saved_count"] == 1
@@ -1675,32 +1943,59 @@ async def test_automatic_collection_reservation_reuses_active_job_and_saved_resu
 
     jobs = await _fetchall(
         database,
-        "SELECT id FROM collection_jobs WHERE source_url = %s",
-        (candidate_url,),
+        "SELECT id FROM collection_jobs WHERE repository_candidate_id = %s",
+        (accepted["id"],),
     )
     assert len(jobs) == 1
 
 
-async def test_automatic_collection_reservation_normalizes_url_before_deduplication(
+async def test_repository_candidate_collection_uses_persisted_url(
     database,
 ):
     await database.init_database()
+    _, candidate = await _create_repository_candidate(
+        database,
+        url="https://repository.example.org/datasets/mortality?id=1&utm_source=a",
+    )
+    accepted = await _accept_repository_candidate(database, candidate["id"])
+
+    reservation = await database.reserve_repository_candidate_collection_job(
+        accepted["id"],
+        TEST_OWNER_ID,
+    )
+
+    assert reservation.created is True
+    assert reservation.job["source_url"] == (
+        "https://repository.example.org/datasets/mortality?id=1"
+    )
+    assert reservation.job["kind"] == "repository_candidate"
+    assert reservation.job["repository_candidate_id"] == accepted["id"]
+
+
+async def test_repository_collection_deduplicates_url_across_searches(database):
+    await database.init_database()
+    candidate_url = "https://repository.example.org/datasets/shared"
+    _, first_candidate = await _create_repository_candidate(
+        database,
+        query="first query",
+        url=candidate_url,
+    )
+    _, second_candidate = await _create_repository_candidate(
+        database,
+        query="second query",
+        url=candidate_url,
+    )
+    first = await _accept_repository_candidate(database, first_candidate["id"])
+    second = await _accept_repository_candidate(database, second_candidate["id"])
 
     reservations = await asyncio.gather(
-        database.reserve_automatic_collection_job(
-            "https://repository.example.org/datasets/mortality?id=1&utm_source=a"
-        ),
-        database.reserve_automatic_collection_job(
-            "https://repository.example.org/datasets/mortality?utm_source=b&id=1#details"
-        ),
+        database.reserve_repository_candidate_collection_job(first["id"], TEST_OWNER_ID),
+        database.reserve_repository_candidate_collection_job(second["id"], TEST_OWNER_ID),
     )
 
     assert sum(reservation.created for reservation in reservations) == 1
     assert {reservation.job["id"] for reservation in reservations} == {
         reservations[0].job["id"]
-    }
-    assert {reservation.job["source_url"] for reservation in reservations} == {
-        "https://repository.example.org/datasets/mortality?id=1"
     }
 
 
@@ -1721,19 +2016,24 @@ async def test_interrupted_collection_jobs_are_marked_error_on_recovery(database
         recovered = await database.get_collection_job(int(job_id))
         assert recovered is not None
         assert recovered["status"] == "error"
-        assert recovered["message"] == "Collecte interrompue."
+        assert recovered["message"] == "Collection interrupted."
         assert recovered["error"] == "Collection interrupted by application restart."
         assert recovered["finished_at"] != ""
 
 
 @pytest.mark.parametrize("terminal_state", ["empty", "error"])
-async def test_automatic_collection_reservation_allows_retry_after_terminal_job(
+async def test_automatic_collection_reservation_retries_after_terminal_job(
     database,
     terminal_state,
 ):
     await database.init_database()
     candidate_url = f"https://repository.example.org/datasets/{terminal_state}"
-    first = await database.reserve_automatic_collection_job(candidate_url)
+    _, candidate = await _create_repository_candidate(database, url=candidate_url)
+    accepted = await _accept_repository_candidate(database, candidate["id"])
+    first = await database.reserve_repository_candidate_collection_job(
+        accepted["id"],
+        TEST_OWNER_ID,
+    )
     assert first.job is not None
     first_job_id = int(first.job["id"])
 
@@ -1752,12 +2052,98 @@ async def test_automatic_collection_reservation_allows_retry_after_terminal_job(
         )
         assert failed["status"] == "error"
 
-    retry = await database.reserve_automatic_collection_job(candidate_url)
+    retry = await database.reserve_repository_candidate_collection_job(
+        accepted["id"],
+        TEST_OWNER_ID,
+    )
 
     assert retry.created is True
     assert retry.job is not None
     assert retry.job["id"] != first_job_id
     assert retry.job["status"] == "pending"
+
+    attempts = await _fetchall(
+        database,
+        """
+        SELECT id, status, saved_count, error
+        FROM collection_jobs
+        WHERE repository_candidate_id = %s
+        ORDER BY id
+        """,
+        (accepted["id"],),
+    )
+    assert len(attempts) == 2
+    assert attempts[0]["id"] == first_job_id
+    assert attempts[0]["status"] == (
+        "done" if terminal_state == "empty" else "error"
+    )
+    assert attempts[0]["saved_count"] == 0
+    assert attempts[0]["error"] == (
+        "" if terminal_state == "empty" else "network failure"
+    )
+    assert attempts[1]["id"] == retry.job["id"]
+    assert attempts[1]["status"] == "pending"
+
+
+async def test_complete_collection_job_saves_refined_distribution_formats(database):
+    from collector.classification.page import PageClassification
+    from collector.fetch import FetchedPage
+    from collector.storage.models import HTTPProbe
+
+    await database.init_database()
+    candidate_url = "https://catalog.example.org/datasets/mortality"
+    resource_url = "https://catalog.example.org/api/mortality"
+
+    class AcceptingClassifier:
+        def classify(self, page, distributions):
+            assert {item.format for item in distributions} == {"API", "JSON"}
+            return PageClassification(accepted=True, dataset_signals={"source": "test"})
+
+    def fake_fetch_html(url):
+        return FetchedPage(
+            url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            html=f"""
+                <html><head><title>Mortality health data</title>
+                <script type="application/ld+json">
+                {{"@type": "Dataset", "distribution": {{
+                    "contentUrl": "{resource_url}", "encodingFormat": "application/json"
+                }}}}
+                </script></head><body>
+                <a href="{resource_url}">API export</a>
+                </body></html>
+            """,
+        )
+
+    def fake_probe(url, **kwargs):
+        return HTTPProbe(
+            url=url,
+            final_url=url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+        )
+
+    collection_result = collect_repository_candidate_with_report(
+        candidate_url,
+        config=CollectorConfig(max_distributions_per_dataset=2),
+        fetch_html=fake_fetch_html,
+        validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
+        classifier=AcceptingClassifier(),
+    )
+    job = await database.create_collection_job(candidate_url)
+    await database.mark_collection_job_running(job["id"])
+    completed = await database.complete_collection_job(job["id"], collection_result)
+
+    assert completed["status"] == "done"
+    assert completed["saved_count"] == 1
+    saved = (await database.list_collected_datasets())[0]
+    assert len(saved.distributions) == len(saved.validation_results) == 1
+    assert saved.distributions[0].format == saved.validation_results[0].format == "JSON"
+    assert saved.distributions[0].url == saved.validation_results[0].url == resource_url
+    assert saved.validation_results[0].ok is True
+    assert saved.distributions[0].last_checked_at
 
 
 async def test_complete_collection_job_rolls_back_datasets_when_one_save_fails(database):
@@ -1853,6 +2239,6 @@ async def test_collection_job_records_errors(database):
     failed = await database.mark_collection_job_error(int(job["id"]), "network timeout")
 
     assert failed["status"] == "error"
-    assert failed["message"] == "Collecte échouée."
+    assert failed["message"] == "Collection failed."
     assert failed["error"] == "network timeout"
     assert failed["finished_at"] != ""

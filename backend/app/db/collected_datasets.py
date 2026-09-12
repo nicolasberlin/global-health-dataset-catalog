@@ -158,7 +158,6 @@ async def search_collected_datasets(
             """,
             (normalized_query, limit),
         )
-
         dataset_ids = [int(row["id"]) for row in dataset_rows]
         distribution_rows = (
             await _fetchall(

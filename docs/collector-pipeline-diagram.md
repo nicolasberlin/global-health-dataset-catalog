@@ -1,233 +1,131 @@
 # Collector Pipeline Diagram
 
-> Current runtime flow, last verified 2026-09-04.
+> Current runtime flow, verified 2026-09-08.
 
-The application has two separate flows. Repository search classifies candidates
-for display. Source collection decides whether discovered records can be stored.
+Repository search persists searches and candidates for trusted classification.
+Only the collection pipeline can create or update catalogue datasets.
 
-## 1. Complete HTTP Flow
-
-```mermaid
-flowchart LR
-    UI["React frontend"]
-    Sources["/sources"]
-    RepoSearch["/collector/search-datasets"]
-    RepoClassify["/collector/classify-repository-result"]
-    Jobs["/collector/collection-jobs"]
-    JobStatus["/collector/collection-jobs/{id}"]
-    Results["/collector/collected-datasets"]
-    DB[(PostgreSQL)]
-
-    UI --> Sources --> DB
-    UI --> RepoSearch --> DB
-    UI --> RepoClassify
-    UI --> Jobs --> DB
-    UI --> JobStatus --> DB
-    UI --> Results --> DB
-```
-
-There is no current manual pasted-HTML/URL test route. Repository search and
-source collection are separate API workflows.
-
-## 2. Repository Search Pipeline
+## Repository Search
 
 ```mermaid
 flowchart TD
-    Query["User query"] --> Route["POST /collector/search-datasets"]
-    Route --> LocalQuery["Remove data/dataset/database<br/>for PostgreSQL only"]
-    LocalQuery --> DBSearch["english full-text search"]
-    DBSearch --> Match{"Full-text match?"}
-    Match -->|yes| Local["origin=database<br/>datasets + distributions"]
-    Local --> LocalUI["Display 'Déjà dans la base'<br/>no IA controls"]
-    Match -->|no| Service["search_repository_metadata(original query)"]
-    Service --> DataCite["DataCiteRepositorySearchProvider"]
-    DataCite --> API["DataCite /dois<br/>resource-type-id=dataset"]
-    API --> Normalize["Normalize RepositorySearchResult"]
-    Normalize --> Filter{"Title and HTTP(S) URL present?"}
-    Filter -->|no| MetadataWarning["Drop result + warning"]
-    Filter -->|yes| Candidates["Return origin=online candidates"]
-    Candidates --> Workers["Progressive frontend workers"]
-    Workers --> ClassifyRoute["POST /collector/classify-repository-result"]
-    ClassifyRoute --> RepoClassifier["Repository relevance classifier<br/>1-voter audit wrapper"]
-    RepoClassifier --> Model["1 EPFL RCP model call"]
-    Model --> Usable{"Usable structured response?"}
-    Usable -->|no| Error["Classification error"]
-    Usable -->|yes| Decision{"Relevant or somewhat relevant?"}
-    Decision -->|yes| Accepted["Display accepted candidate"]
-    Decision -->|no| Rejected["Display rejected candidate"]
+    Query["Original user query + Bearer token"] --> Auth["Authenticate owner"]
+    Auth --> Quota["Consume search quota"]
+    Quota --> Session["create_search_session(query, owner_id)"]
+    Session --> Normalize["Normalize for local search only"]
+    Normalize --> Local["PostgreSQL english full-text search"]
+    Local --> Match{"Local result?"}
+    Match -->|yes| LocalDone["Complete session: database/completed"]
+    LocalDone --> LocalUI["Return search_id + saved datasets"]
+    Match -->|no| DataCite["search_repository_metadata(original query)"]
+    DataCite --> Bound["Filter and bound provider metadata"]
+    Bound --> Persist["Persist repository_candidates and<br/>complete session in one transaction"]
+    Persist --> OnlineUI["Return search_id + candidate_id values"]
 ```
 
-Database search covers title, description, publisher, hosting platform,
-uploader, geography, and dataset URL. PostgreSQL weights title highest and
-orders matches by rank then update time. Both `tsvector` and `tsquery` use the
-`english` configuration. The original query is preserved for the API, DataCite,
-LLM classification, and display. A database error ends the request with HTTP
-500; it is not treated as an empty result. Local retrieval is optimized for
-primarily English metadata; complete bilingual search is not implemented.
+The local normalizer never changes the query stored in `search_sessions` or
+sent to DataCite and the LLM. Provider failure completes the search as `error`;
+warnings produce `partial`. A candidate batch and its successful session
+completion commit atomically. After a session is created, failures while
+completing a local result or bounding and persisting external candidates also
+attempt to close the session as `error`.
 
-Repository positive labels are `relevant` and `somewhat_relevant`. The prompt
-judges relevance to the user query from repository metadata. It does not
-independently validate health relevance, source authority, licence policy, or a
-working data distribution.
-
-Online repository results remain in React state. There is no repository-search save to
-PostgreSQL and no automatic transition into the source collection pipeline.
-
-### Normalized Repository Metadata Contract
-
-Every provider result is normalized to the same ten fields before repository
-classification:
-
-| Field | Meaning |
-| --- | --- |
-| `Title` | Dataset title |
-| `Geography` | Geographic coverage |
-| `Date of publication` | Publication or issued date |
-| `Dataset URL` | Dataset landing or canonical URL |
-| `Disease(s)` | Explicit or extracted disease topics |
-| `Size of dataset` | Record, byte, or coverage size when available |
-| `Demographic information` | Population characteristics |
-| `Sharing license` | Licence or rights metadata |
-| `Modality of data` | Tabular, structured, image, audio, or other modality |
-| `Description of dataset` | Dataset description or abstract |
-
-Missing values are represented as `NA`; they are not treated as positive
-evidence. The LLM also receives the user query and bounded repository fields
-such as URL, publisher, description, and metadata-derived text.
-
-### Provider Failure Handling
+## Candidate Classification
 
 ```mermaid
 flowchart TD
-    Providers["Configured providers"] --> Run["Call each provider"]
-    Run --> Outcome{"Provider result"}
-    Outcome -->|success| Merge["Merge normalized results"]
-    Outcome -->|ValueError| Warning["Log + sanitized warning"]
-    Merge --> Any{"At least one provider succeeded?"}
-    Warning --> Any
-    Any -->|yes| Response["Return partial/full results + warnings"]
-    Any -->|no| Failure["Repository search failure"]
+    UI["POST /repository-candidates/{candidate_id}/classify<br/>Bearer token; empty body"]
+    UI --> Load["get_repository_candidate(candidate_id, owner_id)"]
+    Load --> Quota["Consume classification quota<br/>for eligible LLM work"]
+    Quota --> Reserve["start_candidate_classification(..., owner_id)<br/>pending -> classifying"]
+    Reserve --> Trusted["Rebuild RepositorySearchResult<br/>from PostgreSQL query + metadata"]
+    Trusted --> LLM["Repository relevance classifier"]
+    LLM --> Outcome{"Structured decision?"}
+    Outcome -->|operational error| Error["Persist candidate=error<br/>HTTP 502; explicit retry required"]
+    Outcome -->|rejected| Rejected["Persist rejected<br/>no collection job"]
+    Outcome -->|accepted| Accepted["Persist accepted"]
+    Accepted --> Job["Reserve or reuse job by candidate_id"]
 ```
 
-Only DataCite is configured by default, so its failure currently means all
-providers failed.
+The frontend cannot supply the URL, query, owner, or metadata used by the classifier.
+The owner comes from the authenticated Bearer token, and every candidate read or
+state transition verifies it through `search_sessions`; another owner receives
+a not-found response.
+Atomic state reservation prevents simultaneous LLM calls for one candidate.
+React classifies at most two candidates concurrently and ignores responses whose
+`search_id` no longer matches the active search.
+If the final accepted or rejected decision cannot be persisted, the route
+attempts to move the still-`classifying` candidate to `error` before returning
+HTTP 500. That recovery write can also fail while PostgreSQL is unavailable.
 
-## 3. Source Collection Pipeline
+Repository acceptance means relevance to the user query. It does not by itself
+prove health relevance, source authority, licence acceptability, or file
+availability.
+
+## Automatic Collection
 
 ```mermaid
 flowchart TD
-    Start["POST /collector/collection-jobs"] --> Create["Create pending job"]
-    Create --> Background["FastAPI background task"]
-    Background --> Running["mark_collection_job_running()"]
-    Running --> Collect["collect_source_with_report()"]
-    Collect --> Discover["discover_source()"]
-    Discover --> Limit["Limit pages by CollectorConfig"]
-    Limit --> Analyze["Analyze each discovered record/page"]
-    Analyze --> PageClassifier["Page classifier<br/>1-voter audit wrapper"]
-    PageClassifier --> PageModel["1 EPFL RCP model call"]
-    PageModel --> Accepted{"accepted=true?"}
-    Accepted -->|no| Rejected["Count rejected"]
-    Accepted -->|yes| Transient["Build transient CollectedDataset<br/>classification signals copied"]
-    Transient --> Validate["validate_distribution()"]
-    Validate --> Valid{"At least one valid distribution?"}
-    Valid -->|no| Rejected
-    Valid -->|yes| Result["Add eligible dataset to CollectionResult"]
-    Result --> Complete["Persist dataset with complete_collection_job()"]
+    Candidate["Accepted repository candidate"] --> Reserve["reserve_repository_candidate_collection_job(candidate_id, owner_id)"]
+    Reserve --> Saved{"Candidate URL already observed<br/>for a saved dataset?"}
+    Saved -->|yes| Already["state=saved; no work"]
+    Saved -->|no, pending/running job exists| Reuse["Reuse active job"]
+    Saved -->|no active job| Pending["Create new pending job"]
+    Pending --> Schedule["_schedule_collection_job()<br/>FastAPI background task"]
+    Schedule --> Running["mark_collection_job_running()"]
+    Running --> CandidateCollect["collect_repository_candidate_with_report()"]
+    CandidateCollect --> Page["Fetch one landing page + page classification"]
+    Page --> Distribution["Bounded distribution validation"]
+    Distribution --> Eligible{"Page accepted and<br/>valid distribution exists?"}
+    Eligible -->|yes| Result["Add dataset to CollectionResult"]
+    Eligible -->|no| EmptyResult["CollectionResult without dataset"]
+    Result --> Complete["complete_collection_job()"]
+    EmptyResult --> Complete
+    Complete --> Done["Atomic datasets + job done commit"]
 ```
 
-The page classifier prompt requires both an individual dataset/data resource and
-health relevance. Its `dataset_signals` are copied into the `CollectedDataset`
-for persistence and audit display.
+DataCite metadata is not copied into `collected_datasets`. The collector fetches
+the candidate landing page and applies the existing page and file gates. A done
+job with `saved_count=0` is shown as collection completed without a valid file;
+an exception is stored as job `error`. A later accepted request creates a new
+attempt after either terminal outcome if the dataset is still absent. The old
+terminal row is retained as attempt history.
 
-`CollectionReport.accepted_count` is the number of eligible datasets retained
-after distribution validation, not the number of positive page-classifier
-responses. `rejected_count` includes inaccessible HTML pages, negative page
-decisions, invalid structured URLs, and candidates left without a valid
-distribution. Unexpected classifier or validation exceptions abort the job
-instead of incrementing that counter.
+## Collection Entry Point
 
-## 4. Discovery Pipeline
+The website starts collection automatically for accepted repository candidates.
+Source administration and manual source collection have been removed from the
+website, including the former `POST /collector/collection-jobs` endpoint.
+The source discovery library remains available for maintenance outside the UI.
 
-```mermaid
-flowchart TD
-    SourceURL["Source URL"] --> Manager["discover_source()"]
-    Manager --> Structured{"Structured adapter matches?"}
-    Structured -->|CKAN| CKAN["CKAN records + resources"]
-    Structured -->|Socrata| Socrata["Socrata catalog records + API"]
-    Structured -->|data.json| DataJSON["DCAT/data.json records"]
-    Structured -->|no| Sitemap["robots.txt / sitemap.xml"]
-    Sitemap --> Generic["Generic page candidates"]
-    CKAN --> Pages["DiscoveredPage list"]
-    Socrata --> Pages
-    DataJSON --> Pages
-    Generic --> Pages
-```
+## Limits And Execution
 
-Structured metadata can be classified without downloading an HTML page. Generic
-page candidates are fetched and extracted first. Dataverse is a proposed future
-adapter and is not part of the active `ADAPTERS` tuple.
+- DataCite returns at most 10 candidates per query.
+- React and the backend executor allow at most two candidate classifications at
+  once.
+- Collection concurrency defaults to two jobs per backend process.
+- Source page and distribution limits come from `CollectorConfig`; repository
+  collection is additionally restricted to one landing page.
+- HTML, JSON, sitemap, and distribution reads are bounded and all redirects are
+  revalidated by `open_public_http_url()`.
+- Background work is process-local, not a durable queue. `_schedule_collection_job()`
+  is the single scheduling point intended for a future queue replacement.
 
-## 5. Distribution Validation
+On single-process startup, interrupted searches, jobs, and candidate
+classifications are marked `error`. Static Bearer tokens, candidate ownership,
+and persistent per-owner quotas are implemented for the MVP. OAuth/OIDC, roles,
+multi-worker job ownership, and infrastructure-level traffic limits remain
+future production work.
 
-```mermaid
-flowchart TD
-    Distribution["DistributionCandidate URL"] --> Safe["open_public_http_url()"]
-    Safe --> URLCheck["Validate initial destination"]
-    URLCheck --> HEAD["HEAD request"]
-    HEAD --> Redirect{"Redirect?"}
-    Redirect -->|yes| RedirectCheck["Validate new destination"]
-    RedirectCheck --> HEAD
-    Redirect -->|no| Conclusive{"Conclusive response?"}
-    Conclusive -->|no| GET["Bounded partial GET"]
-    GET --> Redirect
-    Conclusive -->|yes| Rules{"200-399, no error,<br/>non-HTML unless API?"}
-    Rules -->|yes| Valid["ValidationResult.ok = true"]
-    Rules -->|no| Invalid["ValidationResult.ok = false"]
-```
-
-Private, loopback, link-local, multicast, reserved, and unspecified destinations
-are blocked for initial URLs and redirects. Validation is a lightweight network
-and content-type check, not a complete dataset download.
-
-## 6. Atomic Completion
-
-```mermaid
-flowchart TD
-    Result["CollectionResult built outside transaction"] --> Complete["complete_collection_job(job_id, result)"]
-    Complete --> Connection["Acquire one PostgreSQL connection"]
-    Connection --> Tx["BEGIN transaction"]
-    Tx --> Lock["Lock and verify running job"]
-    Lock --> Source["Read source_url from job"]
-    Source --> Save["Upsert every dataset and distribution"]
-    Save --> Done["Mark job done with counters"]
-    Done --> Commit["COMMIT"]
-    Lock -. exception .-> Rollback["ROLLBACK"]
-    Save -. exception .-> Rollback
-    Done -. exception .-> Rollback
-    Rollback --> ErrorTx["Separate transaction attempts job=error"]
-```
-
-The `done` status cannot commit unless every dataset write succeeds. If
-PostgreSQL is completely unavailable, the separate attempt to persist `error`
-can also fail.
-
-## 7. Final Storage Condition
+## Final Save Condition
 
 ```text
-The EPFL RCP page response is valid and accepted=true
-AND
-At least one considered distribution validates successfully
-THEN
-The eligible dataset is included in CollectionResult
-AND
-complete_collection_job() persists it while atomically marking the job done
+repository candidate accepted (for automatic collection only)
+AND page classifier accepted=true
+AND at least one considered distribution validates successfully
+THEN the dataset enters CollectionResult
+AND complete_collection_job() atomically upserts it and marks the job done
 ```
 
-An exact conflict on the normalized `dataset_url` updates the existing
-`collected_datasets` record. The current schema does not deduplicate semantically
-by DOI, title, version, or mirror.
-
-For detailed contracts, see
-[Classification Architecture](classification-architecture.md),
-[Database Schema Diagram](database-schema-diagram.md), and the
-[Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md).
+See [Classification Architecture](classification-architecture.md) for prompts
+and [Database Schema](database-schema-diagram.md) for persisted state.

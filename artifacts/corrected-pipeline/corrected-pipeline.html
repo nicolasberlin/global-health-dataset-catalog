@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Global Health Pipeline — Corrected Version</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;color:#172b40;background:#f3f6fa;margin:0;padding:32px}main{max-width:1400px;margin:auto}h1{font-size:30px}h2{font-size:22px}p{max-width:900px}section{background:white;padding:24px;margin:28px 0;border:1px solid #dce4ed;border-radius:12px}.diagram{overflow:auto;text-align:center}.diagram svg{max-width:none!important;height:auto}button{font:inherit;padding:8px 16px;border:1px solid #a4b5c7;border-radius:6px;background:#eef5fc;color:#16436b;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.status{color:#506176}pre{white-space:pre-wrap;text-align:left;font-size:12px}footer{margin:32px 0}@media print{body{padding:0;background:white}section{break-before:page;border:0;padding:0}.diagram{overflow:visible}.diagram svg{max-width:100%!important}button,.status{display:none}}
+</style>
+</head>
+<body>
+<main>
+<h1>Global Health Pipeline — Corrected Version</h1>
+<p>Verified against the local code on September 11, 2026. The three blocks run in sequence; manual collection enters directly into the third block.</p>
+<p>Each classification stage runs DeepSeek, Gemma Meditron, and Apertus Meditron in parallel. Two positive votes are required, and all three responses must be usable.</p>
+<p class="status" id="status" role="status">Loading diagrams… An Internet connection is required for the first render. Each diagram can then be saved as SVG for offline use.</p>
+
+<section>
+<h2>1. Search</h2>
+<button type="button" data-export="diagram-0" data-filename="corrected-pipeline-search.svg" disabled>Save as SVG</button>
+<div class="diagram" id="diagram-0"><pre class="mermaid">flowchart TD
+    A([&quot;User clicks Search&quot;])
+    A --&gt; B[&quot;Frontend: searchRepositories&quot;]
+    B --&gt; C[&quot;POST /collector/search-datasets&quot;]
+    C --&gt; D[&quot;Identify the user&lt;br/&gt;Check the search quota&quot;]
+    D --&gt; E[&quot;create_search_session&lt;br/&gt;Store the original query and its owner&quot;]
+    E --&gt; F[&quot;normalize_dataset_search_query&lt;br/&gt;For local search only&quot;]
+    F --&gt; G[&quot;search_collected_datasets&lt;br/&gt;Search PostgreSQL&quot;]
+    G --&gt; H{&quot;Local results?&quot;}
+    G -.-&gt;|&quot;PostgreSQL error&quot;| ERR[&quot;Search failed&lt;br/&gt;Return to frontend — no DataCite call&quot;]
+    H --&gt;|&quot;Yes&quot;| I[&quot;Complete the session&lt;br/&gt;origin = database&quot;]
+    I --&gt; J[&quot;Frontend: display local datasets&quot;]
+    J --&gt; END1([&quot;End search&quot;])
+    H --&gt;|&quot;No&quot;| K[&quot;_search_online_repositories&lt;br/&gt;With the original query&quot;]
+    K --&gt; L[&quot;search_repository_metadata&quot;]
+    L --&gt; M[&quot;DataCiteRepositorySearchProvider.search&lt;br/&gt;Up to 10 candidates&quot;]
+    M --&gt; N[&quot;Filter and bound metadata&quot;]
+    N --&gt; O[&quot;PostgreSQL transaction&lt;br/&gt;Store repository_candidates&lt;br/&gt;Complete the session: completed or partial&quot;]
+    O --&gt; P[&quot;Return origin = online&lt;br/&gt;search_id + candidate_id + warnings&quot;]
+    L -.-&gt;|&quot;Provider failure&quot;| ERR2[&quot;Session failed&lt;br/&gt;Return to frontend&quot;]
+    O -.-&gt;|&quot;Persistence failure&quot;| ERR2
+    P --&gt; Q{&quot;At least one candidate?&quot;}
+    Q --&gt;|&quot;No&quot;| END2([&quot;Display no results&quot;])
+    Q --&gt;|&quot;Yes&quot;| NEXT([&quot;BLOCK 2 — Classify each candidate&quot;])
+</pre></div>
+</section>
+
+<section>
+<h2>2. Classification and Collection Reservation</h2>
+<button type="button" data-export="diagram-1" data-filename="corrected-pipeline-classification.svg" disabled>Save as SVG</button>
+<div class="diagram" id="diagram-1"><pre class="mermaid">flowchart TD
+    A([&quot;BLOCK 2 — Stored candidates&quot;])
+    A --&gt; B[&quot;Frontend: classifyRepositoryCandidates&lt;br/&gt;Up to 2 candidates concurrently&quot;]
+    B --&gt; C[&quot;POST /collector/&lt;br/&gt;repository-candidates/{candidate_id}/classify&quot;]
+    C --&gt; D[&quot;Identify the user&lt;br/&gt;Load the user&#39;s candidate from PostgreSQL&quot;]
+    D --&gt; E{&quot;Candidate state?&quot;}
+    E --&gt;|&quot;pending, or error with retry=true&quot;| F[&quot;Check the classification quota&lt;br/&gt;start_candidate_classification&lt;br/&gt;Atomic reservation&quot;]
+    E --&gt;|&quot;accepted&quot;| ACCEPT
+    E --&gt;|&quot;rejected&quot;| REJECT
+    E --&gt;|&quot;classifying, or error without retry&quot;| CONFLICT[&quot;Return HTTP 409&lt;br/&gt;In progress or explicit retry required&quot;]
+    F --&gt; G[&quot;If reserved: rebuild&lt;br/&gt;RepositorySearchResult, then PageSnapshot&lt;br/&gt;from stored data&quot;]
+    G --&gt; H[&quot;LLM relevance classification&lt;br/&gt;Compare metadata with the original query&lt;br/&gt;3-model vote&quot;]
+    H --&gt; I{&quot;Candidate accepted?&quot;}
+    H -.-&gt;|&quot;Model or response error&quot;| ERR[&quot;Store classification_status = error&lt;br/&gt;Return to frontend&quot;]
+    I --&gt;|&quot;No&quot;| REJECT[&quot;Store or return rejected&lt;br/&gt;No collection&quot;]
+    I --&gt;|&quot;Yes&quot;| SAVE[&quot;Store classification_status = accepted&quot;]
+    SAVE --&gt; ACCEPT[&quot;_reserve_automatic_collection&quot;]
+    SAVE -.-&gt;|&quot;Persistence failure&quot;| ERR
+    ACCEPT --&gt; R[&quot;reserve_repository_candidate_collection_job&lt;br/&gt;Atomic reservation by candidate and URL&quot;]
+    R -.-&gt;|&quot;Reservation failure&quot;| SCHEDERR[&quot;Return automatic_collection.state = error&quot;]
+    R --&gt; J{&quot;URL already associated&lt;br/&gt;with a saved dataset?&quot;}
+    J --&gt;|&quot;Yes&quot;| SAVED[&quot;Return state = saved&lt;br/&gt;No new collection&quot;]
+    J --&gt;|&quot;No&quot;| K{&quot;Existing pending or running job?&quot;}
+    K --&gt;|&quot;Yes&quot;| EXIST[&quot;Return the active job&lt;br/&gt;Do not schedule another job&quot;]
+    K --&gt;|&quot;No&quot;| NEW[&quot;Create collection_jobs&lt;br/&gt;kind = repository_candidate&lt;br/&gt;status = pending&quot;]
+    NEW --&gt; SCHEDULE[&quot;_schedule_collection_job&lt;br/&gt;background_tasks.add_task&quot;]
+    SCHEDULE --&gt; NEXT([&quot;BLOCK 3 — Run collection&quot;])
+    EXIST --&gt; FOLLOW[&quot;Frontend: track the existing job&lt;br/&gt;See tracking in block 3&quot;]
+    SCHEDULE -.-&gt;|&quot;HTTP response before job completion&quot;| FOLLOW
+</pre></div>
+</section>
+
+<section>
+<h2>3. Collection, Persistence, and Tracking</h2>
+<button type="button" data-export="diagram-2" data-filename="corrected-pipeline-collection-and-tracking.svg" disabled>Save as SVG</button>
+<div class="diagram" id="diagram-2"><pre class="mermaid">flowchart TD
+    AUTO([&quot;From block 2&lt;br/&gt;Scheduled candidate job&quot;])
+    MANUAL([&quot;User starts collection from a source&quot;])
+    MANUAL --&gt; M1[&quot;POST /collector/collection-jobs&quot;]
+    M1 --&gt; M2[&quot;Identify the user&lt;br/&gt;Check the collection quota&quot;]
+    M2 --&gt; M3[&quot;Create a pending job&lt;br/&gt;kind = source&quot;]
+    M3 --&gt; M4[&quot;_schedule_collection_job&lt;br/&gt;HTTP 202 response&quot;]
+    AUTO --&gt; RUN[&quot;_run_collection_job&quot;]
+    M4 --&gt; RUN
+    RUN --&gt; MARK[&quot;mark_collection_job_running&lt;br/&gt;Continue only if the transition succeeds&quot;]
+    MARK --&gt; KIND{&quot;Job type?&quot;}
+    KIND --&gt;|&quot;repository_candidate&quot;| C1[&quot;collect_repository_candidate_with_report&quot;]
+    C1 --&gt; C2[&quot;Normalize candidate_url&lt;br/&gt;Create one DiscoveredPage&quot;]
+    C2 --&gt; C3[&quot;collect_source_with_report&lt;br/&gt;Limit discovery to this page&quot;]
+    KIND --&gt;|&quot;source&quot;| S1[&quot;collect_source_with_report&quot;]
+    S1 --&gt; S2[&quot;discover_source&lt;br/&gt;CKAN · Socrata · data.json · website&quot;]
+    S2 --&gt; S3[&quot;Select pages to analyze&lt;br/&gt;Current maximum: 5 per source&quot;]
+    C3 --&gt; PAGE
+    S3 --&gt; PAGE[&quot;_collect_discovered_page_with_report&lt;br/&gt;For each selected page&quot;]
+    PAGE --&gt; STRUCT{&quot;Structured metadata&lt;br/&gt;already available?&quot;}
+    STRUCT --&gt;|&quot;Yes&quot;| STRUCTURED[&quot;analyze_discovered_page&lt;br/&gt;Build PageSnapshot&lt;br/&gt;Reuse supplied distributions&quot;]
+    STRUCT --&gt;|&quot;No&quot;| FETCH[&quot;fetch_public_html&lt;br/&gt;Fetch the target page&quot;]
+    FETCH --&gt; EXTRACT[&quot;analyze_html_page&lt;br/&gt;extract_page, then extract_distributions&quot;]
+    STRUCTURED --&gt; CLASSIFY[&quot;page_classifier.classify&lt;br/&gt;Page + distribution candidates&lt;br/&gt;Individual health-relevant dataset?&lt;br/&gt;3-model vote&quot;]
+    EXTRACT --&gt; CLASSIFY
+    CLASSIFY --&gt; ACCEPTED{&quot;Page accepted?&quot;}
+    ACCEPTED --&gt;|&quot;No&quot;| REJECT[&quot;Count the page as rejected&quot;]
+    ACCEPTED --&gt;|&quot;Yes&quot;| VALIDATE[&quot;validate_distribution&lt;br/&gt;HEAD, then partial GET if needed&lt;br/&gt;Current maximum: 1 tested distribution&quot;]
+    VALIDATE --&gt; VALID{&quot;At least one tested&lt;br/&gt;distribution is valid?&quot;}
+    VALID --&gt;|&quot;No&quot;| REJECT
+    VALID --&gt;|&quot;Yes&quot;| KEEP[&quot;Add the dataset and its&lt;br/&gt;validated distributions to the result&quot;]
+    KEEP --&gt; MORE{&quot;Another selected page?&quot;}
+    REJECT --&gt; MORE
+    MORE --&gt;|&quot;Yes&quot;| PAGE
+    MORE --&gt;|&quot;No&quot;| RESULT[&quot;CollectionResult + report&lt;br/&gt;With zero, one, or more datasets&quot;]
+    RESULT --&gt; SAVE[&quot;complete_collection_job&lt;br/&gt;One PostgreSQL transaction:&lt;br/&gt;save datasets and move the job to done&quot;]
+    SAVE --&gt; DONE[&quot;job = done&lt;br/&gt;saved_count = number of saved datasets&quot;]
+    FETCH -.-&gt;|&quot;Exception&quot;| ERROR
+    CLASSIFY -.-&gt;|&quot;Classification error&quot;| ERROR
+    S2 -.-&gt;|&quot;Discovery error&quot;| ERROR
+    SAVE -.-&gt;|&quot;Transaction failure&quot;| ERROR
+    ERROR[&quot;mark_collection_job_error&lt;br/&gt;job = error if the database write succeeds&quot;]
+    AUTO -.-&gt; POLL
+    M4 -.-&gt; POLL
+    EXIST([&quot;Active job reused in block 2&quot;]) -.-&gt; POLL
+    POLL[&quot;Frontend: poll periodically&lt;br/&gt;GET /collector/collection-jobs/{id}&quot;]
+    POLL --&gt; STATUS{&quot;Received state?&quot;}
+    STATUS --&gt;|&quot;pending or running&quot;| WAIT[&quot;Wait, then poll again&lt;br/&gt;Within the frontend tracking limit&quot;]
+    WAIT --&gt; POLL
+    STATUS --&gt;|&quot;done, saved_count &gt; 0&quot;| REFRESH[&quot;GET /collector/collected-datasets&lt;br/&gt;Refresh the catalog and display success&quot;]
+    STATUS --&gt;|&quot;done, saved_count = 0&quot;| EMPTY[&quot;Display: collection completed&lt;br/&gt;without a valid dataset&quot;]
+    STATUS --&gt;|&quot;error&quot;| UIERROR[&quot;Display the error&quot;]
+    POLL -.-&gt;|&quot;Tracking failure or timeout&quot;| TRACKERR[&quot;Display a tracking error&lt;br/&gt;The backend job may continue&quot;]
+</pre></div>
+</section>
+
+<footer>
+<p>The catalog stores metadata and links, not complete dataset files. Jobs run inside the backend process. Active work is marked as an error when the application restarts.</p>
+<p>Error branches show the main cases. Every exception in the job is handled; a PostgreSQL outage can prevent the error itself from being recorded. A reused job is not scheduled again. The limits of 5 pages and 1 distribution reflect the current configuration.</p>
+</footer>
+</main>
+<script type="module">
+try {
+ const {default: mermaid} = await import('https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs');
+ mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'default',flowchart:{htmlLabels:false,useMaxWidth:false,nodeSpacing:35,rankSpacing:45},themeVariables:{fontFamily:'Arial, sans-serif',fontSize:'16px'}});
+ await mermaid.run({querySelector:'.mermaid'});
+ document.getElementById('status').textContent='The diagrams are ready. Save each block as SVG to reuse or share it offline.';
+ document.querySelectorAll('[data-export]').forEach(button=>{
+  button.disabled=false;
+  button.addEventListener('click',()=>{
+   const svg=document.getElementById(button.dataset.export).querySelector('svg').cloneNode(true);
+   svg.setAttribute('xmlns','http://www.w3.org/2000/svg');
+   const url=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)],{type:'image/svg+xml;charset=utf-8'}));
+   const link=document.createElement('a');link.href=url;link.download=button.dataset.filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+ });
+} catch(error) {
+ document.getElementById('status').textContent='The diagrams could not be rendered. Check your Internet connection and reload the page. Editable sources are also included in the downloaded folder.';
+ console.error(error);
+}
+</script>
+</body>
+</html>

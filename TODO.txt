@@ -1,0 +1,119 @@
+GLOBAL HEALTH DATASET CATALOG - PRIORITIZED BACKLOG
+Last reviewed: 2026-09-11
+
+P0 - REQUIRED BEFORE PUBLIC EXPOSURE
+
+1. Scope collection-job reads to their owner.
+   GET /collector/collection-jobs/{job_id} authenticates a principal but currently
+   loads a sequential job ID without checking ownership. Add an owner relationship
+   or join through repository_candidates and search_sessions, then return 404 for
+   jobs owned by another principal.
+
+2. Prevent automatic-collection retry and quota bypass.
+   Re-reading an accepted candidate can create a new job after an error or an empty
+   result without consuming a quota. Require an explicit retry operation, apply a
+   dedicated collection quota, and enforce backoff and a maximum attempt count.
+
+3. Return stable public errors.
+   Log full exceptions with a correlation ID. Persist and return a controlled error
+   code and safe message instead of str(exception).
+
+4. Apply the supplied CollectorConfig to every network operation.
+   request_timeout_seconds, max_sample_bytes, and user_agent currently fall back to
+   module defaults during HTML fetches and distribution validation. Pass configured
+   dependencies through the whole pipeline and test the effective values.
+
+5. Confirm deployment controls.
+   Enforce HTTPS, keep PostgreSQL private, restrict collector egress, store secrets
+   in the deployment secret manager, and verify all three RCP models under realistic
+   concurrency. Add PostgreSQL-backed tests to the release gate.
+
+P1 - RELIABILITY AND DATA INTEGRITY
+
+6. Move orchestration from React to a durable backend workflow.
+   The browser currently dispatches candidate classifications. A tab close or reload
+   can leave candidates pending. Let the backend own search, classification, and
+   collection, and expose resumable status by search ID.
+
+7. Replace process-local background tasks with durable workers.
+   Use a PostgreSQL lease/heartbeat queue or a dedicated task queue. Add bounded
+   capacity, idempotency keys, retries with backoff, cancellation, and recovery.
+   Keep queued jobs pending until a worker actually starts them.
+
+8. Add data-preserving database migrations and recovery procedures.
+   Adopt a migration tool, automate backups, and test restore and rollback. Add
+   readiness checks for PostgreSQL and required RCP configuration; keep /health as
+   a lightweight liveness endpoint.
+
+9. Model validated distributions as one typed aggregate.
+   Replace the parallel distributions and validation_results lists with a
+   ValidatedDistribution type so URL/format evidence cannot become orphaned.
+
+10. Preserve partial collection success.
+    Record a typed PageOutcome for fetch, classification, validation, and acceptance.
+    Keep datasets already collected when a later page fails, and mark the job partial.
+
+11. Fetch landing pages whenever usable distributions are missing.
+    A structured candidate containing only a title currently skips HTML discovery,
+    spends three LLM calls, and is then rejected for having no distribution. Merge
+    structured metadata with bounded HTML discovery when links are absent.
+
+P2 - PERFORMANCE AND MAINTAINABILITY
+
+12. Paginate the catalog and apply filters in PostgreSQL.
+    Add a cursor, bounded limit, server-side filters, sorting, and a dataset-detail
+    endpoint. Load distributions only for the requested page.
+
+13. Validate the schema once at startup.
+    Remove repeated schema-version queries from every repository operation after a
+    successful startup check.
+
+14. Bound LLM response bodies and improve provider resilience.
+    Reject responses over a configured byte limit. Add controlled transient retries,
+    jittered backoff, and metrics for latency, errors, and model disagreement.
+
+15. Split the main backend and frontend orchestrators.
+    Extract SearchService, ClassificationService, and CollectionService from the
+    backend route module. Extract an API client and workflow hooks/reducers from
+    App.jsx. Preserve run-ID checks while browser requests remain asynchronous.
+
+16. Remove hard-coded assumptions about exactly three voters from the UI.
+    Return the voting policy with API results or derive available agreement filters
+    from the ensemble audit.
+
+17. Centralize model and voting configuration.
+    Introduce a typed ModelSpec and a shared RCP client builder. Extract common voting
+    execution while keeping page and repository business decisions separate.
+
+18. Remove dormant source-administration code if it is no longer part of the product.
+    This includes backend source routes, seeds, quotas, job variants, schema objects,
+    and tests. Keep reusable discovery adapters independent of source administration.
+
+P3 - PRODUCT QUALITY
+
+19. Define a publication lifecycle.
+    Separate candidate, collected, reviewed, published, stale, and withdrawn states.
+    Define policy for authority, licence, provenance, sensitivity, and restricted access.
+
+20. Persist stronger identity and provenance.
+    Store DOI, licence, version, repository/provider evidence, and the relationship
+    between repository candidates and saved datasets. Detect duplicates by stable
+    identifiers and semantic identity, not only normalized URLs.
+
+21. Revalidate links on a schedule.
+    Keep access-state history and distinguish available, restricted, unavailable, and
+    unconfirmed resources without erasing datasets after transient failures.
+
+22. Build an LLM evaluation set.
+    Measure precision, recall, disagreement, latency, failure rate, and cost for both
+    repository relevance and page eligibility. Use the results to decide whether
+    somewhat_relevant should trigger collection and whether quorum must remain 3/3.
+
+23. Improve discovery and catalog UX.
+    Let users choose local-only or local-plus-external search. Add filterable paginated
+    results, permanent dataset detail URLs, resumable searches, licence, provenance,
+    access status, last-check time, and stable identifiers.
+
+24. Evaluate additional repository providers against a shared benchmark before
+    enabling them. Keep normalized contracts, per-provider budgets, provenance, and
+    partial-provider failure handling.

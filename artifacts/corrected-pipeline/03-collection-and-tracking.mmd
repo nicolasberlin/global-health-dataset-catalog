@@ -1,0 +1,53 @@
+flowchart TD
+    AUTO(["From block 2<br/>Scheduled candidate job"])
+    MANUAL(["User starts collection from a source"])
+    MANUAL --> M1["POST /collector/collection-jobs"]
+    M1 --> M2["Identify the user<br/>Check the collection quota"]
+    M2 --> M3["Create a pending job<br/>kind = source"]
+    M3 --> M4["_schedule_collection_job<br/>HTTP 202 response"]
+    AUTO --> RUN["_run_collection_job"]
+    M4 --> RUN
+    RUN --> MARK["mark_collection_job_running<br/>Continue only if the transition succeeds"]
+    MARK --> KIND{"Job type?"}
+    KIND -->|"repository_candidate"| C1["collect_repository_candidate_with_report"]
+    C1 --> C2["Normalize candidate_url<br/>Create one DiscoveredPage"]
+    C2 --> C3["collect_source_with_report<br/>Limit discovery to this page"]
+    KIND -->|"source"| S1["collect_source_with_report"]
+    S1 --> S2["discover_source<br/>CKAN · Socrata · data.json · website"]
+    S2 --> S3["Select pages to analyze<br/>Current maximum: 5 per source"]
+    C3 --> PAGE
+    S3 --> PAGE["_collect_discovered_page_with_report<br/>For each selected page"]
+    PAGE --> STRUCT{"Structured metadata<br/>already available?"}
+    STRUCT -->|"Yes"| STRUCTURED["analyze_discovered_page<br/>Build PageSnapshot<br/>Reuse supplied distributions"]
+    STRUCT -->|"No"| FETCH["fetch_public_html<br/>Fetch the target page"]
+    FETCH --> EXTRACT["analyze_html_page<br/>extract_page, then extract_distributions"]
+    STRUCTURED --> CLASSIFY["page_classifier.classify<br/>Page + distribution candidates<br/>Individual health-relevant dataset?<br/>3-model vote"]
+    EXTRACT --> CLASSIFY
+    CLASSIFY --> ACCEPTED{"Page accepted?"}
+    ACCEPTED -->|"No"| REJECT["Count the page as rejected"]
+    ACCEPTED -->|"Yes"| VALIDATE["validate_distribution<br/>HEAD, then partial GET if needed<br/>Current maximum: 1 tested distribution"]
+    VALIDATE --> VALID{"At least one tested<br/>distribution is valid?"}
+    VALID -->|"No"| REJECT
+    VALID -->|"Yes"| KEEP["Add the dataset and its<br/>validated distributions to the result"]
+    KEEP --> MORE{"Another selected page?"}
+    REJECT --> MORE
+    MORE -->|"Yes"| PAGE
+    MORE -->|"No"| RESULT["CollectionResult + report<br/>With zero, one, or more datasets"]
+    RESULT --> SAVE["complete_collection_job<br/>One PostgreSQL transaction:<br/>save datasets and move the job to done"]
+    SAVE --> DONE["job = done<br/>saved_count = number of saved datasets"]
+    FETCH -.->|"Exception"| ERROR
+    CLASSIFY -.->|"Classification error"| ERROR
+    S2 -.->|"Discovery error"| ERROR
+    SAVE -.->|"Transaction failure"| ERROR
+    ERROR["mark_collection_job_error<br/>job = error if the database write succeeds"]
+    AUTO -.-> POLL
+    M4 -.-> POLL
+    EXIST(["Active job reused in block 2"]) -.-> POLL
+    POLL["Frontend: poll periodically<br/>GET /collector/collection-jobs/{id}"]
+    POLL --> STATUS{"Received state?"}
+    STATUS -->|"pending or running"| WAIT["Wait, then poll again<br/>Within the frontend tracking limit"]
+    WAIT --> POLL
+    STATUS -->|"done, saved_count > 0"| REFRESH["GET /collector/collected-datasets<br/>Refresh the catalog and display success"]
+    STATUS -->|"done, saved_count = 0"| EMPTY["Display: collection completed<br/>without a valid dataset"]
+    STATUS -->|"error"| UIERROR["Display the error"]
+    POLL -.->|"Tracking failure or timeout"| TRACKERR["Display a tracking error<br/>The backend job may continue"]

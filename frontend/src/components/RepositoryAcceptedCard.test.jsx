@@ -47,15 +47,15 @@ afterEach(cleanup);
 
 describe('automatic repository collection status', () => {
     it.each([
-        ['pending', 'Collecte automatique en attente'],
-        ['running', 'Collecte automatique en cours'],
-        ['saved', 'Dataset sauvegardé dans le catalogue local'],
-        ['empty', 'Collecte terminée sans fichier valide'],
-        ['error', 'Échec de la collecte automatique'],
+        ['pending', 'Automatic collection pending'],
+        ['running', 'Automatic collection in progress'],
+        ['saved', 'Dataset saved to the local catalog'],
+        ['empty', 'Collection completed without a valid file'],
+        ['error', 'Automatic collection failed'],
     ])('shows the %s state', (state, expectedText) => {
         render(<RepositoryAcceptedCard candidate={acceptedCandidate(state)} />);
 
-        expect(screen.getByText('Candidat accepté 1/1')).toBeInTheDocument();
+        expect(screen.getByText('Accepted candidate 1/1')).toBeInTheDocument();
         expect(screen.getByText(expectedText)).toBeInTheDocument();
     });
 

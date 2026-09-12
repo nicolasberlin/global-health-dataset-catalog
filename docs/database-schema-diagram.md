@@ -7,9 +7,8 @@ The PostgreSQL database is managed by the application. A new database starts at
 the current application schema, recorded in `schema_migrations`.
 
 This diagram describes the current schema only. Proposed review status,
-persistent identifiers, licensing, quality, and lifecycle fields are tracked in
-the [Dataset Collection & Quality Policy](dataset-collection-and-quality-policy.md)
-and [roadmap](roadmap.md).
+persistent identifiers, licensing, quality, and lifecycle work is tracked in
+the [roadmap](roadmap.md).
 
 ```mermaid
 erDiagram
@@ -27,9 +26,50 @@ erDiagram
         string page_url
     }
 
+    search_sessions {
+        uuid id PK
+        string owner_id
+        string query
+        string origin
+        string status
+        string error
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz finished_at
+    }
+
+    api_rate_limits {
+        string owner_id PK
+        string operation PK
+        timestamptz window_started_at
+        int request_count
+        timestamptz updated_at
+    }
+
+    repository_candidates {
+        uuid id PK
+        uuid search_session_id FK
+        string title
+        string description
+        string url
+        string source
+        string publisher
+        string publication_date
+        string doi
+        jsonb keywords
+        jsonb metadata
+        string classification_status
+        jsonb classification
+        string error
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     collection_jobs {
         int id PK
         string source_url
+        string kind
+        uuid repository_candidate_id FK
         string status
         int saved_count
         int discovered_count
@@ -103,6 +143,8 @@ erDiagram
 
     collected_datasets ||--o{ collected_distributions : "delete cascade"
     collected_datasets ||--o{ dataset_discovery_observations : "delete cascade"
+    search_sessions ||--o{ repository_candidates : "delete cascade"
+    repository_candidates o|--o{ collection_jobs : "candidate work"
     collection_jobs ||--o{ dataset_discovery_observations : "set null"
 ```
 
@@ -120,3 +162,26 @@ database deduplicates only exact matches of that normalized `dataset_url`.
 Separate URLs for the same DOI, version, or mirror remain separate records.
 Distributions are unique by `(dataset_id, url, format)`; rediscovery refreshes
 their evidence without deleting distributions absent from a later crawl.
+
+Repository candidates are unique by `(search_session_id, source, url)`. Their
+classification JSON is present only for accepted or rejected terminal states;
+operational failures use the separate `error` state. Candidate collection jobs
+carry `kind=repository_candidate` and a foreign key to the candidate. A partial
+unique index allows at most one `pending` or `running` job per candidate.
+Another partial unique index prevents active repository jobs for different
+candidates from duplicating the same normalized source URL. Only `pending` and
+`running` jobs block a reservation. Terminal `error` and empty `done` attempts
+remain unchanged as history but allow a new pending job while no corresponding
+dataset has been saved.
+
+`search_sessions.owner_id` is derived from the authenticated server-side token
+mapping. Candidate reads and state transitions require that owner, so a UUID
+cannot cross user boundaries. `api_rate_limits` stores atomic fixed-minute
+counters with one row per `(owner_id, operation)` and resets the stored window
+atomically. It intentionally has no foreign key because owner identities are
+configuration-backed in the current MVP rather than rows in an accounts table.
+
+These tables belong to the current pre-release initial schema, including the
+owner column and `api_rate_limits`. There is no
+upgrade migration from an older local schema; recreate the local database when
+startup reports that managed tables are missing.

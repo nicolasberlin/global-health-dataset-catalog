@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+.env
+.env.*
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+**/*.pyc
+backend/*.db
+frontend/dist
+frontend/node_modules

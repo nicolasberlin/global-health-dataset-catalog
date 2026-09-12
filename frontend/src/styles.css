@@ -119,18 +119,69 @@ select:disabled {
 
 .app-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 20px;
     align-items: stretch;
     margin-bottom: 18px;
 }
 
 .title-block {
-    min-height: 210px;
     border: 1px solid #dbe4de;
     border-radius: 8px;
     padding: 28px;
     background: #fff;
+}
+
+.catalog-navigation {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 24px;
+}
+
+.catalog-navigation button[aria-pressed='false'] {
+    background: transparent;
+    color: #1f5f4a;
+    border-color: #bfd5c9;
+}
+
+.dataset-filters {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.dataset-filters label {
+    display: grid;
+    gap: 6px;
+    flex: 1 1 180px;
+    min-width: 0;
+}
+
+.dataset-filters input, .dataset-filters select {
+    width: 100%;
+    min-width: 0;
+}
+
+.dataset-access-details {
+    border-top: 1px solid #dbe4de;
+    margin-top: 16px;
+    font-size: 0.9rem;
+}
+
+.dataset-access-links {
+    display: grid;
+    gap: 12px;
+    padding: 0;
+    list-style: none;
+}
+
+.dataset-access-links li {
+    display: grid;
+    gap: 4px;
+    overflow-wrap: anywhere;
 }
 
 .eyebrow {
@@ -238,6 +289,52 @@ p {
 
 .api-status--error {
     background: #40201e;
+}
+
+.api-access-bar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px 24px;
+    align-items: end;
+    margin-bottom: 18px;
+    border: 1px solid #dbe4de;
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: #fff;
+}
+
+.api-access-status {
+    display: flex;
+    min-width: 180px;
+    flex-direction: column;
+}
+
+.api-access-status span {
+    color: #596860;
+    font-size: 0.84rem;
+}
+
+.api-access-form {
+    display: grid;
+    grid-template-columns: auto minmax(180px, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.api-access-form label {
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.api-access-form button {
+    white-space: nowrap;
+}
+
+.api-access-error {
+    grid-column: 2;
+    margin: 0;
+    color: #8c2d25;
+    font-size: 0.84rem;
 }
 
 .api-status--loading {
@@ -995,11 +1092,6 @@ p {
     background: #eef6f1;
 }
 
-.source-action-button {
-    min-height: 36px;
-    padding: 0 12px;
-}
-
 .empty-card {
     grid-column: 1 / -1;
     padding: 24px;
@@ -1020,75 +1112,6 @@ p {
 
 .empty-card--loading {
     background: #f8faf9;
-}
-
-.collection-notice {
-    margin-top: 14px;
-    border: 1px solid #dbe4de;
-    border-radius: 8px;
-    padding: 12px 14px;
-    background: #f8faf9;
-}
-
-.collection-notice p {
-    margin-bottom: 0;
-    color: #40514a;
-    font-weight: 700;
-}
-
-.collection-notice small {
-    display: block;
-    margin-top: 6px;
-    color: #68766f;
-    font-size: 0.82rem;
-    font-weight: 700;
-}
-
-.collection-notice__summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.collection-notice__summary span {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    min-height: 28px;
-    border: 1px solid #d5ded8;
-    border-radius: 8px;
-    padding: 4px 8px;
-    background: rgba(255, 255, 255, 0.58);
-    color: #51635a;
-    font-size: 0.78rem;
-    font-weight: 700;
-    line-height: 1.2;
-}
-
-.collection-notice__summary strong {
-    color: #2f4038;
-    font-size: 0.88rem;
-}
-
-.collection-notice--ok {
-    border-color: #b8d1c4;
-    background: #eef6f1;
-}
-
-.collection-notice--loading {
-    border-color: #b9c8d8;
-    background: #f3f7fb;
-}
-
-.collection-notice--empty {
-    border-color: #d9c6ad;
-    background: #fbf7f1;
-}
-
-.collection-notice--error {
-    border-color: #e0b9b4;
-    background: #fff7f6;
 }
 
 .collected-section {
@@ -1253,6 +1276,7 @@ p {
     }
 
     .app-header,
+    .api-access-bar,
     .summary-grid,
     .catalog-toolbar,
     .repository-controls,
@@ -1260,6 +1284,10 @@ p {
     .source-grid,
     .dataset-grid {
         grid-template-columns: 1fr;
+    }
+
+    .api-access-form {
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
     }
 
     .title-block,
@@ -1302,10 +1330,15 @@ p {
     }
 
     .repository-search-form,
+    .api-access-form,
     .repository-facts,
     .repository-score-row,
     .repository-decision-row {
         grid-template-columns: 1fr;
+    }
+
+    .api-access-error {
+        grid-column: 1;
     }
 
     .repository-search-form button {
@@ -1344,7 +1377,6 @@ p {
         justify-content: center;
     }
 
-    .source-action-button,
     .dataset-card__source a {
         justify-content: center;
     }

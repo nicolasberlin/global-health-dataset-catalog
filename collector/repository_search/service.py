@@ -77,12 +77,11 @@ def classify_repository_result(
     result: RepositorySearchResult,
     classifier: RepositoryResultClassifier,
 ) -> RepositorySearchResult:
-    """Attach one relevance decision to a transient repository candidate.
+    """Attach one relevance decision to provider metadata loaded by the caller.
 
-    Acceptance only makes the candidate eligible for display in repository
-    search; it does not convert or save it as a ``CollectedDataset``. LLM
-    failures propagate as classification errors instead of becoming semantic
-    rejections.
+    Acceptance makes the candidate eligible for the normal collection pipeline;
+    this function itself never converts or saves it as a ``CollectedDataset``.
+    LLM failures propagate as operational errors instead of semantic rejections.
     """
 
     classification = classifier.classify(_repository_result_page(result))
