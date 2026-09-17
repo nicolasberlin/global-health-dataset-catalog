@@ -20,7 +20,7 @@ from app.database import (
     complete_search_session_with_repository_candidates,
     create_search_session,
     fail_candidate_classification,
-    get_collection_job,
+    get_collection_job_for_owner,
     get_repository_candidate,
     list_collected_datasets,
     mark_collection_job_error,
@@ -29,6 +29,11 @@ from app.database import (
     reserve_repository_candidate_collection_job,
     search_collected_datasets,
     start_candidate_classification,
+)
+from app.routes.collector_presenters import (
+    public_collection_job,
+    public_dataset_signals,
+    public_repository_classification,
 )
 from app.routes.collector_schemas import (
     CollectorAutomaticCollection,
@@ -104,13 +109,13 @@ _collection_executor = ThreadPoolExecutor(
 @router.get("/collection-jobs/{job_id}")
 async def read_collection_job(
     job_id: int,
-    _: Annotated[APIPrincipal, Depends(require_api_principal)],
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
 ) -> CollectorCollectionJobResponse:
-    job = await get_collection_job(job_id)
+    job = await get_collection_job_for_owner(job_id, principal.owner_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Collection job not found")
 
-    return CollectorCollectionJobResponse(job=CollectorCollectionJob(**job))
+    return CollectorCollectionJobResponse(job=public_collection_job(job))
 
 
 @router.get("/collected-datasets")
@@ -406,6 +411,7 @@ async def _reserve_automatic_collection(
         return CollectorAutomaticCollection(
             state="error",
             error="Automatic collection scheduling failed.",
+            error_code="collection_scheduling_failed",
         )
 
     if reservation.already_collected:
@@ -413,7 +419,7 @@ async def _reserve_automatic_collection(
     if reservation.job is None:
         raise RuntimeError("Automatic collection reservation returned no job.")
 
-    job = CollectorCollectionJob(**reservation.job)
+    job = public_collection_job(reservation.job)
     if reservation.created:
         _schedule_collection_job(background_tasks, job)
 
@@ -469,6 +475,7 @@ async def _run_collection_job(
         )
         await complete_collection_job(job_id, collection_result)
     except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
+        logger.exception("Collection failed for job_id=%s", job_id)
         await mark_collection_job_error(job_id, str(exception))
 
 
@@ -531,8 +538,14 @@ def _collector_repository_candidate(
         keywords=candidate["keywords"],
         metadata=candidate["metadata"],
         classification_status=candidate["classification_status"],
-        classification=candidate["classification"],
-        classification_error=candidate["error"],
+        classification=public_repository_classification(candidate["classification"]),
+        classification_error=(
+            "Candidate classification failed."
+            if candidate["classification_status"] == "error" else ""
+        ),
+        classification_error_code=(
+            "classification_failed" if candidate["classification_status"] == "error" else ""
+        ),
         automatic_collection=automatic_collection,
         created_at=candidate["created_at"],
         updated_at=candidate["updated_at"],
@@ -629,7 +642,8 @@ def _collector_validation(validation: ValidationResult) -> CollectorValidation:
         etag=validation.etag,
         last_modified=validation.last_modified,
         content_disposition=validation.content_disposition,
-        error=validation.error,
+        error="Resource validation failed." if not validation.ok else "",
+        error_code="validation_failed" if not validation.ok else "",
     )
 
 
@@ -645,7 +659,7 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
         uploader=dataset.uploader,
         geography=list(dataset.geography),
         discovery_method=dataset.discovery_method,
-        dataset_signals=dataset.dataset_signals,
+        dataset_signals=public_dataset_signals(dataset.dataset_signals),
         distributions=[
             _collector_distribution(distribution)
             for distribution in dataset.distributions

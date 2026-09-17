@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -9,6 +10,8 @@ import pytest
 from app.db import connection as db_connection
 from app.db import schema as db_schema
 from app.db import serialization as db_serialization
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from psycopg import sql as pg_sql
 
 from collector.classification.repository import RepositoryClassification
@@ -36,6 +39,7 @@ SCHEMA_TABLES = (
     "repository_candidates",
     "dataset_discovery_observations",
     "collection_jobs",
+    "collection_job_candidates",
 )
 
 TEST_OWNER_ID = "test-user"
@@ -91,11 +95,12 @@ async def _create_repository_candidate(
     *,
     query: str = "malaria mortality France",
     url: str = "https://repository.example.org/datasets/mortality",
+    owner_id: str = TEST_OWNER_ID,
 ):
-    session = await database.create_search_session(query, TEST_OWNER_ID)
+    session = await database.create_search_session(query, owner_id)
     candidates = await database.complete_search_session_with_repository_candidates(
         session["id"],
-        TEST_OWNER_ID,
+        owner_id,
         [
             RepositorySearchResult(
                 title="Malaria mortality estimates",
@@ -115,18 +120,175 @@ async def _create_repository_candidate(
     return session, candidates[0]
 
 
-async def _accept_repository_candidate(database, candidate_id):
-    started = await database.start_candidate_classification(candidate_id, TEST_OWNER_ID)
+async def _accept_repository_candidate(database, candidate_id, owner_id=TEST_OWNER_ID):
+    started = await database.start_candidate_classification(candidate_id, owner_id)
     assert started is not None
     return await database.complete_candidate_classification(
         candidate_id,
-        TEST_OWNER_ID,
+        owner_id,
         RepositoryClassification(
             relevance_label="relevant",
             reason="The metadata matches the query.",
             ensemble={},
         ),
     )
+
+
+async def test_shared_job_access_requires_an_explicit_authorized_association(database):
+    await database.init_database()
+    _, first = await _create_repository_candidate(database, owner_id="alice")
+    _, second = await _create_repository_candidate(database, owner_id="bob")
+    await _accept_repository_candidate(database, first["id"], "alice")
+    await _accept_repository_candidate(database, second["id"], "bob")
+
+    reservation = await database.reserve_repository_candidate_collection_job(first["id"], "alice")
+    job_id = int(reservation.job["id"])
+    assert await database.get_collection_job_for_owner(job_id, "alice") is not None
+    # Even an accepted candidate at the same URL does not itself grant access.
+    assert await database.get_collection_job_for_owner(job_id, "bob") is None
+    with pytest.raises(ValueError, match="not found"):
+        await database.reserve_repository_candidate_collection_job(second["id"], "mallory")
+
+    shared = await database.reserve_repository_candidate_collection_job(second["id"], "bob")
+    repeated = await database.reserve_repository_candidate_collection_job(second["id"], "bob")
+    assert shared.job["id"] == repeated.job["id"] == job_id
+    assert not shared.created and not repeated.created
+    assert await database.get_collection_job_for_owner(job_id, "bob") is not None
+    assert await database.get_collection_job_for_owner(job_id, "mallory") is None
+    assert await database.get_collection_job_for_owner(999999, "alice") is None
+    await database.mark_collection_job_error(job_id, "test failure")
+    assert (await database.get_collection_job_for_owner(job_id, "bob"))["status"] == "error"
+    links = await _fetchall(database, "SELECT * FROM collection_job_candidates")
+    assert len(links) == 2
+
+
+async def test_shared_job_reservation_serializes_two_owners_on_separate_connections(database):
+    await database.init_database()
+    candidates = []
+    candidate_url = f"https://repository.example.org/datasets/concurrent-{uuid.uuid4().hex}"
+    for owner in ("alice", "bob"):
+        _, candidate = await _create_repository_candidate(
+            database, owner_id=owner, url=candidate_url,
+        )
+        await _accept_repository_candidate(database, candidate["id"], owner)
+        candidates.append((candidate["id"], owner))
+
+    tasks = []
+    try:
+        async with db_connection._require_database_pool().connection() as blocker:
+            async with blocker.transaction():
+                # Force both real reservation transactions to wait for the same URL lock.
+                await blocker.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (candidate_url,),
+                )
+                tasks = [asyncio.create_task(
+                    database.reserve_repository_candidate_collection_job(candidate_id, owner),
+                ) for candidate_id, owner in candidates]
+
+                async def wait_for_both_reservations():
+                    while True:
+                        cursor = await blocker.execute(
+                            """
+                            SELECT waiting.pid FROM pg_locks AS waiting
+                            JOIN pg_locks AS held
+                              ON held.locktype = waiting.locktype
+                             AND held.database = waiting.database
+                             AND held.classid = waiting.classid
+                             AND held.objid = waiting.objid
+                             AND held.objsubid = waiting.objsubid
+                            WHERE waiting.locktype = 'advisory' AND NOT waiting.granted
+                              AND held.pid = pg_backend_pid() AND held.granted
+                            """,
+                        )
+                        waiting = await cursor.fetchall()
+                        if len({row["pid"] for row in waiting}) == 2:
+                            break
+                        await asyncio.sleep(0.01)
+
+                await asyncio.wait_for(wait_for_both_reservations(), timeout=5)
+                assert all(not task.done() for task in tasks)
+
+        reservations = await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert sum(result.created for result in reservations) == 1
+    assert len({result.job["id"] for result in reservations}) == 1
+    jobs = await _fetchall(database, "SELECT id FROM collection_jobs")
+    links = await _fetchall(database, "SELECT job_id, candidate_id FROM collection_job_candidates")
+    assert len(jobs) == 1
+    assert {row["candidate_id"] for row in links} == {item[0] for item in candidates}
+    assert {row["job_id"] for row in links} == {jobs[0]["id"]}
+
+
+async def test_job_http_access_and_public_view_use_real_owner_associations(database, monkeypatch):
+    from app.routes.collector import router
+
+    await database.init_database()
+    _, alice = await _create_repository_candidate(database, owner_id="alice")
+    _, bob = await _create_repository_candidate(database, owner_id="bob")
+    await _accept_repository_candidate(database, alice["id"], "alice")
+    await _accept_repository_candidate(database, bob["id"], "bob")
+    reservation = await database.reserve_repository_candidate_collection_job(alice["id"], "alice")
+    job_id = reservation.job["id"]
+    private_error = "internal-only: database credential and worker traceback"
+    monkeypatch.setenv("API_AUTH_MODE", "token")
+    monkeypatch.setenv("API_ACCESS_TOKENS", json.dumps({
+        owner: f"{owner}-test-token-with-at-least-thirty-two-characters"
+        for owner in ("alice", "bob", "charlie")
+    }))
+    app = FastAPI()
+    app.include_router(router)
+
+    def headers(owner):
+        return {"Authorization": f"Bearer {owner}-test-token-with-at-least-thirty-two-characters"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        url = f"/collector/collection-jobs/{job_id}"
+        assert (await client.get(url)).status_code == 401
+        assert (await client.get(url, headers=headers("bob"))).status_code == 404
+        await database.reserve_repository_candidate_collection_job(bob["id"], "bob")
+        await database.mark_collection_job_error(job_id, private_error)
+        for owner in ("alice", "bob"):
+            response = await client.get(url, headers=headers(owner))
+            assert response.status_code == 200
+            job = response.json()["job"]
+            assert job["status"] == "error"
+            assert job["error_code"] == "collection_failed"
+            assert job["error"] == "Collection failed."
+            assert "repository_candidate_id" not in job
+            assert str(alice["id"]) not in response.text
+            assert private_error not in response.text
+        inaccessible = await client.get(url, headers=headers("charlie"))
+        absent = await client.get("/collector/collection-jobs/999999", headers=headers("charlie"))
+        assert inaccessible.status_code == absent.status_code == 404
+        assert inaccessible.json() == absent.json() == {"detail": "Collection job not found"}
+
+    stored = await database.get_collection_job(job_id)
+    assert stored["repository_candidate_id"] == alice["id"]
+    assert stored["error"] == private_error
+
+
+async def test_job_access_migration_preserves_data_and_only_backfills_known_owners(database):
+    await database.init_database()
+    _, first = await _create_repository_candidate(database, owner_id="alice")
+    await _create_repository_candidate(database, owner_id="bob")
+    await _accept_repository_candidate(database, first["id"], "alice")
+    reservation = await database.reserve_repository_candidate_collection_job(first["id"], "alice")
+    job_id = int(reservation.job["id"])
+    # Reproduce the previous schema, whose only durable association was the origin candidate.
+    await _execute(database, "DROP TABLE collection_job_candidates")
+    await _execute(database, "DELETE FROM schema_migrations WHERE version = 2")
+    await database.init_database()
+    await database.init_database()
+    assert await _schema_version(database) == 2
+    assert (await database.get_collection_job_for_owner(job_id, "alice"))["status"] == "pending"
+    assert await database.get_collection_job_for_owner(job_id, "bob") is None
+    assert len(await _fetchall(database, "SELECT * FROM collection_jobs")) == 1
 
 
 async def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
@@ -566,6 +728,7 @@ async def test_init_database_rejects_current_version_with_obsolete_columns(datab
         await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
         for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
             await connection.execute(schema)
+        await db_schema._migrate_1_to_2(connection)
         await connection.execute(
             """
             ALTER TABLE collected_datasets
@@ -591,6 +754,7 @@ async def test_init_database_does_not_overwrite_current_reserved_source_key_coll
         await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
         for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
             await connection.execute(schema)
+        await db_schema._migrate_1_to_2(connection)
         await connection.execute(
             """
             INSERT INTO data_sources (source_key, name, description, theme, page_url)

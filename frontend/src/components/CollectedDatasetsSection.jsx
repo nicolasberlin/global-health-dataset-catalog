@@ -23,16 +23,17 @@ export default function CollectedDatasetsSection({
                     <h3>Unable to load the catalog</h3>
                     <p>{collectedError}</p>
                 </article>
-            ) : collectedLoading ? (
+            ) : null}
+            {collectedLoading && collectedDatasets.length === 0 ? (
                 <article className="empty-card empty-card--loading" role="status">
                     <h3>Loading the catalog</h3>
                 </article>
-            ) : collectedDatasets.length === 0 ? (
+            ) : collectedDatasets.length === 0 && !collectedError ? (
                 <article className="empty-card">
                     <h3>No datasets in the catalog yet</h3>
                     <p>Run a search. Accepted datasets with validated links are added automatically.</p>
                 </article>
-            ) : (
+            ) : collectedDatasets.length > 0 ? (
                 <>
                     <p>{collectedDatasets.length} dataset{collectedDatasets.length === 1 ? '' : 's'}</p>
                     <div className="repository-result-grid">
@@ -41,7 +42,7 @@ export default function CollectedDatasetsSection({
                         ))}
                     </div>
                 </>
-            )}
+            ) : null}
         </section>
     );
 }

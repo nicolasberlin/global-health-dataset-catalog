@@ -214,6 +214,7 @@ docs/                        Architecture, policy, decisions, onboarding
 Run the standard checks from the repository root:
 
 ```bash
+.venv/bin/pip install -e '.[dev]'
 .venv/bin/ruff check .
 .venv/bin/pytest
 npm --prefix frontend test
@@ -241,6 +242,7 @@ Detailed documentation:
 - [Database Schema](docs/database-schema-diagram.md)
 - [Secure Deployment](docs/DEPLOYMENT.md)
 - [Proposed Multi-Repository Architecture](docs/props/multi-repository-architecture.md)
+- [Collection Workflow Policy — target behavior and acceptance scenarios](docs/collection-workflow-policy.md)
 - [Roadmap](docs/roadmap.md)
 - [ADR 0001: PostgreSQL Only](docs/adr/0001-postgresql-only.md)
 

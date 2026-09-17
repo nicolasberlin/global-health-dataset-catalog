@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from copy import deepcopy
 from dataclasses import asdict, replace
 from uuid import UUID
 
 import pytest
 from app.database import CollectionJobReservation, normalize_dataset_search_query
 from app.routes.collector import (
+    _collector_repository_candidate,
     _run_collection_job,
     classify_repository_result,
     list_collected,
@@ -35,6 +37,7 @@ from collector.storage.models import (
     CollectionReport,
     CollectionResult,
     DistributionCandidate,
+    ValidationResult,
 )
 
 pytestmark = pytest.mark.anyio
@@ -1029,7 +1032,8 @@ async def test_manual_source_collection_endpoint_is_removed():
 
 
 async def test_collector_read_collection_job_route_returns_status(monkeypatch):
-    async def fake_get_collection_job(job_id):
+    async def fake_get_collection_job(job_id, owner_id):
+        assert owner_id == PRINCIPAL.owner_id
         assert job_id == 12
         return {
             "id": 12,
@@ -1049,7 +1053,9 @@ async def test_collector_read_collection_job_route_returns_status(monkeypatch):
             "finished_at": "2026-08-16 12:01:00",
         }
 
-    monkeypatch.setattr("app.routes.collector.get_collection_job", fake_get_collection_job)
+    monkeypatch.setattr(
+        "app.routes.collector.get_collection_job_for_owner", fake_get_collection_job,
+    )
 
     response = await read_collection_job(12, PRINCIPAL)
 
@@ -1061,10 +1067,13 @@ async def test_collector_read_collection_job_route_returns_status(monkeypatch):
 
 
 async def test_collector_read_collection_job_route_returns_not_found(monkeypatch):
-    async def fake_get_collection_job(job_id):
+    async def fake_get_collection_job(job_id, owner_id):
+        assert owner_id == PRINCIPAL.owner_id
         return None
 
-    monkeypatch.setattr("app.routes.collector.get_collection_job", fake_get_collection_job)
+    monkeypatch.setattr(
+        "app.routes.collector.get_collection_job_for_owner", fake_get_collection_job,
+    )
 
     try:
         await read_collection_job(404, PRINCIPAL)
@@ -1073,6 +1082,119 @@ async def test_collector_read_collection_job_route_returns_not_found(monkeypatch
         assert exception.detail == "Collection job not found"
     else:
         raise AssertionError("Expected HTTPException.")
+
+
+@pytest.mark.parametrize("status,saved_count", [
+    ("pending", 0), ("running", 0), ("done", 0), ("done", 2), ("error", 0),
+])
+@pytest.mark.parametrize("already_classified", [False, True])
+async def test_job_public_view_is_identical_in_read_and_classification(
+    monkeypatch, status, saved_count, already_classified,
+):
+    private_candidate = UUID("33333333-3333-4333-8333-333333333333")
+    internal_error = "internal-only: password=example-secret host=private-db"
+    stored_job = {
+        **_collection_job(status=status, saved_count=saved_count),
+        "repository_candidate_id": private_candidate,
+        "message": internal_error,
+        "error": internal_error,
+        "internal_debug": internal_error,
+    }
+    original_job = deepcopy(stored_job)
+    _use_accepting_repository_classifier(monkeypatch)
+    _use_candidate_persistence(
+        monkeypatch,
+        candidate=_candidate(status="accepted" if already_classified else "pending"),
+    )
+    if already_classified:
+        async def already_reserved(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr("app.routes.collector.start_candidate_classification", already_reserved)
+
+    async def read_job(job_id, owner_id):
+        assert job_id == stored_job["id"]
+        assert owner_id == PRINCIPAL.owner_id
+        return stored_job
+
+    async def reserve_job(candidate_id, owner_id):
+        assert candidate_id == CANDIDATE_ID
+        assert owner_id == PRINCIPAL.owner_id
+        return CollectionJobReservation(stored_job, created=False, already_collected=False)
+
+    monkeypatch.setattr("app.routes.collector.get_collection_job_for_owner", read_job)
+    monkeypatch.setattr(
+        "app.routes.collector.reserve_repository_candidate_collection_job", reserve_job,
+    )
+    background = BackgroundTasks()
+    classified = await classify_repository_result(CANDIDATE_ID, background, PRINCIPAL)
+    read = await read_collection_job(12, PRINCIPAL)
+    job = classified.automatic_collection.job.model_dump(mode="json")
+
+    assert job == read.job.model_dump(mode="json")
+    assert "repository_candidate_id" not in job
+    assert "internal_debug" not in job
+    assert str(private_candidate) not in classified.model_dump_json()
+    assert internal_error not in classified.model_dump_json()
+    assert job["status"] == status
+    assert job["saved_count"] == saved_count
+    assert job["error_code"] == ("collection_failed" if status == "error" else "")
+    assert job["error"] == ("Collection failed." if status == "error" else "")
+    assert background.tasks == []
+    assert stored_job == original_job  # Public conversion must not erase the private diagnostic.
+
+
+def test_candidate_errors_are_public_messages_and_keep_internal_diagnostics():
+    stored = _candidate(status="error", error="internal-only: private provider response")
+    public = _collector_repository_candidate(stored)
+
+    assert public.classification_error == "Candidate classification failed."
+    assert public.classification_error_code == "classification_failed"
+    assert "internal-only" not in public.model_dump_json()
+    assert stored["error"] == "internal-only: private provider response"
+
+
+async def test_stored_classifier_vote_errors_are_sanitized_without_mutating_votes(monkeypatch):
+    ensemble = _accepted_repository_ensemble(reason="Matches the query.")
+    ensemble.update(
+        successful_votes=2, accepted_votes=2, failed_votes=1,
+        decision_voter_ids=["llm_a", "llm_b"],
+        voters=ensemble["voters"][:2],
+        failures=[{"voter_id": "llm_c", "error": "internal-only: credential details"}],
+    )
+    candidate = _candidate(status="accepted", classification=RepositoryClassification(
+        relevance_label="relevant", reason="Matches the query.", ensemble=ensemble,
+    ))
+    original = deepcopy(candidate)
+    _use_candidate_persistence(monkeypatch, candidate=candidate)
+
+    async def no_new_classification(*args, **kwargs):
+        return None
+
+    async def already_saved(*args, **kwargs):
+        return CollectionJobReservation(None, created=False, already_collected=True)
+
+    monkeypatch.setattr(
+        "app.routes.collector.start_candidate_classification", no_new_classification,
+    )
+    monkeypatch.setattr(
+        "app.routes.collector.reserve_repository_candidate_collection_job", already_saved,
+    )
+    response = await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+
+    assert "internal-only" not in response.model_dump_json()
+    assert response.classification.ensemble.failures[0].error == "Classifier vote failed."
+    assert response.classification.ensemble.failures[0].error_code == "classifier_vote_failed"
+    assert response.classification.ensemble.voters[0].reason == "Matches the query."
+    assert candidate == original
+
+
+def test_public_job_schema_does_not_advertise_private_candidate_id():
+    from app.main import app
+
+    properties = app.openapi()["components"]["schemas"]["CollectorCollectionJob"]["properties"]
+    assert "repository_candidate_id" not in properties
+    assert {"status", "saved_count", "source_url", "error_code"} <= properties.keys()
 
 
 async def test_run_collection_job_marks_done(monkeypatch):
@@ -1234,7 +1356,7 @@ async def test_run_collection_job_stops_when_job_cannot_be_started(monkeypatch):
     assert calls == [("running", 12)]
 
 
-async def test_run_collection_job_marks_errors(monkeypatch):
+async def test_run_collection_job_marks_errors(monkeypatch, caplog):
     calls = []
 
     def fake_collect_source_with_report(source_url):
@@ -1263,6 +1385,8 @@ async def test_run_collection_job_marks_errors(monkeypatch):
     await _run_collection_job(12, "https://catalog.example.org/")
 
     assert calls == [("running", 12), ("error", 12, "bad source")]
+    assert "job_id=12" in caplog.text
+    assert "bad source" in caplog.text
 
 
 async def test_collection_jobs_limit_backend_concurrency(monkeypatch):
@@ -1398,3 +1522,35 @@ async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch
     assert response.items[0].source_url == "https://catalog.example.org/"
     assert response.items[0].geography == ["France"]
     assert response.items[0].updated_at == "2026-08-16 12:00:00"
+
+
+async def test_catalog_does_not_expose_persisted_vote_or_validation_exceptions(monkeypatch):
+    dataset = CollectedDataset(
+        dataset_url="https://catalog.example.org/dataset/mortality",
+        title="Mortality dataset", description="Annual data", publisher="Health agency",
+        hosting_platform="", uploader="", geography=(), distributions=[],
+        dataset_signals={"ensemble": {
+            "failed_votes": 1,
+            "failures": [{"voter_id": "llm_c", "error": "internal-only: LLM failure"}],
+        }},
+        validation_results=[ValidationResult(
+            url="https://catalog.example.org/data.csv",
+            final_url="https://catalog.example.org/data.csv", format="CSV", ok=False,
+            http_status=503, error="internal-only: HTTP failure",
+        )],
+    )
+    original = deepcopy(dataset)
+
+    async def list_datasets():
+        return [dataset]
+
+    monkeypatch.setattr("app.routes.collector.list_collected_datasets", list_datasets)
+    response = await list_collected()
+
+    assert "internal-only" not in response.model_dump_json()
+    result = response.items[0]
+    assert result.validation_results[0].http_status == 503
+    assert result.validation_results[0].error_code == "validation_failed"
+    failure = result.dataset_signals["ensemble"]["failures"][0]
+    assert failure["error_code"] == "classifier_vote_failed"
+    assert dataset == original

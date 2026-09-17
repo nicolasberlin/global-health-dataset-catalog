@@ -85,6 +85,11 @@ erDiagram
         timestamptz finished_at
     }
 
+    collection_job_candidates {
+        int job_id PK,FK
+        uuid candidate_id PK,FK
+    }
+
     collected_datasets {
         int id PK
         string source_url
@@ -145,6 +150,8 @@ erDiagram
     collected_datasets ||--o{ dataset_discovery_observations : "delete cascade"
     search_sessions ||--o{ repository_candidates : "delete cascade"
     repository_candidates o|--o{ collection_jobs : "candidate work"
+    repository_candidates ||--o{ collection_job_candidates : "authorized association"
+    collection_jobs ||--o{ collection_job_candidates : "shared job"
     collection_jobs ||--o{ dataset_discovery_observations : "set null"
 ```
 

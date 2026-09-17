@@ -92,8 +92,10 @@ export default function RepositorySearchSection({
                         autoComplete="off"
                     />
                 </div>
-                <button type="submit" disabled={repositoryAnalysisInProgress}>
-                    {repositorySearching
+                <button type="submit" disabled={repositoryAnalysisInProgress && repositoryQuery.trim() === repositoryResultQuery}>
+                    {repositoryQuery.trim() !== repositoryResultQuery
+                        ? 'Search'
+                        : repositorySearching
                         ? 'Searching…'
                         : repositoryAnalysisInProgress
                           ? 'Analyzing…'

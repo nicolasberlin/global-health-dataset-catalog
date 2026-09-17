@@ -344,6 +344,7 @@ schema contains:
 - `search_sessions`;
 - `repository_candidates`;
 - `collection_jobs`;
+- `collection_job_candidates`;
 - `collected_datasets`;
 - `collected_distributions`;
 - `dataset_discovery_observations`.
@@ -360,7 +361,11 @@ constraint deduplicates `(search_session_id, source, url)` within a search.
 
 Automatic collection locks the accepted candidate before checking prior work.
 `collection_jobs.kind` distinguishes manual source work from repository
-candidate work, and `repository_candidate_id` links the latter to its candidate.
+candidate work, and `repository_candidate_id` records the original candidate.
+`collection_job_candidates` records all candidates associated with a newly
+created or reused job, in the reservation transaction. Reading a job requires
+an association to a candidate belonging to the authenticated user's search;
+an inaccessible job returns the same 404 response as a missing job.
 A partial unique index prevents multiple active jobs for the same candidate;
 an URL-level advisory lock and second partial index prevent candidates from
 different searches creating concurrent jobs for the same normalized URL. The
@@ -370,9 +375,11 @@ a `done` job with no saved dataset permits a new pending job; terminal rows are
 retained as attempt history. Dataset deduplication remains based on normalized
 dataset URL.
 
-This pre-release schema change modifies the initial schema only. No upgrade
-migration is provided; an older local database must be recreated. The schema
-checks reject a database marked current when these new tables are absent.
+Schema version 2 migrates the supported version 1 baseline without deleting
+data, backfilling the original job/candidate associations. Previously shared
+associations were not stored and cannot be inferred safely from URL equality.
+Historical schemas predating the baseline remain unsupported. The schema
+checks reject a database marked current when required tables are absent.
 
 `search_sessions.owner_id` is the authorization boundary for repository
 candidates. It comes only from server-side token configuration, never from a

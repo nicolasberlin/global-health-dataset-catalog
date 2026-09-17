@@ -140,6 +140,7 @@ async def reserve_repository_candidate_collection_job(
                 )
 
             if reservation_state["id"] is not None:
+                await _associate_job_candidate(connection, reservation_state["id"], candidate_id)
                 return CollectionJobReservation(
                     job=_collection_job_to_dict(reservation_state),
                     created=False,
@@ -154,11 +155,42 @@ async def reserve_repository_candidate_collection_job(
             )
             if new_job is None:
                 raise RuntimeError("Collection job insert did not return a row.")
+            await _associate_job_candidate(connection, new_job["id"], candidate_id)
             return CollectionJobReservation(
                 job=_collection_job_to_dict(new_job),
                 created=True,
                 already_collected=False,
             )
+
+
+async def _associate_job_candidate(connection, job_id: int, candidate_id: UUID) -> None:
+    await connection.execute(
+        """
+        INSERT INTO collection_job_candidates (job_id, candidate_id)
+        VALUES (%s, %s) ON CONFLICT DO NOTHING
+        """,
+        (job_id, candidate_id),
+    )
+
+
+async def get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, object] | None:
+    """Read only jobs explicitly associated with one of the owner's candidates."""
+    async with _require_database_pool().connection() as connection:
+        await _require_current_schema(connection)
+        row = await _fetchone(
+            connection,
+            """
+            SELECT job.* FROM collection_jobs AS job
+            WHERE job.id = %s AND EXISTS (
+                SELECT 1 FROM collection_job_candidates AS association
+                JOIN repository_candidates AS candidate ON candidate.id = association.candidate_id
+                JOIN search_sessions AS session ON session.id = candidate.search_session_id
+                WHERE association.job_id = job.id AND session.owner_id = %s
+            )
+            """,
+            (job_id, _normalized_owner_id(owner_id)),
+        )
+    return _collection_job_to_dict(row) if row else None
 
 
 async def mark_interrupted_collection_jobs_error() -> int:
