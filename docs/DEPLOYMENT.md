@@ -37,6 +37,36 @@ HTTPS responses include one year of HSTS, without extending it to subdomains.
 Clients must use an HTTPS URL before sending a Bearer token: a redirect cannot
 protect credentials already transmitted in an initial HTTP request.
 
+## Collection execution
+
+Run exactly one API process and one API instance against the database. The image
+explicitly starts Uvicorn with `--workers 1`. Do not scale replicas or overlap old
+and new API instances during a deployment: startup recovery would mark the other
+instance's running jobs as interrupted. Stop the old instance before starting
+its replacement. Worker leases and multi-instance recovery are not implemented.
+
+`collection_jobs` is the persistent queue; no additional broker or table is
+required. After startup recovery, backend consumers poll committed `pending`
+jobs. `COLLECTION_MAX_CONCURRENCY` (default `2`) bounds concurrent collection
+runs inside this single process; it is not the number of API processes. Each
+consumer claims one job atomically only when its execution slot is available.
+
+- Pending jobs survive restart and are picked up automatically.
+- Jobs left running by an interrupted process become errors at the next startup;
+  they are not automatically retried.
+- Normal application shutdown stops taking new work and waits for current
+  collections to finish. The container's stop grace period can force termination
+  before that finishes; allow enough time if draining is required.
+- A repeated classification reads its existing collection, including an empty
+  or failed result. No collection retry endpoint is introduced by this change.
+
+Classification decisions and initial collection reservations share one
+transaction. If reservation fails, the decision rolls back too; an explicit
+classification retry may repeat the LLM call. LLM and network calls stay outside
+the transaction. Classification execution itself is not yet durable across HTTP
+cancellation or process interruption. Frontend recovery after a full page reload
+also still needs an authenticated listing endpoint.
+
 ## Outbound network policy
 
 The backend image starts with a short bootstrap that installs an nftables

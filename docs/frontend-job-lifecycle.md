@@ -44,8 +44,10 @@ new access rights from matching URLs.
 
 This change covers mounted-application tracking. Recovering jobs after a full
 page reload or a lost classification response still requires a backend listing
-endpoint. Durable execution across backend restarts still requires worker
-orchestration; React state and status recovery cannot supply that guarantee.
+endpoint. Backend collection workers now recover persisted pending jobs after
+restart; interrupted running jobs become errors. This execution guarantee is
+independent of React state. Classification itself still needs separate durable
+execution; see the [deployment constraints](DEPLOYMENT.md#collection-execution).
 
 Regression coverage includes shared access and migration in PostgreSQL; a shared
 job completing after navigation/search replacement; late classification and

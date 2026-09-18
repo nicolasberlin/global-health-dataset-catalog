@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from .db.api_quotas import APIQuotaDecision, consume_api_quota
+from .db.classification_completion import (
+    CandidateClassificationCompletion,
+    complete_candidate_classification,
+)
 from .db.collected_datasets import (
     list_collected_datasets,
     list_dataset_discovery_observations,
@@ -11,7 +15,9 @@ from .db.collected_datasets import (
 from .db.collection_completion import complete_collection_job
 from .db.collection_jobs import (
     CollectionJobReservation,
+    claim_pending_collection_job,
     create_collection_job,
+    get_candidate_collection,
     get_collection_job,
     get_collection_job_for_owner,
     mark_collection_job_done,
@@ -22,7 +28,6 @@ from .db.collection_jobs import (
 )
 from .db.connection import close_database_pool, open_database_pool
 from .db.repository_candidates import (
-    complete_candidate_classification,
     complete_search_session_with_repository_candidates,
     fail_candidate_classification,
     get_repository_candidate,
@@ -55,6 +60,7 @@ __all__ = (
     "APIQuotaDecision",
     "DATA_SOURCE_KEY_PATTERN_TEXT",
     "CollectionJobReservation",
+    "CandidateClassificationCompletion",
     "DuplicateDataSourceKeyError",
     "InvalidDataSourceKeyError",
     "InvalidDataSourceURLError",
@@ -62,6 +68,7 @@ __all__ = (
     "StoredJSONError",
     "StoredTimestampError",
     "close_database_pool",
+    "claim_pending_collection_job",
     "complete_collection_job",
     "complete_candidate_classification",
     "complete_search_session",
@@ -72,6 +79,7 @@ __all__ = (
     "create_data_source",
     "fail_candidate_classification",
     "get_collection_job",
+    "get_candidate_collection",
     "get_collection_job_for_owner",
     "get_repository_candidate",
     "get_data_source",

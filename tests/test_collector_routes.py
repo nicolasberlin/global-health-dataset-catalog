@@ -8,10 +8,14 @@ from dataclasses import asdict, replace
 from uuid import UUID
 
 import pytest
-from app.database import CollectionJobReservation, normalize_dataset_search_query
+from app.database import (
+    CandidateClassificationCompletion,
+    CollectionJobReservation,
+    normalize_dataset_search_query,
+)
+from app.routes import collector as collector_routes
 from app.routes.collector import (
     _collector_repository_candidate,
-    _run_collection_job,
     classify_repository_result,
     list_collected,
     read_collection_job,
@@ -24,7 +28,7 @@ from app.routes.collector_schemas import (
     CollectorRepositorySearchRequest,
 )
 from app.security import APIPrincipal
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 
 from collector.classification.page import PageClassificationError
 from collector.classification.repository import RepositoryClassification
@@ -34,8 +38,6 @@ from collector.repository_search import (
 )
 from collector.storage.models import (
     CollectedDataset,
-    CollectionReport,
-    CollectionResult,
     DistributionCandidate,
     ValidationResult,
 )
@@ -57,6 +59,7 @@ def bypass_api_quota(monkeypatch):
         }
 
     monkeypatch.setattr("app.routes.collector.enforce_api_quota", allow_request)
+    _use_pending_collection(monkeypatch)
 
 
 def _use_accepting_repository_classifier(monkeypatch):
@@ -177,7 +180,7 @@ def _candidate(
     }
 
 
-def _use_new_automatic_collection_reservation(monkeypatch) -> None:
+def _use_pending_collection(monkeypatch) -> None:
     async def fake_reserve(candidate_id, owner_id):
         assert candidate_id == CANDIDATE_ID
         assert owner_id == PRINCIPAL.owner_id
@@ -188,7 +191,7 @@ def _use_new_automatic_collection_reservation(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "app.routes.collector.reserve_repository_candidate_collection_job",
+        "app.routes.collector.get_candidate_collection",
         fake_reserve,
     )
 
@@ -210,11 +213,14 @@ def _use_candidate_persistence(monkeypatch, *, candidate=None) -> None:
     async def fake_complete(candidate_id, owner_id, classification):
         assert candidate_id == CANDIDATE_ID
         assert owner_id == PRINCIPAL.owner_id
-        return _candidate(
-            title=str(current["title"]),
-            url=str(current["url"]),
-            status="accepted" if classification.accepted else "rejected",
-            classification=classification,
+        return CandidateClassificationCompletion(
+            _candidate(
+                title=str(current["title"]), url=str(current["url"]),
+                status="accepted" if classification.accepted else "rejected",
+                classification=classification,
+            ),
+            await collector_routes.get_candidate_collection(candidate_id, owner_id)
+            if classification.accepted else None,
         )
 
     monkeypatch.setattr("app.routes.collector.get_repository_candidate", fake_get)
@@ -415,8 +421,8 @@ async def test_collector_search_datasets_falls_back_online_when_database_is_empt
             search_query="datasets about malaria mortality in France",
         ),
     )
-    _use_new_automatic_collection_reservation(monkeypatch)
-    await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+    _use_pending_collection(monkeypatch)
+    await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert captured_queries == ["datasets about malaria mortality in France"]
 
@@ -601,10 +607,9 @@ async def test_collector_classify_repository_result_route_returns_classification
 ):
     _use_accepting_repository_classifier(monkeypatch)
     _use_candidate_persistence(monkeypatch)
-    _use_new_automatic_collection_reservation(monkeypatch)
-    background_tasks = BackgroundTasks()
+    _use_pending_collection(monkeypatch)
 
-    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
+    response = await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert response.title == "Malaria mortality estimates"
     assert response.classification is not None
@@ -617,7 +622,6 @@ async def test_collector_classify_repository_result_route_returns_classification
     assert response.automatic_collection.state == "pending"
     assert response.automatic_collection.job is not None
     assert response.automatic_collection.job.id == 12
-    assert len(background_tasks.tasks) == 1
 
 
 async def test_collector_classification_quota_blocks_llm_call(monkeypatch):
@@ -638,7 +642,7 @@ async def test_collector_classification_quota_blocks_llm_call(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as error:
-        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+        await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert error.value.status_code == 429
 
@@ -665,7 +669,7 @@ async def test_collector_classify_rejected_result_does_not_create_collection_job
         lambda: RejectingRepositoryClassifier(),
     )
     monkeypatch.setattr(
-        "app.routes.collector.reserve_repository_candidate_collection_job",
+        "app.routes.collector.get_candidate_collection",
         fail_if_reserved,
     )
     _use_candidate_persistence(
@@ -675,14 +679,12 @@ async def test_collector_classify_rejected_result_does_not_create_collection_job
             url="https://example.org/datasets/unrelated",
         ),
     )
-    background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
+    response = await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert response.classification is not None
     assert response.classification.accepted is False
     assert response.automatic_collection is None
-    assert background_tasks.tasks == []
 
 
 async def test_collector_classify_accepted_result_reuses_active_collection_job(
@@ -701,18 +703,16 @@ async def test_collector_classify_accepted_result_reuses_active_collection_job(
         )
 
     monkeypatch.setattr(
-        "app.routes.collector.reserve_repository_candidate_collection_job",
+        "app.routes.collector.get_candidate_collection",
         fake_reserve,
     )
-    background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
+    response = await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert response.automatic_collection is not None
     assert response.automatic_collection.state == "running"
     assert response.automatic_collection.job is not None
     assert response.automatic_collection.job.id == 12
-    assert background_tasks.tasks == []
 
 
 async def test_collector_classify_accepted_saved_result_does_not_recollect(
@@ -731,43 +731,36 @@ async def test_collector_classify_accepted_saved_result_does_not_recollect(
         )
 
     monkeypatch.setattr(
-        "app.routes.collector.reserve_repository_candidate_collection_job",
+        "app.routes.collector.get_candidate_collection",
         fake_reserve,
     )
-    background_tasks = BackgroundTasks()
 
-    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
+    response = await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert response.automatic_collection is not None
     assert response.automatic_collection.state == "saved"
     assert response.automatic_collection.job is None
-    assert background_tasks.tasks == []
 
 
-async def test_collector_classify_keeps_acceptance_when_collection_reservation_fails(
-    monkeypatch,
-):
+async def test_collector_classify_reports_failure_when_atomic_reservation_fails(monkeypatch):
     _use_accepting_repository_classifier(monkeypatch)
     _use_candidate_persistence(monkeypatch)
+    errors = []
 
-    async def fail_reservation(candidate_id, owner_id):
-        assert owner_id == PRINCIPAL.owner_id
-        raise RuntimeError(f"Database unavailable for {candidate_id}")
+    async def fail_completion(candidate_id, owner_id, classification):
+        raise RuntimeError("Association insert failed")
 
-    monkeypatch.setattr(
-        "app.routes.collector.reserve_repository_candidate_collection_job",
-        fail_reservation,
-    )
-    background_tasks = BackgroundTasks()
+    async def record_error(candidate_id, owner_id, error):
+        errors.append((candidate_id, owner_id, error))
 
-    response = await classify_repository_result(CANDIDATE_ID, background_tasks, PRINCIPAL)
+    monkeypatch.setattr("app.routes.collector.complete_candidate_classification", fail_completion)
+    monkeypatch.setattr("app.routes.collector.fail_candidate_classification", record_error)
+    with pytest.raises(HTTPException) as caught:
+        await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
-    assert response.classification is not None
-    assert response.classification.accepted is True
-    assert response.automatic_collection is not None
-    assert response.automatic_collection.state == "error"
-    assert response.automatic_collection.error == ("Automatic collection scheduling failed.")
-    assert background_tasks.tasks == []
+    assert caught.value.status_code == 500
+    assert caught.value.detail == "Candidate classification could not be saved."
+    assert errors == [(CANDIDATE_ID, PRINCIPAL.owner_id, "Association insert failed")]
 
 
 async def test_collector_classify_repository_result_route_returns_502_when_classification_fails(
@@ -794,7 +787,7 @@ async def test_collector_classify_repository_result_route_returns_502_when_class
     caplog.set_level("ERROR", logger="app.routes.collector")
 
     try:
-        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+        await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
     except HTTPException as exception:
         assert exception.status_code == 502
         assert exception.detail == "Page classification failed."
@@ -830,7 +823,7 @@ async def test_collector_classification_persistence_failure_marks_candidate_erro
     )
 
     with pytest.raises(HTTPException) as error:
-        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+        await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert error.value.status_code == 500
     assert error.value.detail == "Candidate classification could not be saved."
@@ -885,10 +878,10 @@ async def test_collector_repository_classification_limits_backend_concurrency(
 
     async def fake_complete(candidate_id, owner_id, classification):
         assert owner_id == PRINCIPAL.owner_id
-        return {
+        return CandidateClassificationCompletion({
             **_candidate(status="rejected", classification=classification),
             "id": candidate_id,
-        }
+        }, None)
 
     monkeypatch.setattr("app.routes.collector.get_repository_candidate", fake_get)
     monkeypatch.setattr("app.routes.collector.start_candidate_classification", fake_start)
@@ -899,7 +892,7 @@ async def test_collector_repository_classification_limits_backend_concurrency(
 
     await asyncio.gather(
         *(
-            classify_repository_result(candidate_id, BackgroundTasks(), PRINCIPAL)
+            classify_repository_result(candidate_id, PRINCIPAL)
             for candidate_id in candidate_ids
         )
     )
@@ -915,7 +908,7 @@ async def test_collector_classify_repository_result_returns_not_found(monkeypatc
     monkeypatch.setattr("app.routes.collector.get_repository_candidate", fake_get)
 
     with pytest.raises(HTTPException) as error:
-        await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+        await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert error.value.status_code == 404
 
@@ -1124,10 +1117,9 @@ async def test_job_public_view_is_identical_in_read_and_classification(
 
     monkeypatch.setattr("app.routes.collector.get_collection_job_for_owner", read_job)
     monkeypatch.setattr(
-        "app.routes.collector.reserve_repository_candidate_collection_job", reserve_job,
+        "app.routes.collector.get_candidate_collection", reserve_job,
     )
-    background = BackgroundTasks()
-    classified = await classify_repository_result(CANDIDATE_ID, background, PRINCIPAL)
+    classified = await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
     read = await read_collection_job(12, PRINCIPAL)
     job = classified.automatic_collection.job.model_dump(mode="json")
 
@@ -1140,7 +1132,6 @@ async def test_job_public_view_is_identical_in_read_and_classification(
     assert job["saved_count"] == saved_count
     assert job["error_code"] == ("collection_failed" if status == "error" else "")
     assert job["error"] == ("Collection failed." if status == "error" else "")
-    assert background.tasks == []
     assert stored_job == original_job  # Public conversion must not erase the private diagnostic.
 
 
@@ -1178,9 +1169,9 @@ async def test_stored_classifier_vote_errors_are_sanitized_without_mutating_vote
         "app.routes.collector.start_candidate_classification", no_new_classification,
     )
     monkeypatch.setattr(
-        "app.routes.collector.reserve_repository_candidate_collection_job", already_saved,
+        "app.routes.collector.get_candidate_collection", already_saved,
     )
-    response = await classify_repository_result(CANDIDATE_ID, BackgroundTasks(), PRINCIPAL)
+    response = await classify_repository_result(CANDIDATE_ID, PRINCIPAL)
 
     assert "internal-only" not in response.model_dump_json()
     assert response.classification.ensemble.failures[0].error == "Classifier vote failed."
@@ -1195,298 +1186,6 @@ def test_public_job_schema_does_not_advertise_private_candidate_id():
     properties = app.openapi()["components"]["schemas"]["CollectorCollectionJob"]["properties"]
     assert "repository_candidate_id" not in properties
     assert {"status", "saved_count", "source_url", "error_code"} <= properties.keys()
-
-
-async def test_run_collection_job_marks_done(monkeypatch):
-    calls = []
-
-    def fake_collect_source_with_report(source_url):
-        calls.append(("collect", source_url))
-        return CollectionResult(
-            datasets=[
-                CollectedDataset(
-                    dataset_url="https://catalog.example.org/dataset/mortality",
-                    title="Mortality health dataset",
-                    description="Official mortality health data.",
-                    publisher="National Health Agency",
-                    hosting_platform="",
-                    uploader="",
-                    dataset_signals={},
-                    distributions=[],
-                    discovery_method="ckan",
-                    validation_results=[],
-                )
-            ],
-            report=CollectionReport(
-                discovered_count=5,
-                analyzed_count=5,
-                accepted_count=1,
-                rejected_count=4,
-                invalid_distribution_count=1,
-                discovery_methods=("ckan",),
-            ),
-        )
-
-    async def fake_mark_collection_job_running(job_id):
-        calls.append(("running", job_id))
-        return {"id": job_id, "status": "running"}
-
-    async def fake_complete_collection_job(job_id, collection_result):
-        calls.append(
-            (
-                "complete",
-                job_id,
-                len(collection_result.datasets),
-                collection_result.report.discovered_count,
-                collection_result.report.discovery_methods,
-            )
-        )
-
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_running",
-        fake_mark_collection_job_running,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.collect_source_with_report",
-        fake_collect_source_with_report,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.complete_collection_job",
-        fake_complete_collection_job,
-    )
-
-    await _run_collection_job(12, "https://catalog.example.org/")
-
-    assert calls == [
-        ("running", 12),
-        ("collect", "https://catalog.example.org/"),
-        ("complete", 12, 1, 5, ("ckan",)),
-    ]
-
-
-async def test_run_automatic_collection_job_uses_candidate_pipeline_and_completes_empty(
-    monkeypatch,
-):
-    calls = []
-
-    def fake_collect_repository_candidate_with_report(source_url):
-        calls.append(("collect_candidate", source_url))
-        return CollectionResult(
-            report=CollectionReport(
-                discovered_count=1,
-                analyzed_count=1,
-                rejected_count=1,
-                invalid_distribution_count=1,
-                discovery_methods=("repository_search",),
-            )
-        )
-
-    def fail_if_source_collection_runs(source_url):
-        raise AssertionError(f"Whole-source collection ran unexpectedly: {source_url}")
-
-    async def fake_mark_collection_job_running(job_id):
-        calls.append(("running", job_id))
-        return {"id": job_id, "status": "running"}
-
-    async def fake_complete_collection_job(job_id, collection_result):
-        calls.append(
-            (
-                "complete",
-                job_id,
-                len(collection_result.datasets),
-                collection_result.report.discovery_methods,
-            )
-        )
-
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_running",
-        fake_mark_collection_job_running,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.collect_repository_candidate_with_report",
-        fake_collect_repository_candidate_with_report,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.collect_source_with_report",
-        fail_if_source_collection_runs,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.complete_collection_job",
-        fake_complete_collection_job,
-    )
-
-    await _run_collection_job(
-        12,
-        "https://example.org/datasets/malaria-mortality",
-        repository_candidate=True,
-    )
-
-    assert calls == [
-        ("running", 12),
-        (
-            "collect_candidate",
-            "https://example.org/datasets/malaria-mortality",
-        ),
-        ("complete", 12, 0, ("repository_search",)),
-    ]
-
-
-async def test_run_collection_job_stops_when_job_cannot_be_started(monkeypatch):
-    calls = []
-
-    async def fake_mark_collection_job_running(job_id):
-        calls.append(("running", job_id))
-        return None
-
-    def fake_collect_source_with_report(source_url):
-        calls.append(("collect", source_url))
-        raise AssertionError("Collection should not run for a stale job.")
-
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_running",
-        fake_mark_collection_job_running,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.collect_source_with_report",
-        fake_collect_source_with_report,
-    )
-
-    await _run_collection_job(12, "https://catalog.example.org/")
-
-    assert calls == [("running", 12)]
-
-
-async def test_run_collection_job_marks_errors(monkeypatch, caplog):
-    calls = []
-
-    def fake_collect_source_with_report(source_url):
-        raise ValueError("bad source")
-
-    async def fake_mark_collection_job_running(job_id):
-        calls.append(("running", job_id))
-        return {"id": job_id, "status": "running"}
-
-    async def fake_mark_collection_job_error(job_id, error):
-        calls.append(("error", job_id, error))
-
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_running",
-        fake_mark_collection_job_running,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.collect_source_with_report",
-        fake_collect_source_with_report,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_error",
-        fake_mark_collection_job_error,
-    )
-
-    await _run_collection_job(12, "https://catalog.example.org/")
-
-    assert calls == [("running", 12), ("error", 12, "bad source")]
-    assert "job_id=12" in caplog.text
-    assert "bad source" in caplog.text
-
-
-async def test_collection_jobs_limit_backend_concurrency(monkeypatch):
-    active_calls = 0
-    maximum_active_calls = 0
-    counter_lock = threading.Lock()
-    worker_pair = threading.Barrier(2)
-
-    def fake_collect_source_with_report(source_url):
-        nonlocal active_calls, maximum_active_calls
-        with counter_lock:
-            active_calls += 1
-            maximum_active_calls = max(maximum_active_calls, active_calls)
-
-        worker_pair.wait(timeout=1)
-        time.sleep(0.02)
-
-        with counter_lock:
-            active_calls -= 1
-        return CollectionResult()
-
-    async def fake_mark_collection_job_running(job_id):
-        return {"id": job_id, "status": "running"}
-
-    async def fake_complete_collection_job(job_id, collection_result):
-        return {"id": job_id, "status": "done"}
-
-    async def fail_if_marked_error(job_id, error):
-        raise AssertionError(f"Job {job_id} failed unexpectedly: {error}")
-
-    monkeypatch.setattr(
-        "app.routes.collector.collect_source_with_report",
-        fake_collect_source_with_report,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_running",
-        fake_mark_collection_job_running,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.complete_collection_job",
-        fake_complete_collection_job,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_error",
-        fail_if_marked_error,
-    )
-
-    await asyncio.gather(
-        *(
-            _run_collection_job(job_id, f"https://catalog.example.org/{job_id}")
-            for job_id in range(1, 5)
-        )
-    )
-
-    assert maximum_active_calls == 2
-
-
-async def test_run_collection_job_marks_error_when_completion_fails(monkeypatch):
-    calls = []
-
-    def fake_collect_source_with_report(source_url):
-        calls.append(("collect", source_url))
-        return CollectionResult()
-
-    async def fake_mark_collection_job_running(job_id):
-        calls.append(("running", job_id))
-        return {"id": job_id, "status": "running"}
-
-    async def fake_complete_collection_job(job_id, collection_result):
-        calls.append(("complete", job_id, len(collection_result.datasets)))
-        raise RuntimeError("database write failed")
-
-    async def fake_mark_collection_job_error(job_id, error):
-        calls.append(("error", job_id, error))
-
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_running",
-        fake_mark_collection_job_running,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.collect_source_with_report",
-        fake_collect_source_with_report,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.complete_collection_job",
-        fake_complete_collection_job,
-    )
-    monkeypatch.setattr(
-        "app.routes.collector.mark_collection_job_error",
-        fake_mark_collection_job_error,
-    )
-
-    await _run_collection_job(12, "https://catalog.example.org/")
-
-    assert calls == [
-        ("running", 12),
-        ("collect", "https://catalog.example.org/"),
-        ("complete", 12, 0),
-        ("error", 12, "database write failed"),
-    ]
 
 
 async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):

@@ -178,7 +178,7 @@ class CollectorAutomaticCollection(BaseModel):
     state: Literal["pending", "running", "saved", "empty", "error"]
     job: Optional[CollectorCollectionJob] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     error: str = Field(default="", max_length=2_000)
-    error_code: Literal["", "collection_scheduling_failed"] = ""
+    error_code: Literal["", "collection_scheduling_failed", "collection_not_scheduled"] = ""
 
 
 class CollectorRepositorySearchItem(BaseModel):

@@ -255,9 +255,12 @@ Detailed documentation:
 - Repository relevance classification does not independently guarantee health relevance.
 - Source authority and licensing policies are not fully enforced.
 - Dataset deduplication currently uses the normalized dataset URL.
-- Background jobs are process-local. Single-process startup marks interrupted
-  jobs and candidate classifications as errors, but there is no durable worker
-  queue or multi-worker ownership.
+- Collection jobs use PostgreSQL as their persistent queue. Pending jobs survive
+  restart; interrupted running jobs become errors. Acceptance and collection
+  reservation commit together, and repeating a classification only reads its
+  existing follow-up. Run a single API process/instance: there are no worker
+  leases. Classification itself still depends on the HTTP request lifecycle.
+  See the [deployment constraints](docs/DEPLOYMENT.md#collection-execution).
 - Static per-user Bearer tokens, search-session ownership, and PostgreSQL
   request quotas protect costly and mutating routes. This MVP mechanism is not
   an OAuth/OIDC login system and should be replaced by an institutional identity

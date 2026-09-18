@@ -5,28 +5,25 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Annotated, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.database import (
+    CollectionJobReservation,
     complete_candidate_classification,
-    complete_collection_job,
     complete_search_session,
     complete_search_session_with_repository_candidates,
     create_search_session,
     fail_candidate_classification,
+    get_candidate_collection,
     get_collection_job_for_owner,
     get_repository_candidate,
     list_collected_datasets,
-    mark_collection_job_error,
-    mark_collection_job_running,
     normalize_dataset_search_query,
-    reserve_repository_candidate_collection_job,
     search_collected_datasets,
     start_candidate_classification,
 )
@@ -38,7 +35,6 @@ from app.routes.collector_presenters import (
 from app.routes.collector_schemas import (
     CollectorAutomaticCollection,
     CollectorCollectedDataset,
-    CollectorCollectionJob,
     CollectorCollectionJobResponse,
     CollectorCollectionResponse,
     CollectorDatabaseDatasetSearchResponse,
@@ -69,10 +65,6 @@ from collector.classification.repository import (
     MAX_REPOSITORY_TITLE_CHARS,
 )
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
-from collector.main import (
-    collect_repository_candidate_with_report,
-    collect_source_with_report,
-)
 from collector.repository_search import (
     RepositorySearchResponse,
     RepositorySearchResult,
@@ -88,24 +80,12 @@ router = APIRouter(prefix="/collector", tags=["collector"])
 logger = logging.getLogger(__name__)
 
 REPOSITORY_CLASSIFICATION_MAX_CONCURRENCY = 2
-COLLECTION_MAX_CONCURRENCY = int(os.getenv("COLLECTION_MAX_CONCURRENCY", "2"))
-if COLLECTION_MAX_CONCURRENCY < 1:
-    raise RuntimeError("COLLECTION_MAX_CONCURRENCY must be greater than zero.")
-
 # A dedicated executor keeps the strict limit until synchronous LLM work really
 # finishes, even when the awaiting HTTP request is cancelled.
 _repository_classification_executor = ThreadPoolExecutor(
     max_workers=REPOSITORY_CLASSIFICATION_MAX_CONCURRENCY,
     thread_name_prefix="repository-classification",
 )
-# Collection includes network, page classification, and distribution validation.
-# Limiting it server-side protects every client, not only the React application.
-_collection_executor = ThreadPoolExecutor(
-    max_workers=COLLECTION_MAX_CONCURRENCY,
-    thread_name_prefix="collection",
-)
-
-
 @router.get("/collection-jobs/{job_id}")
 async def read_collection_job(
     job_id: int,
@@ -257,7 +237,6 @@ async def _search_online_repositories(
 @router.post("/repository-candidates/{candidate_id}/classify")
 async def classify_repository_result(
     candidate_id: UUID,
-    background_tasks: BackgroundTasks,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     payload: Annotated[
         Optional[CollectorRepositoryCandidateClassificationRequest],  # noqa: UP045
@@ -302,10 +281,8 @@ async def classify_repository_result(
 
         automatic_collection = None
         if status == "accepted":
-            automatic_collection = await _reserve_automatic_collection(
-                candidate_id,
-                principal.owner_id,
-                background_tasks,
+            automatic_collection = _automatic_collection(
+                await get_candidate_collection(candidate_id, principal.owner_id),
             )
         return _collector_repository_candidate(
             current_candidate,
@@ -350,7 +327,7 @@ async def classify_repository_result(
         raise HTTPException(status_code=502, detail="Page classification failed.")
 
     try:
-        completed_candidate = await complete_candidate_classification(
+        completion = await complete_candidate_classification(
             candidate_id,
             principal.owner_id,
             classification,
@@ -377,106 +354,32 @@ async def classify_repository_result(
             detail="Candidate classification could not be saved.",
         ) from exception
 
-    automatic_collection = None
-    if classification.accepted:
-        automatic_collection = await _reserve_automatic_collection(
-            candidate_id,
-            principal.owner_id,
-            background_tasks,
-        )
-
     return _collector_repository_candidate(
-        completed_candidate,
-        automatic_collection=automatic_collection,
+        completion.candidate,
+        automatic_collection=(
+            _automatic_collection(completion.collection) if classification.accepted else None
+        ),
     )
 
 
-async def _reserve_automatic_collection(
-    candidate_id: UUID,
-    owner_id: str,
-    background_tasks: BackgroundTasks,
+def _automatic_collection(
+    collection: CollectionJobReservation | None,
 ) -> CollectorAutomaticCollection:
-    """Reserve one collection job and schedule work only for a new reservation."""
+    """Present existing follow-up; this function never reserves or schedules work."""
 
-    try:
-        reservation = await reserve_repository_candidate_collection_job(
-            candidate_id,
-            owner_id,
-        )
-    except Exception:  # noqa: BLE001 - scheduling failures need a stable API error.
-        logger.exception(
-            "Automatic collection reservation failed for candidate_id=%s",
-            candidate_id,
-        )
+    if collection is not None and collection.already_collected:
+        return CollectorAutomaticCollection(state="saved")
+    if collection is None or collection.job is None:
+        # Legacy acceptances without follow-up are visible; reading cannot repair
+        # them by silently creating new work.
         return CollectorAutomaticCollection(
             state="error",
-            error="Automatic collection scheduling failed.",
-            error_code="collection_scheduling_failed",
+            error="No collection is associated with this candidate.",
+            error_code="collection_not_scheduled",
         )
-
-    if reservation.already_collected:
-        return CollectorAutomaticCollection(state="saved")
-    if reservation.job is None:
-        raise RuntimeError("Automatic collection reservation returned no job.")
-
-    job = public_collection_job(reservation.job)
-    if reservation.created:
-        _schedule_collection_job(background_tasks, job)
-
-    if job.status == "done":
-        state = "saved" if job.saved_count else "empty"
-    else:
-        state = job.status
+    job = public_collection_job(collection.job)
+    state = ("saved" if job.saved_count else "empty") if job.status == "done" else job.status
     return CollectorAutomaticCollection(state=state, job=job)
-
-
-def _schedule_collection_job(
-    background_tasks: BackgroundTasks,
-    job: CollectorCollectionJob,
-) -> None:
-    """Keep in-process scheduling behind one replaceable orchestration point."""
-
-    background_tasks.add_task(
-        _run_collection_job,
-        job.id,
-        job.source_url,
-        job.kind == "repository_candidate",
-    )
-
-
-async def _run_collection_job(
-    job_id: int,
-    source_url: str,
-    repository_candidate: bool = False,
-) -> None:
-    """Collect outside PostgreSQL, then persist datasets and completion atomically.
-
-    Network and LLM work runs in a worker thread before the atomic completion
-    transaction begins. Any collection or completion error is recorded in a
-    separate transaction by marking the job as failed; if PostgreSQL itself is
-    unavailable, that error update can also fail. If the pending-to-running
-    transition loses its state race, no collection work is started.
-    """
-
-    try:
-        running_job = await mark_collection_job_running(job_id)
-        if running_job is None:
-            return
-
-        collect = (
-            collect_repository_candidate_with_report
-            if repository_candidate
-            else collect_source_with_report
-        )
-        collection_result = await asyncio.get_running_loop().run_in_executor(
-            _collection_executor,
-            collect,
-            source_url,
-        )
-        await complete_collection_job(job_id, collection_result)
-    except Exception as exception:  # noqa: BLE001 - background jobs must persist failures.
-        logger.exception("Collection failed for job_id=%s", job_id)
-        await mark_collection_job_error(job_id, str(exception))
 
 
 def _collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution:

@@ -6,9 +6,25 @@ Statut : contrat cible pour une mise en œuvre progressive. La rédaction de ce
 document constitue l'étape 1 ; elle ne modifie pas le comportement de l'application.
 Les écarts constatés dans le code sont recensés en section 9.
 
-Mise à jour du 2026-09-17 : étape 2 réalisée pour les réponses publiques et la
-vérification des garanties existantes. Les transitions, quotas et mécanismes
-d'exécution des étapes suivantes ne sont pas encore implémentés.
+Mise à jour du 2026-09-18 : après l'étape 2 sur les réponses publiques, trois
+corrections ciblées sont réalisées, sans extraction complète des services :
+
+1. La décision et la réservation du job (ou sa réutilisation et l'association)
+   sont enregistrées dans une seule transaction. Si la réservation échoue, la
+   décision est annulée aussi ; une relance explicite de classification peut
+   refaire l'appel IA. Un dataset déjà présent dispense de créer un job.
+2. Les jobs existants constituent la file PostgreSQL. Les `pending` survivent au
+   redémarrage ; les `running` interrompus passent en erreur. Un consommateur ne
+   prend un job que lorsqu'il dispose d'une place. Exploitation avec un seul
+   processus et une seule instance API, sans chevauchement lors des déploiements.
+3. Rappeler une classification acceptée lit le suivi associé, même après une
+   collecte vide ou en erreur. Cela ne réserve ni ne relance une collecte.
+
+La table de demandes, l'admission différée, les nouveaux quotas, les relances de
+collecte et les prises en charge renouvelables restent des extensions futures.
+La classification persistante et le listing de récupération frontend restent
+également séparés. Les sections suivantes décrivent la cible plus large ; cette
+mise à jour précise les garanties réellement livrées et le compromis accepté.
 
 Ce document fixe les comportements à vérifier avant de refactoriser les services.
 Il ne définit pas les critères scientifiques d'acceptation des datasets, une
@@ -59,6 +75,12 @@ Une contrainte SQL assure au plus un job actif par clé de collecte. Cela ne pro
 pas qu'un appel externe ne sera jamais répété après une panne.
 
 ## 2. Trois notions distinctes
+
+Cette distinction appartient à la cible d'admission différée. L'implémentation
+actuelle conserve uniquement les candidats, jobs et associations existants : le
+job lui-même porte le travail à effectuer. Aucune table de demandes supplémentaire
+n'est nécessaire pour les trois corrections livrées. Si sa réservation échoue,
+l'acceptation ne reste pas enregistrée en attente d'une admission ultérieure.
 
 | Notion | Signification |
 | --- | --- |
@@ -290,9 +312,11 @@ les échéances et la cadence de renouvellement doivent être fixés et testés 
 ce lot, à partir de la durée maximale des traitements.
 
 Jusqu'à cette migration, conserver l'exploitation avec un seul processus
-applicatif et la récupération existante au démarrage. Le passage à plusieurs
-workers exige de remplacer la récupération globale qui marque tous les jobs
-actifs en erreur ; elle pourrait invalider le travail d'un autre processus.
+applicatif et une seule instance. La file de collecte actuelle reprend les jobs
+`pending`, mais passe les `running` interrompus en erreur au démarrage. Le passage
+à plusieurs instances exige de remplacer cette récupération globale : elle
+pourrait invalider le travail d'un autre processus. La classification reste liée
+à la requête HTTP, même si sa décision finale et sa collecte sont atomiques.
 
 ## 9. Écarts vérifiés et ordre de mise en œuvre
 
@@ -302,14 +326,14 @@ comportement même lorsque les numéros de ligne changent.
 | Point constaté dans le code local | Référence | Traitement prévu |
 | --- | --- | --- |
 | Lecture des jobs déjà filtrée par association et propriétaire. | [collection_jobs.py](../backend/app/db/collection_jobs.py), `get_collection_job_for_owner` | Préserver et tester, sans annoncer la correction comme absente. |
-| Une réservation après `error` ou `done` vide crée une nouvelle tentative ; ce comportement est actuellement testé. | [collection_jobs.py](../backend/app/db/collection_jobs.py), `reserve_repository_candidate_collection_job` ; [test_database.py](../tests/test_database.py), `test_automatic_collection_reservation_retries_after_terminal_job` | Caractériser avant extraction, puis remplacer explicitement lors du lot relances. |
-| Rappeler la classification d'un candidat accepté repasse par la réservation. | [collector.py](../backend/app/routes/collector.py), `classify_repository_result` | Séparer lecture et commande de relance. |
-| Décision acceptée et réservation sont enregistrées séparément. | [collector.py](../backend/app/routes/collector.py), `complete_candidate_classification` puis `_reserve_automatic_collection` | Introduire une intention de collecte atomique et récupérable. |
+| La primitive interne peut réserver après `error` ou `done` vide ; une première classification d'un nouveau candidat peut donc créer un nouveau job pour la même URL. | [collection_jobs.py](../backend/app/db/collection_jobs.py), `reserve_repository_candidate_collection_job` ; [test_database.py](../tests/test_database.py) | La lecture d'un candidat déjà accepté n'appelle plus cette primitive. L'API de relance reste à définir séparément. |
+| Rappeler la classification acceptée lit uniquement le job explicitement associé ou le résultat déjà collecté. | [collector.py](../backend/app/routes/collector.py), `classify_repository_result` ; [collection_jobs.py](../backend/app/db/collection_jobs.py), `get_candidate_collection` | Réalisé et testé pour `pending`, `running`, `done` vide et `error`, y compris avec `retry=true`. |
+| Décision acceptée et réservation utilisent la même connexion et transaction. | [classification_completion.py](../backend/app/db/classification_completion.py), `complete_candidate_classification` | Réalisé ; une erreur d'association annule aussi la décision et le nouveau job. Une relance peut refaire l'IA. |
 | Des validations HTTP négatives deviennent un compteur, sans préserver leur cause dans le rapport. | [downloads.py](../collector/validation/downloads.py), `probe_url` ; [main.py](../collector/main.py), `_with_valid_distributions_and_report` | Distinguer résultat vide et vérification incomplète avant d'appliquer les délais. |
 | La vue publique retire le candidat d'origine et remplace les diagnostics techniques des jobs, candidats, votes et validations. | [collector_presenters.py](../backend/app/routes/collector_presenters.py) ; [collector_schemas.py](../backend/app/routes/collector_schemas.py) | Réalisé à l'étape 2 ; conserver les diagnostics internes et les champs utiles au suivi. |
 | Les quotas de requêtes ont leur propre transaction ; aucun quota de création de collecte n'existe. | [api_quotas.py](../backend/app/db/api_quotas.py) ; [security.py](../backend/app/security.py) | Conserver lors de l'extraction ; admission et nouveau quota atomiques dans un lot distinct. |
-| `running` est enregistré avant l'attente dans l'exécuteur ; l'exécution est locale au processus. | [collector.py](../backend/app/routes/collector.py), `_run_collection_job` | Corriger la prise en charge et introduire le worker durable. |
-| Les états interrompus sont déjà récupérés au démarrage. | [main.py](../backend/app/main.py), `lifespan` | Préserver pendant la transition, puis remplacer par la récupération des prises en charge expirées. |
+| Les consommateurs prennent les jobs persistés uniquement quand ils sont disponibles. | [collection_worker.py](../backend/app/collection_worker.py) ; [collection_jobs.py](../backend/app/db/collection_jobs.py), `claim_pending_collection_job` | Réalisé ; attente en PostgreSQL et concurrence bornée. Les prises en charge renouvelables restent futures. |
+| Le démarrage préserve les jobs `pending` et marque les `running` interrompus en erreur. | [main.py](../backend/app/main.py), `lifespan` | Réalisé ; aucune reprise automatique d'un job interrompu en cours. Classification durable distincte. |
 | La sauvegarde des datasets et `done` est déjà atomique. | [collection_completion.py](../backend/app/db/collection_completion.py), `complete_collection_job` | Préserver et tester les échecs de transaction. |
 | Le suivi pendant la vie de l'application est séparé ; le listing de récupération backend reste à ajouter. | [Cycle de vie frontend](frontend-job-lifecycle.md) | Compléter la récupération après rechargement. |
 
@@ -318,11 +342,13 @@ comportement même lorsque les numéros de ligne changent.
 | 1 | Ce contrat et les scénarios d'acceptation. Aucun changement d'exécution. | Rédigé |
 | 2 | Tests des garanties existantes et correction des réponses publiques. | Réalisé le 2026-09-17 |
 | 3 | Extraction des services de collecte, classification et recherche à comportement constant. | À faire |
-| 4 | Diagnostics structurés, relances explicites, intentions récupérables et protection contre les commandes répétées. | À faire |
+| 4 | Diagnostics structurés, relances explicites, intentions récupérables et protection contre les commandes répétées. | Partiel : transaction décision–job et classification répétée sans relance réalisées ; reste à faire pour l'admission différée et les commandes de relance. |
 | 5 | Quota de nouvelles collectes atomique, délais et limites d'attente. | À faire |
-| 6 | Worker durable, récupération des tâches et listing accessible au frontend. | À faire |
+| 6 | Worker durable, récupération des tâches et listing accessible au frontend. | Partiel : file de collecte PostgreSQL et reprise des `pending` réalisées ; classification, leases et listing à faire. |
 
-Le lot 4 est divisé en corrections vérifiables : d'abord préserver les causes,
+Les trois corrections ciblées ci-dessus ont été livrées avant l'extraction des
+services ; cette extraction n'était pas nécessaire à leur correction.
+Le reste du lot 4 est divisé en corrections vérifiables : d'abord préserver les causes,
 puis changer les commandes et leur persistance. Le lot 5 n'utilise un résultat
 vide comme résultat réutilisable qu'après cette distinction.
 
@@ -341,7 +367,7 @@ une déclaration de tests exécutés ou déjà réussis.
 | C01 | Deux demandes de classification concurrentes ciblent le même candidat. | Une seule classification réservée ; limites de requêtes appliquées selon leur contrat. |
 | C02 | Une classification acceptée est appelée de nouveau après `done` vide ou `error` de sa collecte. | Aucun nouveau job ni nouvel appel IA. |
 | C03 | Une classification est rejetée puis rappelée. | Décision existante ; aucune collecte. |
-| C04 | Le processus s'arrête entre décision d'acceptation et admission de collecte. | Intention persistée avec la décision, récupérable sans reclassifier. |
+| C04 | La réservation ou son association échoue pendant la sauvegarde de la décision. | Aucun commit partiel : décision, nouveau job et association sont annulés ensemble. Une relance explicite peut reclassifier. |
 | C05 | Le quota empêche la collecte d'un candidat accepté. | Classification conservée, demande différée ; aucun job fictif en erreur. |
 | R01 | Deux envois de la même commande de relance, dont le second arrive après la fin du job créé. | Même tentative retrouvée ; aucune seconde création. |
 | R02 | Deux utilisateurs relancent simultanément un travail équivalent admissible. | Un seul nouveau job et associations des demandes autorisées. |
@@ -356,7 +382,7 @@ une déclaration de tests exécutés ou déjà réussis.
 | Q03 | Alice dépasse son quota ; Bob dispose du sien. | Alice est différée ; Bob peut créer le travail sans blocage global de l'URL. |
 | Q04 | Un utilisateur rejoint un job, ou un worker reprend le même job après interruption. | Aucun débit supplémentaire du quota de création. |
 | Q05 | La capacité d'attente est épuisée. | Refus d'admission explicite et récupérable ; pas de file mémoire illimitée. |
-| E01 | Le processus s'arrête après l'enregistrement d'une tâche mais avant son lancement. | Le worker retrouve la tâche persistée. |
+| E01 | Le processus s'arrête après le commit d'un job de collecte mais avant sa prise en charge. | Le worker retrouve le job `pending` ; les `running` interrompus deviennent des erreurs. |
 | E02 | La connexion HTTP disparaît alors que la classification a été acceptée par le backend. | La tâche reste suivie indépendamment de la requête et son résultat est persisté. |
 | E03 | Un worker termine après expiration de sa prise en charge et reprise par un autre. | Son résultat et son erreur tardive sont refusés. |
 | E04 | Une écriture de dataset échoue pendant la finalisation. | Toutes les écritures de cette transaction sont annulées et le job ne devient pas `done`. |
@@ -376,8 +402,14 @@ réussis et analyse Ruff sans erreur. Le test de concurrence provoque l'attente 
 deux connexions PostgreSQL distinctes sur le verrou d'une même URL. Le test HTTP
 utilise l'authentification et les associations SQL réelles : utilisateur associé
 autorisé, tiers refusé, et même réponse `404` pour un job absent ou inaccessible.
-Les scénarios concernant les futures relances, quotas de création et workers
-durables restent des objectifs, pas des garanties déjà testées.
+Vérification des trois corrections du 2026-09-18 : 354 tests Python réussis sur
+PostgreSQL 16 temporaire, un test de pare-feu ignoré ; 26 tests frontend et build
+réussis, Ruff sans erreur. Les 17 tests de [test_collection_workflow.py](../tests/test_collection_workflow.py)
+couvrent notamment le rollback réel, l'acceptation concurrente de deux candidats,
+les claims concurrents, l'invisibilité avant commit, la reprise au démarrage,
+la capacité et l'arrêt des consommateurs, et les classifications répétées.
+Les futures relances, quotas de création, classifications persistantes et leases
+restent des objectifs, pas des garanties déjà testées.
 
 ## Références de conception
 

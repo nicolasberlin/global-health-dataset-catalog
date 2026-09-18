@@ -173,38 +173,37 @@ async def start_candidate_classification(
     return _repository_candidate_to_dict(row) if row else None
 
 
-async def complete_candidate_classification(
+async def _complete_candidate_classification(
+    connection: AsyncConnection[DictRow],
     candidate_id: UUID,
     owner_id: str,
     classification: RepositoryClassification,
 ) -> dict[str, object]:
-    """Persist one final LLM decision only from the classifying state."""
+    """Persist a decision within the transaction that also reserves its collection."""
 
     status = "accepted" if classification.accepted else "rejected"
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        row = await _fetchone(
-            connection,
-            f"""
-            UPDATE repository_candidates AS candidate
-            SET classification_status = %s,
-                classification = %s,
-                error = '',
-                updated_at = NOW()
-            FROM search_sessions AS session
-            WHERE candidate.id = %s
-              AND candidate.search_session_id = session.id
-              AND session.owner_id = %s
-              AND candidate.classification_status = 'classifying'
-            RETURNING {_RETURNING_CANDIDATE_COLUMNS}
-            """,
-            (
-                status,
-                _jsonb(asdict(classification)),
-                candidate_id,
-                _normalized_owner_id(owner_id),
-            ),
-        )
+    row = await _fetchone(
+        connection,
+        f"""
+        UPDATE repository_candidates AS candidate
+        SET classification_status = %s,
+            classification = %s,
+            error = '',
+            updated_at = NOW()
+        FROM search_sessions AS session
+        WHERE candidate.id = %s
+          AND candidate.search_session_id = session.id
+          AND session.owner_id = %s
+          AND candidate.classification_status = 'classifying'
+        RETURNING {_RETURNING_CANDIDATE_COLUMNS}
+        """,
+        (
+            status,
+            _jsonb(asdict(classification)),
+            candidate_id,
+            _normalized_owner_id(owner_id),
+        ),
+    )
     if row is None:
         raise RuntimeError("Candidate is missing or is not being classified.")
     return _repository_candidate_to_dict(row)

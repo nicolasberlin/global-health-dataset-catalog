@@ -10,6 +10,7 @@ import pytest
 from app.db import connection as db_connection
 from app.db import schema as db_schema
 from app.db import serialization as db_serialization
+from app.db.repository_candidates import _complete_candidate_classification
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from psycopg import sql as pg_sql
@@ -123,15 +124,16 @@ async def _create_repository_candidate(
 async def _accept_repository_candidate(database, candidate_id, owner_id=TEST_OWNER_ID):
     started = await database.start_candidate_classification(candidate_id, owner_id)
     assert started is not None
-    return await database.complete_candidate_classification(
-        candidate_id,
-        owner_id,
-        RepositoryClassification(
-            relevance_label="relevant",
-            reason="The metadata matches the query.",
-            ensemble={},
-        ),
-    )
+    # Arrange legacy accepted candidates to test reservation/read primitives in isolation.
+    async with db_connection._require_database_pool().connection() as connection:
+        async with connection.transaction():
+            return await _complete_candidate_classification(
+                connection, candidate_id, owner_id,
+                RepositoryClassification(
+                    relevance_label="relevant", reason="The metadata matches the query.",
+                    ensemble={},
+                ),
+            )
 
 
 async def test_shared_job_access_requires_an_explicit_authorized_association(database):
@@ -2163,26 +2165,21 @@ async def test_repository_collection_deduplicates_url_across_searches(database):
     }
 
 
-async def test_interrupted_collection_jobs_are_marked_error_on_recovery(database):
+async def test_restart_preserves_pending_and_fails_only_running_jobs(database):
     await database.init_database()
-    pending = await database.create_collection_job(
-        "https://repository.example.org/datasets/pending"
-    )
-    running = await database.create_collection_job(
-        "https://repository.example.org/datasets/running"
-    )
+    pending = await database.create_collection_job("https://repository.example.org/pending")
+    running = await database.create_collection_job("https://repository.example.org/running")
     await database.mark_collection_job_running(int(running["id"]))
 
-    recovered_count = await database.mark_interrupted_collection_jobs_error()
-
-    assert recovered_count == 2
-    for job_id in (pending["id"], running["id"]):
-        recovered = await database.get_collection_job(int(job_id))
-        assert recovered is not None
-        assert recovered["status"] == "error"
-        assert recovered["message"] == "Collection interrupted."
-        assert recovered["error"] == "Collection interrupted by application restart."
-        assert recovered["finished_at"] != ""
+    assert await database.mark_interrupted_collection_jobs_error() == 1
+    assert await database.mark_interrupted_collection_jobs_error() == 0
+    queued = await database.get_collection_job(pending["id"])
+    interrupted = await database.get_collection_job(running["id"])
+    assert queued["status"] == "pending"
+    assert queued["finished_at"] == ""
+    assert interrupted["status"] == "error"
+    assert interrupted["error"] == "Collection interrupted by application restart."
+    assert interrupted["finished_at"] != ""
 
 
 @pytest.mark.parametrize("terminal_state", ["empty", "error"])
