@@ -12,20 +12,11 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik
-      - traefik.http.routers.ai-commons.entrypoints=websecure
-      - traefik.http.routers.ai-commons.tls=true
-      - traefik.http.routers.ai-commons.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.ai-commons.entrypoints=web
       - traefik.http.routers.ai-commons.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons`)
       - traefik.http.routers.ai-commons.priority=10
       - traefik.http.middlewares.strip-ai-commons.stripprefix.prefixes=/ai-commons
-      - traefik.http.middlewares.ai-commons-hsts.headers.stsseconds=31536000
-      - traefik.http.routers.ai-commons.middlewares=strip-ai-commons,ai-commons-hsts
-      - traefik.http.routers.ai-commons-http.entrypoints=web
-      - traefik.http.routers.ai-commons-http.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons`)
-      - traefik.http.routers.ai-commons-http.middlewares=ai-commons-https
-      - traefik.http.routers.ai-commons-http.service=noop@internal
-      - traefik.http.middlewares.ai-commons-https.redirectscheme.scheme=https
-      - traefik.http.middlewares.ai-commons-https.redirectscheme.permanent=true
+      - traefik.http.routers.ai-commons.middlewares=strip-ai-commons
       - traefik.http.services.ai-commons.loadbalancer.server.port=5173
 
   ai-commons-api:
@@ -66,13 +57,11 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik
-      - traefik.http.routers.ai-commons-api.entrypoints=websecure
-      - traefik.http.routers.ai-commons-api.tls=true
-      - traefik.http.routers.ai-commons-api.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.ai-commons-api.entrypoints=web
       - traefik.http.routers.ai-commons-api.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons/api`)
       - traefik.http.routers.ai-commons-api.priority=100
       - traefik.http.middlewares.strip-ai-commons-api.stripprefix.prefixes=/ai-commons/api
-      - traefik.http.routers.ai-commons-api.middlewares=strip-ai-commons-api,ai-commons-hsts
+      - traefik.http.routers.ai-commons-api.middlewares=strip-ai-commons-api
       - traefik.http.services.ai-commons-api.loadbalancer.server.port=8001
 
   postgres:

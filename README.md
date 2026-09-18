@@ -146,8 +146,8 @@ The token is stored only in that browser tab's `sessionStorage`; it is not a
 Vite build variable and must never be compiled into the frontend.
 
 The local Compose file publishes PostgreSQL only on `127.0.0.1`. The main
-`docker-compose.yml` is for HTTPS deployment behind the external Traefik and
-does not publish PostgreSQL. See [Secure deployment](docs/DEPLOYMENT.md) for
+`docker-compose.yml` is for internal EPFL HTTP deployment on port 1312 behind the external Traefik and
+does not publish PostgreSQL. See [Deployment on EPFL](docs/DEPLOYMENT.md) for
 the required domain, certificates, and container egress policy.
 
 For a more detailed setup and troubleshooting guide, read

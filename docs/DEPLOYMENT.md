@@ -1,23 +1,30 @@
-# Secure deployment
+# Deployment on the internal EPFL network
 
 The main `docker-compose.yml` targets an existing Traefik on the external
-`traefik` network. It requires HTTPS and does not publish database or API ports.
+`traefik` network. The gpu217 deployment uses HTTP on external port 1312,
+without TLS or HTTPS redirection. It does not publish database or API ports.
 For a Python backend running on your laptop, use `docker-compose.local.yml`
 instead; its database port is bound only to `127.0.0.1`.
 
 ## Configure the external Traefik
 
-Merge [the example static configuration](../deploy/traefik.example.yml) into
-the actual Traefik configuration. Adapt its operations email and persistent
-ACME storage, and ensure ports 80/443 are routed to Traefik. Protect the ACME
-file with mode 600. The application Compose file does not start or reconfigure
-the external Traefik.
+The existing `web` entrypoint must receive traffic from host port 1312.
+[The example static configuration](../deploy/traefik.example.yml) listens on
+container port 80, which requires a `1312:80` port mapping on the external
+Traefik container. Preserve the existing mapping if HTTP already reaches
+Traefik successfully. The application Compose file does not start or reconfigure
+that external Traefik.
+
+Remove any global HTTP-to-HTTPS redirection or default TLS configuration on
+`web` in the actual Traefik configuration, including command-line flags.
+If its static configuration changes, recreate/restart the external Traefik
+through its own deployment. No certificate resolver or port 443 is required
+for this internal HTTP deployment.
 
 Set the deployment environment (in addition to the secrets in the README):
 
 ```bash
-export PUBLIC_HOST="catalog.example.org"  # hostname only, without scheme/path
-export TRAEFIK_CERT_RESOLVER="letsencrypt"  # must exist in the external Traefik
+export PUBLIC_HOST="gpu217.rcp.epfl.ch"  # hostname only, without scheme/port/path
 # Optional: public CIDRs routed to internal/admin services in your infrastructure.
 # Comma-separated, strict IPv4/IPv6 CIDRs; DNS and PostgreSQL exceptions take precedence.
 export EGRESS_BLOCKED_CIDRS=""
@@ -25,17 +32,10 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-The domain's DNS must point to the deployment. The example resolver obtains a
-certificate with ACME HTTP-01. If your Traefik uses another resolver, set its
-name in `TRAEFIK_CERT_RESOLVER`. Having `tls=true` alone does not provision a
-trusted certificate.
-
-Both application routers use `websecure`, TLS and the configured `Host` rule.
-A separate `web` router redirects `/ai-commons` and its API paths to HTTPS.
-The example static configuration additionally redirects all HTTP traffic.
-HTTPS responses include one year of HSTS, without extending it to subdomains.
-Clients must use an HTTPS URL before sending a Bearer token: a redirect cannot
-protect credentials already transmitted in an initial HTTP request.
+Open `http://gpu217.rcp.epfl.ch:1312/ai-commons/`.
+Both application routers use `web` and the configured `Host` rule. The API
+router keeps its higher priority so `/ai-commons/api` reaches port 8001.
+There is no TLS, HSTS, or HTTPS redirect middleware in this deployment.
 
 ## Collection execution
 
@@ -123,19 +123,19 @@ to remove its process-level database exception entirely.
 
 ## Verify the deployed infrastructure
 
-After configuring the real hostname and certificate:
+After deploying on gpu217:
 
 ```bash
-curl -I "http://${PUBLIC_HOST}/ai-commons/"
-curl --fail --show-error --silent "https://${PUBLIC_HOST}/ai-commons/api/health"
-curl -I "https://${PUBLIC_HOST}/ai-commons/"
+curl -I "http://${PUBLIC_HOST}:1312/ai-commons/"
+curl --fail --show-error --silent "http://${PUBLIC_HOST}:1312/ai-commons/api/health"
 docker compose port postgres 5432
 docker compose exec ai-commons-api nft list table inet collector_egress
 ```
 
-Expect an HTTPS redirect, a successful health response with certificate
-verification enabled, HSTS on HTTPS responses, and no published PostgreSQL
-port. The firewall inspection uses `docker exec` as the trusted container
+Expect a successful frontend response without an HTTPS redirect, a successful
+health response, and no published PostgreSQL port. If curl succeeds but the
+browser still redirects, clear its cached redirect/site data and retry the
+explicit HTTP URL. The firewall inspection uses `docker exec` as the trusted container
 administrator; the application process itself has no capabilities. Verify
 its `Uid`, `Gid`, `CapEff`, `CapBnd`, and `NoNewPrivs` in `/proc/1/status`.
 Also check from another machine that no legacy port mapping or host/provider

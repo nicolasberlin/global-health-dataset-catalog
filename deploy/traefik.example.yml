@@ -1,26 +1,13 @@
-# Merge into the external Traefik's STATIC configuration; adjust email/storage.
-# Mount a persistent /letsencrypt directory writable by Traefik.
+# Example for the internal EPFL HTTP deployment.
+# Merge into the external Traefik STATIC configuration.
+# With this container port, publish host port 1312 as "1312:80".
+# Preserve the existing web address if Traefik already serves HTTP on port 1312.
+# Do not enable HTTP-to-HTTPS redirection or default TLS on this entrypoint.
 entryPoints:
   web:
     address: ":80"
-    http:
-      redirections:
-        entryPoint:
-          to: websecure
-          scheme: https
-          permanent: true
-  websecure:
-    address: ":443"
 
 providers:
   docker:
     exposedByDefault: false
     network: traefik
-
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: replace-with-your-operations-email@example.org
-      storage: /letsencrypt/acme.json
-      httpChallenge:
-        entryPoint: web
