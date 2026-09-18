@@ -5,9 +5,9 @@ from psycopg.rows import DictRow
 
 from .connection import _fetchall, _fetchone, _require_database_pool
 
-# Pre-stable policy: old local dev schemas are disposable. Recreate the DB
-# when the schema changes; data-preserving migrations start at stable release.
-CURRENT_SCHEMA_VERSION = 1
+# Historical pre-baseline schemas are unsupported. Explicit versioned migrations
+# preserve data for supported baselines, including the job associations in v2.
+CURRENT_SCHEMA_VERSION = 3
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",
     "health_probability",
@@ -331,6 +331,13 @@ COLLECTION_JOB_INDEXES = (
     """,
 )
 COLLECTION_JOB_STATUSES = ("pending", "running", "done", "error")
+COLLECTION_JOB_CANDIDATES_SCHEMA = """
+CREATE TABLE collection_job_candidates (
+    job_id INTEGER NOT NULL REFERENCES collection_jobs(id) ON DELETE CASCADE,
+    candidate_id UUID NOT NULL REFERENCES repository_candidates(id) ON DELETE CASCADE,
+    PRIMARY KEY(job_id, candidate_id)
+)
+"""
 REPOSITORY_PERSISTENCE_COLUMNS = {
     "search_sessions": {
         "id",
@@ -356,6 +363,7 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
         "error",
     },
     "collection_jobs": {"kind", "repository_candidate_id"},
+    "collection_job_candidates": {"job_id", "candidate_id"},
 }
 REPOSITORY_PERSISTENCE_INDEXES = {
     "collection_jobs_active_repository_candidate_idx",
@@ -387,6 +395,7 @@ MANAGED_TABLES = (
     "repository_candidates",
     "dataset_discovery_observations",
     "collection_jobs",
+    "collection_job_candidates",
 )
 
 
@@ -434,6 +443,10 @@ async def _apply_schema_migrations(connection: AsyncConnection[DictRow]) -> None
 def _migration_for_version(version: int):
     if version == 0:
         return _migrate_0_to_1
+    if version == 1:
+        return _migrate_1_to_2
+    if version == 2:
+        return _migrate_2_to_3
 
     raise RuntimeError(f"No migration registered for schema version {version}.")
 
@@ -461,6 +474,39 @@ async def _migrate_0_to_1(connection: AsyncConnection[DictRow]) -> None:
 
     for schema in INITIAL_SCHEMA_STATEMENTS:
         await connection.execute(schema)
+
+
+async def _migrate_1_to_2(connection: AsyncConnection[DictRow]) -> None:
+    # Preserve known ownership. Historical URL matches alone are not access grants.
+    await connection.execute(COLLECTION_JOB_CANDIDATES_SCHEMA)
+    await connection.execute(
+        """
+        INSERT INTO collection_job_candidates (job_id, candidate_id)
+        SELECT id, repository_candidate_id FROM collection_jobs
+        WHERE repository_candidate_id IS NOT NULL
+        """
+    )
+
+
+async def _migrate_2_to_3(connection: AsyncConnection[DictRow]) -> None:
+    # Preserve every candidate and distinguish discovery from an explicit request.
+    await connection.execute("""
+        ALTER TABLE repository_candidates
+        DROP CONSTRAINT repository_candidates_classification_status_check,
+        DROP CONSTRAINT repository_candidates_check,
+        ADD CONSTRAINT repository_candidates_classification_status_check
+            CHECK(classification_status IN (
+                'pending', 'queued', 'classifying', 'accepted', 'rejected', 'error'
+            )),
+        ADD CONSTRAINT repository_candidates_check CHECK(
+            (classification_status IN ('pending', 'queued', 'classifying')
+                AND classification IS NULL AND error = '')
+            OR (classification_status IN ('accepted', 'rejected')
+                AND classification IS NOT NULL AND error = '')
+            OR (classification_status = 'error'
+                AND classification IS NULL AND btrim(error) <> '')
+        )
+    """)
 
 
 async def _assert_database_can_be_initialized(

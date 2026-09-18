@@ -44,125 +44,163 @@ async def reserve_repository_candidate_collection_job(
     candidate_id: UUID,
     owner_id: str,
 ) -> CollectionJobReservation:
-    """Create one pending job unless the accepted candidate is already handled.
-
-    Locking the candidate serializes the check-and-insert sequence, while the
-    partial unique index independently enforces one active job per candidate.
-    Only pending or running jobs block a new attempt; terminal jobs remain as
-    immutable attempt history.
-    """
+    """Explicit internal reservation; reads must use get_candidate_collection instead."""
 
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         async with connection.transaction():
-            candidate = await _fetchone(
-                connection,
-                """
-                SELECT candidate.id, candidate.url, candidate.classification_status
-                FROM repository_candidates AS candidate
-                JOIN search_sessions AS session
-                  ON session.id = candidate.search_session_id
-                WHERE candidate.id = %s AND session.owner_id = %s
-                FOR UPDATE OF candidate
-                """,
-                (candidate_id, _normalized_owner_id(owner_id)),
+            return await _reserve_repository_candidate_collection_job(
+                connection, candidate_id, owner_id,
             )
-            if candidate is None:
-                raise ValueError("Repository candidate not found.")
-            if str(candidate["classification_status"]) != "accepted":
-                raise ValueError("Only an accepted candidate can be collected.")
 
-            source_url = require_http_url(str(candidate["url"]))
-            # Different searches can persist different candidate IDs for the
-            # same URL, so URL-level serialization is also required.
-            await connection.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                (source_url,),
-            )
-            reservation_state = await _fetchone(
-                connection,
-                """
-                SELECT
-                    EXISTS (
-                        SELECT 1
-                        FROM collected_datasets AS dataset
-                        WHERE dataset.dataset_url = %s
-                           OR EXISTS (
-                               SELECT 1
-                               FROM dataset_discovery_observations AS observation
-                               WHERE observation.dataset_id = dataset.id
-                                 AND observation.source_url = %s
-                           )
-                    ) AS already_collected,
-                    active_job.id,
-                    active_job.source_url,
-                    active_job.kind,
-                    active_job.repository_candidate_id,
-                    active_job.status,
-                    active_job.saved_count,
-                    active_job.discovered_count,
-                    active_job.analyzed_count,
-                    active_job.accepted_count,
-                    active_job.rejected_count,
-                    active_job.invalid_distribution_count,
-                    active_job.discovery_methods,
-                    active_job.message,
-                    active_job.error,
-                    active_job.created_at,
-                    active_job.updated_at,
-                    active_job.finished_at
-                FROM (VALUES (1)) AS singleton(value)
-                LEFT JOIN LATERAL (
-                    SELECT id, source_url, kind, repository_candidate_id,
-                           status, saved_count, discovered_count,
-                           analyzed_count, accepted_count, rejected_count,
-                           invalid_distribution_count, discovery_methods, message,
-                           error, created_at, updated_at, finished_at
-                    FROM collection_jobs
-                    WHERE (
-                        repository_candidate_id = %s
-                        OR (kind = 'repository_candidate' AND source_url = %s)
-                    )
-                      AND status IN ('pending', 'running')
-                    ORDER BY id DESC
-                    LIMIT 1
-                ) AS active_job ON TRUE
-                """,
-                (source_url, source_url, candidate_id, source_url),
-            )
-            if reservation_state is None:
-                raise RuntimeError("Automatic collection lookup returned no row.")
-            if bool(reservation_state["already_collected"]):
-                return CollectionJobReservation(
-                    job=None,
-                    created=False,
-                    already_collected=True,
-                )
 
-            if reservation_state["id"] is not None:
-                return CollectionJobReservation(
-                    job=_collection_job_to_dict(reservation_state),
-                    created=False,
-                    already_collected=False,
-                )
+async def _reserve_repository_candidate_collection_job(
+    connection: AsyncConnection[DictRow],
+    candidate_id: UUID,
+    owner_id: str,
+) -> CollectionJobReservation:
+    """Reserve on the caller's transaction, including candidate associations."""
 
-            new_job = await _insert_collection_job(
-                connection,
-                source_url,
-                kind="repository_candidate",
-                repository_candidate_id=candidate_id,
+    candidate = await _fetchone(
+        connection,
+        """
+        SELECT candidate.id, candidate.url, candidate.classification_status
+        FROM repository_candidates AS candidate
+        JOIN search_sessions AS session
+          ON session.id = candidate.search_session_id
+        WHERE candidate.id = %s AND session.owner_id = %s
+        FOR UPDATE OF candidate
+        """,
+        (candidate_id, _normalized_owner_id(owner_id)),
+    )
+    if candidate is None:
+        raise ValueError("Repository candidate not found.")
+    if str(candidate["classification_status"]) != "accepted":
+        raise ValueError("Only an accepted candidate can be collected.")
+
+    source_url = require_http_url(str(candidate["url"]))
+    # Different searches can persist different candidate IDs for the
+    # same URL, so URL-level serialization is also required.
+    await connection.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (source_url,),
+    )
+    reservation_state = await _fetchone(
+        connection,
+        """
+        SELECT
+            EXISTS (
+                SELECT 1
+                FROM collected_datasets AS dataset
+                WHERE dataset.dataset_url = %s
+                   OR EXISTS (
+                       SELECT 1
+                       FROM dataset_discovery_observations AS observation
+                       WHERE observation.dataset_id = dataset.id
+                         AND observation.source_url = %s
+                   )
+            ) AS already_collected,
+            active_job.id,
+            active_job.source_url,
+            active_job.kind,
+            active_job.repository_candidate_id,
+            active_job.status,
+            active_job.saved_count,
+            active_job.discovered_count,
+            active_job.analyzed_count,
+            active_job.accepted_count,
+            active_job.rejected_count,
+            active_job.invalid_distribution_count,
+            active_job.discovery_methods,
+            active_job.message,
+            active_job.error,
+            active_job.created_at,
+            active_job.updated_at,
+            active_job.finished_at
+        FROM (VALUES (1)) AS singleton(value)
+        LEFT JOIN LATERAL (
+            SELECT id, source_url, kind, repository_candidate_id,
+                   status, saved_count, discovered_count,
+                   analyzed_count, accepted_count, rejected_count,
+                   invalid_distribution_count, discovery_methods, message,
+                   error, created_at, updated_at, finished_at
+            FROM collection_jobs
+            WHERE (
+                repository_candidate_id = %s
+                OR (kind = 'repository_candidate' AND source_url = %s)
             )
-            if new_job is None:
-                raise RuntimeError("Collection job insert did not return a row.")
-            return CollectionJobReservation(
-                job=_collection_job_to_dict(new_job),
-                created=True,
-                already_collected=False,
+              AND status IN ('pending', 'running')
+            ORDER BY id DESC
+            LIMIT 1
+        ) AS active_job ON TRUE
+        """,
+        (source_url, source_url, candidate_id, source_url),
+    )
+    if reservation_state is None:
+        raise RuntimeError("Automatic collection lookup returned no row.")
+    if bool(reservation_state["already_collected"]):
+        return CollectionJobReservation(
+            job=None,
+            created=False,
+            already_collected=True,
+        )
+
+    if reservation_state["id"] is not None:
+        await _associate_job_candidate(connection, reservation_state["id"], candidate_id)
+        return CollectionJobReservation(
+            job=_collection_job_to_dict(reservation_state),
+            created=False,
+            already_collected=False,
+        )
+
+    new_job = await _insert_collection_job(
+        connection,
+        source_url,
+        kind="repository_candidate",
+        repository_candidate_id=candidate_id,
+    )
+    if new_job is None:
+        raise RuntimeError("Collection job insert did not return a row.")
+    await _associate_job_candidate(connection, new_job["id"], candidate_id)
+    return CollectionJobReservation(
+        job=_collection_job_to_dict(new_job),
+        created=True,
+        already_collected=False,
+    )
+
+
+async def _associate_job_candidate(connection, job_id: int, candidate_id: UUID) -> None:
+    await connection.execute(
+        """
+        INSERT INTO collection_job_candidates (job_id, candidate_id)
+        VALUES (%s, %s) ON CONFLICT DO NOTHING
+        """,
+        (job_id, candidate_id),
+    )
+
+
+async def get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, object] | None:
+    """Read only jobs explicitly associated with one of the owner's candidates."""
+    async with _require_database_pool().connection() as connection:
+        await _require_current_schema(connection)
+        row = await _fetchone(
+            connection,
+            """
+            SELECT job.* FROM collection_jobs AS job
+            WHERE job.id = %s AND EXISTS (
+                SELECT 1 FROM collection_job_candidates AS association
+                JOIN repository_candidates AS candidate ON candidate.id = association.candidate_id
+                JOIN search_sessions AS session ON session.id = candidate.search_session_id
+                WHERE association.job_id = job.id AND session.owner_id = %s
             )
+            """,
+            (job_id, _normalized_owner_id(owner_id)),
+        )
+    return _collection_job_to_dict(row) if row else None
 
 
 async def mark_interrupted_collection_jobs_error() -> int:
-    """Fail process-local jobs left active by a previous application process.
+    """Fail interrupted running jobs; pending jobs remain available to the worker.
 
     This recovery is valid only while the backend runs as one application
     process. A multi-process deployment requires durable ownership and leases so
@@ -180,12 +218,74 @@ async def mark_interrupted_collection_jobs_error() -> int:
                 error = 'Collection interrupted by application restart.',
                 updated_at = NOW(),
                 finished_at = NOW()
-            WHERE status IN ('pending', 'running')
+            WHERE status = 'running'
             RETURNING id
             """,
         )
 
     return len(rows)
+
+
+async def claim_pending_collection_job() -> dict[str, object] | None:
+    """Claim one persisted job only when a worker has a free execution slot."""
+
+    async with _require_database_pool().connection() as connection:
+        await _require_current_schema(connection)
+        row = await _fetchone(
+            connection,
+            """
+            UPDATE collection_jobs
+            SET status = 'running', message = 'Collection in progress.', updated_at = NOW()
+            WHERE id = (
+                SELECT id FROM collection_jobs WHERE status = 'pending'
+                ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+            ) AND status = 'pending'
+            RETURNING *
+            """,
+        )
+    return _collection_job_to_dict(row) if row else None
+
+
+async def get_candidate_collection(
+    candidate_id: UUID, owner_id: str,
+) -> CollectionJobReservation | None:
+    """Read existing follow-up without reserving, associating, or retrying a job.
+
+    The latest job associated with this candidate wins over unrelated work at
+    the same URL. Legacy accepted candidates without follow-up stay explicit.
+    """
+
+    async with _require_database_pool().connection() as connection:
+        await _require_current_schema(connection)
+        row = await _fetchone(
+            connection,
+            """
+            SELECT existing_job.*, EXISTS (
+                SELECT 1 FROM collected_datasets AS dataset
+                WHERE dataset.dataset_url = candidate.url OR EXISTS (
+                    SELECT 1 FROM dataset_discovery_observations AS observation
+                    WHERE observation.dataset_id = dataset.id
+                      AND observation.source_url = candidate.url
+                )
+            ) AS already_collected
+            FROM repository_candidates AS candidate
+            JOIN search_sessions AS session ON session.id = candidate.search_session_id
+            LEFT JOIN LATERAL (
+                SELECT job.* FROM collection_jobs AS job
+                JOIN collection_job_candidates AS association ON association.job_id = job.id
+                WHERE association.candidate_id = candidate.id
+                ORDER BY job.id DESC LIMIT 1
+            ) AS existing_job ON TRUE
+            WHERE candidate.id = %s AND session.owner_id = %s
+              AND candidate.classification_status = 'accepted'
+            """,
+            (candidate_id, _normalized_owner_id(owner_id)),
+        )
+    if row is None:
+        return None
+    if row["id"] is not None:
+        return CollectionJobReservation(_collection_job_to_dict(row), False, False)
+    return CollectionJobReservation(None, False, bool(row["already_collected"]))
 
 
 async def _insert_collection_job(

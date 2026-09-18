@@ -48,7 +48,8 @@ Detailed design: [Multi-Repository Architecture](props/multi-repository-architec
 
 - replace static MVP tokens with institutional authentication and role-based
   authorization;
-- replace process-local FastAPI background tasks with a durable queue and worker;
+- extend the PostgreSQL collection queue with worker leases and multi-instance
+  recovery for both classification and collection;
 - define retries, idempotency, cancellation, and dead-letter handling;
 - deploy PostgreSQL with backups, migrations, pooling, and least-privilege roles;
 - move secrets into environment-specific secret management;

@@ -1,23 +1,30 @@
-# Secure deployment
+# Deployment on the internal EPFL network
 
 The main `docker-compose.yml` targets an existing Traefik on the external
-`traefik` network. It requires HTTPS and does not publish database or API ports.
+`traefik` network. The gpu217 deployment uses HTTP on external port 1312,
+without TLS or HTTPS redirection. It does not publish database or API ports.
 For a Python backend running on your laptop, use `docker-compose.local.yml`
 instead; its database port is bound only to `127.0.0.1`.
 
 ## Configure the external Traefik
 
-Merge [the example static configuration](../deploy/traefik.example.yml) into
-the actual Traefik configuration. Adapt its operations email and persistent
-ACME storage, and ensure ports 80/443 are routed to Traefik. Protect the ACME
-file with mode 600. The application Compose file does not start or reconfigure
-the external Traefik.
+The existing `web` entrypoint must receive traffic from host port 1312.
+[The example static configuration](../deploy/traefik.example.yml) listens on
+container port 80, which requires a `1312:80` port mapping on the external
+Traefik container. Preserve the existing mapping if HTTP already reaches
+Traefik successfully. The application Compose file does not start or reconfigure
+that external Traefik.
+
+Remove any global HTTP-to-HTTPS redirection or default TLS configuration on
+`web` in the actual Traefik configuration, including command-line flags.
+If its static configuration changes, recreate/restart the external Traefik
+through its own deployment. No certificate resolver or port 443 is required
+for this internal HTTP deployment.
 
 Set the deployment environment (in addition to the secrets in the README):
 
 ```bash
-export PUBLIC_HOST="catalog.example.org"  # hostname only, without scheme/path
-export TRAEFIK_CERT_RESOLVER="letsencrypt"  # must exist in the external Traefik
+export PUBLIC_HOST="gpu217.rcp.epfl.ch"  # hostname only, without scheme/port/path
 # Optional: public CIDRs routed to internal/admin services in your infrastructure.
 # Comma-separated, strict IPv4/IPv6 CIDRs; DNS and PostgreSQL exceptions take precedence.
 export EGRESS_BLOCKED_CIDRS=""
@@ -25,17 +32,52 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-The domain's DNS must point to the deployment. The example resolver obtains a
-certificate with ACME HTTP-01. If your Traefik uses another resolver, set its
-name in `TRAEFIK_CERT_RESOLVER`. Having `tls=true` alone does not provision a
-trusted certificate.
+Open `http://gpu217.rcp.epfl.ch:1312/ai-commons/`.
+Both application routers use `web` and the configured `Host` rule. The API
+router keeps its higher priority so `/ai-commons/api` reaches port 8001.
+There is no TLS, HSTS, or HTTPS redirect middleware in this deployment.
 
-Both application routers use `websecure`, TLS and the configured `Host` rule.
-A separate `web` router redirects `/ai-commons` and its API paths to HTTPS.
-The example static configuration additionally redirects all HTTP traffic.
-HTTPS responses include one year of HSTS, without extending it to subdomains.
-Clients must use an HTTPS URL before sending a Bearer token: a redirect cannot
-protect credentials already transmitted in an initial HTTP request.
+## Collection execution
+
+Run exactly one API process and one API instance against the database. The image
+explicitly starts Uvicorn with `--workers 1`. Do not scale replicas or overlap old
+and new API instances during a deployment: startup recovery would mark the other
+instance's running jobs as interrupted. Stop the old instance before starting
+its replacement. Worker leases and multi-instance recovery are not implemented.
+
+`collection_jobs` is the persistent queue; no additional broker or table is
+required. After startup recovery, backend consumers poll committed `pending`
+jobs. `COLLECTION_MAX_CONCURRENCY` (default `2`) bounds concurrent collection
+runs inside this single process; it is not the number of API processes. Each
+consumer claims one job atomically only when its execution slot is available.
+
+- Pending jobs survive restart and are picked up automatically.
+- Jobs left running by an interrupted process become errors at the next startup;
+  they are not automatically retried.
+- Normal application shutdown stops taking new work and waits for current
+  collections to finish. The container's stop grace period can force termination
+  before that finishes; allow enough time if draining is required.
+- A repeated classification reads its existing collection, including an empty
+  or failed result. No collection retry endpoint is introduced by this change.
+
+Classification decisions and initial collection reservations share one
+transaction. If reservation fails, the decision rolls back too; an explicit
+classification retry may repeat the LLM call. LLM and network calls stay outside
+the transaction. Classification requests now persist as `queued` on existing candidates before
+HTTP 202 is returned. `pending` means discovered but not requested; workers never
+execute it. `CLASSIFICATION_MAX_CONCURRENCY` (default `2`) bounds the separate
+classification pool. Queued requests survive restart; interrupted `classifying`
+candidates become errors and require an explicit `retry=true` request. An LLM
+response lost before persistence may need another call; no automatic retry is
+added. Both pools share the same bounded consumer implementation.
+
+Schema version 3 adds the `queued` state without deleting data or adding a table.
+Deploy backend and frontend together: classification submission now returns an
+intermediate state, followed through authenticated GET requests. The frontend
+restores the most recent search containing repository candidates on load and
+provides a restore button. It never submits its unrequested candidates implicitly.
+This is recovery of the last repository analysis, not a complete search history.
+The single-process/single-instance constraint also applies to classification.
 
 ## Outbound network policy
 
@@ -81,19 +123,19 @@ to remove its process-level database exception entirely.
 
 ## Verify the deployed infrastructure
 
-After configuring the real hostname and certificate:
+After deploying on gpu217:
 
 ```bash
-curl -I "http://${PUBLIC_HOST}/ai-commons/"
-curl --fail --show-error --silent "https://${PUBLIC_HOST}/ai-commons/api/health"
-curl -I "https://${PUBLIC_HOST}/ai-commons/"
+curl -I "http://${PUBLIC_HOST}:1312/ai-commons/"
+curl --fail --show-error --silent "http://${PUBLIC_HOST}:1312/ai-commons/api/health"
 docker compose port postgres 5432
 docker compose exec ai-commons-api nft list table inet collector_egress
 ```
 
-Expect an HTTPS redirect, a successful health response with certificate
-verification enabled, HSTS on HTTPS responses, and no published PostgreSQL
-port. The firewall inspection uses `docker exec` as the trusted container
+Expect a successful frontend response without an HTTPS redirect, a successful
+health response, and no published PostgreSQL port. If curl succeeds but the
+browser still redirects, clear its cached redirect/site data and retry the
+explicit HTTP URL. The firewall inspection uses `docker exec` as the trusted container
 administrator; the application process itself has no capabilities. Verify
 its `Uid`, `Gid`, `CapEff`, `CapBnd`, and `NoNewPrivs` in `/proc/1/status`.
 Also check from another machine that no legacy port mapping or host/provider

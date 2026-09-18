@@ -83,6 +83,7 @@ class CollectorRepositoryClassificationFailure(BaseModel):
 
     voter_id: RepositoryVoterId
     error: str = Field(min_length=1, max_length=2_000)
+    error_code: Literal["classifier_vote_failed"] = "classifier_vote_failed"
 
 
 class CollectorRepositoryClassificationEnsemble(BaseModel):
@@ -150,11 +151,14 @@ class CollectorRepositoryClassification(BaseModel):
 
 
 class CollectorCollectionJob(BaseModel):
+    """Public job view; internal rows must pass through the response presenter."""
+
+    model_config = ConfigDict(extra="forbid")
+
     id: int
     source_url: str
     kind: Literal["source", "repository_candidate"] = "source"
-    repository_candidate_id: Optional[UUID] = None  # noqa: UP045
-    status: str
+    status: Literal["pending", "running", "done", "error"]
     saved_count: int
     discovered_count: int = 0
     analyzed_count: int = 0
@@ -164,6 +168,7 @@ class CollectorCollectionJob(BaseModel):
     discovery_methods: list[str] = Field(default_factory=list)
     message: str = ""
     error: str = ""
+    error_code: Literal["", "collection_failed"] = ""
     created_at: str = ""
     updated_at: str = ""
     finished_at: str = ""
@@ -173,6 +178,7 @@ class CollectorAutomaticCollection(BaseModel):
     state: Literal["pending", "running", "saved", "empty", "error"]
     job: Optional[CollectorCollectionJob] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     error: str = Field(default="", max_length=2_000)
+    error_code: Literal["", "collection_scheduling_failed", "collection_not_scheduled"] = ""
 
 
 class CollectorRepositorySearchItem(BaseModel):
@@ -193,10 +199,11 @@ class CollectorRepositorySearchItem(BaseModel):
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
     classification_status: Literal[
-        "pending", "classifying", "accepted", "rejected", "error"
+        "pending", "queued", "classifying", "accepted", "rejected", "error"
     ] = "pending"
     classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     classification_error: str = Field(default="", max_length=2_000)
+    classification_error_code: Literal["", "classification_failed"] = ""
     automatic_collection: Optional[CollectorAutomaticCollection] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     created_at: str = ""
     updated_at: str = ""
@@ -249,6 +256,7 @@ class CollectorValidation(BaseModel):
     last_modified: str = ""
     content_disposition: str = ""
     error: str = ""
+    error_code: Literal["", "validation_failed"] = ""
 
 
 class CollectorCollectedDataset(BaseModel):

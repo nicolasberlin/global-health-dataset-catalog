@@ -66,6 +66,15 @@ function formatDecisionReason(reason) {
 
 function automaticCollectionStatus(automaticCollection) {
     const job = automaticCollection?.job;
+    if (['retrying', 'unavailable'].includes(automaticCollection?.tracking)) {
+        return {
+            title: 'Collection tracking temporarily unavailable',
+            detail: automaticCollection.tracking === 'retrying'
+                ? 'The server may still be working. Retrying automatically.'
+                : 'Unable to read this job. Check your API access.',
+            tone: 'empty',
+        };
+    }
     const statuses = {
         pending: {
             title: 'Automatic collection pending',

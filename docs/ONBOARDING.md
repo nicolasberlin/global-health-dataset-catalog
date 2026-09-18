@@ -401,10 +401,13 @@ Confirm that `DATABASE_URL` uses the same password as `POSTGRES_PASSWORD`.
 
 The application initializes an empty PostgreSQL database automatically. It does not repair arbitrary partial or obsolete schemas.
 
-The current pre-release baseline includes owned `search_sessions`,
-`repository_candidates`, `api_rate_limits`, and candidate-linked
-`collection_jobs`. No upgrade migration is provided for an older local schema;
-recreate the local database.
+Schema version 2 adds `collection_job_candidates` to the version 1 baseline.
+Startup migrates a supported version 1 database without deleting its data and
+records each job's original candidate association. Earlier shared associations
+were not persisted and cannot be reconstructed from URL matches alone. New and
+reused jobs record every authorized candidate association transactionally.
+Historical schemas predating the supported baseline still require an explicit
+migration or a disposable development database.
 
 For migration decisions, consult:
 

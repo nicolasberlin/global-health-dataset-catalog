@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.classification_worker import classification_workers
+from app.collection_worker import collection_workers
 from app.database import (
     close_database_pool,
     init_database,
@@ -28,7 +30,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await mark_interrupted_search_sessions_error()
         await mark_interrupted_candidate_classifications_error()
         await mark_interrupted_collection_jobs_error()
-        yield
+        async with collection_workers(), classification_workers():
+            yield
     finally:
         await close_database_pool()
 

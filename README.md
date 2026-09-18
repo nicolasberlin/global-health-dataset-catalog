@@ -74,6 +74,7 @@ export RCP_GEMMA_MEDITRON_MODEL="EPFLiGHT/Gemma-3-27B-MeditronFO"
 export RCP_APERTUS_MEDITRON_API_KEY="$RCP_GEMMA_MEDITRON_API_KEY"
 export RCP_APERTUS_MEDITRON_MODEL="EPFLiGHT/Apertus-70B-MeditronFO"
 export COLLECTION_MAX_CONCURRENCY="2"
+export CLASSIFICATION_MAX_CONCURRENCY="2"
 
 # Local development: no token entry, backend bound to loopback only.
 export API_AUTH_MODE="local"
@@ -145,8 +146,8 @@ The token is stored only in that browser tab's `sessionStorage`; it is not a
 Vite build variable and must never be compiled into the frontend.
 
 The local Compose file publishes PostgreSQL only on `127.0.0.1`. The main
-`docker-compose.yml` is for HTTPS deployment behind the external Traefik and
-does not publish PostgreSQL. See [Secure deployment](docs/DEPLOYMENT.md) for
+`docker-compose.yml` is for internal EPFL HTTP deployment on port 1312 behind the external Traefik and
+does not publish PostgreSQL. See [Deployment on EPFL](docs/DEPLOYMENT.md) for
 the required domain, certificates, and container egress policy.
 
 For a more detailed setup and troubleshooting guide, read
@@ -184,7 +185,7 @@ and its progress endpoint remain available. Existing datasets are preserved.
 | --- | --- | --- |
 | `GET` | `/health` | Check that the backend process is running |
 | `POST` | `/collector/search-datasets` | Search PostgreSQL, then external repositories |
-| `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Classify one persisted external candidate |
+| `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Queue an owned classification (202); read its state separately |
 | `GET` | `/collector/collection-jobs/{id}` | Read collection progress |
 | `GET` | `/collector/collected-datasets` | List persisted datasets |
 
@@ -214,6 +215,7 @@ docs/                        Architecture, policy, decisions, onboarding
 Run the standard checks from the repository root:
 
 ```bash
+.venv/bin/pip install -e '.[dev]'
 .venv/bin/ruff check .
 .venv/bin/pytest
 npm --prefix frontend test
@@ -241,6 +243,7 @@ Detailed documentation:
 - [Database Schema](docs/database-schema-diagram.md)
 - [Secure Deployment](docs/DEPLOYMENT.md)
 - [Proposed Multi-Repository Architecture](docs/props/multi-repository-architecture.md)
+- [Collection Workflow Policy — target behavior and acceptance scenarios](docs/collection-workflow-policy.md)
 - [Roadmap](docs/roadmap.md)
 - [ADR 0001: PostgreSQL Only](docs/adr/0001-postgresql-only.md)
 
@@ -253,9 +256,13 @@ Detailed documentation:
 - Repository relevance classification does not independently guarantee health relevance.
 - Source authority and licensing policies are not fully enforced.
 - Dataset deduplication currently uses the normalized dataset URL.
-- Background jobs are process-local. Single-process startup marks interrupted
-  jobs and candidate classifications as errors, but there is no durable worker
-  queue or multi-worker ownership.
+- Collection jobs use PostgreSQL as their persistent queue. Pending jobs survive
+  restart; interrupted running jobs become errors. Acceptance and collection
+  reservation commit together, and repeating a classification only reads its
+  existing follow-up. Run a single API process/instance: there are no worker
+  leases. Classification requests also persist in PostgreSQL before a bounded
+  worker executes them. The frontend restores the last repository analysis.
+  See the [deployment constraints](docs/DEPLOYMENT.md#collection-execution).
 - Static per-user Bearer tokens, search-session ownership, and PostgreSQL
   request quotas protect costly and mutating routes. This MVP mechanism is not
   an OAuth/OIDC login system and should be replaced by an institutional identity

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from .db.api_quotas import APIQuotaDecision, consume_api_quota
+from .db.classification_completion import (
+    CandidateClassificationCompletion,
+    complete_candidate_classification,
+)
 from .db.collected_datasets import (
     list_collected_datasets,
     list_dataset_discovery_observations,
@@ -11,8 +15,11 @@ from .db.collected_datasets import (
 from .db.collection_completion import complete_collection_job
 from .db.collection_jobs import (
     CollectionJobReservation,
+    claim_pending_collection_job,
     create_collection_job,
+    get_candidate_collection,
     get_collection_job,
+    get_collection_job_for_owner,
     mark_collection_job_done,
     mark_collection_job_error,
     mark_collection_job_running,
@@ -21,13 +28,14 @@ from .db.collection_jobs import (
 )
 from .db.connection import close_database_pool, open_database_pool
 from .db.repository_candidates import (
-    complete_candidate_classification,
+    claim_candidate_classification,
     complete_search_session_with_repository_candidates,
+    enqueue_candidate_classification,
     fail_candidate_classification,
     get_repository_candidate,
+    latest_repository_analysis,
     mark_interrupted_candidate_classifications_error,
     save_repository_candidates,
-    start_candidate_classification,
 )
 from .db.schema import DATA_SOURCE_KEY_PATTERN_TEXT, init_database
 from .db.search_sessions import (
@@ -54,6 +62,7 @@ __all__ = (
     "APIQuotaDecision",
     "DATA_SOURCE_KEY_PATTERN_TEXT",
     "CollectionJobReservation",
+    "CandidateClassificationCompletion",
     "DuplicateDataSourceKeyError",
     "InvalidDataSourceKeyError",
     "InvalidDataSourceURLError",
@@ -61,6 +70,7 @@ __all__ = (
     "StoredJSONError",
     "StoredTimestampError",
     "close_database_pool",
+    "claim_pending_collection_job",
     "complete_collection_job",
     "complete_candidate_classification",
     "complete_search_session",
@@ -71,6 +81,8 @@ __all__ = (
     "create_data_source",
     "fail_candidate_classification",
     "get_collection_job",
+    "get_candidate_collection",
+    "get_collection_job_for_owner",
     "get_repository_candidate",
     "get_data_source",
     "init_database",
@@ -91,7 +103,9 @@ __all__ = (
     "save_repository_candidates",
     "save_collected_datasets",
     "search_collected_datasets",
-    "start_candidate_classification",
+    "enqueue_candidate_classification",
+    "claim_candidate_classification",
+    "latest_repository_analysis",
     "upsert_collector_data_source",
     "upsert_data_source",
 )
