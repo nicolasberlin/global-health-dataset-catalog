@@ -26,6 +26,17 @@ La classification persistante et le listing de récupération frontend restent
 également séparés. Les sections suivantes décrivent la cible plus large ; cette
 mise à jour précise les garanties réellement livrées et le compromis accepté.
 
+
+Complément du 2026-09-18 — point 4 livré : les demandes de classification sont
+persistées dans les candidats existants (`queued`) avant la réponse HTTP 202.
+Un worker borné les traite indépendamment des requêtes. Les découvertes `pending`
+ne sont jamais exécutées implicitement. Au redémarrage, `queued` reprend et
+`classifying` devient `error`, avec relance explicite. La dernière analyse de
+l'utilisateur et son suivi sont récupérables par des lectures authentifiées,
+sans nouvel appel IA. La migration v3 préserve les données, sans nouvelle table.
+Cela remplace les réserves ci-dessus concernant la classification persistante ;
+l'historique complet, les leases et les politiques futures restent hors périmètre.
+
 Ce document fixe les comportements à vérifier avant de refactoriser les services.
 Il ne définit pas les critères scientifiques d'acceptation des datasets, une
 nouvelle politique de licence, ni une garantie d'exécution externe exactement une
@@ -315,8 +326,8 @@ Jusqu'à cette migration, conserver l'exploitation avec un seul processus
 applicatif et une seule instance. La file de collecte actuelle reprend les jobs
 `pending`, mais passe les `running` interrompus en erreur au démarrage. Le passage
 à plusieurs instances exige de remplacer cette récupération globale : elle
-pourrait invalider le travail d'un autre processus. La classification reste liée
-à la requête HTTP, même si sa décision finale et sa collecte sont atomiques.
+pourrait invalider le travail d'un autre processus. La classification est désormais consommée depuis les candidats `queued`,
+indépendamment de la requête HTTP ; les interruptions en cours exigent une relance.
 
 ## 9. Écarts vérifiés et ordre de mise en œuvre
 
@@ -333,7 +344,7 @@ comportement même lorsque les numéros de ligne changent.
 | La vue publique retire le candidat d'origine et remplace les diagnostics techniques des jobs, candidats, votes et validations. | [collector_presenters.py](../backend/app/routes/collector_presenters.py) ; [collector_schemas.py](../backend/app/routes/collector_schemas.py) | Réalisé à l'étape 2 ; conserver les diagnostics internes et les champs utiles au suivi. |
 | Les quotas de requêtes ont leur propre transaction ; aucun quota de création de collecte n'existe. | [api_quotas.py](../backend/app/db/api_quotas.py) ; [security.py](../backend/app/security.py) | Conserver lors de l'extraction ; admission et nouveau quota atomiques dans un lot distinct. |
 | Les consommateurs prennent les jobs persistés uniquement quand ils sont disponibles. | [collection_worker.py](../backend/app/collection_worker.py) ; [collection_jobs.py](../backend/app/db/collection_jobs.py), `claim_pending_collection_job` | Réalisé ; attente en PostgreSQL et concurrence bornée. Les prises en charge renouvelables restent futures. |
-| Le démarrage préserve les jobs `pending` et marque les `running` interrompus en erreur. | [main.py](../backend/app/main.py), `lifespan` | Réalisé ; aucune reprise automatique d'un job interrompu en cours. Classification durable distincte. |
+| Le démarrage préserve les jobs `pending` et marque les `running` interrompus en erreur. | [main.py](../backend/app/main.py), `lifespan` | Réalisé ; aucune reprise automatique d'un job interrompu en cours. Classification en file persistante également, sans reprise des appels interrompus. |
 | La sauvegarde des datasets et `done` est déjà atomique. | [collection_completion.py](../backend/app/db/collection_completion.py), `complete_collection_job` | Préserver et tester les échecs de transaction. |
 | Le suivi pendant la vie de l'application est séparé ; le listing de récupération backend reste à ajouter. | [Cycle de vie frontend](frontend-job-lifecycle.md) | Compléter la récupération après rechargement. |
 
@@ -344,7 +355,7 @@ comportement même lorsque les numéros de ligne changent.
 | 3 | Extraction des services de collecte, classification et recherche à comportement constant. | À faire |
 | 4 | Diagnostics structurés, relances explicites, intentions récupérables et protection contre les commandes répétées. | Partiel : transaction décision–job et classification répétée sans relance réalisées ; reste à faire pour l'admission différée et les commandes de relance. |
 | 5 | Quota de nouvelles collectes atomique, délais et limites d'attente. | À faire |
-| 6 | Worker durable, récupération des tâches et listing accessible au frontend. | Partiel : file de collecte PostgreSQL et reprise des `pending` réalisées ; classification, leases et listing à faire. |
+| 6 | Worker durable, récupération des tâches et listing accessible au frontend. | Partiel : file de collecte PostgreSQL et reprise des `pending` réalisées ; classification persistante et restauration de la dernière analyse réalisées ; leases et historique complet à faire. |
 
 Les trois corrections ciblées ci-dessus ont été livrées avant l'extraction des
 services ; cette extraction n'était pas nécessaire à leur correction.
@@ -408,8 +419,10 @@ réussis, Ruff sans erreur. Les 17 tests de [test_collection_workflow.py](../tes
 couvrent notamment le rollback réel, l'acceptation concurrente de deux candidats,
 les claims concurrents, l'invisibilité avant commit, la reprise au démarrage,
 la capacité et l'arrêt des consommateurs, et les classifications répétées.
-Les futures relances, quotas de création, classifications persistantes et leases
-restent des objectifs, pas des garanties déjà testées.
+Les futures politiques de relance, quotas de création et leases restent des
+objectifs. La classification persistante et sa récupération sont maintenant
+couvertes par les tests de `test_classification_workflow.py` et
+`App.classification.test.jsx`.
 
 ## Références de conception
 
@@ -420,3 +433,11 @@ restent des objectifs, pas des garanties déjà testées.
 
 Ces références justifient les mécanismes. Les politiques de partage, les délais
 initiaux et la progression par lots sont des décisions propres à ce projet.
+
+
+Vérification du point 4 (2026-09-18) : 355 tests Python réussis avec PostgreSQL 16
+temporaire, un test d'intégration du pare-feu ignoré ; 33 tests frontend réussis,
+build de production et Ruff validés. Les tests couvrent la migration v2 vers v3,
+l'exécution sans requête HTTP active, les demandes et claims concurrents, la reprise
+après redémarrage, les droits de lecture, la relance explicite et la récupération
+de l'interface sans resoumission automatique.

@@ -42,12 +42,23 @@ rows and backfills only the original candidate association for historical jobs;
 other historical sharing relationships were never persisted. It does not infer
 new access rights from matching URLs.
 
-This change covers mounted-application tracking. Recovering jobs after a full
-page reload or a lost classification response still requires a backend listing
-endpoint. Backend collection workers now recover persisted pending jobs after
-restart; interrupted running jobs become errors. This execution guarantee is
-independent of React state. Classification itself still needs separate durable
-execution; see the [deployment constraints](DEPLOYMENT.md#collection-execution).
+Classification submission now acknowledges persisted work with HTTP 202.
+`useClassifications` polls authenticated candidate reads independently of the
+visible search. A lost acknowledgement causes a GET, never an automatic POST.
+Token changes stop polling and reject late results. Accepted results register
+collection jobs with the common job manager, including after another search.
+
+On load, the frontend restores the owner's last repository analysis through
+`GET /collector/repository-analyses/latest`, then follows queued/classifying
+candidates and active collection jobs. Pending discoveries are not submitted
+again; their Analyze button makes a request explicitly. Errors offer Retry
+analysis. This recovers the last search with repository candidates, not all
+historical searches. Schema version 3 preserves existing candidates and adds
+`queued` to separate discoveries from requested classifications.
+
+Both worker pools recover queued work from PostgreSQL after restart. Interrupted
+running classifications and collections become errors; neither is automatically
+retried. See the [deployment constraints](DEPLOYMENT.md#collection-execution).
 
 Regression coverage includes shared access and migration in PostgreSQL; a shared
 job completing after navigation/search replacement; late classification and

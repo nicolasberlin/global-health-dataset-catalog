@@ -142,13 +142,13 @@ async def get_repository_candidate(
     return _repository_candidate_to_dict(row) if row else None
 
 
-async def start_candidate_classification(
+async def enqueue_candidate_classification(
     candidate_id: UUID,
     owner_id: str,
     *,
     retry: bool = False,
 ) -> dict[str, object] | None:
-    """Atomically reserve a pending candidate, or an explicit errored retry."""
+    """Persist an explicit request; discoveries alone are never consumed by workers."""
 
     eligible_statuses = ("pending", "error") if retry else ("pending",)
     async with _require_database_pool().connection() as connection:
@@ -157,7 +157,7 @@ async def start_candidate_classification(
             connection,
             f"""
             UPDATE repository_candidates AS candidate
-            SET classification_status = 'classifying',
+            SET classification_status = 'queued',
                 classification = NULL,
                 error = '',
                 updated_at = NOW()
@@ -171,6 +171,56 @@ async def start_candidate_classification(
             (candidate_id, _normalized_owner_id(owner_id), list(eligible_statuses)),
         )
     return _repository_candidate_to_dict(row) if row else None
+
+
+async def claim_candidate_classification() -> dict[str, object] | None:
+    """Internal worker claim; ownership comes from the persisted search session."""
+
+    async with _require_database_pool().connection() as connection:
+        await _require_current_schema(connection)
+        row = await _fetchone(
+            connection,
+            f"""
+            UPDATE repository_candidates AS candidate
+            SET classification_status = 'classifying', updated_at = NOW()
+            FROM search_sessions AS session
+            WHERE candidate.id = (
+                SELECT id FROM repository_candidates
+                WHERE classification_status = 'queued'
+                ORDER BY updated_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
+            ) AND candidate.search_session_id = session.id
+              AND candidate.classification_status = 'queued'
+            RETURNING {_CANDIDATE_COLUMNS}, session.owner_id
+        """,
+        )
+    if row is None:
+        return None
+    return {**_repository_candidate_to_dict(row), "owner_id": str(row["owner_id"])}
+
+
+async def latest_repository_analysis(owner_id: str) -> list[dict[str, object]]:
+    """Restore the owner's most recent search containing repository candidates."""
+
+    async with _require_database_pool().connection() as connection:
+        await _require_current_schema(connection)
+        rows = await _fetchall(
+            connection,
+            f"""
+            SELECT {_CANDIDATE_COLUMNS}
+            FROM repository_candidates AS candidate
+            JOIN search_sessions AS session ON session.id = candidate.search_session_id
+            WHERE session.id = (
+                SELECT search.id FROM search_sessions AS search
+                WHERE search.owner_id = %s AND EXISTS (
+                    SELECT 1 FROM repository_candidates WHERE search_session_id = search.id
+                )
+                ORDER BY search.created_at DESC, search.id DESC LIMIT 1
+            ) AND session.owner_id = %s
+            ORDER BY candidate.created_at, candidate.id
+        """,
+            (_normalized_owner_id(owner_id), _normalized_owner_id(owner_id)),
+        )
+    return [_repository_candidate_to_dict(row) for row in rows]
 
 
 async def _complete_candidate_classification(

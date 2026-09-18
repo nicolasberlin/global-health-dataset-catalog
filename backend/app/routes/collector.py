@@ -5,27 +5,25 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Annotated, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 
 from app.database import (
     CollectionJobReservation,
-    complete_candidate_classification,
     complete_search_session,
     complete_search_session_with_repository_candidates,
     create_search_session,
-    fail_candidate_classification,
+    enqueue_candidate_classification,
     get_candidate_collection,
     get_collection_job_for_owner,
     get_repository_candidate,
+    latest_repository_analysis,
     list_collected_datasets,
     normalize_dataset_search_query,
     search_collected_datasets,
-    start_candidate_classification,
 )
 from app.routes.collector_presenters import (
     public_collection_job,
@@ -47,9 +45,6 @@ from app.routes.collector_schemas import (
     CollectorValidation,
 )
 from app.security import APIPrincipal, enforce_api_quota, require_api_principal
-from collector.classification.factory import (
-    build_default_repository_result_classifier,
-)
 from collector.classification.repository import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
@@ -71,21 +66,12 @@ from collector.repository_search import (
     RepositorySearchWarning,
     search_repository_metadata,
 )
-from collector.repository_search import (
-    classify_repository_result as classify_one_repository_result,
-)
 from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 router = APIRouter(prefix="/collector", tags=["collector"])
 logger = logging.getLogger(__name__)
 
-REPOSITORY_CLASSIFICATION_MAX_CONCURRENCY = 2
-# A dedicated executor keeps the strict limit until synchronous LLM work really
-# finishes, even when the awaiting HTTP request is cancelled.
-_repository_classification_executor = ThreadPoolExecutor(
-    max_workers=REPOSITORY_CLASSIFICATION_MAX_CONCURRENCY,
-    thread_name_prefix="repository-classification",
-)
+
 @router.get("/collection-jobs/{job_id}")
 async def read_collection_job(
     job_id: int,
@@ -102,8 +88,7 @@ async def read_collection_job(
 async def list_collected() -> CollectorCollectionResponse:
     return CollectorCollectionResponse(
         items=[
-            _collector_collected_dataset(dataset)
-            for dataset in await list_collected_datasets()
+            _collector_collected_dataset(dataset) for dataset in await list_collected_datasets()
         ],
     )
 
@@ -142,9 +127,7 @@ async def search_datasets(
     # authoritative for providers and downstream LLM classification.
     local_query = normalize_dataset_search_query(original_query)
     try:
-        local_datasets = (
-            await search_collected_datasets(local_query) if local_query else []
-        )
+        local_datasets = await search_collected_datasets(local_query) if local_query else []
     except Exception as exception:  # noqa: BLE001 - DB errors must not trigger online calls.
         logger.exception("Collected dataset search failed for query=%r", original_query)
         await _fail_search_session(
@@ -177,9 +160,7 @@ async def search_datasets(
         return CollectorDatabaseDatasetSearchResponse(
             search_id=search_id,
             query=original_query,
-            items=[
-                _collector_collected_dataset(dataset) for dataset in local_datasets
-            ],
+            items=[_collector_collected_dataset(dataset) for dataset in local_datasets],
         )
 
     try:
@@ -220,8 +201,7 @@ async def search_datasets(
         query=original_query,
         items=[_collector_repository_candidate(item) for item in persisted_candidates],
         warnings=[
-            _collector_repository_search_warning(warning)
-            for warning in online_response.warnings
+            _collector_repository_search_warning(warning) for warning in online_response.warnings
         ],
     )
 
@@ -234,132 +214,83 @@ async def _search_online_repositories(
     return await asyncio.to_thread(search_repository_metadata, query)
 
 
-@router.post("/repository-candidates/{candidate_id}/classify")
+@router.get("/repository-analyses/latest")
+async def read_latest_repository_analysis(
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+) -> CollectorOnlineDatasetSearchResponse:
+    candidates = await latest_repository_analysis(principal.owner_id)
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No previous repository analysis.")
+    return CollectorOnlineDatasetSearchResponse(
+        search_id=candidates[0]["search_session_id"],
+        query=candidates[0]["search_query"],
+        items=[
+            await _candidate_with_collection(candidate, principal.owner_id)
+            for candidate in candidates
+        ],
+    )
+
+
+@router.get("/repository-candidates/{candidate_id}")
+async def read_repository_candidate(
+    candidate_id: UUID,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+) -> CollectorRepositorySearchItem:
+    candidate = await get_repository_candidate(candidate_id, principal.owner_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Repository candidate not found")
+    return await _candidate_with_collection(candidate, principal.owner_id)
+
+
+@router.post(
+    "/repository-candidates/{candidate_id}/classify",
+    responses={
+        202: {
+            "model": CollectorRepositorySearchItem,
+            "description": "Classification queued or running.",
+        }
+    },
+)
 async def classify_repository_result(
     candidate_id: UUID,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    response: Response,
     payload: Annotated[
         Optional[CollectorRepositoryCandidateClassificationRequest],  # noqa: UP045
         Body(),
     ] = None,
     retry: bool = False,
 ) -> CollectorRepositorySearchItem:
-    """Classify the exact candidate metadata previously persisted by the server.
-
-    The empty request contract rejects arbitrary browser metadata. Atomic state
-    reservation prevents simultaneous LLM calls, and a failed classification
-    can only be retried explicitly with ``retry=true``.
-    """
+    """Persist a request before acknowledging it; never run an LLM in this route."""
 
     del payload
     candidate = await get_repository_candidate(candidate_id, principal.owner_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="Repository candidate not found")
-
-    if candidate["classification_status"] == "pending" or (
-        retry and candidate["classification_status"] == "error"
-    ):
-        await enforce_api_quota(principal, "repository_classification")
-
-    reserved_candidate = await start_candidate_classification(
-        candidate_id,
-        principal.owner_id,
-        retry=retry,
-    )
-    if reserved_candidate is None:
-        current_candidate = await get_repository_candidate(candidate_id, principal.owner_id)
-        if current_candidate is None:
-            raise HTTPException(status_code=404, detail="Repository candidate not found")
-        status = str(current_candidate["classification_status"])
-        if status == "classifying":
-            raise HTTPException(status_code=409, detail="Candidate is being classified.")
-        if status == "error":
-            raise HTTPException(
-                status_code=409,
-                detail="Candidate classification failed; retry explicitly.",
-            )
-
-        automatic_collection = None
-        if status == "accepted":
-            automatic_collection = _automatic_collection(
-                await get_candidate_collection(candidate_id, principal.owner_id),
-            )
-        return _collector_repository_candidate(
-            current_candidate,
-            automatic_collection=automatic_collection,
-        )
-
-    result = _repository_search_result_from_candidate(reserved_candidate)
-    try:
-        classified_result = await asyncio.get_running_loop().run_in_executor(
-            _repository_classification_executor,
-            classify_one_repository_result,
-            result,
-            build_default_repository_result_classifier(),
-        )
-    except Exception as exception:  # noqa: BLE001 - operational failures are persisted.
-        try:
-            await fail_candidate_classification(
-                candidate_id,
-                principal.owner_id,
-                str(exception) or exception.__class__.__name__,
-            )
-        except Exception:  # noqa: BLE001 - preserve the original classifier failure.
-            logger.exception(
-                "Repository classification failure state could not be saved for "
-                "candidate_id=%s",
-                candidate_id,
-            )
-        logger.exception(
-            "Repository result classification failed for source=%r url=%s",
-            result.source,
-            result.url,
-        )
-        raise HTTPException(status_code=502, detail="Page classification failed.") from exception
-
-    classification = classified_result.classification
-    if classification is None:
-        await fail_candidate_classification(
-            candidate_id,
-            principal.owner_id,
-            "Repository classifier returned no decision.",
-        )
-        raise HTTPException(status_code=502, detail="Page classification failed.")
-
-    try:
-        completion = await complete_candidate_classification(
-            candidate_id,
-            principal.owner_id,
-            classification,
-        )
-    except Exception as exception:  # noqa: BLE001 - DB failures must be visible.
-        logger.exception(
-            "Repository classification persistence failed for candidate_id=%s",
-            candidate_id,
-        )
-        try:
-            await fail_candidate_classification(
-                candidate_id,
-                principal.owner_id,
-                str(exception) or exception.__class__.__name__,
-            )
-        except Exception:  # noqa: BLE001 - preserve the original persistence failure.
-            logger.exception(
-                "Repository classification persistence failure state could not be "
-                "saved for candidate_id=%s",
-                candidate_id,
-            )
+    status = candidate["classification_status"]
+    if status == "error" and not retry:
         raise HTTPException(
-            status_code=500,
-            detail="Candidate classification could not be saved.",
-        ) from exception
+            status_code=409, detail="Candidate classification failed; retry explicitly."
+        )
+    if status == "pending" or (status == "error" and retry):
+        # Preserve the existing request quota policy; workers do not charge again.
+        await enforce_api_quota(principal, "repository_classification")
+        await enqueue_candidate_classification(candidate_id, principal.owner_id, retry=retry)
+        candidate = await get_repository_candidate(candidate_id, principal.owner_id)
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="Repository candidate not found")
+    if candidate["classification_status"] in {"queued", "classifying"}:
+        response.status_code = 202
+    return await _candidate_with_collection(candidate, principal.owner_id)
 
-    return _collector_repository_candidate(
-        completion.candidate,
-        automatic_collection=(
-            _automatic_collection(completion.collection) if classification.accepted else None
-        ),
-    )
+
+async def _candidate_with_collection(candidate, owner_id) -> CollectorRepositorySearchItem:
+    collection = None
+    if candidate["classification_status"] == "accepted":
+        collection = _automatic_collection(
+            await get_candidate_collection(candidate["id"], owner_id)
+        )
+    return _collector_repository_candidate(candidate, automatic_collection=collection)
 
 
 def _automatic_collection(
@@ -404,14 +335,10 @@ def _bounded_repository_result(
 
     data = asdict(item)
     data["title"] = str(data.get("title", ""))[:MAX_REPOSITORY_TITLE_CHARS]
-    data["description"] = str(data.get("description", ""))[
-        :MAX_REPOSITORY_DESCRIPTION_CHARS
-    ]
+    data["description"] = str(data.get("description", ""))[:MAX_REPOSITORY_DESCRIPTION_CHARS]
     data["source"] = str(data.get("source", ""))[:MAX_REPOSITORY_SOURCE_CHARS]
     data["search_query"] = search_query[:MAX_REPOSITORY_SEARCH_QUERY_CHARS]
-    data["publisher"] = str(data.get("publisher", ""))[
-        :MAX_REPOSITORY_PUBLISHER_CHARS
-    ]
+    data["publisher"] = str(data.get("publisher", ""))[:MAX_REPOSITORY_PUBLISHER_CHARS]
     data["date"] = str(data.get("date", ""))[:MAX_REPOSITORY_DATE_CHARS]
     data["doi"] = str(data.get("doi", ""))[:MAX_REPOSITORY_DOI_CHARS]
     data["keywords"] = [
@@ -444,7 +371,8 @@ def _collector_repository_candidate(
         classification=public_repository_classification(candidate["classification"]),
         classification_error=(
             "Candidate classification failed."
-            if candidate["classification_status"] == "error" else ""
+            if candidate["classification_status"] == "error"
+            else ""
         ),
         classification_error_code=(
             "classification_failed" if candidate["classification_status"] == "error" else ""
@@ -459,7 +387,7 @@ def _bounded_repository_metadata(value: object) -> dict[str, str]:
     metadata = normalize_dataset_metadata(value if isinstance(value, dict) else {})
     bounded_metadata = {
         key: text[
-            :(
+            : (
                 MAX_REPOSITORY_METADATA_DESCRIPTION_CHARS
                 if key == "Description of dataset"
                 else MAX_REPOSITORY_METADATA_VALUE_CHARS
@@ -486,23 +414,6 @@ def _json_size_bytes(value: dict[str, str]) -> int:
             allow_nan=False,
             separators=(",", ":"),
         ).encode("utf-8")
-    )
-
-
-def _repository_search_result_from_candidate(
-    candidate: dict[str, object],
-) -> RepositorySearchResult:
-    return RepositorySearchResult(
-        title=str(candidate["title"]),
-        description=str(candidate["description"]),
-        url=str(candidate["url"]),
-        source=str(candidate["source"]),
-        search_query=str(candidate["search_query"]),
-        publisher=str(candidate["publisher"]),
-        date=str(candidate["publication_date"]),
-        doi=str(candidate["doi"]),
-        keywords=list(candidate["keywords"]),
-        metadata=dict(candidate["metadata"]),
     )
 
 
@@ -564,12 +475,10 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
         discovery_method=dataset.discovery_method,
         dataset_signals=public_dataset_signals(dataset.dataset_signals),
         distributions=[
-            _collector_distribution(distribution)
-            for distribution in dataset.distributions
+            _collector_distribution(distribution) for distribution in dataset.distributions
         ],
         validation_results=[
-            _collector_validation(validation)
-            for validation in dataset.validation_results
+            _collector_validation(validation) for validation in dataset.validation_results
         ],
         first_seen_at=dataset.first_seen_at,
         last_seen_at=dataset.last_seen_at,

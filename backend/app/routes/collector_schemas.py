@@ -199,7 +199,7 @@ class CollectorRepositorySearchItem(BaseModel):
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
     classification_status: Literal[
-        "pending", "classifying", "accepted", "rejected", "error"
+        "pending", "queued", "classifying", "accepted", "rejected", "error"
     ] = "pending"
     classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     classification_error: str = Field(default="", max_length=2_000)

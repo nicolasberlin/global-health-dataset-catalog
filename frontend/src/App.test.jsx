@@ -17,6 +17,7 @@ function jsonResponse(payload, { ok = true, status = 200 } = {}) {
 function mockApi(searchHandler) {
     global.fetch = vi.fn((input, options = {}) => {
         const url = String(input);
+        if (url.endsWith('/repository-analyses/latest')) return Promise.resolve(jsonResponse({ detail: 'None' }, { ok: false, status: 404 }));
         if (url.endsWith('/sources')) {
             return Promise.resolve(jsonResponse({ items: [] }));
         }
@@ -165,13 +166,14 @@ describe('database-first dataset search', () => {
 
         submitSearch();
 
-        expect(await screen.findByText('AI analysis…')).toBeInTheDocument();
+        expect(await screen.findByText('Requesting analysis…')).toBeInTheDocument();
         expect(screen.getByText('No local results')).toBeInTheDocument();
 
         await act(async () => {
             resolveClassification(
                 jsonResponse({
                     ...onlineItem,
+                    classification_status: 'accepted',
                     classification: {
                         accepted: true,
                         relevance_label: 'relevant',
@@ -246,6 +248,7 @@ describe('database-first dataset search', () => {
                 return Promise.resolve(
                     jsonResponse({
                         ...onlineItem,
+                        classification_status: 'accepted',
                         classification: {
                             accepted: true,
                             relevance_label: 'relevant',
@@ -337,6 +340,7 @@ describe('database-first dataset search', () => {
                 return Promise.resolve(
                     jsonResponse({
                         ...onlineItem,
+                        classification_status: 'rejected',
                         classification: {
                             accepted: false,
                             relevance_label: 'not_relevant',

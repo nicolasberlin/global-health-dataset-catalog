@@ -74,6 +74,7 @@ export RCP_GEMMA_MEDITRON_MODEL="EPFLiGHT/Gemma-3-27B-MeditronFO"
 export RCP_APERTUS_MEDITRON_API_KEY="$RCP_GEMMA_MEDITRON_API_KEY"
 export RCP_APERTUS_MEDITRON_MODEL="EPFLiGHT/Apertus-70B-MeditronFO"
 export COLLECTION_MAX_CONCURRENCY="2"
+export CLASSIFICATION_MAX_CONCURRENCY="2"
 
 # Local development: no token entry, backend bound to loopback only.
 export API_AUTH_MODE="local"
@@ -184,7 +185,7 @@ and its progress endpoint remain available. Existing datasets are preserved.
 | --- | --- | --- |
 | `GET` | `/health` | Check that the backend process is running |
 | `POST` | `/collector/search-datasets` | Search PostgreSQL, then external repositories |
-| `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Classify one persisted external candidate |
+| `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Queue an owned classification (202); read its state separately |
 | `GET` | `/collector/collection-jobs/{id}` | Read collection progress |
 | `GET` | `/collector/collected-datasets` | List persisted datasets |
 
@@ -259,7 +260,8 @@ Detailed documentation:
   restart; interrupted running jobs become errors. Acceptance and collection
   reservation commit together, and repeating a classification only reads its
   existing follow-up. Run a single API process/instance: there are no worker
-  leases. Classification itself still depends on the HTTP request lifecycle.
+  leases. Classification requests also persist in PostgreSQL before a bounded
+  worker executes them. The frontend restores the last repository analysis.
   See the [deployment constraints](docs/DEPLOYMENT.md#collection-execution).
 - Static per-user Bearer tokens, search-session ownership, and PostgreSQL
   request quotas protect costly and mutating routes. This MVP mechanism is not

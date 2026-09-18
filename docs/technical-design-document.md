@@ -95,7 +95,9 @@ credentials return HTTP 401; exhausted per-minute quotas return HTTP 429 with a
 | GET | `/sources` | Lists configured source records |
 | POST | `/sources` | Creates a source after Pydantic and DB validation |
 | GET | `/sources/{source_id}/page` | Redirects to the configured source URL |
-| POST | `/collector/repository-candidates/{candidate_id}/classify` | Atomically reserves and classifies one persisted candidate; no client metadata is accepted |
+| POST | `/collector/repository-candidates/{candidate_id}/classify` | Persists an owned classification request; returns 202 while queued/running, 200 when terminal |
+| GET | `/collector/repository-candidates/{candidate_id}` | Reads an owned candidate, decision and collection follow-up |
+| GET | `/collector/repository-analyses/latest` | Restores the owner’s last search containing repository candidates |
 | GET | `/collector/collection-jobs/{job_id}` | Returns job status and counters |
 | GET | `/collector/collected-datasets` | Lists persisted datasets and distributions |
 | POST | `/collector/search-datasets` | Searches collected datasets first, then repository providers on no match |
@@ -104,8 +106,11 @@ Collection workers consume committed `pending` jobs directly from PostgreSQL.
 On startup, the single-process MVP preserves pending jobs and marks interrupted
 `running` jobs, running searches and `classifying` candidates as errors. There
 are no automatic collection retries, worker leases or multi-process ownership.
-Use one API process and instance; classification still runs within the HTTP
-request lifecycle and is not protected against cancellation by this queue.
+Use one API process and instance. Classification uses the same bounded consumer
+implementation with a separate executor: requests persist as `queued` on existing
+candidates before HTTP acknowledgement. Discoveries remain `pending` and are not
+consumed automatically. Interrupted `classifying` candidates require explicit
+retry; an external LLM response lost before persistence may need another call.
 
 ### How Repository Search and Source Collection Relate
 
@@ -129,7 +134,8 @@ flowchart LR
     Match -->|yes| Local["Return persisted datasets"]
     Match -->|no| External["Search external repositories"]
     External --> PersistCandidate["Persist search session + candidates"]
-    PersistCandidate --> RepoClassify["Classify persisted candidate by ID"]
+    PersistCandidate --> Request["Persist classification request; HTTP 202"]
+    Request --> RepoClassify["Worker claims and classifies candidate by ID"]
     RepoClassify -->|rejected| Display["Display rejected candidate"]
     RepoClassify -->|accepted| CandidateJob["One transaction: decision + saved lookup or job reservation + association"]
     CandidateJob -. reservation failure .-> ScheduleError["Rollback decision and reservation; return error"]
@@ -158,8 +164,9 @@ flowchart TD
     UI --> ClassifyRoute["Authenticate candidate owner<br/>no metadata body"]
     ClassifyRoute -->|already accepted or rejected| Existing["Read existing decision and follow-up; no reservation"]
     ClassifyRoute -->|new classification or explicit classification retry| ClassifyQuota["Consume classification quota<br/>before eligible LLM work"]
-    ClassifyQuota --> ReserveClassify["pending -> classifying<br/>atomic compare-and-set"]
-    ReserveClassify --> Reload["Reload query + metadata from PostgreSQL"]
+    ClassifyQuota --> ReserveClassify["pending -> queued<br/>persist then return HTTP 202"]
+    ReserveClassify --> Claim["Available worker claims queued -> classifying"]
+    Claim --> Reload["Read owner, query and metadata from PostgreSQL"]
     Reload --> RepoClassifier["EPFL RCP ensemble<br/>2 positive votes, 3 usable responses"]
     RepoClassifier --> Decision{"Positive structured decision?"}
     Decision -->|no| Rejected["Display rejected candidate; no job"]
@@ -358,7 +365,7 @@ semantic deduplication by DOI, title, version, or mirror relationship.
 
 `search_sessions` owns the original query and its local/online terminal state.
 `repository_candidates` stores bounded provider metadata and the atomic
-`pending -> classifying -> accepted|rejected|error` state machine. A uniqueness
+`pending -> queued -> classifying -> accepted|rejected|error` state machine. A uniqueness
 constraint deduplicates `(search_session_id, source, url)` within a search.
 
 `complete_candidate_classification()` persists the decision and reserves its
@@ -388,6 +395,7 @@ remain attempt history. Dataset deduplication uses normalized dataset URLs.
 Schema version 2 migrates the supported version 1 baseline without deleting
 data, backfilling the original job/candidate associations. Previously shared
 associations were not stored and cannot be inferred safely from URL equality.
+Version 3 adds the classification `queued` state without a new table or data loss.
 Historical schemas predating the baseline remain unsupported. The schema
 checks reject a database marked current when required tables are absent.
 
@@ -423,6 +431,7 @@ and the decision not to migrate the historical SQLite data are recorded in
 | `API_SEARCH_REQUESTS_PER_MINUTE` | No | Search quota per owner; defaults to `10` |
 | `API_CLASSIFICATION_REQUESTS_PER_MINUTE` | No | LLM classification quota per owner; defaults to `20` |
 | `API_SOURCE_CREATION_REQUESTS_PER_MINUTE` | No | Source-creation quota per owner; defaults to `10` |
+| `CLASSIFICATION_MAX_CONCURRENCY` | No | Concurrent classification runs per backend process; defaults to `2` |
 | `COLLECTION_MAX_CONCURRENCY` | No | Concurrent collection runs per backend process; defaults to `2` |
 | `VITE_API_BASE_URL` | No | Frontend API base; defaults to `http://127.0.0.1:8001` |
 | `TEST_DATABASE_URL` | No | Enables PostgreSQL integration tests |
@@ -474,8 +483,9 @@ Availability expectations are intentionally local-MVP level:
 - no uptime service-level objective is defined;
 - pending collection jobs survive restart; the next single-process startup marks
   interrupted running jobs as `error`, without retrying them automatically;
-- classification execution and frontend recovery after a full page reload remain
-  separate limitations;
+- queued classifications survive restart; running ones become retryable errors;
+- the frontend restores the last repository analysis after reload; a full history
+  of searches is not implemented;
 - no automatic retry budget is configured for external APIs or LLM calls;
 - PostgreSQL is a mandatory startup dependency;
 - the frontend expects the API at one configured base URL.
@@ -581,19 +591,19 @@ Policy requirements that exceed current enforcement remain tracked in the
 ## 16. Error Handling and Observability
 
 Repository provider failures produce sanitized API warnings for partial success.
-Repository classification failures are stored on the candidate, return HTTP
-502, and require `retry=true` for another attempt. If persisting a successful
-classification decision fails, the route makes a separate best-effort transition
-from `classifying` to `error` before returning HTTP 500. Search failures after
-session creation likewise make a best-effort terminal `error` update, including
-failures while completing a local result or bounding external candidates. If an
-accepted classification cannot reserve its job or association, the decision and
-reservation roll back together. The same best-effort classification-error update
-and HTTP 500 apply; `retry=true` may repeat the LLM call. Fetch, classifier,
-and validation exceptions attempt to mark the job `error`; if PostgreSQL itself
-is unavailable, any of these recovery writes can also fail. A successfully
-fetched and analyzed candidate without a valid dataset is represented as a
-completed empty collection.
+Classification requests are acknowledged after persistence, normally with HTTP
+202. Classifier failures are stored by the worker, exposed through sanitized GET
+responses, and require `retry=true` for another attempt. If persisting a decision
+or its collection reservation fails, the transaction rolls back and the worker
+makes a separate best-effort transition from `classifying` to `error`. Retrying
+can repeat the LLM call. If PostgreSQL itself is unavailable, the error update
+can also fail; startup recovery handles remaining `classifying` rows.
+
+Search failures after session creation make a best-effort terminal `error`
+update, including failures while completing local results or bounding external
+candidates. Fetch, classifier and validation exceptions attempt to mark the
+collection job `error`. A successfully fetched and analyzed candidate without
+a valid dataset is represented as a completed empty collection.
 
 Collection jobs persist counters, messages, errors, discovery methods, and
 timestamps. Application logging exists, but there is no metrics backend,
@@ -631,7 +641,7 @@ contract.
 | Priority | Risk | Current exposure | Mitigation or next control |
 | --- | --- | --- | --- |
 | Medium | Static access tokens are not a production identity system | Tokens have no expiry or roles and source/job records are shared | Keep tokens unique and secret for the MVP; replace them with institutional OAuth/OIDC and role-based authorization before broad multi-user use |
-| High | Single-instance execution and interruptible classification | Pending collections are persisted, but interrupted running jobs fail and classification remains tied to HTTP | Add worker leases, bounded recovery and persisted classification tasks before scaling instances |
+| High | Single-instance execution | Both queues persist requests, but interrupted running tasks require explicit retries | Add worker leases and bounded recovery before scaling instances |
 | High | Repository relevance mistaken for catalogue approval | Repository acceptance precedes and differs from page/file validation | Keep candidate and collection states distinct; persist only through collection gates |
 | High | Source authority, licence, and sensitivity not enforced | Technically valid records may still be unsuitable for publication | Implement policy gates and human review before public catalogue claims |
 | Medium | One distribution validated by default | A valid secondary file can be missed | Validate ranked alternatives within a bounded budget |
@@ -656,7 +666,7 @@ refresh its narrow database exception. See [Secure Deployment](DEPLOYMENT.md).
 | Human-review workflow | Data-governance owner | Unassigned / open | Define triggers, roles, decisions, and audit retention |
 | Acceptable licences and restricted-access data | Legal/policy owner | Unassigned / open | Allow/review/deny policy |
 | Authentication and deployment boundary | Security/infra owner | Unassigned / open | Roles, identity provider, and exposed routes |
-| Multi-instance and classification execution | Backend/infra owner | Unassigned / open | Extend the PostgreSQL collection queue with leases, bounded recovery and persisted classification tasks |
+| Multi-instance execution | Backend/infra owner | Unassigned / open | Extend the PostgreSQL queues with leases and bounded recovery |
 | Provider-independent LLM voting | ML/technical owner | Unassigned / open | Decide resilience requirement and evaluation plan |
 | Stable-release migration policy | Backend/data owner | Unassigned / open | Data-preserving migration and rollback process |
 
@@ -671,7 +681,8 @@ The detailed provider proposal is isolated in
 - licence acceptance is not enforced;
 - normalized-URL-only deduplication does not model versions or mirrors;
 - collection execution requires one API process/instance; interrupted running
-  jobs are not retried, and classification work is not yet durable;
+  tasks are not retried automatically; completed external responses lost before
+  persistence may require another LLM call;
 - no human-review, publication status, or lifecycle workflow exists;
 - no CI/staging/production architecture is defined in code.
 

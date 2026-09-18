@@ -11,7 +11,7 @@ const candidate = (id = 'candidate-a') => ({
     url: 'https://example.org/data', source: 'DataCite', classification_status: 'pending',
 });
 const accepted = (item, job = { id: 42, status: 'pending', saved_count: 0 }) => ({
-    ...item, classification: { accepted: true, ensemble: {} },
+    ...item, classification_status: 'accepted', classification: { accepted: true, ensemble: {} },
     automatic_collection: { state: job.status, job },
 });
 function deferred() {
@@ -28,6 +28,7 @@ async function search(query) {
 function installApi({ items = [candidate()], classify, poll, catalog } = {}) {
     global.fetch = vi.fn(async (input, options = {}) => {
         const url = String(input);
+        if (url.endsWith('/repository-analyses/latest')) return { ok: false, status: 404, json: async () => ({ detail: 'None' }) };
         if (url.endsWith('/collected-datasets')) return catalog?.() ?? response({ items: [] });
         if (url.endsWith('/search-datasets')) {
             const query = JSON.parse(options.body).query;

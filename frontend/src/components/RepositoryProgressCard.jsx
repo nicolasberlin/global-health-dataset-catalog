@@ -6,7 +6,7 @@ function getHostname(url) {
     }
 }
 
-export default function RepositoryProgressCard({ candidate }) {
+export default function RepositoryProgressCard({ candidate, onAnalyze }) {
     const { item, status } = candidate;
 
     return (
@@ -17,10 +17,12 @@ export default function RepositoryProgressCard({ candidate }) {
                     className={`repository-status-pill repository-status-pill--${status}`}
                     role="status"
                 >
-                    {status === 'classifying' ? 'AI analysis…' : 'Waiting'}
+                    {candidate.requesting ? 'Requesting analysis…' : status === 'classifying' ? 'AI analysis…' : status === 'queued' ? 'Waiting' : 'Not requested'}
                 </span>
             </div>
             <h3>{item.title}</h3>
+            {candidate.trackingError && <p role="status">Analysis tracking unavailable: {candidate.trackingError}</p>}
+            {status === 'pending' && <button disabled={candidate.requesting} type="button" onClick={onAnalyze}>Analyze</button>}
             <p>{item.description || 'Description unavailable.'}</p>
             <div className="repository-card__footer">
                 <span>{item.publisher || getHostname(item.url)}</span>

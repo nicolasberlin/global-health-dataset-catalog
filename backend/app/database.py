@@ -28,12 +28,14 @@ from .db.collection_jobs import (
 )
 from .db.connection import close_database_pool, open_database_pool
 from .db.repository_candidates import (
+    claim_candidate_classification,
     complete_search_session_with_repository_candidates,
+    enqueue_candidate_classification,
     fail_candidate_classification,
     get_repository_candidate,
+    latest_repository_analysis,
     mark_interrupted_candidate_classifications_error,
     save_repository_candidates,
-    start_candidate_classification,
 )
 from .db.schema import DATA_SOURCE_KEY_PATTERN_TEXT, init_database
 from .db.search_sessions import (
@@ -101,7 +103,9 @@ __all__ = (
     "save_repository_candidates",
     "save_collected_datasets",
     "search_collected_datasets",
-    "start_candidate_classification",
+    "enqueue_candidate_classification",
+    "claim_candidate_classification",
+    "latest_repository_analysis",
     "upsert_collector_data_source",
     "upsert_data_source",
 )

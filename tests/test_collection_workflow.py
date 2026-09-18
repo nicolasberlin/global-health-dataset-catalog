@@ -12,6 +12,7 @@ from app.db.connection import _fetchall, _require_database_pool
 from app.db.repository_candidates import _complete_candidate_classification
 from app.routes.collector import classify_repository_result
 from app.security import APIPrincipal
+from fastapi import Response
 
 from collector.classification.repository import RepositoryClassification
 from collector.repository_search import RepositorySearchResult
@@ -50,6 +51,13 @@ def decision(accepted=True):
     )
 
 
+async def _start_candidate(database, candidate_id, owner_id, *, retry=False):
+    queued = await database.enqueue_candidate_classification(candidate_id, owner_id, retry=retry)
+    if queued is None:
+        return None
+    return await database.claim_candidate_classification()
+
+
 async def candidate_for(database, owner="alice", url=SOURCE_URL):
     session = await database.create_search_session("mortality", owner)
     candidates = await database.complete_search_session_with_repository_candidates(
@@ -59,7 +67,7 @@ async def candidate_for(database, owner="alice", url=SOURCE_URL):
         status="completed",
     )
     candidate = candidates[0]
-    await database.start_candidate_classification(candidate["id"], owner)
+    await _start_candidate(database, candidate["id"], owner)
     return candidate
 
 
@@ -176,14 +184,11 @@ async def test_repeated_accepted_classification_only_reads_its_job(database, mon
     def forbidden(*args, **kwargs):
         raise AssertionError("A repeated classification must not perform new work")
 
-    monkeypatch.setattr(
-        "app.routes.collector.build_default_repository_result_classifier", forbidden
-    )
     monkeypatch.setattr("app.routes.collector.enforce_api_quota", forbidden)
     monkeypatch.setattr(job_store, "_reserve_repository_candidate_collection_job", forbidden)
     for retry in (False, True):
         response = await classify_repository_result(
-            candidate["id"], APIPrincipal("alice"), retry=retry
+            candidate["id"], APIPrincipal("alice"), Response(), retry=retry
         )
         assert response.automatic_collection.job.id == job_id
         assert response.automatic_collection.job.status == status
@@ -209,7 +214,7 @@ async def test_legacy_acceptance_without_job_does_not_silently_start_work(databa
     candidate = await candidate_for(database)
     async with _require_database_pool().connection() as connection:
         await _complete_candidate_classification(connection, candidate["id"], "alice", decision())
-    response = await classify_repository_result(candidate["id"], APIPrincipal("alice"))
+    response = await classify_repository_result(candidate["id"], APIPrincipal("alice"), Response())
     assert response.automatic_collection.error_code == "collection_not_scheduled"
     assert await rows("SELECT id FROM collection_jobs") == []
 

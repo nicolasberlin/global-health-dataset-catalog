@@ -63,9 +63,21 @@ consumer claims one job atomically only when its execution slot is available.
 Classification decisions and initial collection reservations share one
 transaction. If reservation fails, the decision rolls back too; an explicit
 classification retry may repeat the LLM call. LLM and network calls stay outside
-the transaction. Classification execution itself is not yet durable across HTTP
-cancellation or process interruption. Frontend recovery after a full page reload
-also still needs an authenticated listing endpoint.
+the transaction. Classification requests now persist as `queued` on existing candidates before
+HTTP 202 is returned. `pending` means discovered but not requested; workers never
+execute it. `CLASSIFICATION_MAX_CONCURRENCY` (default `2`) bounds the separate
+classification pool. Queued requests survive restart; interrupted `classifying`
+candidates become errors and require an explicit `retry=true` request. An LLM
+response lost before persistence may need another call; no automatic retry is
+added. Both pools share the same bounded consumer implementation.
+
+Schema version 3 adds the `queued` state without deleting data or adding a table.
+Deploy backend and frontend together: classification submission now returns an
+intermediate state, followed through authenticated GET requests. The frontend
+restores the most recent search containing repository candidates on load and
+provides a restore button. It never submits its unrequested candidates implicitly.
+This is recovery of the last repository analysis, not a complete search history.
+The single-process/single-instance constraint also applies to classification.
 
 ## Outbound network policy
 

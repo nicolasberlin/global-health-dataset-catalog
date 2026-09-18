@@ -38,11 +38,12 @@ flowchart TD
     UI --> Load["get_repository_candidate(candidate_id, owner_id)"]
     Load -->|already accepted or rejected| Existing["Return existing decision and follow-up; no new job"]
     Load -->|eligible for classification| Quota["Consume classification quota<br/>for eligible LLM work"]
-    Quota --> Reserve["start_candidate_classification(..., owner_id)<br/>pending -> classifying"]
-    Reserve --> Trusted["Rebuild RepositorySearchResult<br/>from PostgreSQL query + metadata"]
+    Quota --> Reserve["enqueue_candidate_classification(..., owner_id)<br/>pending -> queued; HTTP 202"]
+    Reserve --> Claim["Available worker claims queued -> classifying"]
+    Claim --> Trusted["Rebuild RepositorySearchResult<br/>from PostgreSQL query + metadata"]
     Trusted --> LLM["Repository relevance classifier"]
     LLM --> Outcome{"Structured decision?"}
-    Outcome -->|operational error| Error["Persist candidate=error<br/>HTTP 502; explicit retry required"]
+    Outcome -->|operational error| Error["Persist candidate=error<br/>GET exposes failure; explicit retry required"]
     Outcome -->|rejected| Rejected["Persist rejected<br/>no collection job"]
     Outcome -->|accepted| Accepted["One transaction: decision + saved lookup or job + association"]
     Accepted --> Job["Commit before a collection worker can claim the job"]
@@ -53,14 +54,17 @@ The owner comes from the authenticated Bearer token, and every candidate read or
 state transition verifies it through `search_sessions`; another owner receives
 a not-found response.
 Atomic state reservation prevents simultaneous LLM calls for one candidate.
-React classifies at most two candidates concurrently and ignores responses whose
-`search_id` no longer matches the active search.
+React submits at most two requests concurrently. The backend worker pool bounds
+LLM work independently (default two classifications). Tracking survives a new
+search in the same authenticated session; old results cannot replace that search.
+On reload, the last repository analysis is restored through an authenticated GET.
 Acceptance and job reservation use the same connection and transaction. A failure
 to reserve or associate the job rolls back the decision too; retrying the
 classification can repeat the LLM call. Network and LLM calls stay outside this
-transaction. If the final decision and its follow-up cannot be persisted, the route
-attempts to move the still-`classifying` candidate to `error` before returning
-HTTP 500. That recovery write can also fail while PostgreSQL is unavailable.
+transaction. If the final decision and its follow-up cannot be persisted, the worker
+attempts to move the still-`classifying` candidate to `error`. That recovery write
+can also fail while PostgreSQL is unavailable. A lost submission response triggers
+a status read in the frontend, never an automatic repeat submission.
 
 Repository acceptance means relevance to the user query. It does not by itself
 prove health relevance, source authority, licence acceptability, or file
@@ -106,8 +110,8 @@ The source discovery library remains available for maintenance outside the UI.
 ## Limits And Execution
 
 - DataCite returns at most 10 candidates per query.
-- React and the backend executor allow at most two candidate classifications at
-  once.
+- Classification concurrency defaults to two runs; only explicitly queued
+  candidates are consumed, never all discovered `pending` candidates.
 - Collection concurrency defaults to two jobs per backend process.
 - Source page and distribution limits come from `CollectorConfig`; repository
   collection is additionally restricted to one landing page.
@@ -120,7 +124,8 @@ On single-process startup, pending collection jobs survive and are consumed;
 interrupted running jobs, searches, and candidate classifications become `error`.
 Normal shutdown drains current collection work. Forced termination leaves running
 jobs for startup recovery, without automatic retries. Use one API process and
-one instance; classification itself still depends on the HTTP request lifecycle.
+one instance. Classification requests also survive as `queued` independently of
+HTTP; interrupted `classifying` candidates require an explicit retry.
 Static Bearer tokens, candidate ownership,
 and persistent per-owner quotas are implemented for the MVP. OAuth/OIDC, roles,
 multi-worker job ownership, and infrastructure-level traffic limits remain

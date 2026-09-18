@@ -192,3 +192,10 @@ These tables belong to the current pre-release initial schema, including the
 owner column and `api_rate_limits`. There is no
 upgrade migration from an older local schema; recreate the local database when
 startup reports that managed tables are missing.
+
+
+Schema version 3 preserves all existing rows and adds `queued` to candidate
+classification states. `pending` means discovered but not requested. The POST
+request moves an eligible owned candidate to `queued`; an available worker claims
+it as `classifying`. Only `classifying` rows are marked interrupted on startup.
+No additional classification-job table is needed for this single-attempt model.

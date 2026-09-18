@@ -49,7 +49,7 @@ Detailed design: [Multi-Repository Architecture](props/multi-repository-architec
 - replace static MVP tokens with institutional authentication and role-based
   authorization;
 - extend the PostgreSQL collection queue with worker leases and multi-instance
-  recovery, and persist classification work independently of HTTP requests;
+  recovery for both classification and collection;
 - define retries, idempotency, cancellation, and dead-letter handling;
 - deploy PostgreSQL with backups, migrations, pooling, and least-privilege roles;
 - move secrets into environment-specific secret management;

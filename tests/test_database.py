@@ -46,6 +46,13 @@ SCHEMA_TABLES = (
 TEST_OWNER_ID = "test-user"
 
 
+async def _start_candidate(database, candidate_id, owner_id, *, retry=False):
+    queued = await database.enqueue_candidate_classification(candidate_id, owner_id, retry=retry)
+    if queued is None:
+        return None
+    return await database.claim_candidate_classification()
+
+
 async def _schema_version(database) -> int:
     async with db_connection._require_database_pool().connection() as connection:
         return await db_schema._schema_version(connection)
@@ -122,7 +129,7 @@ async def _create_repository_candidate(
 
 
 async def _accept_repository_candidate(database, candidate_id, owner_id=TEST_OWNER_ID):
-    started = await database.start_candidate_classification(candidate_id, owner_id)
+    started = await _start_candidate(database, candidate_id, owner_id)
     assert started is not None
     # Arrange legacy accepted candidates to test reservation/read primitives in isolation.
     async with db_connection._require_database_pool().connection() as connection:
@@ -284,10 +291,10 @@ async def test_job_access_migration_preserves_data_and_only_backfills_known_owne
     job_id = int(reservation.job["id"])
     # Reproduce the previous schema, whose only durable association was the origin candidate.
     await _execute(database, "DROP TABLE collection_job_candidates")
-    await _execute(database, "DELETE FROM schema_migrations WHERE version = 2")
+    await _execute(database, "DELETE FROM schema_migrations WHERE version >= 2")
     await database.init_database()
     await database.init_database()
-    assert await _schema_version(database) == 2
+    assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
     assert (await database.get_collection_job_for_owner(job_id, "alice"))["status"] == "pending"
     assert await database.get_collection_job_for_owner(job_id, "bob") is None
     assert len(await _fetchall(database, "SELECT * FROM collection_jobs")) == 1
@@ -1893,7 +1900,7 @@ async def test_repository_candidate_is_visible_only_to_its_search_owner(database
         is None
     )
     assert (
-        await database.start_candidate_classification(
+        await _start_candidate(database,
             candidate["id"],
             "different-user",
         )
@@ -1963,7 +1970,7 @@ async def test_repository_candidate_classification_reservation_is_atomic(databas
 
     reservations = await asyncio.gather(
         *(
-            database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+            _start_candidate(database, candidate["id"], TEST_OWNER_ID)
             for _request in range(4)
         )
     )
@@ -2014,7 +2021,7 @@ async def test_repository_candidate_batch_rolls_back_on_invalid_metadata(databas
 async def test_repository_candidate_error_requires_explicit_retry(database):
     await database.init_database()
     _, candidate = await _create_repository_candidate(database)
-    await database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+    await _start_candidate(database, candidate["id"], TEST_OWNER_ID)
     failed = await database.fail_candidate_classification(
         candidate["id"],
         TEST_OWNER_ID,
@@ -2023,10 +2030,10 @@ async def test_repository_candidate_error_requires_explicit_retry(database):
 
     assert failed["classification_status"] == "error"
     assert (
-        await database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+        await _start_candidate(database, candidate["id"], TEST_OWNER_ID)
         is None
     )
-    retried = await database.start_candidate_classification(
+    retried = await _start_candidate(database,
         candidate["id"],
         TEST_OWNER_ID,
         retry=True,
@@ -2039,7 +2046,7 @@ async def test_repository_candidate_error_requires_explicit_retry(database):
 async def test_interrupted_candidate_classification_is_made_retryable(database):
     await database.init_database()
     _, candidate = await _create_repository_candidate(database)
-    await database.start_candidate_classification(candidate["id"], TEST_OWNER_ID)
+    await _start_candidate(database, candidate["id"], TEST_OWNER_ID)
 
     recovered_count = await database.mark_interrupted_candidate_classifications_error()
     recovered = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)

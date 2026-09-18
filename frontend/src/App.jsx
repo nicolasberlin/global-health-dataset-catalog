@@ -7,9 +7,10 @@ import CollectedDatasetsSection from './components/CollectedDatasetsSection.jsx'
 import { getAcceptedVoteCount, getTotalVoteCount } from './components/RepositoryAcceptedCard.jsx';
 import RepositorySearchSection from './components/RepositorySearchSection.jsx';
 
+import { useClassifications } from './jobs/useClassifications.js';
 import { useCollectionJobs } from './jobs/useCollectionJobs.js';
 
-const REPOSITORY_CLASSIFICATION_CONCURRENCY = 2;
+const CLASSIFICATION_SUBMISSION_CONCURRENCY = 2;
 
 export default function App() {
     const [activeView, setActiveView] = useState('search');
@@ -20,6 +21,14 @@ export default function App() {
     const { collectedDatasets, collectedLoading, collectedError, loadCollectedDatasets } = useDatasetCatalog();
     const { session, changeToken } = useApiSession(LOCAL_ACCESS);
     const { registerJob, resolveCollection } = useCollectionJobs(session, loadCollectedDatasets);
+    const { follow } = useClassifications(session, (item, requestSession, trackingError, requesting) => {
+        const registered = registerCandidateCollection(item, requestSession);
+        if (repositorySearchIdRef.current !== item.search_id) return;
+        setRepositoryCandidates(current => current.map(candidate => candidate.id === item.candidate_id
+            ? { ...candidate, item: registered, status: item.classification_status,
+                error: item.classification_error ?? '', trackingError, requesting }
+            : candidate));
+    });
     const apiToken = session.token;
     const [repositoryQuery, setRepositoryQuery] = useState('');
     const [repositoryResultQuery, setRepositoryResultQuery] = useState('');
@@ -83,116 +92,60 @@ export default function App() {
         return { ...item, automatic_collection: { jobId: collection.job.id } };
     }
 
-    function updateRepositoryCandidate(runId, searchId, candidateId, update) {
-        if (
-            repositorySearchRunRef.current !== runId ||
-            repositorySearchIdRef.current !== searchId
-        ) {
-            return;
-        }
-
-        setRepositoryCandidates((currentCandidates) =>
-            currentCandidates.map((candidate) =>
-                candidate.id === candidateId ? { ...candidate, ...update } : candidate,
-            ),
-        );
-    }
-
-    async function classifyRepositoryCandidates(
-        candidates,
-        runId,
-        searchId,
-        abortController,
-        requestSession,
-    ) {
-        let nextCandidateIndex = 0;
-        const { signal } = abortController;
-
-        async function classificationWorker() {
-            while (
-                repositorySearchRunRef.current === runId &&
-                repositorySearchIdRef.current === searchId &&
-                !signal.aborted && requestSession.isCurrent()
-            ) {
-                const candidateIndex = nextCandidateIndex;
-                nextCandidateIndex += 1;
-
-                if (candidateIndex >= candidates.length) {
-                    return;
-                }
-
-                const candidate = candidates[candidateIndex];
-                updateRepositoryCandidate(runId, searchId, candidate.id, {
-                    status: 'classifying',
-                    error: '',
-                });
-
-                try {
-                    // A new search stops queued work, but a response to an already
-                    // dispatched classification can still carry a newly created job.
-                    const responsePayload = await requestJson(
-                        `/collector/repository-candidates/${candidate.id}/classify`,
-                        { method: 'POST', session: requestSession },
-                    );
-
-                    if (typeof responsePayload?.classification?.accepted !== 'boolean') {
-                        throw new Error('The classification response is incomplete.');
-                    }
-
-                    if (
-                        responsePayload.candidate_id !== candidate.id ||
-                        responsePayload.search_id !== searchId
-                    ) {
-                        throw new Error('The classification response no longer matches this search.');
-                    }
-
-                    if (
-                        responsePayload.classification.accepted &&
-                        !responsePayload.automatic_collection
-                    ) {
-                        throw new Error(
-                            'The automatic collection response is incomplete.',
-                        );
-                    }
-
-                    const item = registerCandidateCollection(responsePayload, requestSession);
-                    updateRepositoryCandidate(runId, searchId, candidate.id, {
-                        item,
-                        status: responsePayload.classification.accepted
-                            ? 'accepted'
-                            : 'rejected',
-                        error: '',
-                    });
-                } catch (exception) {
-                    if (isAbortError(exception) || signal.aborted || !requestSession.isCurrent()) {
-                        return;
-                    }
-
-                    updateRepositoryCandidate(runId, searchId, candidate.id, {
-                        status: 'error',
-                        error:
-                            exception instanceof Error
-                                ? exception.message
-                                : 'Classification error.',
-                    });
-                }
+    async function classifyRepositoryCandidates(candidates, runId, abortController, requestSession) {
+        let next = 0;
+        async function submitNext() {
+            while (repositorySearchRunRef.current === runId && requestSession.isCurrent() &&
+                !abortController.signal.aborted && next < candidates.length) {
+                const candidate = candidates[next++];
+                await follow(candidate.item, requestSession, { submit: true });
             }
         }
+        await Promise.all(Array.from(
+            { length: Math.min(CLASSIFICATION_SUBMISSION_CONCURRENCY, candidates.length) }, submitNext,
+        ));
+    }
 
-        const workerCount = Math.min(
-            REPOSITORY_CLASSIFICATION_CONCURRENCY,
-            candidates.length,
-        );
-        await Promise.all(
-            Array.from({ length: workerCount }, () => classificationWorker()),
-        );
-
-        if (
-            repositorySearchRunRef.current === runId &&
-            repositorySearchAbortRef.current === abortController
-        ) {
-            repositorySearchAbortRef.current = null;
+    async function restoreAnalysis(manual = false) {
+        const requestSession = session;
+        if (!requestSession.local && !requestSession.token) return;
+        const runId = ++repositorySearchRunRef.current;
+        setRepositorySearching(false);
+        repositorySearchAbortRef.current?.abort();
+        repositorySearchAbortRef.current = null;
+        try {
+            const data = await requestJson('/collector/repository-analyses/latest', { session: requestSession });
+            if (!requestSession.isCurrent() || repositorySearchRunRef.current !== runId) return;
+            if (typeof data?.search_id !== 'string' || typeof data.query !== 'string' ||
+                !Array.isArray(data.items) || data.items.some(item => item.search_id !== data.search_id ||
+                    typeof item.candidate_id !== 'string')) throw new Error('The saved analysis is incomplete.');
+            repositorySearchIdRef.current = data.search_id;
+            setRepositoryOrigin('online');
+            setRepositoryHasSearched(true);
+            setRepositoryQuery(current => manual || !current ? data.query : current);
+            setRepositorySearching(false);
+            setRepositoryWarnings([]);
+            setLocalRepositoryResults([]);
+            setAgreementFilter('all');
+            setRepositoryResultQuery(data.query);
+            setRepositoryError('');
+            setRepositoryCandidates(data.items.map(item => ({
+                id: item.candidate_id, item: registerCandidateCollection(item, requestSession),
+                status: item.classification_status, error: item.classification_error ?? '',
+            })));
+            for (const item of data.items) void follow(item, requestSession);
+        } catch (error) {
+            if (!isAbortError(error) && requestSession.isCurrent() &&
+                repositorySearchRunRef.current === runId && (manual || error.status !== 404)) {
+                setRepositoryError(`Unable to restore the last analysis: ${error.message}`);
+            }
         }
+    }
+
+    useEffect(() => { void restoreAnalysis(); }, [session]);
+
+    function analyzeCandidate(candidate) {
+        void follow(candidate.item, session, { submit: true, retry: candidate.status === 'error' });
     }
 
     async function searchRepositories(event) {
@@ -286,7 +239,6 @@ export default function App() {
                 void classifyRepositoryCandidates(
                     candidates,
                     runId,
-                    searchId,
                     abortController,
                     requestSession,
                 );
@@ -326,6 +278,7 @@ export default function App() {
                 }),
                 {
                     pending: 0,
+                    queued: 0,
                     classifying: 0,
                     accepted: 0,
                     rejected: 0,
@@ -339,7 +292,7 @@ export default function App() {
         () =>
             repositoryCandidates.filter(
                 (candidate) =>
-                    candidate.status === 'pending' || candidate.status === 'classifying',
+                    ['pending', 'queued', 'classifying'].includes(candidate.status),
             ),
         [repositoryCandidates],
     );
@@ -376,8 +329,8 @@ export default function App() {
     );
 
     const repositoryAnalysisInProgress =
-        repositorySearching ||
-        repositoryStatusCounts.pending > 0 ||
+        repositorySearching || repositoryCandidates.some(candidate => candidate.requesting) ||
+        repositoryStatusCounts.queued > 0 ||
         repositoryStatusCounts.classifying > 0;
 
     return (
@@ -426,6 +379,8 @@ export default function App() {
 
             <div hidden={activeView !== 'search'}>
             <RepositorySearchSection
+                analyzeCandidate={analyzeCandidate}
+                restoreAnalysis={() => restoreAnalysis(true)}
                 collectedDatasets={collectedDatasets}
                 acceptedRepositoryCandidates={acceptedRepositoryCandidates}
                 agreementFilter={agreementFilter}

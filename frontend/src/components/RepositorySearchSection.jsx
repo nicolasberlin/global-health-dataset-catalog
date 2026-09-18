@@ -12,6 +12,8 @@ const AGREEMENT_FILTERS = [
 
 export default function RepositorySearchSection({
     collectedDatasets = [],
+    analyzeCandidate,
+    restoreAnalysis,
     acceptedRepositoryCandidates,
     agreementFilter,
     inProgressRepositoryCandidates,
@@ -102,6 +104,7 @@ export default function RepositorySearchSection({
                           : 'Search'}
                 </button>
             </form>
+            <button type="button" className="secondary-button" onClick={restoreAnalysis}>Restore last analysis</button>
 
             {repositoryHasSearched && !repositorySearching && !repositoryError && (
                 <div className="dataset-result-tools">
@@ -223,7 +226,7 @@ export default function RepositorySearchSection({
                         <RepositoryAcceptedCard key={candidate.id} candidate={candidate} />
                     ))}
                     {inProgressRepositoryCandidates.map((candidate) => (
-                        <RepositoryProgressCard key={candidate.id} candidate={candidate} />
+                        <RepositoryProgressCard key={candidate.id} candidate={candidate} onAnalyze={() => analyzeCandidate(candidate)} />
                     ))}
                 </div>
             ) : null}
@@ -231,7 +234,7 @@ export default function RepositorySearchSection({
             {repositoryHasSearched &&
             !repositoryAnalysisInProgress &&
             repositoryOrigin === 'online' &&
-            repositoryStatusCounts.accepted === 0 &&
+            repositoryStatusCounts.accepted === 0 && repositoryStatusCounts.pending === 0 &&
             !repositoryError ? (
                 <div className="repository-empty-state">
                     <h3>No dataset was accepted for this search.</h3>
@@ -268,8 +271,9 @@ export default function RepositorySearchSection({
                                 <span>
                                     {candidate.item.title}
                                     {candidate.error ? <small>{candidate.error}</small> : null}
+                                    {candidate.trackingError ? <small>{candidate.trackingError}</small> : null}
                                 </span>
-                                <strong>Error</strong>
+                                <button disabled={candidate.requesting} type="button" onClick={() => analyzeCandidate(candidate)}>Retry analysis</button>
                             </li>
                         ))}
                     </ul>
