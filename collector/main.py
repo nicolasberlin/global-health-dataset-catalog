@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 
 from collector.classification.factory import build_default_page_classifier
 from collector.classification.page import PageClassifier
@@ -67,8 +68,8 @@ def collect_source_with_report(
     source_url: str,
     config: CollectorConfig = DEFAULT_CONFIG,
     discover: DiscoverFunction = discover_source,
-    fetch_html: FetchHTMLFunction = fetch_public_html,
-    validate: ValidateDistributionFunction = validate_distribution,
+    fetch_html: FetchHTMLFunction | None = None,
+    validate: ValidateDistributionFunction | None = None,
     classifier: PageClassifier | None = None,
 ) -> CollectionResult:
     """Collect a bounded source into datasets and an audit report.
@@ -81,7 +82,24 @@ def collect_source_with_report(
 
     The returned result is not saved here. Fetch, classifier, and validation
     errors propagate to the caller instead of being counted as rejections.
+
+    Default fetch and validation functions use this run's network settings.
+    Explicitly supplied functions retain their single-argument interface and
+    are responsible for their own network settings.
     """
+
+    if fetch_html is None:
+        fetch_html = partial(
+            fetch_public_html,
+            timeout=config.request_timeout_seconds,
+            user_agent=config.user_agent,
+        )
+    if validate is None:
+        validate = partial(
+            validate_distribution,
+            timeout=config.request_timeout_seconds,
+            max_sample_bytes=config.max_sample_bytes,
+        )
 
     collected_datasets: list[CollectedDataset] = []
     rejected_count = 0
@@ -130,8 +148,8 @@ def collect_source_with_report(
 def collect_repository_candidate_with_report(
     candidate_url: str,
     config: CollectorConfig = DEFAULT_CONFIG,
-    fetch_html: FetchHTMLFunction = fetch_public_html,
-    validate: ValidateDistributionFunction = validate_distribution,
+    fetch_html: FetchHTMLFunction | None = None,
+    validate: ValidateDistributionFunction | None = None,
     classifier: PageClassifier | None = None,
 ) -> CollectionResult:
     """Collect one repository landing page through the normal validation gates.

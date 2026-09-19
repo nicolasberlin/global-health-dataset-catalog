@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+
 import pytest
 
 from collector.classification.page import PageClassification, PageClassificationError
@@ -82,6 +84,86 @@ class RejectingPageClassifier:
             accepted=False,
             dataset_signals={"source": "test"},
         )
+
+
+@pytest.mark.parametrize("repository_candidate", [False, True])
+def test_collection_passes_config_to_network_operations(monkeypatch, repository_candidate):
+    page_url = "https://example.org/datasets/mortality"
+    file_url = "https://example.org/files/mortality.csv"
+    html = f'<html><a href="{file_url}">Download CSV</a></html>'.encode()
+    requests = []
+    reads = []
+
+    class Response(io.BytesIO):
+        status = 200
+
+        def __init__(self, request, body, headers):
+            super().__init__(body)
+            self.request = request
+            self.headers = headers
+
+        def geturl(self):
+            return self.request.full_url
+
+        def read(self, size=-1):
+            reads.append((self.request.full_url, self.request.get_method(), size))
+            return super().read(size)
+
+    def open_response(request, *, timeout):
+        requests.append((request, timeout))
+        if request.full_url == page_url:
+            return Response(request, html, {"Content-Type": "text/html"})
+        assert request.full_url == file_url
+        if request.get_method() == "HEAD":
+            # Missing data headers force validation to sample the file with GET.
+            return Response(request, b"", {})
+        return Response(request, b"age,count\n" * 10_000, {"Content-Type": "text/csv"})
+
+    monkeypatch.setattr("collector.fetch.open_public_http_url", open_response)
+    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", open_response)
+
+    # Consecutive runs must each bind their own settings, including a return
+    # to defaults after custom configurations.
+    for config in (
+        CollectorConfig(
+            request_timeout_seconds=3.0,
+            max_sample_bytes=8_192,
+            user_agent="TestCollector/2.0",
+        ),
+        CollectorConfig(
+            request_timeout_seconds=1.5,
+            max_sample_bytes=512,
+            user_agent="TestCollector/3.0",
+        ),
+        CollectorConfig(),
+    ):
+        requests.clear()
+        reads.clear()
+        kwargs = {"config": config, "classifier": AcceptingPageClassifier()}
+        if repository_candidate:
+            result = collect_repository_candidate_with_report(page_url, **kwargs)
+        else:
+            result = collect_source_with_report(
+                page_url,
+                discover=lambda _: [DiscoveredPage(url=page_url, discovery_method="test")],
+                **kwargs,
+            )
+
+        assert len(result.datasets) == 1
+        assert result.datasets[0].validation_results[0].ok
+        assert [
+            (request.full_url, request.get_method(), timeout) for request, timeout in requests
+        ] == [
+            (page_url, "GET", config.request_timeout_seconds),
+            (file_url, "HEAD", config.request_timeout_seconds),
+            (file_url, "GET", config.request_timeout_seconds),
+        ]
+        assert requests[0][0].get_header("User-agent") == config.user_agent
+        assert requests[2][0].get_header("Range") == f"bytes=0-{config.max_sample_bytes - 1}"
+        assert reads == [
+            (page_url, "GET", 1_000_001),
+            (file_url, "GET", config.max_sample_bytes),
+        ]
 
 
 def test_collector_extracts_dataset_page_and_distributions():

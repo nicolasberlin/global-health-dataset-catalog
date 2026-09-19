@@ -39,6 +39,8 @@ def fetch_public_html(
     url: str,
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 1_000_000,
+    *,
+    user_agent: str = DEFAULT_CONFIG.user_agent,
 ) -> FetchedPage:
     """Fetch and decode a bounded response requested as HTML.
 
@@ -52,7 +54,7 @@ def fetch_public_html(
         url,
         headers={
             "Accept": "text/html,application/xhtml+xml",
-            "User-Agent": DEFAULT_CONFIG.user_agent,
+            "User-Agent": user_agent,
         },
         method="GET",
     )
