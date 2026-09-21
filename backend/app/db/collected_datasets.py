@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import string
+from dataclasses import replace
 
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
+from collector.storage.metadata import METADATA_FIELDS, metadata_evidence
 from collector.storage.models import (
     CollectedDataset,
     DistributionCandidate,
@@ -79,41 +81,86 @@ async def save_collected_datasets(
             ]
 
 
-async def list_collected_datasets() -> list[CollectedDataset]:
-    """Load all dataset aggregates, ordered by latest update then title."""
+async def list_collected_datasets(
+    *, limit: int = 20, before_id: int | None = None,
+    query: str = "", country: str = "", format: str = "",
+) -> list[CollectedDataset]:
+    """Read a bounded catalog page, newest inserted IDs first.
 
+    Allow one lookahead row for the API cursor. Updates cannot move an existing
+    dataset between pages. Filters run before LIMIT, across the whole catalog.
+    """
+    if not 1 <= limit <= 101:
+        raise ValueError("limit must be between 1 and 101.")
+    if before_id is not None and before_id < 1:
+        raise ValueError("before_id must be positive.")
+    clauses = []
+    parameters: list[object] = []
+    if before_id is not None:
+        clauses.append("dataset.id < %s")
+        parameters.append(before_id)
+    if query.strip():
+        clauses.append(
+            f"dataset.search_vector @@ websearch_to_tsquery("
+            f"'{DATASET_SEARCH_TEXT_CONFIGURATION}', %s)"
+        )
+        parameters.append(normalize_dataset_search_query(query))
+    if country.strip():
+        clauses.append("""EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(dataset.geography) AS area
+            WHERE lower(area) = lower(%s)
+        )""")
+        parameters.append(country.strip())
+    if format.strip():
+        clauses.append("""EXISTS (
+            SELECT 1 FROM collected_distributions AS distribution
+            WHERE distribution.dataset_id = dataset.id
+              AND upper(distribution.format) = upper(%s)
+        )""")
+        parameters.append(format.strip())
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    parameters.append(limit)
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
-        dataset_rows = await _fetchall(
+        rows = await _fetchall(
             connection,
-            """
-            SELECT id, source_url, dataset_url, title, description, publisher,
-                   hosting_platform, uploader, geography, discovery_method,
-                   dataset_signals, first_seen_at, last_seen_at, updated_at
-            FROM collected_datasets
-            ORDER BY updated_at DESC, title
-            """,
+            "SELECT dataset.* FROM collected_datasets AS dataset" + where
+            + " ORDER BY dataset.id DESC LIMIT %s",
+            tuple(parameters),
         )
-        distribution_rows = await _fetchall(
-            connection,
-            """
-            SELECT *
-            FROM collected_distributions
-            ORDER BY probability DESC, url
-            """,
-        )
+        return await _datasets_with_distributions(connection, rows)
 
-    distributions_by_dataset_id: dict[int, list[Row]] = {}
-    for row in distribution_rows:
-        distributions_by_dataset_id.setdefault(int(row["dataset_id"]), []).append(row)
 
-    return [
-        _collected_dataset_from_rows(
-            dataset_row,
-            distributions_by_dataset_id.get(int(dataset_row["id"]), []),
+async def get_collected_datasets(dataset_ids: list[int]) -> list[CollectedDataset]:
+    """Resolve explicit public catalog IDs independently of catalog pagination."""
+    if len(dataset_ids) > 100 or any(value < 1 for value in dataset_ids):
+        raise ValueError("Expected at most 100 positive dataset IDs.")
+    if not dataset_ids:
+        return []
+    async with _require_database_pool().connection() as connection:
+        await _require_current_schema(connection)
+        rows = await _fetchall(
+            connection, "SELECT * FROM collected_datasets WHERE id = ANY(%s) ORDER BY id DESC",
+            (dataset_ids,),
         )
-        for dataset_row in dataset_rows
-    ]
+        return await _datasets_with_distributions(connection, rows)
+
+
+async def _datasets_with_distributions(connection, dataset_rows) -> list[CollectedDataset]:
+    ids = [int(row["id"]) for row in dataset_rows]
+    if not ids:
+        return []
+    rows = await _fetchall(
+        connection,
+        """SELECT * FROM collected_distributions WHERE dataset_id = ANY(%s)
+           ORDER BY probability DESC, url""",
+        (ids,),
+    )
+    by_id: dict[int, list[Row]] = {}
+    for row in rows:
+        by_id.setdefault(int(row["dataset_id"]), []).append(row)
+    return [_collected_dataset_from_rows(row, by_id.get(int(row["id"]), []))
+            for row in dataset_rows]
 
 
 async def search_collected_datasets(
@@ -146,6 +193,8 @@ async def search_collected_datasets(
             )
             SELECT dataset.id, dataset.source_url, dataset.dataset_url,
                    dataset.title, dataset.description, dataset.publisher,
+                   dataset.date_of_publication, dataset.sharing_license, dataset.doi,
+                   dataset.metadata_provenance,
                    dataset.hosting_platform, dataset.uploader, dataset.geography,
                    dataset.discovery_method, dataset.dataset_signals,
                    dataset.first_seen_at, dataset.last_seen_at, dataset.updated_at,
@@ -209,6 +258,10 @@ async def _save_collected_dataset(
     distributions before reloading the stored aggregate.
     """
 
+    dataset = replace(dataset, metadata_provenance={
+        **metadata_evidence(dataset, kind="collection", source_url=source_url),
+        **dataset.metadata_provenance,
+    })
     dataset_row = await _upsert_collected_dataset(connection, source_url, dataset)
     dataset_id = int(dataset_row["id"])
     await _insert_dataset_discovery_observation(
@@ -239,18 +292,41 @@ async def _upsert_collected_dataset(
     row raises ``RuntimeError``.
     """
 
+    metadata_updates = ", ".join(
+        f"""{field} = CASE
+            WHEN EXISTS (
+                SELECT 1 FROM jsonb_array_elements(
+                    COALESCE(excluded.metadata_provenance->'{field}', '[]'::jsonb)
+                ) AS evidence
+                WHERE evidence->>'value' = excluded.{field}
+                  AND evidence->>'kind' IN ('page', 'adapter')
+            ) THEN COALESCE(NULLIF(excluded.{field}, ''), collected_datasets.{field})
+            ELSE COALESCE(NULLIF(collected_datasets.{field}, ''), excluded.{field}) END"""
+        for field in METADATA_FIELDS
+    )
+    provenance_values = ", ".join(
+        f"""'{field}', COALESCE((SELECT jsonb_agg(DISTINCT evidence)
+            FROM jsonb_array_elements(
+                COALESCE(collected_datasets.metadata_provenance->'{field}', '[]'::jsonb)
+                || COALESCE(excluded.metadata_provenance->'{field}', '[]'::jsonb)
+            ) AS evidence), '[]'::jsonb)"""
+        for field in METADATA_FIELDS
+    )
     row = await _fetchone(
         connection,
-        """
+        f"""
         INSERT INTO collected_datasets (
             source_url, dataset_url, title, description, publisher,
             hosting_platform, uploader, geography, discovery_method,
-            dataset_signals, first_seen_at, last_seen_at
+            dataset_signals, date_of_publication, sharing_license, doi, metadata_provenance,
+            first_seen_at, last_seen_at
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
         )
         ON CONFLICT(dataset_url) DO UPDATE SET
+            {metadata_updates},
+            metadata_provenance = jsonb_build_object({provenance_values}),
             source_url = excluded.source_url,
             title = COALESCE(NULLIF(excluded.title, ''), collected_datasets.title),
             description = COALESCE(
@@ -283,7 +359,8 @@ async def _upsert_collected_dataset(
             updated_at = NOW()
         RETURNING id, source_url, dataset_url, title, description, publisher,
                   hosting_platform, uploader, geography, discovery_method,
-                  dataset_signals, first_seen_at, last_seen_at, updated_at
+                  dataset_signals, date_of_publication, sharing_license, doi, metadata_provenance,
+                  first_seen_at, last_seen_at, updated_at
         """,
         (
             source_url,
@@ -296,6 +373,8 @@ async def _upsert_collected_dataset(
             _serialize_geography(dataset.geography),
             dataset.discovery_method,
             _serialize_signals(dataset.dataset_signals),
+            dataset.date_of_publication, dataset.sharing_license, dataset.doi,
+            _serialize_signals(dataset.metadata_provenance),
         ),
     )
     if row is None:
@@ -455,14 +534,14 @@ async def _upsert_collected_distribution(
             last_checked_at, validation_attempted, validation_final_url, validation_ok,
             validation_http_status, validation_mime_type, validation_size_bytes,
             validation_etag, validation_last_modified, validation_content_disposition,
-            validation_error
+            validation_error, validation_status, validation_reason
         )
         VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             NOW(),
             NOW(),
             CASE WHEN %s THEN NOW() ELSE NULL END,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT(dataset_id, url, format) DO UPDATE SET
             probability = excluded.probability,
@@ -518,6 +597,14 @@ async def _upsert_collected_distribution(
             validation_error = CASE
                 WHEN excluded.validation_attempted THEN excluded.validation_error
                 ELSE collected_distributions.validation_error
+            END,
+            validation_status = CASE
+                WHEN excluded.validation_attempted THEN excluded.validation_status
+                ELSE collected_distributions.validation_status
+            END,
+            validation_reason = CASE
+                WHEN excluded.validation_attempted THEN excluded.validation_reason
+                ELSE collected_distributions.validation_reason
             END
         """,
         (
@@ -543,6 +630,8 @@ async def _upsert_collected_distribution(
             validation.last_modified if validation else "",
             validation.content_disposition if validation else "",
             validation.error if validation else "",
+            validation.status if validation else "unconfirmed",
+            validation.reason if validation else "",
         ),
     )
 
@@ -603,6 +692,8 @@ def _collected_dataset_from_rows(
             last_modified=str(row["validation_last_modified"]),
             content_disposition=str(row["validation_content_disposition"]),
             error=str(row["validation_error"]),
+            status=str(row["validation_status"]),
+            reason=str(row["validation_reason"]),
         )
         for row in distribution_rows
         if bool(row["validation_attempted"])
@@ -610,6 +701,12 @@ def _collected_dataset_from_rows(
 
     return CollectedDataset(
         dataset_url=str(dataset_row["dataset_url"]),
+        date_of_publication=str(dataset_row["date_of_publication"]),
+        sharing_license=str(dataset_row["sharing_license"]),
+        doi=str(dataset_row["doi"]),
+        metadata_provenance=_deserialize_signals(
+            dataset_row["metadata_provenance"], "collected_datasets.metadata_provenance",
+        ),
         title=str(dataset_row["title"]),
         description=str(dataset_row["description"]),
         publisher=str(dataset_row["publisher"]),

@@ -291,52 +291,6 @@ p {
     background: #40201e;
 }
 
-.api-access-bar {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 12px 24px;
-    align-items: end;
-    margin-bottom: 18px;
-    border: 1px solid #dbe4de;
-    border-radius: 8px;
-    padding: 14px 16px;
-    background: #fff;
-}
-
-.api-access-status {
-    display: flex;
-    min-width: 180px;
-    flex-direction: column;
-}
-
-.api-access-status span {
-    color: #596860;
-    font-size: 0.84rem;
-}
-
-.api-access-form {
-    display: grid;
-    grid-template-columns: auto minmax(180px, 1fr) auto auto;
-    gap: 8px;
-    align-items: center;
-}
-
-.api-access-form label {
-    font-size: 0.86rem;
-    font-weight: 700;
-}
-
-.api-access-form button {
-    white-space: nowrap;
-}
-
-.api-access-error {
-    grid-column: 2;
-    margin: 0;
-    color: #8c2d25;
-    font-size: 0.84rem;
-}
-
 .api-status--loading {
     background: #24313c;
 }
@@ -989,107 +943,10 @@ p {
     font-weight: 800;
 }
 
-.source-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-}
-
-.source-card,
 .empty-card {
     border: 1px solid #dbe4de;
     border-radius: 8px;
     background: #fff;
-}
-
-.source-card {
-    display: flex;
-    min-height: 230px;
-    flex-direction: column;
-    padding: 18px;
-}
-
-.source-card__meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-}
-
-.theme-pill,
-.source-key {
-    display: inline-flex;
-    min-height: 28px;
-    align-items: center;
-    border-radius: 999px;
-    padding: 0 10px;
-    font-size: 0.76rem;
-    font-weight: 800;
-}
-
-.theme-pill {
-    background: #eef6f1;
-    color: #1f5f4a;
-}
-
-.source-key {
-    max-width: 100%;
-    overflow: hidden;
-    background: #f1f4f2;
-    color: #68766f;
-    font-family: 'SFMono-Regular', Consolas, monospace;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.source-card p {
-    flex: 1;
-    margin-bottom: 18px;
-}
-
-.source-card__footer {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-    border-top: 1px solid #edf2ef;
-    padding-top: 14px;
-}
-
-.source-card__footer span {
-    min-width: 0;
-    overflow: hidden;
-    color: #68766f;
-    font-size: 0.86rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.source-card__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: flex-end;
-}
-
-.source-link {
-    display: inline-flex;
-    min-height: 36px;
-    align-items: center;
-    border: 1px solid #b8d1c4;
-    border-radius: 8px;
-    padding: 0 12px;
-    color: #1f5f4a;
-    font-weight: 800;
-    text-decoration: none;
-    white-space: nowrap;
-}
-
-.source-link:hover {
-    border-color: #1f5f4a;
-    background: #eef6f1;
 }
 
 .empty-card {
@@ -1276,26 +1133,16 @@ p {
     }
 
     .app-header,
-    .api-access-bar,
     .summary-grid,
     .catalog-toolbar,
     .repository-controls,
     .repository-result-grid,
-    .source-grid,
     .dataset-grid {
         grid-template-columns: 1fr;
     }
 
-    .api-access-form {
-        grid-template-columns: auto minmax(0, 1fr) auto auto;
-    }
-
     .title-block,
     .api-status {
-        min-height: auto;
-    }
-
-    .source-card {
         min-height: auto;
     }
 
@@ -1315,7 +1162,6 @@ p {
     .catalog-section,
     .collected-section,
     .dataset-card,
-    .source-card,
     .empty-card {
         padding: 16px;
     }
@@ -1330,15 +1176,10 @@ p {
     }
 
     .repository-search-form,
-    .api-access-form,
     .repository-facts,
     .repository-score-row,
     .repository-decision-row {
         grid-template-columns: 1fr;
-    }
-
-    .api-access-error {
-        grid-column: 1;
     }
 
     .repository-search-form button {
@@ -1362,19 +1203,9 @@ p {
         font-size: 1.18rem;
     }
 
-    .source-card__footer {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .source-card__actions,
     .dataset-card__source {
         align-items: stretch;
         flex-direction: column;
-    }
-
-    .source-link {
-        justify-content: center;
     }
 
     .dataset-card__source a {

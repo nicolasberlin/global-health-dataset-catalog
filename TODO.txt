@@ -110,9 +110,12 @@ P3 - PRODUCT QUALITY
     somewhat_relevant should trigger collection and whether quorum must remain 3/3.
 
 23. Improve discovery and catalog UX.
-    Let users choose local-only or local-plus-external search. Add filterable paginated
-    results, permanent dataset detail URLs, resumable searches, licence, provenance,
-    access status, last-check time, and stable identifiers.
+    Deferred (2026-09-19): consider a "Search external repositories" button to expand
+    the same query even when local results exist. Keep local results accessible.
+    For now, retain database-first search with automatic external fallback only
+    when no local results are found. This option is not a current priority.
+    Add filterable paginated results, permanent dataset detail URLs, resumable
+    searches, licence, provenance, access status, last-check time, and stable identifiers.
 
 24. Evaluate additional repository providers against a shared benchmark before
     enabling them. Keep normalized contracts, per-provider budgets, provenance, and

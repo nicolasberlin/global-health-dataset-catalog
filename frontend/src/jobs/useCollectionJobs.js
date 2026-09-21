@@ -97,6 +97,7 @@ export function useCollectionJobs(session, onSaved) {
         const { job, tracking, trackingError } = entry;
         return {
             job,
+            dataset_ids: job.dataset_ids ?? [],
             state: job.status === 'done' ? (job.saved_count > 0 ? 'saved' : 'empty') : job.status,
             tracking,
             trackingError,

@@ -134,7 +134,7 @@ describe('database-first dataset search', () => {
             description: 'Annual observations.',
             url: 'https://example.org/malaria',
             source: 'DataCite',
-            classification_status: 'pending',
+            classification_status: 'queued',
             publisher: 'Example Institute',
             date: '2025',
             doi: '',
@@ -155,7 +155,7 @@ describe('database-first dataset search', () => {
             }
             if (
                 url.endsWith(
-                    `/collector/repository-candidates/${CANDIDATE_ID}/classify`,
+                    `/collector/repository-candidates/${CANDIDATE_ID}`,
                 )
             ) {
                 return classificationResponse;
@@ -166,7 +166,7 @@ describe('database-first dataset search', () => {
 
         submitSearch();
 
-        expect(await screen.findByText('Requesting analysis…')).toBeInTheDocument();
+        expect(await screen.findByText('Waiting')).toBeInTheDocument();
         expect(screen.getByText('No local results')).toBeInTheDocument();
 
         await act(async () => {
@@ -205,8 +205,9 @@ describe('database-first dataset search', () => {
         ).toBeInTheDocument();
         expect(screen.getByText('AI agreement')).toBeInTheDocument();
         const classificationCall = global.fetch.mock.calls.find(([url]) =>
-            String(url).includes(`/repository-candidates/${CANDIDATE_ID}/classify`),
+            String(url).includes(`/repository-candidates/${CANDIDATE_ID}`),
         );
+        expect(global.fetch.mock.calls.some(([url]) => String(url).includes('/classify'))).toBe(false);
         expect(classificationCall?.[1]?.body).toBeUndefined();
         expect(classificationCall?.[1]?.headers?.Authorization).toBe(
             'Bearer frontend-test-token',
@@ -221,7 +222,7 @@ describe('database-first dataset search', () => {
             description: 'Annual observations.',
             url: 'https://example.org/malaria',
             source: 'DataCite',
-            classification_status: 'pending',
+            classification_status: 'queued',
             publisher: 'Example Institute',
             date: '2025',
             doi: '',
@@ -242,7 +243,7 @@ describe('database-first dataset search', () => {
             }
             if (
                 url.endsWith(
-                    `/collector/repository-candidates/${CANDIDATE_ID}/classify`,
+                    `/collector/repository-candidates/${CANDIDATE_ID}`,
                 )
             ) {
                 return Promise.resolve(
@@ -313,7 +314,7 @@ describe('database-first dataset search', () => {
             description: 'Unrelated observations.',
             url: 'https://example.org/unrelated',
             source: 'DataCite',
-            classification_status: 'pending',
+            classification_status: 'queued',
             publisher: '',
             date: '',
             doi: '',
@@ -334,7 +335,7 @@ describe('database-first dataset search', () => {
             }
             if (
                 url.endsWith(
-                    `/collector/repository-candidates/${CANDIDATE_ID}/classify`,
+                    `/collector/repository-candidates/${CANDIDATE_ID}`,
                 )
             ) {
                 return Promise.resolve(
@@ -458,8 +459,8 @@ describe('protected API access', () => {
         ).toBe(false);
     });
 
-    it('uses a token entered at runtime for protected requests', async () => {
-        window.sessionStorage.clear();
+    it('uses an existing session token without displaying token controls', async () => {
+        window.sessionStorage.setItem('global-health-api-token', 'runtime-test-token');
         mockApi((url) => {
             if (url.endsWith('/collector/search-datasets')) {
                 return Promise.resolve(
@@ -475,10 +476,8 @@ describe('protected API access', () => {
         });
         render(<App />);
 
-        fireEvent.change(screen.getByLabelText('API token'), {
-            target: { value: 'runtime-test-token' },
-        });
-        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        expect(screen.queryByLabelText('API token')).not.toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: 'Protected API access' })).not.toBeInTheDocument();
         submitSearch();
 
         await waitFor(() => {

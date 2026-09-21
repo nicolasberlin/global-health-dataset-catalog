@@ -14,6 +14,7 @@ from collector.classification.page import PageClassificationError
 
 RequestBodyBuilder = Callable[[dict[str, object], str], dict[str, object]]
 ResponseTextExtractor = Callable[[object], str]
+MAX_LLM_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
 def extract_chat_completions_message_text(response_payload: object) -> str:
@@ -104,7 +105,10 @@ class HTTPJSONLLMClient:
 
         try:
             with self._request(request, timeout=self._timeout_seconds) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
+                payload_bytes = response.read(MAX_LLM_RESPONSE_BYTES + 1)
+                if len(payload_bytes) > MAX_LLM_RESPONSE_BYTES:
+                    raise PageClassificationError("Provider response is too large.")
+                response_payload = json.loads(payload_bytes.decode("utf-8"))
         except HTTPError as exception:
             raise PageClassificationError(
                 f"{self._provider.name} classification request failed with HTTP {exception.code}."

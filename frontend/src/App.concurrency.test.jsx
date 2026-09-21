@@ -8,7 +8,7 @@ const response = (payload) => ({ ok: true, status: 200, json: async () => payloa
 const dataset = { id: 1, title: 'Saved malaria data', dataset_url: 'https://example.org/data', distributions: [] };
 const candidate = (id = 'candidate-a') => ({
     candidate_id: id, search_id: 'search-a', title: `Malaria ${id}`,
-    url: 'https://example.org/data', source: 'DataCite', classification_status: 'pending',
+    url: 'https://example.org/data', source: 'DataCite', classification_status: 'queued',
 });
 const accepted = (item, job = { id: 42, status: 'pending', saved_count: 0 }) => ({
     ...item, classification_status: 'accepted', classification: { accepted: true, ensemble: {} },
@@ -23,7 +23,7 @@ const advance = async (ms = 0) => act(async () => { await vi.advanceTimersByTime
 async function search(query) {
     fireEvent.change(screen.getByLabelText('Search for a health dataset'), { target: { value: query } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-    await advance();
+    await advance(700);
 }
 function installApi({ items = [candidate()], classify, poll, catalog } = {}) {
     global.fetch = vi.fn(async (input, options = {}) => {
@@ -36,8 +36,8 @@ function installApi({ items = [candidate()], classify, poll, catalog } = {}) {
                 ? { search_id: 'search-a', origin: 'online', items }
                 : { search_id: 'search-b', origin: 'database', items: [{ ...dataset, dataset_url: 'https://example.org/vaccination', title: 'Vaccination data' }] });
         }
-        if (url.endsWith('/classify')) {
-            const item = items.find((entry) => url.includes(`/${entry.candidate_id}/`));
+        if (/\/repository-candidates\/[^/]+$/.test(url)) {
+            const item = items.find((entry) => url.endsWith(`/${entry.candidate_id}`));
             return classify?.(item, options) ?? response(accepted(item));
         }
         if (url.endsWith('/collection-jobs/42')) {
@@ -100,52 +100,47 @@ it('registers a job from a late classification in the same session without repla
     expect(screen.queryByText('Malaria candidate-a')).not.toBeInTheDocument();
 });
 
-it('aborts a previous token session even during JSON parsing and ignores its job response', async () => {
+it('aborts an unmounted session even during JSON parsing and ignores its job response', async () => {
     const lateBody = deferred();
     let classificationSignal;
     installApi({ classify: (_, options) => {
         classificationSignal = options.signal;
         return { ok: true, json: () => lateBody.promise };
     } });
-    render(<App />);
+    const { unmount } = render(<App />);
     await advance(50);
     await search('malaria');
-    fireEvent.change(screen.getByLabelText('API token'), { target: { value: 'second-token' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    unmount();
     expect(classificationSignal.aborted).toBe(true);
-    await search('vaccination');
     await act(async () => lateBody.resolve(accepted(candidate())));
     await advance(2000);
     expect(callsTo('/collection-jobs/42')).toHaveLength(0);
     expect(callsTo('/collected-datasets')).toHaveLength(1);
-    expect(screen.getByRole('heading', { name: 'Vaccination data' })).toBeVisible();
-    expect(callsTo('/search-datasets').at(-1)[1].headers.Authorization).toBe('Bearer second-token');
 });
 
-it('clears loading on logout and rejects a late search response', async () => {
+it('rejects a late search response after unmount', async () => {
     const late = deferred();
     global.fetch = vi.fn((url) => String(url).endsWith('/collected-datasets')
         ? Promise.resolve(response({ items: [] })) : late.promise);
-    render(<App />);
+    const { unmount } = render(<App />);
     await search('malaria');
     const signal = callsTo('/search-datasets')[0][1].signal;
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    unmount();
     expect(signal.aborted).toBe(true);
-    expect(screen.getByRole('button', { name: 'Search' })).toBeEnabled();
     await act(async () => late.resolve(response({ search_id: 'search-a', origin: 'online', items: [candidate()] })));
     expect(screen.queryByText('Malaria candidate-a')).not.toBeInTheDocument();
     expect(callsTo('/classify')).toHaveLength(0);
 });
 
-it('aborts polling on logout and ignores its late completion', async () => {
+it('aborts polling on unmount and ignores its late completion', async () => {
     const late = deferred();
     let pollSignal;
     installApi({ poll: (options) => { pollSignal = options.signal; return late.promise; } });
-    render(<App />);
+    const { unmount } = render(<App />);
     await advance(50);
     await search('malaria');
     await advance(700);
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    unmount();
     expect(pollSignal.aborted).toBe(true);
     await act(async () => late.resolve(response({ job: { id: 42, status: 'done', saved_count: 1 } })));
     await advance(4000);

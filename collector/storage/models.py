@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from collector.extraction.dataset_metadata import (
     build_dataset_metadata,
@@ -38,6 +39,7 @@ class PageSnapshot:
     title: str = ""
     geography: tuple[str, ...] = ()
     date_of_publication: str = ""
+    doi: str = ""
     dataset_url: str = ""
     diseases: tuple[str, ...] = ()
     size_of_dataset: str = ""
@@ -151,6 +153,9 @@ class HTTPProbe:
     error: str = ""
 
 
+ValidationStatus = Literal["available", "restricted", "unavailable", "unconfirmed"]
+
+
 @dataclass(frozen=True)
 class ValidationResult:
     """Bounded HTTP-probe result used to retain or reject a distribution.
@@ -171,6 +176,18 @@ class ValidationResult:
     last_modified: str = ""
     content_disposition: str = ""
     error: str = ""
+    status: ValidationStatus | None = None
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        # Accept legacy callers while making status authoritative for new results.
+        status = self.status or ("available" if self.ok else "unconfirmed")
+        object.__setattr__(self, "status", status)
+        object.__setattr__(self, "ok", status == "available")
+        if not self.reason:
+            object.__setattr__(self, "reason", (
+                "Data response confirmed." if self.ok else "Resource validation failed."
+            ))
 
 
 @dataclass(frozen=True)
@@ -191,6 +208,10 @@ class CollectedDataset:
     uploader: str
     dataset_signals: dict[str, object]
     geography: tuple[str, ...] = ()
+    date_of_publication: str = ""
+    sharing_license: str = ""
+    doi: str = ""
+    metadata_provenance: dict[str, object] = field(default_factory=dict)
     distributions: list[DistributionCandidate] = field(default_factory=list)
     discovery_method: str = ""
     validation_results: list[ValidationResult] = field(default_factory=list)
@@ -218,6 +239,7 @@ class CollectionReport:
     rejected_count: int = 0
     invalid_distribution_count: int = 0
     discovery_methods: tuple[str, ...] = ()
+    validation_failures: list[ValidationResult] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

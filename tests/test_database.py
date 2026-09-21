@@ -106,7 +106,7 @@ async def _create_repository_candidate(
     owner_id: str = TEST_OWNER_ID,
 ):
     session = await database.create_search_session(query, owner_id)
-    candidates = await database.complete_search_session_with_repository_candidates(
+    candidates = await database.save_repository_candidates(
         session["id"],
         owner_id,
         [
@@ -123,8 +123,8 @@ async def _create_repository_candidate(
                 metadata={"Geography": "France"},
             )
         ],
-        status="completed",
     )
+    await database.complete_search_session(session["id"], owner_id, origin="online")
     return session, candidates[0]
 
 
@@ -291,6 +291,12 @@ async def test_job_access_migration_preserves_data_and_only_backfills_known_owne
     job_id = int(reservation.job["id"])
     # Reproduce the previous schema, whose only durable association was the origin candidate.
     await _execute(database, "DROP TABLE collection_job_candidates")
+    await _execute(database, """ALTER TABLE collected_datasets
+        DROP COLUMN date_of_publication, DROP COLUMN sharing_license,
+        DROP COLUMN doi, DROP COLUMN metadata_provenance""")
+    await _execute(database, """ALTER TABLE collected_distributions
+        DROP COLUMN validation_status, DROP COLUMN validation_reason""")
+    await _execute(database, "ALTER TABLE collection_jobs DROP COLUMN validation_failures")
     await _execute(database, "DELETE FROM schema_migrations WHERE version >= 2")
     await database.init_database()
     await database.init_database()
@@ -2291,11 +2297,12 @@ async def test_complete_collection_job_saves_refined_distribution_formats(databa
             final_url=url,
             status_code=200,
             headers={"content-type": "application/json"},
+            body_sample=b'{"data": [{"value": 10}]}',
         )
 
     collection_result = collect_repository_candidate_with_report(
         candidate_url,
-        config=CollectorConfig(max_distributions_per_dataset=2),
+        config=CollectorConfig(max_distributions_saved=2),
         fetch_html=fake_fetch_html,
         validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
         classifier=AcceptingClassifier(),

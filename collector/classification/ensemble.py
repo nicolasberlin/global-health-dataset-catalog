@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 
 from collector.classification.page import (
     PageClassification,
@@ -17,6 +15,7 @@ from collector.classification.repository import (
     RepositoryRelevanceLabel,
     RepositoryResultClassifier,
 )
+from collector.classification.voting import run_voters
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 # Ties are resolved by selecting the first matching, most conservative label.
@@ -102,7 +101,12 @@ class EnsemblePageClassifier:
         page: PageSnapshot,
         distributions: list[DistributionCandidate],
     ) -> PageClassification:
-        outcomes = self._classify_voters(page, distributions)
+        outcomes = run_voters(
+            self._voters,
+            classify=lambda classifier: classifier.classify(page, distributions),
+            make_vote=_page_vote,
+            handled_errors=(PageClassificationError,),
+        )
         votes = [
             outcome.vote
             for outcome in outcomes
@@ -159,23 +163,6 @@ class EnsemblePageClassifier:
             },
         )
 
-    def _classify_voters(
-        self,
-        page: PageSnapshot,
-        distributions: list[DistributionCandidate],
-    ) -> list[_VoteOutcome]:
-        with ThreadPoolExecutor(max_workers=len(self._voters)) as executor:
-            return list(
-                executor.map(
-                    lambda voter: _classify_voter(
-                        voter,
-                        page,
-                        distributions,
-                    ),
-                    self._voters,
-                )
-            )
-
 
 class EnsembleRepositoryRelevanceClassifier:
     """Run repository classifiers in parallel and combine relevance votes.
@@ -229,7 +216,12 @@ class EnsembleRepositoryRelevanceClassifier:
         self,
         page: PageSnapshot,
     ) -> RepositoryClassification:
-        outcomes = self._classify_voters(page)
+        outcomes = run_voters(
+            self._voters,
+            classify=lambda classifier: classifier.classify(page),
+            make_vote=_repository_vote,
+            handled_errors=(PageClassificationError, ValueError),
+        )
 
         votes = [
             outcome.vote
@@ -305,88 +297,27 @@ class EnsembleRepositoryRelevanceClassifier:
             ensemble=ensemble_summary,
         )
 
-    def _classify_voters(
-        self,
-        page: PageSnapshot,
-    ) -> list[_RepositoryVoteOutcome]:
-        with ThreadPoolExecutor(max_workers=len(self._voters)) as executor:
-            return list(
-                executor.map(
-                    lambda voter: _classify_repository_voter(
-                        voter,
-                        page,
-                    ),
-                    self._voters,
-                )
-            )
 
-
-@dataclass(frozen=True)
-class _VoteOutcome:
-    voter_id: str
-    vote: PageClassificationVote | None = None
-    error: str = ""
-
-
-@dataclass(frozen=True)
-class _RepositoryVoteOutcome:
-    voter_id: str
-    vote: RepositoryClassificationVote | None = None
-    error: str = ""
-
-
-def _classify_voter(
-    voter: tuple[str, PageClassifier],
-    page: PageSnapshot,
-    distributions: list[DistributionCandidate],
-) -> _VoteOutcome:
-    voter_id, classifier = voter
-
-    try:
-        classification = classifier.classify(
-            page,
-            distributions,
-        )
-    except PageClassificationError as exception:
-        return _VoteOutcome(
-            voter_id=voter_id,
-            error=str(exception),
-        )
-
-    return _VoteOutcome(
+def _page_vote(
+    voter_id: str,
+    classification: PageClassification,
+) -> PageClassificationVote:
+    return PageClassificationVote(
         voter_id=voter_id,
-        vote=PageClassificationVote(
-            voter_id=voter_id,
-            accepted=classification.accepted,
-            dataset_signals=classification.dataset_signals,
-        ),
+        accepted=classification.accepted,
+        dataset_signals=classification.dataset_signals,
     )
 
 
-def _classify_repository_voter(
-    voter: tuple[str, RepositoryResultClassifier],
-    page: PageSnapshot,
-) -> _RepositoryVoteOutcome:
-    voter_id, classifier = voter
-
-    try:
-        classification = classifier.classify(page)
-    except (PageClassificationError, ValueError) as exception:
-        return _RepositoryVoteOutcome(
-            voter_id=voter_id,
-            error=str(exception),
-        )
-
-    return _RepositoryVoteOutcome(
+def _repository_vote(
+    voter_id: str,
+    classification: RepositoryClassification,
+) -> RepositoryClassificationVote:
+    return RepositoryClassificationVote(
         voter_id=voter_id,
-        vote=RepositoryClassificationVote(
-            voter_id=voter_id,
-            relevance_label=classification.relevance_label,
-            reason=classification.reason,
-            missing_information=list(
-                classification.missing_information
-            ),
-        ),
+        relevance_label=classification.relevance_label,
+        reason=classification.reason,
+        missing_information=list(classification.missing_information),
     )
 
 

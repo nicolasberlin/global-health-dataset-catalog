@@ -49,7 +49,7 @@ async def complete_search_session_with_repository_candidates(
     *,
     status: SearchStatus,
 ) -> list[dict[str, object]]:
-    """Persist all online candidates and finish their search in one transaction."""
+    """Persist and enqueue online candidates, then finish their search atomically."""
 
     if status not in {"completed", "partial"}:
         raise ValueError("An online candidate search must complete or be partial.")
@@ -72,6 +72,15 @@ async def complete_search_session_with_repository_candidates(
             )
             if session_row is None:
                 raise RuntimeError("Search session is missing or already completed.")
+            await connection.execute(
+                """UPDATE repository_candidates SET classification_status = 'queued',
+                          updated_at = NOW()
+                   WHERE search_session_id = %s AND classification_status = 'pending'""",
+                (search_id,),
+            )
+            for row in rows:
+                if row["classification_status"] == "pending":
+                    row["classification_status"] = "queued"
     return [_repository_candidate_to_dict(row) for row in rows]
 
 

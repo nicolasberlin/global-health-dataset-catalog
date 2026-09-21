@@ -5,15 +5,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
+from urllib.parse import urlsplit
 
 from collector.classification.factory import build_default_page_classifier
 from collector.classification.page import PageClassifier
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.discovery.adapters import DiscoveredPage
+from collector.discovery.adapters.shared import EXCLUDED_RESOURCE_FORMATS
 from collector.discovery.manager import discover_source
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
 from collector.fetch import FetchedPage, fetch_public_html
+from collector.storage.metadata import metadata_evidence
 from collector.storage.models import (
     CollectedDataset,
     CollectionReport,
@@ -35,6 +38,8 @@ def analyze_html_page(
     html: str,
     config: CollectorConfig = DEFAULT_CONFIG,
     classifier: PageClassifier | None = None,
+    *,
+    discovered_page: DiscoveredPage | None = None,
 ) -> CollectedDataset | None:
     """Extract and classify one HTML page before distribution validation.
 
@@ -44,7 +49,18 @@ def analyze_html_page(
     """
 
     page = extract_page(url, html)
-    distributions = extract_distributions(page)
+    evidence = metadata_evidence(page, kind="page", source_url=page.url)
+    if discovered_page is not None:
+        page = _merge_discovery_metadata(page, discovered_page)
+        for field in ("date_of_publication", "sharing_license"):
+            value = getattr(discovered_page, field)
+            if value:
+                evidence.setdefault(field, []).append({
+                    "value": value, "kind": "adapter", "source_url": discovered_page.url,
+                })
+    distributions = [item for item in extract_distributions(page) if _usable_distribution(item)]
+    if not distributions:
+        return None
     page_classifier = _classifier_or_default(classifier)
     classification = page_classifier.classify(page, distributions)
 
@@ -59,6 +75,10 @@ def analyze_html_page(
         hosting_platform=page.hosting_platform,
         uploader=page.uploader,
         geography=page.geography,
+        date_of_publication=page.date_of_publication,
+        sharing_license=page.sharing_license,
+        doi=page.doi,
+        metadata_provenance=evidence,
         dataset_signals=classification.dataset_signals,
         distributions=distributions,
     )
@@ -76,8 +96,9 @@ def collect_source_with_report(
 
     Discovery, HTML fetching, classification, and distribution probes may
     perform outbound requests. At most ``max_pages_per_source`` candidates are
-    analyzed and at most ``max_distributions_per_dataset`` resources per
-    accepted page are probed. A page enters the result only after classifier
+    analyzed and at most ``max_distribution_attempts`` distinct resources per
+    accepted page are probed, retaining up to ``max_distributions_saved``.
+    A page enters the result only after classifier
     acceptance and at least one successful distribution validation.
 
     The returned result is not saved here. Fetch, classifier, and validation
@@ -102,6 +123,14 @@ def collect_source_with_report(
         )
 
     collected_datasets: list[CollectedDataset] = []
+    validation_failures: list[ValidationResult] = []
+
+    def validate_and_record(distribution: DistributionCandidate) -> ValidationResult:
+        result = validate(distribution)
+        if not result.ok:
+            validation_failures.append(result)
+        return result
+
     rejected_count = 0
     invalid_distribution_count = 0
     discovered_pages = discover(source_url)
@@ -115,7 +144,7 @@ def collect_source_with_report(
             discovered_page,
             config,
             fetch_html,
-            validate,
+            validate_and_record,
             page_classifier,
         )
         invalid_distribution_count += invalid_count
@@ -132,6 +161,7 @@ def collect_source_with_report(
             accepted_count=len(collected_datasets),
             rejected_count=rejected_count,
             invalid_distribution_count=invalid_distribution_count,
+            validation_failures=validation_failures,
             discovery_methods=tuple(
                 sorted(
                     {
@@ -192,25 +222,31 @@ def _collect_discovered_page_with_report(
     """Turn one discovery candidate into a validated transient dataset."""
 
     page_classifier = _classifier_or_default(classifier)
-    # Structured adapters already provide classifier evidence, so fetching the
-    # landing page again would add network cost without being required.
-    if _has_structured_discovery_metadata(discovered_page):
+    # A title alone cannot replace the page containing the download links.
+    if any(_usable_distribution(item) for item in discovered_page.distributions):
         dataset = analyze_discovered_page(discovered_page, config, page_classifier)
     else:
+        catalog_url = discovered_page.discovery_metadata.get("data_json_url")
+        if isinstance(catalog_url, str) and (
+            urlsplit(discovered_page.url)[:3] == urlsplit(catalog_url)[:3]
+        ):
+            # data.json can synthesize record URLs on the catalog itself.
+            return None, 0
         fetched_page = fetch_html(discovered_page.url)
+        mime_type = fetched_page.content_type.split(";", 1)[0].strip().lower()
+        if mime_type and mime_type not in {"text/html", "application/xhtml+xml"}:
+            return None, 0
         dataset = analyze_html_page(
             fetched_page.final_url,
             fetched_page.html,
             config,
             page_classifier,
+            discovered_page=discovered_page,
         )
         if dataset is not None:
             dataset = replace(
                 dataset,
                 discovery_method=discovered_page.discovery_method,
-                geography=(
-                    dataset.geography or discovered_page.geography
-                ),
             )
 
     if dataset is None:
@@ -259,7 +295,9 @@ def analyze_discovered_page(
         ),
         json_ld=({"@type": "Dataset"},),
     )
-    distributions = list(discovered_page.distributions)
+    distributions = [item for item in discovered_page.distributions if _usable_distribution(item)]
+    if not distributions:
+        return None
     page_classifier = _classifier_or_default(classifier)
     classification = page_classifier.classify(page, distributions)
 
@@ -274,6 +312,12 @@ def analyze_discovered_page(
         hosting_platform="",
         uploader="",
         geography=page.geography,
+        date_of_publication=page.date_of_publication,
+        sharing_license=page.sharing_license,
+        doi=page.doi,
+        metadata_provenance=metadata_evidence(
+            page, kind="adapter", source_url=page.url,
+        ),
         dataset_signals=classification.dataset_signals,
         distributions=distributions,
         discovery_method=discovered_page.discovery_method,
@@ -286,14 +330,27 @@ def _classifier_or_default(
     return classifier if classifier is not None else build_default_page_classifier()
 
 
-def _has_structured_discovery_metadata(discovered_page: DiscoveredPage) -> bool:
-    """Return whether adapter evidence is sufficient to skip an HTML fetch."""
+def _usable_distribution(distribution: DistributionCandidate) -> bool:
+    """Recognize plausible data links; network validation still decides availability."""
+    return (
+        normalize_http_url(distribution.url) is not None
+        and distribution.format.upper() not in EXCLUDED_RESOURCE_FORMATS
+        and "html" not in distribution.mime_type.lower()
+    )
 
-    return bool(
-        discovered_page.title
-        or discovered_page.description
-        or discovered_page.publisher
-        or discovered_page.distributions
+
+def _merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot:
+    """Fill missing page fields before classification, retaining the extracted links."""
+    fields = (
+        "title", "publisher", "geography", "date_of_publication", "diseases",
+        "size_of_dataset", "demographic_information", "sharing_license", "modality_of_data",
+    )
+    return replace(
+        page,
+        **{field: getattr(page, field) or getattr(discovered, field) for field in fields},
+        meta_description=page.meta_description or page.og_description or discovered.description,
+        description_of_dataset=page.description_of_dataset or discovered.description,
+        text=" ".join((page.text, discovered.title, discovered.description, discovered.publisher)),
     )
 
 
@@ -307,11 +364,20 @@ def _with_valid_distributions_and_report(
     valid_distributions: list[DistributionCandidate] = []
     validation_results: list[ValidationResult] = []
     validated_keys: set[tuple[str, str]] = set()
+    attempted_urls: set[str] = set()
     invalid_count = 0
 
-    # Classification sees extracted candidates first; this separate limit
-    # bounds network probes and the distributions eligible for persistence.
-    for distribution in dataset.distributions[: config.max_distributions_per_dataset]:
+    ranked_distributions = sorted(
+        dataset.distributions, key=lambda item: item.probability, reverse=True,
+    )
+    for distribution in ranked_distributions:
+        if (len(attempted_urls) >= config.max_distribution_attempts
+                or len(valid_distributions) >= config.max_distributions_saved):
+            break
+        url = normalize_http_url(distribution.url)
+        if url is None or url in attempted_urls:
+            continue
+        attempted_urls.add(url)
         validation_result = validate(distribution)
         if not validation_result.ok:
             invalid_count += 1

@@ -52,8 +52,9 @@ at least one distribution validates successfully
 
 Install:
 
-- Python 3.9 or newer;
-- Node.js 20 or newer;
+- Python 3.11 recommended (Python 3.9 compatibility is tested in CI);
+- uv 0.12.17 ([installation](https://docs.astral.sh/uv/getting-started/installation/))
+- Node.js 22 recommended;
 - Docker;
 - Git.
 
@@ -66,10 +67,16 @@ may run searches, classifications, or collections.
 From the repository root:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r backend/requirements.txt
-npm --prefix frontend install
+uv sync --locked --extra dev
+npm --prefix frontend ci
 ```
+
+Python dependencies are declared only in `pyproject.toml` and resolved in
+`uv.lock`. `.python-version` selects Python 3.11; CI also checks Python 3.9.
+The backend image consumes the same lock without development dependencies.
+For an intentional dependency update, run `uv lock --upgrade`, synchronize with
+`uv sync --locked --extra dev`, run the checks, and commit the updated lock.
+Do not regenerate the lock during normal installation.
 
 Confirm that the main tools are available:
 
@@ -307,7 +314,7 @@ Keep provider-specific behavior in provider modules. Do not place RCP-specific r
 TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
 ```
 
-PostgreSQL tests create isolated schemas. If `TEST_DATABASE_URL` is not set, those tests are skipped.
+PostgreSQL tests create isolated schemas. If `TEST_DATABASE_URL` is not set, those tests are skipped locally. CI always supplies a disposable PostgreSQL 16 service and this variable; connection failures fail the job. The separate Docker firewall job sets `EGRESS_TEST_IMAGE` and runs `tests/test_container_egress.py`. It needs public HTTPS access but no model credentials.
 
 ### Code Quality
 

@@ -160,6 +160,7 @@ class CollectorCollectionJob(BaseModel):
     kind: Literal["source", "repository_candidate"] = "source"
     status: Literal["pending", "running", "done", "error"]
     saved_count: int
+    dataset_ids: list[int] = Field(default_factory=list)
     discovered_count: int = 0
     analyzed_count: int = 0
     accepted_count: int = 0
@@ -175,6 +176,7 @@ class CollectorCollectionJob(BaseModel):
 
 
 class CollectorAutomaticCollection(BaseModel):
+    dataset_ids: list[int] = Field(default_factory=list)
     state: Literal["pending", "running", "saved", "empty", "error"]
     job: Optional[CollectorCollectionJob] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     error: str = Field(default="", max_length=2_000)
@@ -249,6 +251,8 @@ class CollectorValidation(BaseModel):
     final_url: str
     format: str
     ok: bool
+    status: Literal["available", "restricted", "unavailable", "unconfirmed"] = "unconfirmed"
+    reason: str = ""
     http_status: Optional[int]  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     mime_type: str = ""
     size_bytes: Optional[int] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
@@ -269,6 +273,10 @@ class CollectorCollectedDataset(BaseModel):
     hosting_platform: str
     uploader: str
     geography: list[str] = Field(default_factory=list)
+    date_of_publication: str = ""
+    sharing_license: str = ""
+    doi: str = ""
+    metadata_provenance: dict[str, Any] = Field(default_factory=dict)
     discovery_method: str
     dataset_signals: dict[str, Any]
     distributions: list[CollectorDistribution]
@@ -295,6 +303,7 @@ class CollectorOnlineDatasetSearchResponse(BaseModel):
 
 
 class CollectorCollectionResponse(BaseModel):
+    next_cursor: Optional[int] = None  # noqa: UP045 - Pydantic on Python 3.9.
     items: list[CollectorCollectedDataset]
 
 

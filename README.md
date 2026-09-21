@@ -43,8 +43,9 @@ Collector
 
 ### Requirements
 
-- Python 3.9 or newer
-- Node.js 20 or newer
+- Python 3.11 recommended (Python 3.9 compatibility is tested in CI)
+- uv 0.12.17 ([installation](https://docs.astral.sh/uv/getting-started/installation/))
+- Node.js 22 recommended
 - Docker
 - An EPFL RCP API key
 - One private API access token of at least 32 characters
@@ -54,10 +55,21 @@ Collector
 From the repository root:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r backend/requirements.txt
-npm --prefix frontend install
+uv sync --locked --extra dev
+npm --prefix frontend ci
 ```
+
+`pyproject.toml` is the single source for Python dependencies, including the API
+server and development tools. Commit `uv.lock` when dependencies change; local
+setup, CI, and the backend image all consume this lock. `.python-version` selects
+Python 3.11 by default. To check the minimum supported version, use
+`uv sync --locked --extra dev --python 3.9` in a separate environment.
+
+To update dependencies intentionally, run `uv lock --upgrade`, then
+`uv sync --locked --extra dev` and the checks below. Normal installs must use
+`--locked`; do not maintain a second requirements list. Use uv 0.12.17, matching
+CI and Docker. This locks Python packages, not the operating-system image or apt
+packages used by Docker.
 
 ### Configure the Environment
 
@@ -215,7 +227,7 @@ docs/                        Architecture, policy, decisions, onboarding
 Run the standard checks from the repository root:
 
 ```bash
-.venv/bin/pip install -e '.[dev]'
+uv sync --locked --extra dev
 .venv/bin/ruff check .
 .venv/bin/pytest
 npm --prefix frontend test
@@ -228,6 +240,13 @@ To include PostgreSQL integration tests:
 ```bash
 TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
 ```
+
+GitHub Actions runs these checks on pushes and pull requests: Python 3.9 and
+3.11 with a disposable PostgreSQL 16 service, frontend tests and build on Node.js
+22, and a separate backend image/firewall test. The database jobs always set
+`TEST_DATABASE_URL`; missing or unreachable PostgreSQL must fail CI. The Docker
+firewall test also exercises public HTTPS and needs network access, but no RCP
+credentials or production database.
 
 ## Documentation
 

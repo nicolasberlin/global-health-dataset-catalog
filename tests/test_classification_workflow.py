@@ -50,7 +50,7 @@ def decision(accepted=True):
 
 async def candidate(database, owner="alice", query="mortality"):
     search = await database.create_search_session(query, owner)
-    items = await database.complete_search_session_with_repository_candidates(
+    items = await database.save_repository_candidates(
         search["id"],
         owner,
         [
@@ -58,7 +58,6 @@ async def candidate(database, owner="alice", query="mortality"):
                 title="Mortality", url="https://example.org/data", source="DataCite"
             )
         ],
-        status="completed",
     )
     return items[0]
 

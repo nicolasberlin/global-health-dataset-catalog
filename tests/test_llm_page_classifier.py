@@ -236,7 +236,7 @@ def test_http_json_llm_client_uses_provider_config():
         def __exit__(self, exc_type, exc, traceback):
             return False
 
-        def read(self):
+        def read(self, size=-1):
             return json.dumps(
                 {
                     "output_text": json.dumps(_valid_llm_response()),
@@ -459,6 +459,40 @@ def test_epfl_rcp_repository_provider_uses_relevance_prompt_and_schema():
     assert "You are a relevance classifier for a dataset search system." in system_prompt
     assert '"missing_information"' in system_prompt
     assert json.loads(body["messages"][1]["content"]) == payload
+
+
+@pytest.mark.parametrize("extra_bytes", [0, 1, 100_000])
+def test_http_json_llm_client_bounds_response_before_parsing(extra_bytes):
+    import io
+
+    from collector.classification.llm_client import MAX_LLM_RESPONSE_BYTES
+
+    body = json.dumps({"output_text": json.dumps(_valid_llm_response())}).encode()
+    body += b" " * (MAX_LLM_RESPONSE_BYTES - len(body) + extra_bytes)
+    reads = []
+
+    class Response(io.BytesIO):
+        def read(self, size=-1):
+            reads.append(size)
+            return super().read(size)
+
+    response = Response(body)
+    client = HTTPJSONLLMClient(
+        provider=LLMProviderConfig(
+            name="Test", endpoint_url="https://llm.example.org/classify",
+            api_key_env_var="TEST_KEY", model_env_var="TEST_MODEL", default_model="test",
+            request_body_builder=_fake_request_body,
+            response_text_extractor=_fake_response_text,
+        ),
+        api_key="test", request=lambda *args, **kwargs: response,
+    )
+    if extra_bytes:
+        with pytest.raises(PageClassificationError, match="Provider response is too large"):
+            client.classify_page({})
+    else:
+        assert client.classify_page({}) == _valid_llm_response()
+    assert reads == [MAX_LLM_RESPONSE_BYTES + 1]
+    assert response.closed
 
 
 def test_http_json_llm_client_requires_configured_api_key(monkeypatch):

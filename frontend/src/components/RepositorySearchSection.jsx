@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLinkedDatasets } from '../catalog/useLinkedDatasets.js';
 import { datasetCountries, datasetFormats } from './DatasetAccessDetails.jsx';
 import LocalDatasetSearchCard from './LocalDatasetSearchCard.jsx';
 import RepositoryAcceptedCard from './RepositoryAcceptedCard.jsx';
@@ -11,7 +12,6 @@ const AGREEMENT_FILTERS = [
 ];
 
 export default function RepositorySearchSection({
-    collectedDatasets = [],
     analyzeCandidate,
     restoreAnalysis,
     acceptedRepositoryCandidates,
@@ -36,16 +36,18 @@ export default function RepositorySearchSection({
     const [subject, setSubject] = useState('');
     const [country, setCountry] = useState('');
     const [format, setFormat] = useState('');
-    const enrich = item => {
-        const saved = collectedDatasets.find(dataset => dataset.dataset_url === (item.dataset_url || item.url));
-        return saved ? { ...item, ...saved } : item;
-    };
-    const localItems = localRepositoryResults.map(enrich);
+    const linked = useLinkedDatasets(acceptedRepositoryCandidates);
+    const localItems = localRepositoryResults;
     const acceptedCandidates = acceptedRepositoryCandidates.map(candidate => ({
-        ...candidate, item: enrich(candidate.item),
+        ...candidate,
+        item: {
+            ...candidate.item,
+            collected_datasets: (candidate.item.automatic_collection?.dataset_ids ?? [])
+                .map(id => linked.datasets[id]).filter(Boolean),
+        },
     }));
     const availableItems = repositoryOrigin === 'database' ? localItems :
-        repositoryCandidates.filter(candidate => candidate.status === 'accepted').map(candidate => enrich(candidate.item));
+        acceptedCandidates.map(candidate => candidate.item);
     const countries = [...new Set(availableItems.flatMap(datasetCountries))].sort();
     const formats = [...new Set(availableItems.flatMap(datasetFormats))].sort();
     const normalize = value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -152,6 +154,11 @@ export default function RepositorySearchSection({
 
                 </div>
             ) : null}
+
+            {linked.error && <div role="alert" className="repository-message repository-message--error">
+                <span>{linked.error}</span>
+                <button type="button" onClick={linked.retry}>Retry dataset details</button>
+            </div>}
 
             {repositoryError ? (
                 <div className="repository-message repository-message--error" role="alert">

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from uuid import UUID
 
 from psycopg import AsyncConnection
@@ -16,6 +16,7 @@ from .serialization import (
     _deserialize_discovery_methods,
     _format_optional_timestamp,
     _format_timestamp,
+    _jsonb,
     _serialize_discovery_methods,
 )
 
@@ -27,6 +28,7 @@ class CollectionJobReservation:
     job: dict[str, object] | None
     created: bool
     already_collected: bool
+    dataset_ids: tuple[int, ...] = ()
 
 
 async def create_collection_job(source_url: str) -> dict[str, object]:
@@ -143,6 +145,7 @@ async def _reserve_repository_candidate_collection_job(
             job=None,
             created=False,
             already_collected=True,
+            dataset_ids=tuple(await _existing_dataset_ids(connection, source_url)),
         )
 
     if reservation_state["id"] is not None:
@@ -196,7 +199,34 @@ async def get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, 
             """,
             (job_id, _normalized_owner_id(owner_id)),
         )
-    return _collection_job_to_dict(row) if row else None
+        if row is None:
+            return None
+        job = _collection_job_to_dict(row)
+        job["dataset_ids"] = await _job_dataset_ids(connection, job_id)
+        return job
+
+
+async def _job_dataset_ids(connection, job_id: int) -> list[int]:
+    rows = await _fetchall(
+        connection,
+        """SELECT DISTINCT dataset_id FROM dataset_discovery_observations
+           WHERE collection_job_id = %s ORDER BY dataset_id""",
+        (job_id,),
+    )
+    return [int(row["dataset_id"]) for row in rows]
+
+
+async def _existing_dataset_ids(connection, source_url: str) -> list[int]:
+    rows = await _fetchall(
+        connection,
+        """SELECT dataset.id FROM collected_datasets AS dataset
+           WHERE dataset.dataset_url = %s OR EXISTS (
+               SELECT 1 FROM dataset_discovery_observations AS observation
+               WHERE observation.dataset_id = dataset.id AND observation.source_url = %s
+           ) ORDER BY dataset.id""",
+        (source_url, source_url),
+    )
+    return [int(row["id"]) for row in rows]
 
 
 async def mark_interrupted_collection_jobs_error() -> int:
@@ -260,7 +290,7 @@ async def get_candidate_collection(
         row = await _fetchone(
             connection,
             """
-            SELECT existing_job.*, EXISTS (
+            SELECT existing_job.*, candidate.url AS candidate_url, EXISTS (
                 SELECT 1 FROM collected_datasets AS dataset
                 WHERE dataset.dataset_url = candidate.url OR EXISTS (
                     SELECT 1 FROM dataset_discovery_observations AS observation
@@ -281,11 +311,15 @@ async def get_candidate_collection(
             """,
             (candidate_id, _normalized_owner_id(owner_id)),
         )
-    if row is None:
-        return None
-    if row["id"] is not None:
-        return CollectionJobReservation(_collection_job_to_dict(row), False, False)
-    return CollectionJobReservation(None, False, bool(row["already_collected"]))
+        if row is None:
+            return None
+        if row["id"] is not None:
+            ids = await _job_dataset_ids(connection, int(row["id"]))
+            job = _collection_job_to_dict(row)
+            job["dataset_ids"] = ids
+            return CollectionJobReservation(job, False, False, tuple(ids))
+        ids = await _existing_dataset_ids(connection, str(row["candidate_url"]))
+        return CollectionJobReservation(None, False, bool(ids), tuple(ids))
 
 
 async def _insert_collection_job(
@@ -381,6 +415,7 @@ async def _mark_collection_job_done(
             rejected_count = %s,
             invalid_distribution_count = %s,
             discovery_methods = %s,
+            validation_failures = %s,
             message = %s,
             error = '',
             updated_at = NOW(),
@@ -400,6 +435,7 @@ async def _mark_collection_job_done(
             report.rejected_count,
             report.invalid_distribution_count,
             _serialize_discovery_methods(report.discovery_methods),
+            _jsonb([asdict(result) for result in report.validation_failures]),
             _collection_job_done_message(saved_count, report),
             job_id,
         ),

@@ -6,6 +6,7 @@ from .db.classification_completion import (
     complete_candidate_classification,
 )
 from .db.collected_datasets import (
+    get_collected_datasets,
     list_collected_datasets,
     list_dataset_discovery_observations,
     normalize_dataset_search_query,
@@ -86,6 +87,7 @@ __all__ = (
     "get_repository_candidate",
     "get_data_source",
     "init_database",
+    "get_collected_datasets",
     "list_collected_datasets",
     "list_data_sources",
     "list_dataset_discovery_observations",

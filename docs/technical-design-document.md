@@ -107,9 +107,9 @@ On startup, the single-process MVP preserves pending jobs and marks interrupted
 `running` jobs, running searches and `classifying` candidates as errors. There
 are no automatic collection retries, worker leases or multi-process ownership.
 Use one API process and instance. Classification uses the same bounded consumer
-implementation with a separate executor: requests persist as `queued` on existing
-candidates before HTTP acknowledgement. Discoveries remain `pending` and are not
-consumed automatically. Interrupted `classifying` candidates require explicit
+implementation with a separate executor: online search results are persisted as
+`queued` in the transaction that completes the search, before HTTP acknowledgement.
+The browser only follows these initial classifications. Interrupted `classifying` candidates require explicit
 retry; an external LLM response lost before persistence may need another call.
 
 ### How Repository Search and Source Collection Relate
@@ -117,11 +117,11 @@ retry; an external LLM response lost before persistence may need another call.
 `POST /collector/search-datasets` first authenticates and consumes the owner's
 search quota, then creates an owned durable `search_sessions` row and queries
 collected datasets. Only when the local query has no match does it
-call external providers and atomically persist normalized results in
-`repository_candidates`. The frontend submits only `candidate_id`; the backend
-reloads the candidate and original query only when its session has the same
-owner. An eligible classification consumes that owner's classification quota
-before the LLM call. A positive decision reserves a candidate-linked collection
+call external providers, charge classification quota for each unique candidate,
+and atomically persist and enqueue normalized results in `repository_candidates`.
+Quota failure returns an error before any candidates are saved. Explicit retries
+submit only `candidate_id`; ownership and the original query come from PostgreSQL.
+A positive decision reserves a candidate-linked collection
 job. DataCite metadata is never
 copied into `collected_datasets`: the job fetches the landing page and uses the
 normal page-classification and distribution-validation gates before
@@ -159,9 +159,11 @@ flowchart TD
     LocalMatch -->|no| Service["search_repository_metadata()"]
     Service --> Provider["DataCite provider"]
     Provider --> Filter["Require title + HTTP(S) URL"]
-    Filter --> Persist["Save repository_candidates<br/>complete search session"]
+    Filter --> InitialQuota["Consume classification quota for unique candidates"]
+    InitialQuota --> Persist["Atomically save queued candidates<br/>and complete search session"]
     Persist --> UI["Return search_id + candidate_id"]
-    UI --> ClassifyRoute["Authenticate candidate owner<br/>no metadata body"]
+    Persist --> Claim
+    UI -->|explicit retry or legacy pending candidate| ClassifyRoute["Authenticate candidate owner<br/>no metadata body"]
     ClassifyRoute -->|already accepted or rejected| Existing["Read existing decision and follow-up; no reservation"]
     ClassifyRoute -->|new classification or explicit classification retry| ClassifyQuota["Consume classification quota<br/>before eligible LLM work"]
     ClassifyQuota --> ReserveClassify["pending -> queued<br/>persist then return HTTP 202"]
@@ -303,12 +305,31 @@ in [Classification Architecture](classification-architecture.md).
 
 ## 9. Distribution Validation
 
-`validate_distribution()` sends `HEAD` first and uses a bounded partial `GET`
-when the response is inconclusive. A validation succeeds when:
+Candidates are tried in descending probability order, deduplicated by URL.
+The collector tries up to three distinct links and stops after the first
+available distribution by default. Attempt and saved-resource limits are
+configured independently.
 
-- no network error is reported;
-- the status is between 200 and 399;
-- a non-API distribution does not return HTML.
+Structured discovery skips the dataset HTML page only when it already supplies
+plausible data links. Otherwise, page extraction fills missing metadata from
+the adapter before one classification; date and license evidence retains both
+sources. Pages without data links skip classification. A `data.json` catalog
+record URL is not treated as an HTML landing page.
+
+`validate_distribution()` uses `HEAD` for metadata and requires a bounded `GET`
+sample to confirm access. Results carry `status` and a public `reason`; legacy
+`ok` is derived from `status == "available"`. Authentication and CAPTCHA responses
+are `restricted`, missing URLs are `unavailable`, and empty, failed or ambiguous
+responses are `unconfirmed`. HTML is never accepted as a data distribution.
+JSON error envelopes and empty results are rejected; an incomplete JSON sample
+remains unconfirmed. Failed checks survive dataset rejection in the collection
+job's `validation_failures` audit field.
+
+For HTTP 206, total size comes from valid `Content-Range`, or compatible HEAD
+metadata when the total is unknown; the partial `Content-Length` is never used
+as the full size. Schema migration 5 stores sizes as `BIGINT` and adds validation
+status, reason and job audit fields. LLM provider responses are separately limited
+to 2 MiB before decoding or parsing JSON.
 
 Headers and a small sample may refine the detected format. This is an
 availability/type probe, not a complete file download or content audit.
@@ -436,9 +457,14 @@ and the decision not to migrate the historical SQLite data are recorded in
 | `VITE_API_BASE_URL` | No | Frontend API base; defaults to `http://127.0.0.1:8001` |
 | `TEST_DATABASE_URL` | No | Enables PostgreSQL integration tests |
 
-The project dependency constraints are defined in `pyproject.toml`,
-`backend/requirements.txt`, and `frontend/package.json`. Locally installed
-package versions are deliberately not duplicated here.
+Python dependency constraints are defined only in `pyproject.toml`; `uv.lock`
+locks their resolved versions for local development, CI, and the backend image.
+Use `uv sync --locked --extra dev` locally. Frontend dependencies are defined in
+`frontend/package.json` and locked in `frontend/package-lock.json`; use `npm ci`.
+CI tests Python 3.9 and 3.11 with PostgreSQL 16, runs frontend tests and a production
+build, and separately verifies the backend container firewall. Docker uses Python
+3.11, also selected locally by `.python-version`. OS packages and base images
+remain outside the Python dependency lock.
 
 ## 12. Non-Functional Requirements and Runtime Limits
 
@@ -450,7 +476,8 @@ crawling. The limits below are code defaults, not production capacity targets.
 | Collector HTTP timeout | 10 seconds/request | `CollectorConfig.request_timeout_seconds` |
 | EPFL RCP HTTP timeout | 20 seconds/request | `HTTPJSONLLMClient` |
 | Pages analyzed per source | 5 | `CollectorConfig.max_pages_per_source` |
-| Distributions validated per dataset | 1 | `CollectorConfig.max_distributions_per_dataset` |
+| Distinct distribution attempts per dataset | 3 | `CollectorConfig.max_distribution_attempts` |
+| Distributions retained per dataset | 1 | `CollectorConfig.max_distributions_saved` |
 | Distribution partial-GET sample | 65,536 bytes | `CollectorConfig.max_sample_bytes` |
 | HTML response body | 1,000,000 bytes | `fetch_public_html()` |
 | JSON discovery response body | 5,000,000 bytes | `fetch_json_url()` |

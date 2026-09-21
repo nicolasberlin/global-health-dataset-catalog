@@ -9,7 +9,7 @@ from dataclasses import asdict
 from typing import Annotated, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 
 from app.database import (
     CollectionJobReservation,
@@ -18,6 +18,7 @@ from app.database import (
     create_search_session,
     enqueue_candidate_classification,
     get_candidate_collection,
+    get_collected_datasets,
     get_collection_job_for_owner,
     get_repository_candidate,
     latest_repository_analysis,
@@ -85,11 +86,32 @@ async def read_collection_job(
 
 
 @router.get("/collected-datasets")
-async def list_collected() -> CollectorCollectionResponse:
+async def list_collected(
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[Optional[int], Query(ge=1, le=2147483647)] = None,  # noqa: UP045
+    query: Annotated[str, Query(max_length=300)] = "",
+    country: Annotated[str, Query(max_length=200)] = "",
+    format: Annotated[str, Query(max_length=100)] = "",
+) -> CollectorCollectionResponse:
+    datasets = await list_collected_datasets(
+        limit=limit + 1, before_id=cursor, query=query, country=country, format=format,
+    )
+    items = datasets[:limit]
     return CollectorCollectionResponse(
-        items=[
-            _collector_collected_dataset(dataset) for dataset in await list_collected_datasets()
-        ],
+        items=[_collector_collected_dataset(dataset) for dataset in items],
+        next_cursor=items[-1].database_id if len(datasets) > limit else None,
+    )
+
+
+@router.get("/collected-datasets/by-id")
+async def read_collected_by_id(
+    ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(
+        min_length=1, max_length=100,
+    )],
+) -> CollectorCollectionResponse:
+    return CollectorCollectionResponse(
+        items=[_collector_collected_dataset(dataset)
+               for dataset in await get_collected_datasets(ids)],
     )
 
 
@@ -180,12 +202,20 @@ async def search_datasets(
             _bounded_repository_result(item, search_query=original_query)
             for item in online_response.results
         ]
+        # Charge each unique candidate before atomically persisting and enqueueing the batch.
+        for _ in {(item.source.strip(), item.url) for item in bounded_results}:
+            await enforce_api_quota(principal, "repository_classification")
         persisted_candidates = await complete_search_session_with_repository_candidates(
             search_id,
             principal.owner_id,
             bounded_results,
             status="partial" if online_response.warnings else "completed",
         )
+    except HTTPException as exception:
+        await _fail_search_session(
+            search_id, principal.owner_id, origin="online", error=str(exception.detail),
+        )
+        raise
     except Exception as exception:  # noqa: BLE001 - candidates must be durable.
         logger.exception("Online search finalization failed for search_id=%s", search_id)
         await _fail_search_session(
@@ -299,7 +329,7 @@ def _automatic_collection(
     """Present existing follow-up; this function never reserves or schedules work."""
 
     if collection is not None and collection.already_collected:
-        return CollectorAutomaticCollection(state="saved")
+        return CollectorAutomaticCollection(state="saved", dataset_ids=list(collection.dataset_ids))
     if collection is None or collection.job is None:
         # Legacy acceptances without follow-up are visible; reading cannot repair
         # them by silently creating new work.
@@ -310,7 +340,7 @@ def _automatic_collection(
         )
     job = public_collection_job(collection.job)
     state = ("saved" if job.saved_count else "empty") if job.status == "done" else job.status
-    return CollectorAutomaticCollection(state=state, job=job)
+    return CollectorAutomaticCollection(state=state, job=job, dataset_ids=job.dataset_ids)
 
 
 def _collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution:
@@ -450,6 +480,8 @@ def _collector_validation(validation: ValidationResult) -> CollectorValidation:
         final_url=validation.final_url,
         format=validation.format,
         ok=validation.ok,
+        status=validation.status,
+        reason=validation.reason,
         http_status=validation.http_status,
         mime_type=validation.mime_type,
         size_bytes=validation.size_bytes,
@@ -472,6 +504,10 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
         hosting_platform=dataset.hosting_platform,
         uploader=dataset.uploader,
         geography=list(dataset.geography),
+        date_of_publication=dataset.date_of_publication,
+        sharing_license=dataset.sharing_license,
+        doi=dataset.doi,
+        metadata_provenance=dataset.metadata_provenance,
         discovery_method=dataset.discovery_method,
         dataset_signals=public_dataset_signals(dataset.dataset_signals),
         distributions=[

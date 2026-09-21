@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} with PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.11']
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: global_health_test
+          POSTGRES_USER: global_health_test
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U global_health_test -d global_health_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://global_health_test:ci-only-password@127.0.0.1:5432/global_health_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.17'
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev --python '${{ matrix.python }}'
+      - name: Lint
+        run: .venv/bin/ruff check .
+      - name: Unit and PostgreSQL integration tests
+        run: |
+          test -n "$TEST_DATABASE_URL"
+          .venv/bin/pytest --ignore=tests/test_container_egress.py -ra
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  container-egress:
+    name: Backend image and firewall
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.17'
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile -t global-health-ci:egress .
+      - name: Verify firewall and privilege drop
+        env:
+          EGRESS_TEST_IMAGE: global-health-ci:egress
+        run: .venv/bin/pytest tests/test_container_egress.py -ra

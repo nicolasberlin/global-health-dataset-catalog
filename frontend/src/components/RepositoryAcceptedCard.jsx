@@ -176,7 +176,13 @@ export default function RepositoryAcceptedCard({ candidate }) {
                 </div>
             ) : null}
 
-            <DatasetAccessDetails item={item} />
+            {item.collected_datasets?.length ? item.collected_datasets.map(dataset => (
+                <section key={dataset.id} aria-label={`Saved dataset: ${dataset.title}`}>
+                    {item.collected_datasets.length > 1 && <h4>{dataset.title}</h4>}
+                    <DatasetAccessDetails item={dataset} />
+                    <a href={dataset.dataset_url} target="_blank" rel="noreferrer">Open saved dataset page</a>
+                </section>
+            )) : <DatasetAccessDetails item={item} />}
             <div className="repository-card__link-row">
                 <span>{getHostname(item.url)}</span>
                 <a href={item.url} target="_blank" rel="noreferrer">

@@ -443,7 +443,7 @@ def test_analyze_html_page_respects_injected_page_classifier_rejection():
     assert result is None
 
 
-def test_distribution_validation_uses_head_metadata():
+def test_distribution_validation_samples_even_with_head_metadata():
     distribution = DistributionCandidate(
         url="https://example.org/files/mortality.csv",
         format="CSV",
@@ -451,11 +451,11 @@ def test_distribution_validation_uses_head_metadata():
     )
 
     def fake_probe(url, **kwargs):
-        assert kwargs["method"] == "HEAD"
         return HTTPProbe(
             url=url,
             final_url=url,
             status_code=200,
+            body_sample=b"country,value\nCH,10\n" if kwargs["method"] == "GET" else b"",
             headers={
                 "content-type": "text/csv",
                 "content-length": "12345",
@@ -593,6 +593,8 @@ def test_collect_source_retains_verified_distribution_format(
             final_url=f"https://data.example.org/mortality.{expected_format.lower()}",
             status_code=200,
             headers={"content-type": content_type},
+            body_sample=b'{"data": [{"country": "CH"}]}' if expected_format == "JSON"
+            else b"country,value\nCH,10\n",
         )
 
     result = collect_source_with_report(
@@ -630,11 +632,12 @@ def test_collect_source_deduplicates_distributions_after_format_validation():
             final_url=url,
             status_code=200,
             headers={"content-type": "application/json"},
+            body_sample=b'{"data": [{"country": "CH"}]}',
         )
 
     result = collect_source_with_report(
         "https://example.org/catalog",
-        config=CollectorConfig(max_distributions_per_dataset=2),
+        config=CollectorConfig(max_distributions_saved=2),
         discover=lambda _: [
             DiscoveredPage(
                 url="https://example.org/datasets/mortality",

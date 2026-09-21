@@ -79,6 +79,8 @@ it('reads persisted state after a lost POST acknowledgement without reposting', 
     fireEvent.change(screen.getByLabelText('Search for a health dataset'), { target: { value: 'mortality' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     await advance();
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
+    await advance();
     expect(screen.getByText(/Analysis tracking unavailable/)).toBeVisible();
     await advance(700);
     expect(screen.getByText('Dataset saved to the local catalog')).toBeVisible();
@@ -123,7 +125,7 @@ it('ignores a late restored analysis after the user starts a new search', async 
     expect(calls('/repository-candidates/')).toHaveLength(0);
 });
 
-it('aborts classification polling on logout and ignores its late accepted result', async () => {
+it('aborts classification polling on unmount and ignores its late accepted result', async () => {
     const late = deferred();
     let signal;
     const item = candidate('requested');
@@ -132,9 +134,9 @@ it('aborts classification polling on logout and ignores its late accepted result
         if (url.endsWith('/repository-candidates/requested')) { signal = options.signal; return late.promise; }
         throw new Error(`Unexpected request ${url}`);
     });
-    render(<App />);
+    const { unmount } = render(<App />);
     await advance(750);
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    unmount();
     expect(signal.aborted).toBe(true);
     await act(async () => late.resolve(response(accepted(item))));
     await advance(3000);

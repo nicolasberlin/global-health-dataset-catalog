@@ -60,11 +60,10 @@ async def _start_candidate(database, candidate_id, owner_id, *, retry=False):
 
 async def candidate_for(database, owner="alice", url=SOURCE_URL):
     session = await database.create_search_session("mortality", owner)
-    candidates = await database.complete_search_session_with_repository_candidates(
+    candidates = await database.save_repository_candidates(
         session["id"],
         owner,
         [RepositorySearchResult(title="Mortality", url=url, source="DataCite")],
-        status="completed",
     )
     candidate = candidates[0]
     await _start_candidate(database, candidate["id"], owner)

@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 from collector.source_identity import identify_source
+from collector.storage.metadata import normalize_doi
 from collector.storage.models import LinkCandidate, PageSnapshot
 from collector.url_utils import canonicalize_url, same_domain, select_dataset_url
 
@@ -30,6 +31,7 @@ class _PageHTMLParser(HTMLParser):
         self.og_title = ""
         self.og_description = ""
         self.publisher = ""
+        self.doi = ""
         self.geography: list[str] = []
         self._active_link: dict[str, object] | None = None
         self._active_json_ld_parts: list[str] | None = None
@@ -121,6 +123,9 @@ class _PageHTMLParser(HTMLParser):
         if not content:
             return
 
+        if name == "citation_doi":
+            self.doi = normalize_doi(content)
+
         if name == "description" and not self.meta_description:
             self.meta_description = content
         elif property_name == "og:title" and not self.og_title:
@@ -205,6 +210,7 @@ def extract_page(url: str, html: str) -> PageSnapshot:
         uploader=source_identity.uploader,
         geography=tuple(geography),
         date_of_publication=_date_from_json_ld(parser.json_ld),
+        doi=parser.doi or _doi_from_json_ld(parser.json_ld),
         dataset_url=canonical_url,
         diseases=tuple(_diseases_from_text(" ".join([title, h1, description, text]))),
         size_of_dataset=_size_from_json_ld(parser.json_ld),
@@ -443,3 +449,25 @@ def _url_extension(url: str) -> str:
     path = urlsplit(url).path.lower()
     match = re.search(r"(\.[a-z0-9]+)$", path)
     return match.group(1) if match else ""
+
+
+def _doi_from_json_ld(json_ld_items: list[object]) -> str:
+    for item in _iter_json_objects(json_ld_items):
+        types = item.get("@type", [])
+        if isinstance(types, str):
+            types = [types]
+        if not isinstance(types, list):
+            continue
+        if not any(str(value).rsplit("/", 1)[-1].rsplit(":", 1)[-1] == "Dataset"
+                   for value in types):
+            continue
+        identifiers = item.get("identifier", [])
+        if not isinstance(identifiers, list):
+            identifiers = [identifiers]
+        for identifier in [item.get("@id"), *identifiers]:
+            if isinstance(identifier, dict):
+                identifier = identifier.get("value") or identifier.get("@id")
+            doi = normalize_doi(identifier)
+            if doi:
+                return doi
+    return ""

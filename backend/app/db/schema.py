@@ -7,7 +7,7 @@ from .connection import _fetchall, _fetchone, _require_database_pool
 
 # Historical pre-baseline schemas are unsupported. Explicit versioned migrations
 # preserve data for supported baselines, including the job associations in v2.
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 5
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",
     "health_probability",
@@ -102,7 +102,7 @@ CREATE TABLE collected_distributions (
     validation_ok BOOLEAN NOT NULL DEFAULT FALSE,
     validation_http_status INTEGER,
     validation_mime_type TEXT NOT NULL DEFAULT '',
-    validation_size_bytes INTEGER,
+    validation_size_bytes BIGINT,
     validation_etag TEXT NOT NULL DEFAULT '',
     validation_last_modified TEXT NOT NULL DEFAULT '',
     validation_content_disposition TEXT NOT NULL DEFAULT '',
@@ -447,6 +447,10 @@ def _migration_for_version(version: int):
         return _migrate_1_to_2
     if version == 2:
         return _migrate_2_to_3
+    if version == 3:
+        return _migrate_3_to_4
+    if version == 4:
+        return _migrate_4_to_5
 
     raise RuntimeError(f"No migration registered for schema version {version}.")
 
@@ -506,6 +510,24 @@ async def _migrate_2_to_3(connection: AsyncConnection[DictRow]) -> None:
             OR (classification_status = 'error'
                 AND classification IS NULL AND btrim(error) <> '')
         )
+    """)
+
+
+async def _migrate_4_to_5(connection: AsyncConnection[DictRow]) -> None:
+    await connection.execute("""
+        ALTER TABLE collected_distributions
+            ALTER COLUMN validation_size_bytes TYPE BIGINT,
+            ADD COLUMN validation_status TEXT NOT NULL DEFAULT 'unconfirmed'
+                CHECK(validation_status IN (
+                    'available', 'restricted', 'unavailable', 'unconfirmed')),
+            ADD COLUMN validation_reason TEXT NOT NULL DEFAULT '';
+        UPDATE collected_distributions
+        SET validation_status = CASE WHEN validation_ok THEN 'available' ELSE 'unconfirmed' END,
+            validation_reason = 'Validated by a previous collector version.'
+        WHERE validation_attempted;
+        ALTER TABLE collection_jobs
+            ADD COLUMN validation_failures JSONB NOT NULL DEFAULT '[]'::jsonb
+                CHECK(jsonb_typeof(validation_failures) = 'array');
     """)
 
 
@@ -739,3 +761,14 @@ async def _set_schema_version(
         """,
         (version,),
     )
+
+
+async def _migrate_3_to_4(connection: AsyncConnection[DictRow]) -> None:
+    await connection.execute("""
+        ALTER TABLE collected_datasets
+        ADD COLUMN date_of_publication TEXT NOT NULL DEFAULT '',
+        ADD COLUMN sharing_license TEXT NOT NULL DEFAULT '',
+        ADD COLUMN doi TEXT NOT NULL DEFAULT '',
+        ADD COLUMN metadata_provenance JSONB NOT NULL DEFAULT '{}'::jsonb
+            CHECK(jsonb_typeof(metadata_provenance) = 'object')
+    """)

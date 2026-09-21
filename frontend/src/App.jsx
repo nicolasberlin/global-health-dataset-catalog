@@ -10,16 +10,15 @@ import RepositorySearchSection from './components/RepositorySearchSection.jsx';
 import { useClassifications } from './jobs/useClassifications.js';
 import { useCollectionJobs } from './jobs/useCollectionJobs.js';
 
-const CLASSIFICATION_SUBMISSION_CONCURRENCY = 2;
-
 export default function App() {
     const [activeView, setActiveView] = useState('search');
     const LOCAL_ACCESS = import.meta.env.DEV && import.meta.env.VITE_API_AUTH_MODE === 'local';
     const repositorySearchRunRef = useRef(0);
     const repositorySearchIdRef = useRef(null);
     const repositorySearchAbortRef = useRef(null);
-    const { collectedDatasets, collectedLoading, collectedError, loadCollectedDatasets } = useDatasetCatalog();
-    const { session, changeToken } = useApiSession(LOCAL_ACCESS);
+    const catalog = useDatasetCatalog();
+    const { loadCollectedDatasets } = catalog;
+    const { session } = useApiSession(LOCAL_ACCESS);
     const { registerJob, resolveCollection } = useCollectionJobs(session, loadCollectedDatasets);
     const { follow } = useClassifications(session, (item, requestSession, trackingError, requesting) => {
         const registered = registerCandidateCollection(item, requestSession);
@@ -29,7 +28,6 @@ export default function App() {
                 error: item.classification_error ?? '', trackingError, requesting }
             : candidate));
     });
-    const apiToken = session.token;
     const [repositoryQuery, setRepositoryQuery] = useState('');
     const [repositoryResultQuery, setRepositoryResultQuery] = useState('');
     const [repositoryOrigin, setRepositoryOrigin] = useState(null);
@@ -40,45 +38,6 @@ export default function App() {
     const [repositorySearching, setRepositorySearching] = useState(false);
     const [repositoryHasSearched, setRepositoryHasSearched] = useState(false);
     const [agreementFilter, setAgreementFilter] = useState('all');
-    const [apiTokenInput, setApiTokenInput] = useState('');
-    const [apiTokenError, setApiTokenError] = useState('');
-    function clearPrivateSearch() {
-        repositorySearchRunRef.current += 1;
-        repositorySearchAbortRef.current?.abort();
-        repositorySearchAbortRef.current = null;
-        repositorySearchIdRef.current = null;
-        setRepositorySearching(false);
-        setRepositoryHasSearched(false);
-        setRepositoryCandidates([]);
-        setLocalRepositoryResults([]);
-        setRepositoryWarnings([]);
-        setRepositoryError('');
-        setRepositoryOrigin(null);
-        setRepositoryQuery('');
-        setRepositoryResultQuery('');
-        setAgreementFilter('all');
-    }
-
-    function saveApiToken(event) {
-        event.preventDefault();
-        const normalizedToken = apiTokenInput.trim();
-        if (!normalizedToken) {
-            setApiTokenError('Enter an API token.');
-            return;
-        }
-
-        if (changeToken(normalizedToken)) clearPrivateSearch();
-        setApiTokenInput('');
-        setApiTokenError('');
-    }
-
-    function removeApiToken() {
-        changeToken('');
-        clearPrivateSearch();
-        setApiTokenInput('');
-        setApiTokenError('');
-    }
-
     useEffect(() => () => {
         repositorySearchRunRef.current += 1;
         repositorySearchAbortRef.current?.abort();
@@ -90,20 +49,6 @@ export default function App() {
         registerJob(collection.job, requestSession);
         // Store only the reference; the job manager owns every job status.
         return { ...item, automatic_collection: { jobId: collection.job.id } };
-    }
-
-    async function classifyRepositoryCandidates(candidates, runId, abortController, requestSession) {
-        let next = 0;
-        async function submitNext() {
-            while (repositorySearchRunRef.current === runId && requestSession.isCurrent() &&
-                !abortController.signal.aborted && next < candidates.length) {
-                const candidate = candidates[next++];
-                await follow(candidate.item, requestSession, { submit: true });
-            }
-        }
-        await Promise.all(Array.from(
-            { length: Math.min(CLASSIFICATION_SUBMISSION_CONCURRENCY, candidates.length) }, submitNext,
-        ));
     }
 
     async function restoreAnalysis(manual = false) {
@@ -178,7 +123,6 @@ export default function App() {
         setRepositoryWarnings([]);
         setRepositoryError('');
 
-        let classificationStarted = false;
         try {
             const responsePayload = await requestJson('/collector/search-datasets', {
                 method: 'POST',
@@ -234,15 +178,7 @@ export default function App() {
                 Array.isArray(responsePayload?.warnings) ? responsePayload.warnings : [],
             );
 
-            if (candidates.length > 0) {
-                classificationStarted = true;
-                void classifyRepositoryCandidates(
-                    candidates,
-                    runId,
-                    abortController,
-                    requestSession,
-                );
-            }
+            for (const candidate of candidates) void follow(candidate.item, requestSession);
         } catch (exception) {
             if (isAbortError(exception) || abortController.signal.aborted) {
                 return;
@@ -260,10 +196,7 @@ export default function App() {
                 setRepositorySearching(false);
             }
 
-            if (
-                !classificationStarted &&
-                repositorySearchAbortRef.current === abortController
-            ) {
+            if (repositorySearchAbortRef.current === abortController) {
                 repositorySearchAbortRef.current = null;
             }
         }
@@ -351,37 +284,10 @@ export default function App() {
                     onClick={() => setActiveView('catalog')}>Catalog</button>
             </nav>
 
-            {!LOCAL_ACCESS && <section className="api-access-bar" aria-label="Protected API access">
-                <div className="api-access-status">
-                    <strong>API access</strong>
-                    <span>{apiToken ? 'Token active for this session' : 'Token required'}</span>
-                </div>
-                <form className="api-access-form" onSubmit={saveApiToken}>
-                    <label htmlFor="api-token">API token</label>
-                    <input
-                        id="api-token"
-                        type="password"
-                        autoComplete="off"
-                        value={apiTokenInput}
-                        onChange={(event) => setApiTokenInput(event.target.value)}
-                    />
-                    <button type="submit" className="secondary-button">
-                        Save
-                    </button>
-                    {apiToken ? (
-                        <button type="button" onClick={removeApiToken}>
-                            Remove
-                        </button>
-                    ) : null}
-                </form>
-                {apiTokenError ? <p className="api-access-error">{apiTokenError}</p> : null}
-            </section>}
-
             <div hidden={activeView !== 'search'}>
             <RepositorySearchSection
                 analyzeCandidate={analyzeCandidate}
                 restoreAnalysis={() => restoreAnalysis(true)}
-                collectedDatasets={collectedDatasets}
                 acceptedRepositoryCandidates={acceptedRepositoryCandidates}
                 agreementFilter={agreementFilter}
                 inProgressRepositoryCandidates={inProgressRepositoryCandidates}
@@ -405,10 +311,7 @@ export default function App() {
 
             <div hidden={activeView !== 'catalog'}>
             <CollectedDatasetsSection
-                collectedDatasets={collectedDatasets}
-                collectedError={collectedError}
-                collectedLoading={collectedLoading}
-                loadCollectedDatasets={loadCollectedDatasets}
+                {...catalog}
             />
             </div>
 

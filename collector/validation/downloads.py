@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
@@ -10,7 +11,12 @@ from urllib.request import Request
 from collector.config import DEFAULT_CONFIG
 from collector.extraction.distributions import guess_format
 from collector.fetch import open_public_http_url
-from collector.storage.models import DistributionCandidate, HTTPProbe, ValidationResult
+from collector.storage.models import (
+    DistributionCandidate,
+    HTTPProbe,
+    ValidationResult,
+    ValidationStatus,
+)
 
 ProbeFunction = Callable[..., HTTPProbe]
 
@@ -23,13 +29,12 @@ def validate_distribution(
 ) -> ValidationResult:
     """Normalize one distribution probe into a validation outcome.
 
-    Validation starts with ``HEAD`` and falls back to a ranged ``GET`` when the
-    server rejects ``HEAD`` or does not expose credible data headers. The GET
-    sample is capped by ``max_sample_bytes``. Probe failures become
-    ``ValidationResult(ok=False)``; exceptions from an injected probe are not
-    intercepted here.
+    HEAD supplies metadata; a bounded GET sample is required to confirm access.
+    Transport failures and ambiguous samples remain unconfirmed.
     """
 
+    if max_sample_bytes < 1:
+        raise ValueError("max_sample_bytes must be positive.")
     probe = probe or probe_url
     head_probe = probe(distribution.url, method="HEAD", timeout=timeout, max_bytes=0)
     selected_probe = head_probe
@@ -45,28 +50,23 @@ def validate_distribution(
 
     content_type = _header(selected_probe, "content-type")
     content_disposition = _header(selected_probe, "content-disposition")
-    content_length = _header(selected_probe, "content-length")
     format_name = _validated_format(distribution, content_type, content_disposition, selected_probe)
-    is_html_error = "text/html" in content_type.lower() and distribution.format != "API"
-    ok = (
-        selected_probe.error == ""
-        and selected_probe.status_code is not None
-        and 200 <= selected_probe.status_code < 400
-        and not is_html_error
-    )
+    status, reason = _response_status(selected_probe, format_name)
 
     return ValidationResult(
         url=distribution.url,
         final_url=selected_probe.final_url or selected_probe.url,
         format=format_name,
-        ok=ok,
+        ok=status == "available",
+        status=status,
+        reason=reason,
         http_status=selected_probe.status_code,
         mime_type=content_type.split(";", 1)[0].strip(),
-        size_bytes=_parse_content_length(content_length),
+        size_bytes=_total_size(selected_probe, head_probe),
         etag=_header(selected_probe, "etag"),
         last_modified=_header(selected_probe, "last-modified"),
         content_disposition=content_disposition,
-        error=selected_probe.error or ("HTML response instead of data" if is_html_error else ""),
+        error=selected_probe.error or (reason if status != "available" else ""),
     )
 
 
@@ -116,12 +116,92 @@ def probe_url(
 
 
 def _needs_partial_get(probe: HTTPProbe) -> bool:
-    content_type = _header(probe, "content-type").lower()
     return (
         probe.status_code in {403, 405, 501}
-        or (probe.status_code is not None and 200 <= probe.status_code < 400 and not content_type)
-        or "text/html" in content_type
+        or (probe.status_code is not None and 200 <= probe.status_code < 400)
     )
+
+
+def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStatus, str]:
+    code = probe.status_code
+    if code in {401, 403}:
+        return "restricted", "Authentication or access permission is required."
+    if code in {404, 410}:
+        return "unavailable", "Resource was not found at this URL."
+    if probe.error or code is None or not 200 <= code < 300:
+        return "unconfirmed", "The request did not confirm access to data."
+    sample = probe.body_sample.strip()
+    if code in {204, 205} or not sample:
+        return "unconfirmed", "No data content was returned."
+
+    content_type = _header(probe, "content-type").lower()
+    text = sample[:8192].decode("utf-8-sig", errors="replace").lower()
+    if "html" in content_type or (text.lstrip().startswith("<") and re.search(
+        r"<(?:!doctype\s+html|html|head|body|form)\b", text,
+    )):
+        if re.search(r"captcha|type\s*=\s*['\"]?password\b|\blog[ -]?in\b|\bsign[ -]?in\b", text):
+            return "restricted", "A login page or CAPTCHA prevents access to data."
+        return "unconfirmed", "HTML was returned instead of data."
+
+    if "json" in content_type or format_name == "JSON" or sample.startswith((b"{", b"[")):
+        try:
+            payload = json.loads(sample)
+        except (ValueError, UnicodeError, RecursionError):
+            # A bounded/ranged sample may end in the middle of a valid document.
+            return "unconfirmed", "The JSON sample is incomplete or invalid."
+        if isinstance(payload, dict):
+            failure = (
+                bool(payload.get("error")) or bool(payload.get("errors"))
+                or payload.get("success") is False
+                or str(payload.get("status", "")).lower() in {"error", "failed", "failure"}
+            )
+            if failure:
+                error_text = json.dumps(payload).lower()
+                if re.search(
+                    r"authenticat|unauthori[sz]ed|forbidden|api[ _-]?key|captcha|log[ -]?in"
+                    r"|access denied", error_text,
+                ):
+                    return "restricted", "The API requires authentication or access permission."
+                return "unconfirmed", "The API returned an error response."
+            # Common data envelopes and plain records; metadata alone is insufficient.
+            for key in ("data", "results", "records", "value", "items", "features"):
+                if key in payload:
+                    payload = payload[key]
+                    break
+            else:
+                metadata_keys = {"error", "errors", "success", "status", "message", "detail",
+                                 "count", "total", "links", "meta", "metadata"}
+                payload = {key: value for key, value in payload.items() if key not in metadata_keys}
+        if not isinstance(payload, (dict, list)) or not payload:
+            return "unconfirmed", "The JSON response contains no confirmed data."
+        return "available", "A JSON data response was confirmed."
+
+    if format_name in {"UNKNOWN", "API"}:
+        return "unconfirmed", "The response format could not be confirmed."
+    return "available", "A non-empty data response was confirmed."
+
+
+def _total_size(probe: HTTPProbe, head: HTTPProbe) -> int | None:
+    if probe.status_code == 206:
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+|\*)", _header(probe, "content-range"))
+        if match:
+            start, end, total = (_parse_content_length(value) for value in match.groups())
+            if start is not None and end is not None and total is not None and start <= end < total:
+                return total
+    if probe.status_code == 200:
+        length = _parse_content_length(_header(probe, "content-length"))
+        if length is not None:
+            return length
+    # Do not use HEAD metadata from a login page, a different representation or an error.
+    if (head.status_code == 200 and not head.error and head.final_url == probe.final_url
+            and "html" not in _header(head, "content-type").lower()
+            and all(not _header(head, key) or not _header(probe, key)
+                    or _header(head, key) == _header(probe, key)
+                    for key in ("etag", "content-type", "content-encoding"))):
+        length = _parse_content_length(_header(head, "content-length"))
+        if length is not None and length >= len(probe.body_sample):
+            return length
+    return None
 
 
 def _validated_format(
@@ -174,6 +254,8 @@ def _header(probe: HTTPProbe, name: str) -> str:
 
 
 def _parse_content_length(value: str) -> int | None:
-    if not value or not re.fullmatch(r"\d+", value.strip()):
+    value = value.strip()
+    if not re.fullmatch(r"[0-9]{1,19}", value):
         return None
-    return int(value)
+    length = int(value)
+    return length if length <= 2**63 - 1 else None

@@ -210,7 +210,7 @@ def _use_search_persistence(monkeypatch) -> None:
         assert owner_id == PRINCIPAL.owner_id
         return [
             {
-                **_candidate(title=item.title, url=item.url),
+                **_candidate(title=item.title, url=item.url, status="queued"),
                 "search_query": item.search_query,
                 "source": item.source,
                 "description": item.description,
@@ -566,6 +566,46 @@ async def test_collector_search_quota_blocks_work_before_database_or_provider(
     assert error.value.status_code == 429
 
 
+@pytest.mark.parametrize("exhausted", [False, True])
+async def test_search_charges_classification_before_persisting_candidates(monkeypatch, exhausted):
+    _use_search_persistence(monkeypatch)
+    operations = []
+    completed = []
+
+    async def quota(principal, operation):
+        operations.append(operation)
+        if exhausted and operation == "repository_classification":
+            raise HTTPException(status_code=429, detail="quota exceeded")
+
+    async def empty_database(query):
+        return []
+
+    async def finish(search_id, owner_id, **kwargs):
+        completed.append(kwargs)
+
+    async def no_save(*args, **kwargs):
+        pytest.fail("Quota rejection must not create pending candidates")
+
+    monkeypatch.setattr("app.routes.collector.enforce_api_quota", quota)
+    monkeypatch.setattr("app.routes.collector.search_collected_datasets", empty_database)
+    monkeypatch.setattr("app.routes.collector.complete_search_session", finish)
+    item = RepositorySearchResult(title="Health data", url="https://example.org/data",
+                                  source="DataCite")
+    monkeypatch.setattr("app.routes.collector.search_repository_metadata",
+                        lambda query: RepositorySearchResponse(results=[item, item]))
+    if exhausted:
+        monkeypatch.setattr("app.routes.collector.complete_search_session_with_repository_candidates",
+                            no_save)
+        with pytest.raises(HTTPException) as error:
+            await search_datasets(CollectorRepositorySearchRequest(query="health"), PRINCIPAL)
+        assert error.value.status_code == 429
+        assert completed[0]["status"] == "error"
+    else:
+        result = await search_datasets(CollectorRepositorySearchRequest(query="health"), PRINCIPAL)
+        assert all(item.classification_status == "queued" for item in result.items)
+    assert operations == ["repository_search", "repository_classification"]
+
+
 async def test_classification_request_returns_202_without_running_llm(monkeypatch):
     _use_candidate_persistence(monkeypatch)
     response = Response()
@@ -893,7 +933,7 @@ def test_public_job_schema_does_not_advertise_private_candidate_id():
 
 
 async def test_collector_list_collected_route_returns_saved_datasets(monkeypatch):
-    async def fake_list_collected_datasets():
+    async def fake_list_collected_datasets(**kwargs):
         return [
             CollectedDataset(
                 dataset_url="https://catalog.example.org/dataset/mortality",
@@ -944,7 +984,7 @@ async def test_catalog_does_not_expose_persisted_vote_or_validation_exceptions(m
     )
     original = deepcopy(dataset)
 
-    async def list_datasets():
+    async def list_datasets(**kwargs):
         return [dataset]
 
     monkeypatch.setattr("app.routes.collector.list_collected_datasets", list_datasets)
