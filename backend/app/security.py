@@ -8,10 +8,16 @@ import os
 from dataclasses import dataclass
 from typing import Annotated, Literal, Optional
 
-from fastapi import Depends, HTTPException, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, HTTPException, Request, Response
+from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
 
 from app.db.api_quotas import consume_api_quota
+from app.visitor_sessions import (
+    SESSION_COOKIE_NAME,
+    VisitorSessionSettings,
+    visitor_owner_id,
+    visitor_session_settings,
+)
 
 APIQuotaOperation = Literal[
     "repository_search",
@@ -22,7 +28,12 @@ _QUOTA_ENVIRONMENT_VARIABLES: dict[APIQuotaOperation, tuple[str, int]] = {
     "repository_search": ("API_SEARCH_REQUESTS_PER_MINUTE", 10),
     "repository_classification": ("API_CLASSIFICATION_REQUESTS_PER_MINUTE", 20),
 }
-_bearer_scheme = HTTPBearer(auto_error=False)
+_bearer_scheme = HTTPBearer(auto_error=False, description="Used when API_AUTH_MODE=token.")
+_visitor_scheme = APIKeyCookie(
+    name=SESSION_COOKIE_NAME,
+    auto_error=False,
+    description="Used when API_AUTH_MODE=public. Obtain the cookie with POST /session.",
+)
 
 
 @dataclass(frozen=True)
@@ -35,8 +46,11 @@ class APIPrincipal:
 def validate_api_security_configuration() -> None:
     """Fail startup when authentication or quota configuration is unsafe."""
 
-    if not _local_access_enabled():
+    mode = api_auth_mode()
+    if mode == "token":
         _configured_access_tokens()
+    elif mode == "public":
+        visitor_session_settings()
     for operation in _QUOTA_ENVIRONMENT_VARIABLES:
         _quota_limit(operation)
 
@@ -47,10 +61,25 @@ async def require_api_principal(
         Depends(_bearer_scheme),
     ],
     request: Request,
+    response: Response,
+    visitor_cookie: Annotated[Optional[str], Depends(_visitor_scheme)] = None,  # noqa: UP045
 ) -> APIPrincipal:
-    """Authenticate one configured Bearer token without exposing token values."""
+    """Resolve an owner using only the credential accepted by the deployment mode."""
 
-    if _local_access_enabled():
+    mode = api_auth_mode()
+    if mode == "public":
+        settings = visitor_session_settings()
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            _require_session_origin(request, settings)
+        if request.headers.get("authorization") is not None:
+            raise HTTPException(status_code=401, detail="Public access requires a visitor session.")
+        owner_id = visitor_owner_id(visitor_cookie, settings)
+        if owner_id is None:
+            raise HTTPException(status_code=401, detail="Visitor session is missing or expired.")
+        response.headers["Cache-Control"] = "no-store"
+        return APIPrincipal(owner_id=owner_id)
+
+    if mode == "local":
         local_hosts = {"127.0.0.1", "::1", "localhost"}
         origin = request.headers.get("origin")
         if (
@@ -120,11 +149,27 @@ async def enforce_api_quota(
     )
 
 
-def _local_access_enabled() -> bool:
+def api_auth_mode() -> str:
     mode = os.environ.get("API_AUTH_MODE", "token")
-    if mode not in {"token", "local"}:
-        raise RuntimeError("API_AUTH_MODE must be token or local.")
-    return mode == "local"
+    if mode not in {"token", "local", "public"}:
+        raise RuntimeError("API_AUTH_MODE must be token, local or public.")
+    return mode
+
+
+def require_public_session_bootstrap(request: Request) -> VisitorSessionSettings:
+    """Keep cookie issuance and origin checks under the same access policy."""
+
+    if api_auth_mode() != "public":
+        raise HTTPException(status_code=404, detail="Not found")
+    settings = visitor_session_settings()
+    _require_session_origin(request, settings)
+    return settings
+
+
+def _require_session_origin(request: Request, settings: VisitorSessionSettings) -> None:
+    # Fail closed for missing/null origins too. CORS alone does not prevent CSRF.
+    if request.headers.get("origin") != settings.origin:
+        raise HTTPException(status_code=403, detail="Request origin is not allowed.")
 
 
 def _configured_access_tokens() -> dict[str, str]:

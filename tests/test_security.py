@@ -10,7 +10,7 @@ from app.security import (
     require_api_principal,
     validate_api_security_configuration,
 )
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 
 pytestmark = pytest.mark.anyio
@@ -30,7 +30,7 @@ async def test_local_access_needs_no_token(monkeypatch):
     monkeypatch.setenv("API_AUTH_MODE", "local")
     monkeypatch.delenv("API_ACCESS_TOKENS", raising=False)
     validate_api_security_configuration()
-    assert await require_api_principal(None, _request()) == APIPrincipal("local-user")
+    assert await require_api_principal(None, _request(), Response()) == APIPrincipal("local-user")
 
 
 @pytest.mark.parametrize("overrides", [
@@ -40,7 +40,7 @@ async def test_local_access_needs_no_token(monkeypatch):
 async def test_local_access_rejects_remote_clients_and_browser_origins(monkeypatch, overrides):
     monkeypatch.setenv("API_AUTH_MODE", "local")
     with pytest.raises(HTTPException) as error:
-        await require_api_principal(None, _request(**overrides))
+        await require_api_principal(None, _request(**overrides), Response())
     assert error.value.status_code == 403
 
 
@@ -55,7 +55,8 @@ async def test_bearer_token_authenticates_configured_owner(monkeypatch):
     _configure_access_token(monkeypatch)
 
     principal = await require_api_principal(
-        HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_TOKEN), _request()
+        HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_TOKEN),
+        _request(), Response(),
     )
 
     assert principal == APIPrincipal(owner_id="test-user")
@@ -75,7 +76,7 @@ async def test_bearer_token_rejects_missing_or_invalid_credentials(
     _configure_access_token(monkeypatch)
 
     with pytest.raises(HTTPException) as error:
-        await require_api_principal(credentials, _request())
+        await require_api_principal(credentials, _request(), Response())
 
     assert error.value.status_code == 401
     assert error.value.headers == {"WWW-Authenticate": "Bearer"}
@@ -91,10 +92,11 @@ def test_security_configuration_rejects_duplicate_tokens(monkeypatch):
         validate_api_security_configuration()
 
 
-def test_costly_and_mutating_routes_declare_bearer_authentication():
+def test_costly_and_mutating_routes_document_both_deployment_authentication_schemes():
     from app.main import app
 
     openapi = app.openapi()
+    assert "/session" in openapi["paths"]
     protected_operations = (
         ("/collector/collection-jobs/{job_id}/retry", "post"),
         ("/collector/search-datasets", "post"),
@@ -103,7 +105,9 @@ def test_costly_and_mutating_routes_declare_bearer_authentication():
     )
 
     for path, method in protected_operations:
-        assert openapi["paths"][path][method]["security"] == [{"HTTPBearer": []}]
+        assert openapi["paths"][path][method]["security"] == [
+            {"HTTPBearer": []}, {"APIKeyCookie": []},
+        ]
 
 
 def test_security_configuration_requires_access_tokens(monkeypatch):
