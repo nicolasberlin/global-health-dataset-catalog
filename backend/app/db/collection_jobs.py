@@ -114,6 +114,7 @@ async def _reserve_repository_candidate_collection_job(
             active_job.rejected_count,
             active_job.invalid_distribution_count,
             active_job.discovery_methods,
+            active_job.classification_progress,
             active_job.message,
             active_job.error,
             active_job.created_at,
@@ -124,7 +125,8 @@ async def _reserve_repository_candidate_collection_job(
             SELECT id, source_url, kind, repository_candidate_id,
                    status, saved_count, discovered_count,
                    analyzed_count, accepted_count, rejected_count,
-                   invalid_distribution_count, discovery_methods, message,
+                   invalid_distribution_count, discovery_methods, classification_progress,
+                   message,
                    error, created_at, updated_at, finished_at
             FROM collection_jobs
             WHERE (
@@ -192,7 +194,8 @@ async def get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, 
             SELECT job.* FROM collection_jobs AS job
             WHERE job.id = %s AND EXISTS (
                 SELECT 1 FROM collection_job_candidates AS association
-                JOIN repository_candidates AS candidate ON candidate.id = association.candidate_id
+                JOIN repository_candidates AS candidate
+                      ON candidate.id = association.candidate_id
                 JOIN search_sessions AS session ON session.id = candidate.search_session_id
                 WHERE association.job_id = job.id AND session.owner_id = %s
             )
@@ -214,6 +217,45 @@ async def _job_dataset_ids(connection, job_id: int) -> list[int]:
         (job_id,),
     )
     return [int(row["dataset_id"]) for row in rows]
+
+
+async def retry_collection_job_for_owner(job_id: int, owner_id: str) -> dict | None:
+    """Requeue an owned failed job, keeping its validated votes and associations."""
+    async with _require_database_pool().connection() as connection:
+        async with connection.transaction():
+            job = await _fetchone(connection, """
+                SELECT job.* FROM collection_jobs AS job
+                WHERE job.id = %s AND EXISTS (
+                    SELECT 1 FROM collection_job_candidates AS association
+                    JOIN repository_candidates AS candidate
+                      ON candidate.id = association.candidate_id
+                    JOIN search_sessions AS session ON session.id = candidate.search_session_id
+                    WHERE association.job_id = job.id AND session.owner_id = %s
+                )
+            """, (job_id, _normalized_owner_id(owner_id)))
+            if job is None:
+                return None
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (job["source_url"],),
+            )
+            job = await _fetchone(connection,
+                "SELECT * FROM collection_jobs WHERE id = %s FOR UPDATE", (job_id,))
+            if job["status"] in {"pending", "running"}:
+                return _collection_job_to_dict(job)
+            if job["status"] != "error":
+                raise ValueError("Only a failed collection can be retried.")
+            active = await _fetchone(connection, """
+                SELECT id FROM collection_jobs WHERE source_url = %s
+                AND status IN ('pending', 'running') AND id <> %s
+            """, (job["source_url"], job_id))
+            if active:
+                raise ValueError("Another collection is already running for this page.")
+            row = await _fetchone(connection, """
+                UPDATE collection_jobs SET status = 'pending', error = '',
+                    message = 'Collection pending.', finished_at = NULL, updated_at = NOW()
+                WHERE id = %s RETURNING *
+            """, (job_id,))
+            return _collection_job_to_dict(row)
 
 
 async def _existing_dataset_ids(connection, source_url: str) -> list[int]:
@@ -329,20 +371,32 @@ async def _insert_collection_job(
     kind: str = "source",
     repository_candidate_id: UUID | None = None,
 ) -> Row | None:
+    previous = await _fetchone(connection, """
+        SELECT job.status, COALESCE(job.classification_root_id, job.id) AS root_id
+        FROM collection_jobs AS job
+        WHERE job.source_url = %s AND job.kind = %s AND (
+            (%s::uuid IS NULL AND job.repository_candidate_id IS NULL) OR EXISTS (
+                SELECT 1 FROM collection_job_candidates AS association
+                WHERE association.job_id = job.id AND association.candidate_id = %s
+            )
+        ) ORDER BY job.id DESC LIMIT 1
+    """, (source_url, kind, repository_candidate_id, repository_candidate_id))
+    root_id = previous["root_id"] if previous and previous["status"] == "error" else None
     return await _fetchone(
         connection,
         """
         INSERT INTO collection_jobs (
-            source_url, kind, repository_candidate_id, status, message
+            source_url, kind, repository_candidate_id, classification_root_id, status, message
         )
-        VALUES (%s, %s, %s, 'pending', 'Collection pending.')
+        VALUES (%s, %s, %s, %s, 'pending', 'Collection pending.')
         RETURNING id, source_url, kind, repository_candidate_id,
                   status, saved_count, discovered_count,
                   analyzed_count, accepted_count, rejected_count,
-                  invalid_distribution_count, discovery_methods, message,
+                  invalid_distribution_count, discovery_methods, classification_progress,
+                  message,
                   error, created_at, updated_at, finished_at
         """,
-        (source_url, kind, repository_candidate_id),
+        (source_url, kind, repository_candidate_id, root_id),
     )
 
 
@@ -377,7 +431,8 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
             RETURNING id, source_url, kind, repository_candidate_id,
                       status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
-                      invalid_distribution_count, discovery_methods, message,
+                      invalid_distribution_count, discovery_methods, classification_progress,
+                      message,
                       error, created_at, updated_at, finished_at
             """,
             (job_id,),
@@ -424,7 +479,8 @@ async def _mark_collection_job_done(
         RETURNING id, source_url, kind, repository_candidate_id,
                   status, saved_count, discovered_count,
                   analyzed_count, accepted_count, rejected_count,
-                  invalid_distribution_count, discovery_methods, message,
+                  invalid_distribution_count, discovery_methods, classification_progress,
+                  message,
                   error, created_at, updated_at, finished_at
         """,
         (
@@ -462,7 +518,8 @@ async def mark_collection_job_error(
             RETURNING id, source_url, kind, repository_candidate_id,
                       status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
-                      invalid_distribution_count, discovery_methods, message,
+                      invalid_distribution_count, discovery_methods, classification_progress,
+                      message,
                       error, created_at, updated_at, finished_at
             """,
             (error, job_id),
@@ -478,7 +535,8 @@ async def _get_collection_job_row(connection, job_id: int) -> Row | None:
         SELECT id, source_url, kind, repository_candidate_id,
                status, saved_count, discovered_count,
                analyzed_count, accepted_count, rejected_count,
-               invalid_distribution_count, discovery_methods, message, error,
+               invalid_distribution_count, discovery_methods, classification_progress,
+               message, error,
                created_at, updated_at, finished_at
         FROM collection_jobs
         WHERE id = %s
@@ -514,6 +572,7 @@ def _collection_job_to_dict(row: Row) -> dict[str, object]:
             else None
         ),
         "status": str(row["status"]),
+        "classification_progress": row.get("classification_progress", {}),
         "saved_count": int(row["saved_count"]),
         "discovered_count": int(row["discovered_count"]),
         "analyzed_count": int(row["analyzed_count"]),

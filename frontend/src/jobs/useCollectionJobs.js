@@ -9,11 +9,12 @@ export function useCollectionJobs(session, onSaved) {
     const manager = useRef(null);
 
     useEffect(() => {
-        const state = { session, jobs: new Map(), trackers: new Map(), notified: new Set() };
+        const state = { session, jobs: new Map(), trackers: new Map(), notified: new Set(), retries: new Map() };
         manager.current = state;
         setJobs({});
         return () => {
             manager.current = null;
+            for (const controller of state.retries.values()) controller.abort();
             for (const tracker of state.trackers.values()) {
                 window.clearTimeout(tracker.timer);
                 tracker.controller?.abort();
@@ -37,6 +38,7 @@ export function useCollectionJobs(session, onSaved) {
             }
         }
         const previous = state.jobs.get(job.id);
+        if (previous && Date.parse(previous.job.updated_at) > Date.parse(job.updated_at)) return;
         // Registration can arrive late or repeatedly from candidates sharing a job.
         // Polling owns updates once a job is registered; terminal responses can finish it.
         if (previous && (terminal(previous.job) || !terminal(job))) return;
@@ -90,19 +92,49 @@ export function useCollectionJobs(session, onSaved) {
         tracker.timer = window.setTimeout(poll, 700);
     }, [onSaved]);
 
+    const retryJob = useCallback(async (jobId, requestSession) => {
+        const state = manager.current;
+        const entry = state?.jobs.get(jobId);
+        if (!entry || entry.job.status !== 'error' || state.session !== requestSession ||
+            !requestSession.isCurrent() || state.retries.has(jobId)) return;
+        const controller = new AbortController();
+        state.retries.set(jobId, controller);
+        state.jobs.set(jobId, { ...entry, retrying: true, trackingError: '' });
+        setJobs(Object.fromEntries(state.jobs));
+        const alive = () => manager.current === state && requestSession.isCurrent();
+        try {
+            const data = await requestJson(`/collector/collection-jobs/${jobId}/retry`, {
+                method: 'POST', session: requestSession, signal: controller.signal,
+            });
+            if (!alive()) return;
+            if (data.job?.id !== jobId || !['pending', 'running', 'done', 'error'].includes(data.job.status)) {
+                throw new Error('The collection retry response is incomplete.');
+            }
+            state.jobs.delete(jobId);
+            registerJob(data.job, requestSession);
+        } catch (error) {
+            if (!alive() || isAbortError(error)) return;
+            state.jobs.set(jobId, { ...entry, retrying: false, trackingError: error.message });
+            setJobs(Object.fromEntries(state.jobs));
+        } finally {
+            state.retries.delete(jobId);
+        }
+    }, [registerJob]);
+
     const resolveCollection = useCallback((collection) => {
         if (!collection?.jobId) return collection;
         const entry = jobs[collection.jobId];
         if (!entry || !session.isCurrent()) return null;
-        const { job, tracking, trackingError } = entry;
+        const { job, tracking, trackingError, retrying } = entry;
         return {
             job,
             dataset_ids: job.dataset_ids ?? [],
             state: job.status === 'done' ? (job.saved_count > 0 ? 'saved' : 'empty') : job.status,
             tracking,
             trackingError,
+            retrying,
         };
     }, [jobs, session]);
 
-    return { registerJob, resolveCollection };
+    return { registerJob, resolveCollection, retryJob };
 }

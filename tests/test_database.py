@@ -41,6 +41,8 @@ SCHEMA_TABLES = (
     "dataset_discovery_observations",
     "collection_jobs",
     "collection_job_candidates",
+    "classification_runs",
+    "classification_votes",
 )
 
 TEST_OWNER_ID = "test-user"
@@ -297,6 +299,11 @@ async def test_job_access_migration_preserves_data_and_only_backfills_known_owne
     await _execute(database, """ALTER TABLE collected_distributions
         DROP COLUMN validation_status, DROP COLUMN validation_reason""")
     await _execute(database, "ALTER TABLE collection_jobs DROP COLUMN validation_failures")
+    await _execute(database, "DROP TABLE classification_votes, classification_runs")
+    await _execute(database,
+                   "ALTER TABLE repository_candidates DROP COLUMN classification_progress")
+    await _execute(database, """ALTER TABLE collection_jobs DROP COLUMN classification_progress,
+        DROP COLUMN classification_root_id""")
     await _execute(database, "DELETE FROM schema_migrations WHERE version >= 2")
     await database.init_database()
     await database.init_database()
@@ -523,40 +530,18 @@ def _mortality_dataset() -> CollectedDataset:
     )
 
 
-async def test_init_database_seeds_dataset_pages(database):
+async def test_init_database_preserves_legacy_sources_without_seeding(database):
     await database.init_database()
-
-    sources = await database.list_data_sources()
-    assert len(sources) == 2
-    assert {source["source_key"] for source in sources} == {
-        "who_gho_indicators",
-        "who_gho_life_expectancy",
-    }
-    assert all(source["page_url"].startswith("https://www.who.int/") for source in sources)
-    assert {source["theme"] for source in sources} == {"General", "Mortality"}
-    assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
-
-    await database.upsert_collector_data_source(
-        "user_defined_source",
-        "User source",
-        "User description",
-        "Custom",
-        "https://example.org/user-source",
-    )
+    assert await _fetchall(database, "SELECT * FROM data_sources") == []
+    await _execute(database, """
+        INSERT INTO data_sources (source_key, name, page_url)
+        VALUES ('legacy', 'Existing source', 'https://example.org/legacy')
+    """)
     await database.init_database()
-
-    sources = await database.list_data_sources()
-    life_expectancy_source = next(
-        source
-        for source in sources
-        if source["source_key"] == "who_gho_life_expectancy"
-    )
-    assert (
-        life_expectancy_source["name"]
-        == "WHO Global Health Observatory - Life expectancy"
-    )
-    assert any(source["source_key"] == "user_defined_source" for source in sources)
-    assert len(sources) == 3
+    sources = await _fetchall(database, "SELECT * FROM data_sources")
+    assert len(sources) == 1
+    assert sources[0]["name"] == "Existing source"
+    assert sources[0]["page_url"] == "https://example.org/legacy"
 
 
 async def test_init_database_creates_current_schema_with_integrity(database):
@@ -743,7 +728,8 @@ async def test_init_database_rejects_current_version_with_obsolete_columns(datab
         await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
         for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
             await connection.execute(schema)
-        await db_schema._migrate_1_to_2(connection)
+        for version in range(1, db_schema.CURRENT_SCHEMA_VERSION):
+            await db_schema._migration_for_version(version)(connection)
         await connection.execute(
             """
             ALTER TABLE collected_datasets
@@ -762,14 +748,15 @@ async def test_init_database_rejects_current_version_with_obsolete_columns(datab
     assert "collected_datasets" in await _table_names(database)
 
 
-async def test_init_database_does_not_overwrite_current_reserved_source_key_collision(
+async def test_init_database_does_not_overwrite_existing_legacy_sources(
     database,
 ):
     async with db_connection._require_database_pool().connection() as connection:
         await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
         for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
             await connection.execute(schema)
-        await db_schema._migrate_1_to_2(connection)
+        for version in range(1, db_schema.CURRENT_SCHEMA_VERSION):
+            await db_schema._migration_for_version(version)(connection)
         await connection.execute(
             """
             INSERT INTO data_sources (source_key, name, description, theme, page_url)
@@ -803,143 +790,9 @@ async def test_init_database_does_not_overwrite_current_reserved_source_key_coll
     assert rows[0]["page_url"] == "https://example.org/current-collision"
 
 
-async def test_future_seed_collision_preserves_existing_source(database, monkeypatch):
-    from app.db import schema as db_schema
-
-    await database.init_database()
-    await database.upsert_collector_data_source(
-        "who_mortality_2027",
-        "User mortality source",
-        "Created before the key became a seed.",
-        "Custom",
-        "https://example.org/user-mortality",
-    )
-    future_seed = {
-        "source_key": "who_mortality_2027",
-        "name": "WHO mortality 2027",
-        "description": "Future application seed.",
-        "theme": "Mortality",
-        "page_url": "https://www.who.int/data/mortality-2027",
-    }
-    monkeypatch.setattr(
-        db_schema,
-        "DATA_SOURCE_SEEDS",
-        [*db_schema.DATA_SOURCE_SEEDS, future_seed],
-    )
-
-    await database.init_database()
-
-    source = next(
-        source
-        for source in await database.list_data_sources()
-        if source["source_key"] == "who_mortality_2027"
-    )
-    assert source["name"] == "User mortality source"
-    assert source["page_url"] == "https://example.org/user-mortality"
-
-
-async def test_upsert_collector_data_source_can_update_seed_key(database):
-    await database.init_database()
-
-    updated_source = await database.upsert_collector_data_source(
-        "who_gho_indicators",
-        "WHO GHO refreshed",
-        "Updated by authorized internal sync.",
-        "Custom",
-        "https://example.org/override",
-    )
-
-    assert updated_source["source_key"] == "who_gho_indicators"
-    assert updated_source["name"] == "WHO GHO refreshed"
-
-    await database.init_database()
-
-    source = next(
-        source
-        for source in await database.list_data_sources()
-        if source["source_key"] == "who_gho_indicators"
-    )
-    assert source["name"] == "WHO GHO refreshed"
-    assert source["page_url"] == "https://example.org/override"
-
-
-async def test_create_data_source_rejects_reserved_seed_key_after_normalization(
-    database,
-):
-    await database.init_database()
-
-    with pytest.raises(database.ReservedDataSourceKeyError):
-        await database.create_data_source(
-            "who_gho_indicators ",
-            "User override",
-            "Should not be allowed.",
-            "Custom",
-            "https://example.org/override",
-        )
-
-    source = next(
-        source
-        for source in await database.list_data_sources()
-        if source["source_key"] == "who_gho_indicators"
-    )
-    assert source["name"] == "WHO Global Health Observatory - Indicators"
-
-
-async def test_upsert_collector_data_source_rejects_invalid_source_key(database):
-    await database.init_database()
-
-    with pytest.raises(database.InvalidDataSourceKeyError):
-        await database.upsert_collector_data_source(
-            "My HDX",
-            "Humanitarian Data Exchange",
-            "Global datasets.",
-            "Humanitarian",
-            "https://data.humdata.org/dataset",
-        )
-
-
-async def test_create_data_source_rejects_invalid_page_url_before_pool():
-    from app import database
-
-    with pytest.raises(database.InvalidDataSourceURLError):
-        await database.create_data_source(
-            "my_hdx",
-            "Humanitarian Data Exchange",
-            "Global datasets.",
-            "Humanitarian",
-            "not-a-url",
-        )
-
-
-async def test_create_data_source_rejects_duplicate_source_key(database):
-    await database.init_database()
-
-    created = await database.create_data_source(
-        "my_hdx",
-        "Humanitarian Data Exchange",
-        "Global datasets.",
-        "Humanitarian",
-        "https://data.humdata.org/dataset",
-    )
-
-    with pytest.raises(database.DuplicateDataSourceKeyError):
-        await database.create_data_source(
-            "my_hdx",
-            "Replacement",
-            "Should not overwrite the existing source.",
-            "Other",
-            "https://example.org/replacement",
-        )
-
-    source = await database.get_data_source(int(created["id"]))
-    assert source is not None
-    assert source["name"] == "Humanitarian Data Exchange"
-    assert source["page_url"] == "https://data.humdata.org/dataset"
-
-
 async def test_business_operations_do_not_apply_schema_migrations(database):
     with pytest.raises(RuntimeError, match="Run init_database"):
-        await database.list_data_sources()
+        await database.list_collected_datasets()
 
     assert await _table_names(database) == set()
     assert await _schema_version(database) == 0
@@ -2417,3 +2270,40 @@ async def test_collection_job_records_errors(database):
     assert failed["message"] == "Collection failed."
     assert failed["error"] == "network timeout"
     assert failed["finished_at"] != ""
+
+
+async def test_business_operations_do_not_reread_schema_version(database, monkeypatch):
+    await database.init_database()
+
+    async def unexpected_schema_query(*args):
+        raise AssertionError("Business operations must use the initialized pool state.")
+
+    monkeypatch.setattr(db_schema, "_schema_version", unexpected_schema_query)
+    assert await database.list_collected_datasets() == []
+    await database.create_search_session("mortality", "alice")
+    await database.create_collection_job("https://example.org/data")
+    assert (await database.claim_pending_collection_job())["status"] == "running"
+
+
+async def test_reopened_pool_requires_schema_validation(database):
+    await database.init_database()
+    await database.close_database_pool()
+    await database.open_database_pool()
+    with pytest.raises(RuntimeError, match="Run init_database"):
+        await database.list_collected_datasets()
+    await database.init_database()
+    assert await database.list_collected_datasets() == []
+
+
+async def test_failed_schema_validation_clears_initialized_state(database):
+    await database.init_database()
+    await _execute(database, "INSERT INTO schema_migrations (version) VALUES (%s)",
+                   (db_schema.CURRENT_SCHEMA_VERSION + 1,))
+    with pytest.raises(RuntimeError, match="newer than supported"):
+        await database.init_database()
+    with pytest.raises(RuntimeError, match="Run init_database"):
+        await database.list_collected_datasets()
+    await _execute(database, "DELETE FROM schema_migrations WHERE version = %s",
+                   (db_schema.CURRENT_SCHEMA_VERSION + 1,))
+    await database.init_database()
+    assert await database.list_collected_datasets() == []

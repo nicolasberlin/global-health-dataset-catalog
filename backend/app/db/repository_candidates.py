@@ -346,7 +346,7 @@ _CANDIDATE_COLUMNS = """
     candidate.publisher, candidate.publication_date, candidate.doi,
     candidate.keywords, candidate.metadata, candidate.classification_status,
     candidate.classification, candidate.error, candidate.created_at,
-    candidate.updated_at
+    candidate.updated_at, candidate.classification_progress
 """
 _RETURNING_CANDIDATE_COLUMNS = _CANDIDATE_COLUMNS
 
@@ -377,6 +377,7 @@ def _repository_candidate_to_dict(row: Row) -> dict[str, object]:
             "repository_candidates.metadata",
         ),
         "classification_status": str(row["classification_status"]),
+        "classification_progress": row.get("classification_progress", {}),
         "classification": (
             None
             if classification is None

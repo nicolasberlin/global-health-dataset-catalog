@@ -375,7 +375,7 @@ async def test_collector_search_datasets_falls_back_online_when_database_is_empt
 
     monkeypatch.setattr(
         "app.classification_worker.build_default_repository_result_classifier",
-        lambda: QueryCapturingClassifier(),
+        lambda **kwargs: QueryCapturingClassifier(),
     )
     _use_candidate_persistence(
         monkeypatch,

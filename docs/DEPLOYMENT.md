@@ -58,11 +58,12 @@ consumer claims one job atomically only when its execution slot is available.
   collections to finish. The container's stop grace period can force termination
   before that finishes; allow enough time if draining is required.
 - A repeated classification reads its existing collection, including an empty
-  or failed result. No collection retry endpoint is introduced by this change.
+  or failed result. `POST /collector/collection-jobs/{job_id}/retry` explicitly
+  requeues an owned failed job and consumes the existing classification quota.
 
 Classification decisions and initial collection reservations share one
 transaction. If reservation fails, the decision rolls back too; an explicit
-classification retry may repeat the LLM call. LLM and network calls stay outside
+classification retry reuses all already persisted valid votes. LLM and network calls stay outside
 the transaction. Classification requests now persist as `queued` on existing candidates before
 HTTP 202 is returned. `pending` means discovered but not requested; workers never
 execute it. `CLASSIFICATION_MAX_CONCURRENCY` (default `2`) bounds the separate
@@ -71,7 +72,15 @@ candidates become errors and require an explicit `retry=true` request. An LLM
 response lost before persistence may need another call; no automatic retry is
 added. Both pools share the same bounded consumer implementation.
 
-Schema version 3 adds the `queued` state without deleting data or adding a table.
+Schema version 6 adds `classification_runs` and `classification_votes`, with
+input/configuration fingerprints, per-voter attempts, and progress on candidates
+and collection jobs. Migration runs automatically at backend startup without
+removing existing data. Existing historical decisions are not backfilled as votes.
+Each response is validated and committed before waiting for the remaining voters.
+A changed input or ensemble configuration starts a separate run. No transaction
+stays open during an external request. Startup marks interrupted votes as failed
+without discarding successes. The CLI has no persistent vote store; this recovery
+applies to backend workers.
 Deploy backend and frontend together: classification submission now returns an
 intermediate state, followed through authenticated GET requests. The frontend
 restores the most recent search containing repository candidates on load and
@@ -162,3 +171,18 @@ References: [Python TLS](https://docs.python.org/3.11/library/ssl.html),
 [Traefik entrypoints](https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/),
 [Docker DNS](https://docs.docker.com/engine/network/#dns-services), and
 [setpriv](https://man7.org/linux/man-pages/man1/setpriv.1.html).
+
+
+## Schema validation and retired source administration
+
+Startup validates and migrates the schema before serving requests or starting
+workers. The initialized state belongs to the current database pool and is cleared
+on close/reopen or failed initialization. Business operations use this in-memory
+guard without repeating schema-version queries. Scripts that reopen a pool must
+call `init_database()` before business operations. Apply schema changes through
+startup migration; live external schema changes are not monitored per request.
+
+The `/sources` administration routes, storage helpers, creation quota, and seed
+inserts are removed. Historical `data_sources` rows are preserved. No data-dropping
+migration is part of this cleanup, and source-discovery adapters still operate
+from URLs independently of the retired administration subsystem.

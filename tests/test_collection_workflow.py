@@ -256,7 +256,7 @@ async def test_startup_collects_persisted_pending_job_without_http_scheduling(
     await database.close_database_pool()
     calls = []
 
-    def collect(url):
+    def collect(url, **kwargs):
         calls.append(url)
         return CollectionResult()
 
@@ -283,7 +283,7 @@ async def test_busy_workers_leave_excess_jobs_pending_and_drain_on_shutdown(data
     release = threading.Event()
     started = []
 
-    def collect(url):
+    def collect(url, **kwargs):
         started.append(url)
         assert release.wait(timeout=5)
         return CollectionResult()
@@ -325,7 +325,7 @@ async def test_worker_records_error_and_continues_to_next_job(database, monkeypa
     second = await database.create_collection_job("https://example.org/pass")
     real_complete = collection_worker.complete_collection_job
 
-    def collect(url):
+    def collect(url, **kwargs):
         if failure_stage == "collect" and url.endswith("fail"):
             raise RuntimeError("test collection failure")
         return CollectionResult()

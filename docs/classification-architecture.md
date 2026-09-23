@@ -6,6 +6,22 @@ This document describes every runtime module under `collector/classification/`,
 the values exchanged between them, and the two classification flows. Private
 helpers are included when they validate, transform, or aggregate data.
 
+## Durable partial votes
+
+Backend workers pass `PostgresVoteStore` to the factory. `checkpoints.py` wraps
+each HTTP client: validate the response with the domain parser, commit it, then
+return it to the ensemble. All three valid responses remain required. The store
+bridges voter threads to the backend event loop; network calls hold no DB locks.
+
+A run identifies the bounded input and the whole ensemble configuration (model
+IDs, endpoint, prompt, output schema and request parameters; no credentials).
+Retries reuse positive and negative valid votes only for that exact run. Failed
+or missing responses can be retried explicitly, with attempt tokens rejecting
+late writes. Inputs/configuration changes start a new run. Page collection
+retries may fetch the page again; changed extracted content invalidates reuse.
+The API exposes counts through `classification_progress`, without raw provider
+errors or snapshots. Final decisions keep the existing ensemble response format.
+
 ## Module Map
 
 ```mermaid

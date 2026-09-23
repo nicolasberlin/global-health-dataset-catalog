@@ -1,18 +1,14 @@
 import { useState } from 'react';
 import { useLinkedDatasets } from '../catalog/useLinkedDatasets.js';
+import ClassificationProgress from './ClassificationProgress.jsx';
 import { datasetCountries, datasetFormats } from './DatasetAccessDetails.jsx';
 import LocalDatasetSearchCard from './LocalDatasetSearchCard.jsx';
-import RepositoryAcceptedCard from './RepositoryAcceptedCard.jsx';
+import RepositoryAcceptedCard, { getVoteAgreement } from './RepositoryAcceptedCard.jsx';
 import RepositoryProgressCard from './RepositoryProgressCard.jsx';
-
-const AGREEMENT_FILTERS = [
-    { value: 'all', label: 'All' },
-    { value: '2', label: '2/3' },
-    { value: '3', label: '3/3' },
-];
 
 export default function RepositorySearchSection({
     analyzeCandidate,
+    retryCollection,
     restoreAnalysis,
     acceptedRepositoryCandidates,
     agreementFilter,
@@ -33,6 +29,12 @@ export default function RepositorySearchSection({
     setAgreementFilter,
     setRepositoryQuery,
 }) {
+    const agreements = [...new Set(repositoryCandidates
+        .filter(candidate => candidate.status === 'accepted')
+        .map(candidate => getVoteAgreement(candidate.item.classification))
+        .filter(Boolean))].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+    const agreementFilters = [{ value: 'all', label: 'All' },
+        ...agreements.map(value => ({ value, label: value }))];
     const [subject, setSubject] = useState('');
     const [country, setCountry] = useState('');
     const [format, setFormat] = useState('');
@@ -134,7 +136,7 @@ export default function RepositorySearchSection({
                     <fieldset className="agreement-filter">
                         <legend>AI agreement</legend>
                         <div className="agreement-filter__options">
-                            {AGREEMENT_FILTERS.map((filter) => (
+                            {agreementFilters.map((filter) => (
                                 <button
                                     key={filter.value}
                                     type="button"
@@ -230,7 +232,7 @@ export default function RepositorySearchSection({
                 visibleCandidates.length > 0) ? (
                 <div className="repository-result-grid" aria-live="polite">
                     {visibleCandidates.map((candidate) => (
-                        <RepositoryAcceptedCard key={candidate.id} candidate={candidate} />
+                        <RepositoryAcceptedCard key={candidate.id} candidate={candidate} onRetryCollection={() => retryCollection(candidate)} />
                     ))}
                     {inProgressRepositoryCandidates.map((candidate) => (
                         <RepositoryProgressCard key={candidate.id} candidate={candidate} onAnalyze={() => analyzeCandidate(candidate)} />
@@ -277,6 +279,7 @@ export default function RepositorySearchSection({
                             <li key={candidate.id}>
                                 <span>
                                     {candidate.item.title}
+                                    <ClassificationProgress progress={candidate.item.classification_progress} />
                                     {candidate.error ? <small>{candidate.error}</small> : null}
                                     {candidate.trackingError ? <small>{candidate.trackingError}</small> : null}
                                 </span>

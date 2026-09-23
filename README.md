@@ -17,7 +17,7 @@ The current application can:
 - validate candidate download and API links;
 - persist accepted datasets and their distributions.
 
-The catalogue contains seeded official sources, but the application does not yet guarantee that every collected dataset comes from an official publisher.
+The application does not yet guarantee that every collected dataset comes from an official publisher.
 
 ## Architecture
 
@@ -105,12 +105,14 @@ source .env.local
 
 Page and repository classification each call three models in parallel: DeepSeek,
 Gemma Meditron, and Apertus Meditron. Acceptance requires two positive votes and
-three usable responses. Any model error fails classification rather than
-silently removing a voter. Each model has its own model and credential variables;
+three usable responses. Validated responses are saved individually in PostgreSQL
+by backend workers. If a model fails, an explicit retry calls only missing or
+failed voters; successful negative votes are preserved too. A changed input,
+model, or prompt starts a new set of votes. Each model has its own model and credential variables;
 the example explicitly reuses the Gemma key for Apertus. All three use the same
 client, prompt per flow, parser, and error handling. The EPFL RCP Chat Completions
 endpoint, which must serve these model IDs and support the JSON response mode.
-This makes three inference requests per classification instead of one; existing
+An initial classification makes three inference requests; existing
 request quotas still count application operations, not individual model calls.
 
 ### Start PostgreSQL
@@ -188,10 +190,11 @@ Automatic collection
 
 ## API
 
-The website offers Search and Catalog views. Source administration and manual
-source collection are not exposed by the website; the former
-`POST /collector/collection-jobs` endpoint has been removed. Automatic collection
-and its progress endpoint remain available. Existing datasets are preserved.
+The website offers Search and Catalog views. Source administration (`/sources`)
+and the manual `POST /collector/collection-jobs` endpoint have been removed.
+Automatic collection, progress, and explicit failed-job retries remain available.
+Historical source records and collected datasets are preserved; startup no longer
+seeds source records.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -199,10 +202,11 @@ and its progress endpoint remain available. Existing datasets are preserved.
 | `POST` | `/collector/search-datasets` | Search PostgreSQL, then external repositories |
 | `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Queue an owned classification (202); read its state separately |
 | `GET` | `/collector/collection-jobs/{id}` | Read collection progress |
+| `POST` | `/collector/collection-jobs/{job_id}/retry` | Retry an owned failed collection, preserving saved votes |
 | `GET` | `/collector/collected-datasets` | List persisted datasets |
 
 All routes in the table except `/health` and `/collector/collected-datasets`
-require `Authorization: Bearer <token>`. `POST /sources` is protected as well.
+require `Authorization: Bearer <token>`.
 Search and classification quotas are counted per configured owner in
 PostgreSQL; optional environment overrides are documented in the TDD.
 

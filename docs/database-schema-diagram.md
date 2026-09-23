@@ -4,7 +4,9 @@ This document is a compact visual reference for the PostgreSQL schema managed by
 the application.
 
 The PostgreSQL database is managed by the application. A new database starts at
-the current application schema, recorded in `schema_migrations`.
+the current application schema, recorded in `schema_migrations`. `data_sources`
+is a retained historical table: source administration and startup seeding have
+been removed, while existing records are preserved.
 
 This diagram describes the current schema only. Proposed review status,
 persistent identifiers, licensing, quality, and lifecycle work is tracked in
@@ -60,6 +62,7 @@ erDiagram
         jsonb metadata
         string classification_status
         jsonb classification
+        jsonb classification_progress
         string error
         timestamptz created_at
         timestamptz updated_at
@@ -70,6 +73,8 @@ erDiagram
         string source_url
         string kind
         uuid repository_candidate_id FK
+        int classification_root_id FK
+        jsonb classification_progress
         string status
         int saved_count
         int discovered_count
@@ -106,6 +111,26 @@ erDiagram
         timestamptz first_seen_at
         timestamptz last_seen_at
         timestamptz created_at
+        timestamptz updated_at
+    }
+
+    classification_runs {
+        uuid id PK
+        uuid repository_candidate_id FK
+        int collection_job_id FK
+        string fingerprint
+        jsonb snapshot
+        timestamptz created_at
+    }
+
+    classification_votes {
+        uuid run_id PK,FK
+        string voter_id PK
+        string status
+        jsonb response
+        string error
+        int attempts
+        uuid attempt_token
         timestamptz updated_at
     }
 
@@ -146,6 +171,9 @@ erDiagram
         timestamptz observed_at
     }
 
+    repository_candidates ||--o{ classification_runs : "relevance votes"
+    collection_jobs ||--o{ classification_runs : "page votes"
+    classification_runs ||--o{ classification_votes : "delete cascade"
     collected_datasets ||--o{ collected_distributions : "delete cascade"
     collected_datasets ||--o{ dataset_discovery_observations : "delete cascade"
     search_sessions ||--o{ repository_candidates : "delete cascade"

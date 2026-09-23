@@ -1,3 +1,4 @@
+import ClassificationProgress from './ClassificationProgress.jsx';
 import DatasetAccessDetails from './DatasetAccessDetails.jsx';
 
 function getHostname(url) {
@@ -41,6 +42,14 @@ export function getTotalVoteCount(classification) {
     const voters = Array.isArray(ensemble?.voters) ? ensemble.voters.length : 0;
     const failures = Array.isArray(ensemble?.failures) ? ensemble.failures.length : 0;
     return voters + failures || null;
+}
+
+export function getVoteAgreement(classification) {
+    const accepted = getAcceptedVoteCount(classification);
+    const total = getTotalVoteCount(classification);
+    if (!Number.isInteger(accepted) || !Number.isInteger(total) ||
+        total <= 0 || accepted < 0 || accepted > total) return null;
+    return `${accepted}/${total}`;
 }
 
 function formatRepositoryRelevanceLabel(label) {
@@ -111,7 +120,7 @@ function automaticCollectionStatus(automaticCollection) {
     return statuses[automaticCollection?.state] ?? null;
 }
 
-export default function RepositoryAcceptedCard({ candidate }) {
+export default function RepositoryAcceptedCard({ candidate, onRetryCollection }) {
     const { item } = candidate;
     const classification = item.classification;
     const ensemble = getEnsembleSummary(classification);
@@ -172,6 +181,13 @@ export default function RepositoryAcceptedCard({ candidate }) {
                     role="status"
                 >
                     <strong>{collectionStatus.title}</strong>
+                    <ClassificationProgress progress={item.automatic_collection?.job?.classification_progress} />
+                    {item.automatic_collection?.state === 'error' && item.automatic_collection.job && onRetryCollection && (
+                        <button type="button" disabled={item.automatic_collection.retrying} onClick={onRetryCollection}>
+                            {item.automatic_collection.retrying ? 'Requesting retry…' : 'Retry collection'}
+                        </button>
+                    )}
+                    {item.automatic_collection?.trackingError && <span>{item.automatic_collection.trackingError}</span>}
                     {collectionStatus.detail ? <span>{collectionStatus.detail}</span> : null}
                 </div>
             ) : null}
@@ -222,7 +238,7 @@ export default function RepositoryAcceptedCard({ candidate }) {
                         </ul>
                     ) : null}
                     {Number(ensemble.failed_votes) > 0 ? (
-                        <small>{ensemble.failed_votes} vote IA indisponible.</small>
+                        <small>{ensemble.failed_votes} model {ensemble.failed_votes === 1 ? 'vote unavailable' : 'votes unavailable'}.</small>
                     ) : null}
                 </details>
             ) : null}

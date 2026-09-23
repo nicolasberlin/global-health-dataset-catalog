@@ -78,6 +78,16 @@ class HTTPJSONLLMClient:
         self._request = request
 
     def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
+        return self.classify_request(self.prepare_request(payload))
+
+    def prepare_request(self, payload: dict[str, object]) -> dict[str, object]:
+        """Capture the complete provider body, excluding authentication secrets."""
+        return self._request_body(payload)
+
+    def request_configuration(self) -> dict[str, object]:
+        return {"endpoint": self._provider.endpoint_url, "body": self.prepare_request({})}
+
+    def classify_request(self, request_body: dict[str, object]) -> dict[str, object]:
         """Perform one synchronous provider request and require JSON output.
 
         Missing configuration, HTTP and timeout failures, malformed provider
@@ -98,7 +108,7 @@ class HTTPJSONLLMClient:
         }
         request = Request(
             self._provider.endpoint_url,
-            data=json.dumps(self._request_body(payload)).encode("utf-8"),
+            data=json.dumps(request_body).encode("utf-8"),
             headers=headers,
             method="POST",
         )

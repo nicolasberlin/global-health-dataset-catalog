@@ -4,7 +4,7 @@ import { isAbortError, requestJson } from './api/client.js';
 import { useApiSession } from './auth/useApiSession.js';
 import { useDatasetCatalog } from './catalog/useDatasetCatalog.js';
 import CollectedDatasetsSection from './components/CollectedDatasetsSection.jsx';
-import { getAcceptedVoteCount, getTotalVoteCount } from './components/RepositoryAcceptedCard.jsx';
+import { getVoteAgreement } from './components/RepositoryAcceptedCard.jsx';
 import RepositorySearchSection from './components/RepositorySearchSection.jsx';
 
 import { useClassifications } from './jobs/useClassifications.js';
@@ -19,7 +19,7 @@ export default function App() {
     const catalog = useDatasetCatalog();
     const { loadCollectedDatasets } = catalog;
     const { session } = useApiSession(LOCAL_ACCESS);
-    const { registerJob, resolveCollection } = useCollectionJobs(session, loadCollectedDatasets);
+    const { registerJob, resolveCollection, retryJob } = useCollectionJobs(session, loadCollectedDatasets);
     const { follow } = useClassifications(session, (item, requestSession, trackingError, requesting) => {
         const registered = registerCandidateCollection(item, requestSession);
         if (repositorySearchIdRef.current !== item.search_id) return;
@@ -241,11 +241,7 @@ export default function App() {
                     return true;
                 }
 
-                return (
-                    getTotalVoteCount(candidate.item.classification) === 3 &&
-                    getAcceptedVoteCount(candidate.item.classification) ===
-                    Number(agreementFilter)
-                );
+                return getVoteAgreement(candidate.item.classification) === agreementFilter;
             }).map((candidate) => ({
                 ...candidate,
                 item: {
@@ -287,6 +283,7 @@ export default function App() {
             <div hidden={activeView !== 'search'}>
             <RepositorySearchSection
                 analyzeCandidate={analyzeCandidate}
+                retryCollection={candidate => retryJob(candidate.item.automatic_collection.job.id, session)}
                 restoreAnalysis={() => restoreAnalysis(true)}
                 acceptedRepositoryCandidates={acceptedRepositoryCandidates}
                 agreementFilter={agreementFilter}

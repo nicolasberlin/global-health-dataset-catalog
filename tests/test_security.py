@@ -96,7 +96,7 @@ def test_costly_and_mutating_routes_declare_bearer_authentication():
 
     openapi = app.openapi()
     protected_operations = (
-        ("/sources", "post"),
+        ("/collector/collection-jobs/{job_id}/retry", "post"),
         ("/collector/search-datasets", "post"),
         ("/collector/repository-candidates/{candidate_id}/classify", "post"),
         ("/collector/collection-jobs/{job_id}", "get"),
@@ -131,3 +131,13 @@ async def test_api_quota_returns_retry_after_when_limit_is_exhausted(monkeypatch
 
     assert error.value.status_code == 429
     assert error.value.headers == {"Retry-After": "17"}
+
+
+def test_source_administration_routes_are_removed():
+    from app.main import app
+    from starlette.routing import Match
+
+    assert not any(path.startswith("/sources") for path in app.openapi()["paths"])
+    for method, path in [("GET", "/sources"), ("POST", "/sources"), ("GET", "/sources/1/page")]:
+        scope = {"type": "http", "method": method, "path": path}
+        assert all(route.matches(scope)[0] == Match.NONE for route in app.routes)

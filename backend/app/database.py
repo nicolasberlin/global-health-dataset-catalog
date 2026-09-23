@@ -38,36 +38,18 @@ from .db.repository_candidates import (
     mark_interrupted_candidate_classifications_error,
     save_repository_candidates,
 )
-from .db.schema import DATA_SOURCE_KEY_PATTERN_TEXT, init_database
+from .db.schema import init_database
 from .db.search_sessions import (
     complete_search_session,
     create_search_session,
     mark_interrupted_search_sessions_error,
 )
 from .db.serialization import StoredJSONError, StoredTimestampError
-from .db.sources import (
-    DuplicateDataSourceKeyError,
-    InvalidDataSourceKeyError,
-    InvalidDataSourceURLError,
-    ReservedDataSourceKeyError,
-    create_data_source,
-    get_data_source,
-    list_data_sources,
-    normalize_data_source_key,
-    normalize_data_source_page_url,
-    upsert_collector_data_source,
-    upsert_data_source,
-)
 
 __all__ = (
     "APIQuotaDecision",
-    "DATA_SOURCE_KEY_PATTERN_TEXT",
     "CollectionJobReservation",
     "CandidateClassificationCompletion",
-    "DuplicateDataSourceKeyError",
-    "InvalidDataSourceKeyError",
-    "InvalidDataSourceURLError",
-    "ReservedDataSourceKeyError",
     "StoredJSONError",
     "StoredTimestampError",
     "close_database_pool",
@@ -79,17 +61,14 @@ __all__ = (
     "consume_api_quota",
     "create_collection_job",
     "create_search_session",
-    "create_data_source",
     "fail_candidate_classification",
     "get_collection_job",
     "get_candidate_collection",
     "get_collection_job_for_owner",
     "get_repository_candidate",
-    "get_data_source",
     "init_database",
     "get_collected_datasets",
     "list_collected_datasets",
-    "list_data_sources",
     "list_dataset_discovery_observations",
     "mark_interrupted_collection_jobs_error",
     "mark_interrupted_search_sessions_error",
@@ -97,8 +76,6 @@ __all__ = (
     "mark_collection_job_done",
     "mark_collection_job_error",
     "mark_collection_job_running",
-    "normalize_data_source_key",
-    "normalize_data_source_page_url",
     "normalize_dataset_search_query",
     "open_database_pool",
     "reserve_repository_candidate_collection_job",
@@ -108,6 +85,4 @@ __all__ = (
     "enqueue_candidate_classification",
     "claim_candidate_classification",
     "latest_repository_analysis",
-    "upsert_collector_data_source",
-    "upsert_data_source",
 )

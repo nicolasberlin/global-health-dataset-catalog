@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import RepositoryAcceptedCard from './RepositoryAcceptedCard.jsx';
 
@@ -73,4 +73,15 @@ describe('automatic repository collection status', () => {
             screen.getByText('Automatic collection scheduling failed.'),
         ).toBeInTheDocument();
     });
+});
+
+
+it('shows partial votes and offers an explicit collection retry', () => {
+    const candidate = acceptedCandidate('error');
+    candidate.item.automatic_collection.job.classification_progress = { total: 3, succeeded: 2, failed: 1 };
+    const retry = vi.fn();
+    render(<RepositoryAcceptedCard candidate={candidate} onRetryCollection={retry} />);
+    expect(screen.getByText('2/3 model responses saved.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry collection' }));
+    expect(retry).toHaveBeenCalledTimes(1);
 });

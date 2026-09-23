@@ -58,7 +58,11 @@ async def test_version_four_upgrade_preserves_existing_validation(database):
                 DROP COLUMN validation_status, DROP COLUMN validation_reason,
                 ALTER COLUMN validation_size_bytes TYPE INTEGER;
             ALTER TABLE collection_jobs DROP COLUMN validation_failures;
-            DELETE FROM schema_migrations WHERE version = 5;
+            DROP TABLE classification_votes, classification_runs;
+            ALTER TABLE repository_candidates DROP COLUMN classification_progress;
+            ALTER TABLE collection_jobs DROP COLUMN classification_progress,
+                DROP COLUMN classification_root_id;
+            DELETE FROM schema_migrations WHERE version >= 5;
         """)
     await database.init_database()
     await database.init_database()
@@ -83,6 +87,7 @@ async def test_search_commits_classification_queue_without_browser_submission(da
     assert stored[0]["classification_status"] == "queued"
     await database.close_database_pool()
     await database.open_database_pool()
+    await database.init_database()
     claimed = await database.claim_candidate_classification()
     assert claimed["id"] == stored[0]["id"]
     assert claimed["owner_id"] == "alice"

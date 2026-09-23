@@ -12,6 +12,7 @@ QueryParameters = Union[Sequence[object], Mapping[str, object], None]
 Row = dict[str, Any]
 
 _database_pool: AsyncConnectionPool[DictRow] | None = None
+_initialized_pool: AsyncConnectionPool[DictRow] | None = None
 
 
 def _database_url_from_env() -> str:
@@ -39,6 +40,7 @@ async def open_database_pool() -> None:
     )
     await pool.open()
     _database_pool = pool
+    _set_initialized_pool(None)
 
 
 async def close_database_pool() -> None:
@@ -47,8 +49,19 @@ async def close_database_pool() -> None:
     if _database_pool is None:
         return
 
+    _set_initialized_pool(None)
     await _database_pool.close()
     _database_pool = None
+
+
+def _set_initialized_pool(pool: AsyncConnectionPool[DictRow] | None) -> None:
+    global _initialized_pool
+    _initialized_pool = pool
+
+
+def _require_database_initialized() -> None:
+    if _initialized_pool is not _require_database_pool():
+        raise RuntimeError("Database schema is not initialized. Run init_database() first.")
 
 
 def _require_database_pool() -> AsyncConnectionPool[DictRow]:

@@ -16,8 +16,8 @@ from app.database import (
     mark_interrupted_search_sessions_error,
     open_database_pool,
 )
+from app.db.classification_votes import mark_interrupted_votes_error
 from app.routes.collector import router as collector_router
-from app.routes.sources import router as sources_router
 from app.security import validate_api_security_configuration
 
 
@@ -27,6 +27,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await open_database_pool()
     try:
         await init_database()
+        await mark_interrupted_votes_error()
         await mark_interrupted_search_sessions_error()
         await mark_interrupted_candidate_classifications_error()
         await mark_interrupted_collection_jobs_error()
@@ -49,7 +50,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(sources_router)
 app.include_router(collector_router)
 
 

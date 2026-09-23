@@ -253,7 +253,6 @@ Start with:
 backend/app/main.py
 backend/app/security.py
 backend/app/routes/collector.py
-backend/app/routes/sources.py
 backend/app/db/
 ```
 

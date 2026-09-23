@@ -150,6 +150,12 @@ class CollectorRepositoryClassification(BaseModel):
         return self
 
 
+class CollectorVoteProgress(BaseModel):
+    total: int = Field(default=0, ge=0, le=10)
+    succeeded: int = Field(default=0, ge=0, le=10)
+    failed: int = Field(default=0, ge=0, le=10)
+
+
 class CollectorCollectionJob(BaseModel):
     """Public job view; internal rows must pass through the response presenter."""
 
@@ -160,6 +166,7 @@ class CollectorCollectionJob(BaseModel):
     kind: Literal["source", "repository_candidate"] = "source"
     status: Literal["pending", "running", "done", "error"]
     saved_count: int
+    classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
     dataset_ids: list[int] = Field(default_factory=list)
     discovered_count: int = 0
     analyzed_count: int = 0
@@ -204,6 +211,7 @@ class CollectorRepositorySearchItem(BaseModel):
         "pending", "queued", "classifying", "accepted", "rejected", "error"
     ] = "pending"
     classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
     classification_error: str = Field(default="", max_length=2_000)
     classification_error_code: Literal["", "classification_failed"] = ""
     automatic_collection: Optional[CollectorAutomaticCollection] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.

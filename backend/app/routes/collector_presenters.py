@@ -30,6 +30,7 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
         kind=job.get("kind", "source"),
         status=status,
         saved_count=saved_count,
+        classification_progress=job.get("classification_progress", {}),
         dataset_ids=job.get("dataset_ids", []),
         discovered_count=job.get("discovered_count", 0),
         analyzed_count=job.get("analyzed_count", 0),

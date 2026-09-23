@@ -16,13 +16,11 @@ from app.db.api_quotas import consume_api_quota
 APIQuotaOperation = Literal[
     "repository_search",
     "repository_classification",
-    "source_creation",
 ]
 
 _QUOTA_ENVIRONMENT_VARIABLES: dict[APIQuotaOperation, tuple[str, int]] = {
     "repository_search": ("API_SEARCH_REQUESTS_PER_MINUTE", 10),
     "repository_classification": ("API_CLASSIFICATION_REQUESTS_PER_MINUTE", 20),
-    "source_creation": ("API_SOURCE_CREATION_REQUESTS_PER_MINUTE", 10),
 }
 _bearer_scheme = HTTPBearer(auto_error=False)
 

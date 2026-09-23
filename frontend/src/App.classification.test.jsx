@@ -183,3 +183,36 @@ it('leaves the interface usable when restoring interrupts a search and no analys
     await act(async () => late.resolve(response(analysis([candidate('obsolete')]))));
     expect(screen.queryByText('Dataset obsolete')).not.toBeInTheDocument();
 });
+
+it('builds agreement filters from each result and keeps three- and four-model decisions distinct', async () => {
+    const voted = (id, positives, total) => ({
+        ...accepted(candidate(id)),
+        classification: { accepted: true, ensemble: {
+            accepted_votes: positives, successful_votes: total, failed_votes: 0,
+        } },
+    });
+    api(url => {
+        if (url.endsWith('/repository-analyses/latest')) return response(analysis([
+            voted('old', 3, 3), voted('partial', 3, 4), voted('unanimous', 4, 4),
+            accepted(candidate('unknown')),
+        ]));
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<App />);
+    await advance();
+    expect(screen.queryByRole('button', { name: '2/3' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '3/3' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '3/4' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '4/4' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '3/4' }));
+    expect(screen.getByRole('heading', { name: 'Dataset partial' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Dataset old' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Dataset unanimous' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '3/3' }));
+    expect(screen.getByRole('heading', { name: 'Dataset old' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Dataset partial' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'All', exact: true }));
+    expect(screen.getByRole('heading', { name: 'Dataset unknown' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Dataset unanimous' })).toBeVisible();
+    expect(calls('/classify')).toHaveLength(0);
+});

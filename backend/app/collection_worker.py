@@ -6,13 +6,16 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 from app.database import (
     claim_pending_collection_job,
     complete_collection_job,
     mark_collection_job_error,
 )
+from app.vote_store import PostgresVoteStore
 from app.workers import persisted_workers
+from collector.classification.factory import build_default_page_classifier
 from collector.main import collect_repository_candidate_with_report, collect_source_with_report
 
 logger = logging.getLogger(__name__)
@@ -30,7 +33,9 @@ async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecut
         )
         result = await asyncio.get_running_loop().run_in_executor(
             executor,
-            collect,
+            partial(collect, classifier=build_default_page_classifier(vote_store=PostgresVoteStore(
+                asyncio.get_running_loop(), job_id=job_id,
+            ))),
             str(job["source_url"]),
         )
         await complete_collection_job(job_id, result)

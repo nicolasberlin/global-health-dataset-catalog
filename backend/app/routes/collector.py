@@ -26,6 +26,7 @@ from app.database import (
     normalize_dataset_search_query,
     search_collected_datasets,
 )
+from app.db.collection_jobs import retry_collection_job_for_owner
 from app.routes.collector_presenters import (
     public_collection_job,
     public_dataset_signals,
@@ -82,6 +83,25 @@ async def read_collection_job(
     if job is None:
         raise HTTPException(status_code=404, detail="Collection job not found")
 
+    return CollectorCollectionJobResponse(job=public_collection_job(job))
+
+
+@router.post("/collection-jobs/{job_id}/retry", status_code=202)
+async def retry_collection_job(
+    job_id: int,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+) -> CollectorCollectionJobResponse:
+    job = await get_collection_job_for_owner(job_id, principal.owner_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Collection job not found")
+    if job["status"] == "error":
+        await enforce_api_quota(principal, "repository_classification")
+    try:
+        job = await retry_collection_job_for_owner(job_id, principal.owner_id)
+    except ValueError as exception:
+        raise HTTPException(status_code=409, detail=str(exception)) from exception
+    if job is None:
+        raise HTTPException(status_code=404, detail="Collection job not found")
     return CollectorCollectionJobResponse(job=public_collection_job(job))
 
 
@@ -398,6 +418,7 @@ def _collector_repository_candidate(
         keywords=candidate["keywords"],
         metadata=candidate["metadata"],
         classification_status=candidate["classification_status"],
+        classification_progress=candidate.get("classification_progress", {}),
         classification=public_repository_classification(candidate["classification"]),
         classification_error=(
             "Candidate classification failed."

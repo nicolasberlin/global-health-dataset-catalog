@@ -83,7 +83,7 @@ There is no obsolete manual pasted-HTML collector flow in the current UI.
 
 ## 4. HTTP API Inventory
 
-`POST /sources` and all listed `/collector` routes except
+All listed `/collector` routes except
 `GET /collector/collected-datasets` require a configured Bearer token. Protected
 searches are owned by the token's stable owner ID. Missing or invalid
 credentials return HTTP 401; exhausted per-minute quotas return HTTP 429 with a
@@ -92,9 +92,6 @@ credentials return HTTP 401; exhausted per-minute quotas return HTTP 429 with a
 | Method | Route | Current behavior |
 | --- | --- | --- |
 | GET | `/health` | Returns `{"status":"ok"}`; it does not test dependencies |
-| GET | `/sources` | Lists configured source records |
-| POST | `/sources` | Creates a source after Pydantic and DB validation |
-| GET | `/sources/{source_id}/page` | Redirects to the configured source URL |
 | POST | `/collector/repository-candidates/{candidate_id}/classify` | Persists an owned classification request; returns 202 while queued/running, 200 when terminal |
 | GET | `/collector/repository-candidates/{candidate_id}` | Reads an owned candidate, decision and collection follow-up |
 | GET | `/collector/repository-analyses/latest` | Restores the owner’s last search containing repository candidates |
@@ -366,11 +363,14 @@ path. The API exposes persisted dataset URLs as Pydantic `HttpUrl` values.
 
 ## 10. Persistence and Schema
 
-The application uses PostgreSQL through an async psycopg pool. The current
-schema contains:
+The application uses PostgreSQL through an async psycopg pool. Startup applies
+migrations and validates the schema before marking that pool initialized. Business
+operations check this state in memory instead of querying the schema version.
+Closing/reopening a pool or a failed initialization invalidates the state; schema
+changes require startup validation again. The current schema contains:
 
 - `schema_migrations`;
-- `data_sources`;
+- `data_sources` (legacy records only, without a runtime administration API);
 - `search_sessions`;
 - `repository_candidates`;
 - `collection_jobs`;
@@ -451,7 +451,6 @@ and the decision not to migrate the historical SQLite data are recorded in
 | `API_ACCESS_TOKENS` | Yes for backend | JSON object mapping stable owner IDs to unique Bearer tokens of 32-512 characters |
 | `API_SEARCH_REQUESTS_PER_MINUTE` | No | Search quota per owner; defaults to `10` |
 | `API_CLASSIFICATION_REQUESTS_PER_MINUTE` | No | LLM classification quota per owner; defaults to `20` |
-| `API_SOURCE_CREATION_REQUESTS_PER_MINUTE` | No | Source-creation quota per owner; defaults to `10` |
 | `CLASSIFICATION_MAX_CONCURRENCY` | No | Concurrent classification runs per backend process; defaults to `2` |
 | `COLLECTION_MAX_CONCURRENCY` | No | Concurrent collection runs per backend process; defaults to `2` |
 | `VITE_API_BASE_URL` | No | Frontend API base; defaults to `http://127.0.0.1:8001` |
@@ -537,23 +536,11 @@ Dataverse is intentionally absent from this matrix because it is not registered
 at runtime. Its proposed integration is described in
 [Multi-Repository Architecture](props/multi-repository-architecture.md).
 
-## 14. Seed and Upsert Rules
+## 14. Legacy source records and dataset upserts
 
-### Source seeds
-
-The schema defines two WHO source seeds:
-
-- `who_gho_indicators`;
-- `who_gho_life_expectancy`.
-
-Startup inserts missing seeds with `ON CONFLICT(source_key) DO NOTHING`.
-Therefore startup never overwrites an existing source row, including local
-changes to a seed. Seed keys are reserved and cannot be created through the
-public `POST /sources` path.
-
-`upsert_collector_data_source()` is a separate internal operation. It may update
-name, description, theme, and URL for an existing key, including a seed key. It
-must not be confused with non-destructive startup seeding.
+Source administration and its storage helpers have been removed. The historical
+`data_sources` table remains to preserve existing records and supported migration
+history. Startup neither seeds nor updates it. No `/sources` route is registered.
 
 ### Collected dataset upsert
 

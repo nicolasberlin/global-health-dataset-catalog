@@ -12,6 +12,7 @@ from app.database import (
     complete_candidate_classification,
     fail_candidate_classification,
 )
+from app.vote_store import PostgresVoteStore
 from app.workers import persisted_workers
 from collector.classification.factory import build_default_repository_result_classifier
 from collector.repository_search import RepositorySearchResult
@@ -23,13 +24,16 @@ logger = logging.getLogger(__name__)
 def _classify(candidate):
     return classify_one_repository_result(
         _repository_search_result_from_candidate(candidate),
-        build_default_repository_result_classifier(),
+        build_default_repository_result_classifier(vote_store=candidate.get("_vote_store")),
     ).classification
 
 
 async def _run_classification(candidate: dict[str, object], executor: ThreadPoolExecutor) -> None:
     candidate_id, owner_id = candidate["id"], candidate["owner_id"]
     try:
+        candidate = {**candidate, "_vote_store": PostgresVoteStore(
+            asyncio.get_running_loop(), candidate_id=candidate_id,
+        )}
         decision = await asyncio.get_running_loop().run_in_executor(executor, _classify, candidate)
         if decision is None:
             raise RuntimeError("Repository classifier returned no decision.")
