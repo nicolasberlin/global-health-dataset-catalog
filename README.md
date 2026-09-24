@@ -153,18 +153,19 @@ with `--no-proxy-headers`; local access rejects remote clients and foreign brows
 origins. All local searches belong to `local-user`, with quotas still enforced.
 The frontend local mode applies only to the development server.
 
-Public deployments retain the default `API_AUTH_MODE=token` and require
+Token deployments retain the default `API_AUTH_MODE=token` and require
 `API_ACCESS_TOKENS` (a JSON mapping of owner IDs to private tokens).
 Never enable local mode behind a public reverse proxy.
 The token is stored only in that browser tab's `sessionStorage`; it is not a
 Vite build variable and must never be compiled into the frontend.
 
-The backend also implements an opt-in `API_AUTH_MODE=public` visitor-session
-foundation with per-visitor/IP quotas and global workload limits. It is not
-enabled in Compose or connected to the frontend yet; HTTPS, trusted proxy
-configuration, and general traffic limiting remain deployment prerequisites. See
+Set `API_AUTH_MODE=public` for automatic anonymous browser sessions, with
+per-visitor/IP quotas and global workload limits. Compose builds the frontend
+in the same mode. HTTPS is the default requirement; internal EPFL HTTP has an
+explicit temporary opt-in. Trusted proxy configuration and network access must
+be verified before deployment. See
 [Anonymous visitor sessions](docs/anonymous-visitor-sessions.md) for the API
-contract, configuration, and validation of the backend implementation.
+contract, configuration, and browser validation.
 
 The local Compose file publishes PostgreSQL only on `127.0.0.1`. The main
 `docker-compose.yml` is for internal EPFL HTTP deployment on port 1312 behind the external Traefik and

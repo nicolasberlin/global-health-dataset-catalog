@@ -5,13 +5,14 @@ services:
       args:
         VITE_API_BASE_URL: /ai-commons/api
         VITE_PUBLIC_BASE: /ai-commons/
+        VITE_API_AUTH_MODE: ${API_AUTH_MODE:-token}
     depends_on:
       - ai-commons-api
     networks:
       - traefik
     labels:
       - traefik.enable=true
-      - traefik.docker.network=root_mmore-prod
+      - traefik.docker.network=traefik
       - traefik.http.routers.ai-commons.entrypoints=web
       - traefik.http.routers.ai-commons.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons`)
       - traefik.http.routers.ai-commons.priority=10
@@ -31,7 +32,13 @@ services:
       RCP_APERTUS_MEDITRON_API_KEY: ${RCP_APERTUS_MEDITRON_API_KEY:?Set RCP_APERTUS_MEDITRON_API_KEY before starting the application}
       RCP_GEMMA_MEDITRON_MODEL: ${RCP_GEMMA_MEDITRON_MODEL:-EPFLiGHT/Gemma-3-27B-MeditronFO}
       RCP_APERTUS_MEDITRON_MODEL: ${RCP_APERTUS_MEDITRON_MODEL:-EPFLiGHT/Apertus-70B-MeditronFO}
-      API_ACCESS_TOKENS: ${API_ACCESS_TOKENS:?Set API_ACCESS_TOKENS before starting the application}
+      API_AUTH_MODE: ${API_AUTH_MODE:-token}
+      API_ACCESS_TOKENS: ${API_ACCESS_TOKENS:-}
+      API_PUBLIC_ORIGIN: ${API_PUBLIC_ORIGIN:-}
+      API_SESSION_SECRET: ${API_SESSION_SECRET:-}
+      API_ALLOW_INSECURE_HTTP_SESSIONS: ${API_ALLOW_INSECURE_HTTP_SESSIONS:-false}
+      # Trust only verified proxy peer addresses, never arbitrary client forwarding headers.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
       API_SEARCH_REQUESTS_PER_MINUTE: ${API_SEARCH_REQUESTS_PER_MINUTE:-10}
       API_CLASSIFICATION_REQUESTS_PER_MINUTE: ${API_CLASSIFICATION_REQUESTS_PER_MINUTE:-20}
       API_SOURCE_CREATION_REQUESTS_PER_MINUTE: ${API_SOURCE_CREATION_REQUESTS_PER_MINUTE:-10}
@@ -56,7 +63,7 @@ services:
       - database
     labels:
       - traefik.enable=true
-      - traefik.docker.network=root_mmore-prod
+      - traefik.docker.network=traefik
       - traefik.http.routers.ai-commons-api.entrypoints=web
       - traefik.http.routers.ai-commons-api.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons/api`)
       - traefik.http.routers.ai-commons-api.priority=100
@@ -90,4 +97,4 @@ networks:
     internal: true
   traefik:
     external: true
-    name: root_mmore-prod
+    name: traefik

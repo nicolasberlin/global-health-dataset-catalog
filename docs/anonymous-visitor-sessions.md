@@ -1,10 +1,11 @@
-# Anonymous visitor sessions — backend foundation
+# Anonymous visitor sessions
 
 The backend can recognize a browser without asking its visitor to supply an API
-token. The backend also limits public workload. The default remains
-`API_AUTH_MODE=token`; Compose and the frontend retain their existing behavior.
-Public rollout still requires frontend session initialization, HTTPS, trusted
-proxy configuration, and general traffic limits at the reverse proxy.
+token. The frontend initializes the session automatically in public mode, and
+the backend limits workload. The default remains `API_AUTH_MODE=token`.
+Internet rollout requires HTTPS, trusted proxy configuration, and general
+traffic limits at the reverse proxy. An explicit temporary HTTP exception is
+available for the internal EPFL deployment, as described below.
 
 ## Configuration
 
@@ -14,16 +15,51 @@ proxy configuration, and general traffic limits at the reverse proxy.
 | --- | --- |
 | `API_SESSION_SECRET` | Random server-side secret, 32–512 characters, no surrounding whitespace. Keep stable across restarts. |
 | `API_PUBLIC_ORIGIN` | The browser's HTTPS origin, including any non-default port, without a path or trailing slash. Example: `https://health.example`. |
+| `API_ALLOW_INSECURE_HTTP_SESSIONS` | Defaults to `false`. Set to `true` only for the temporary internal HTTP deployment. Other values than `true`/`false` are rejected (case-insensitive). |
 
 Startup rejects missing or invalid settings. `API_ACCESS_TOKENS` is not required
 in public mode. Never put the session secret in a `VITE_*` variable or a browser
 response. Changing it invalidates all existing visitor cookies. The public
 origin is configured explicitly rather than inferred from forwarded headers.
 
-Use one HTTPS origin for the frontend and API. The current internal EPFL HTTP
-deployment does not meet this prerequisite. TLS may terminate at the trusted
+Use one origin for the frontend and API. TLS may terminate at the trusted
 reverse proxy; the API does not need to terminate TLS itself. Local development
 can continue using the existing loopback-only `local` mode.
+
+### Temporary internal HTTP access
+
+For `http://gpu217.rcp.epfl.ch:1312/ai-commons/`, explicitly set:
+
+```dotenv
+PUBLIC_HOST=gpu217.rcp.epfl.ch
+API_AUTH_MODE=public
+API_ALLOW_INSECURE_HTTP_SESSIONS=true
+API_PUBLIC_ORIGIN=http://gpu217.rcp.epfl.ch:1312
+API_SESSION_SECRET=<random server-only secret of at least 32 characters>
+```
+
+Keep existing database and provider secrets. Compose passes `API_AUTH_MODE` to
+the frontend build as `VITE_API_AUTH_MODE`, with `/ai-commons/api` as the API base.
+Rebuild the frontend when changing modes. No session secret is a build argument.
+Outside Compose, set `VITE_API_AUTH_MODE=public` and a same-origin API base when
+building. Public mode rejects a cross-origin API URL before sending requests.
+
+When the configured origin is HTTP and the exception is enabled, the cookie is
+`global-health-session`, without `Secure` or the `__Host-` prefix. It retains
+`HttpOnly`, `SameSite=Lax`, `Path=/`, host-only scope, signing and expiration.
+Only the configured cookie is accepted. HTTP and HTTPS use different signing
+salts, so an HTTP credential cannot be renamed into a valid HTTPS cookie.
+Enabling the exception with an HTTPS origin does not weaken the HTTPS cookie.
+
+HTTP does not encrypt session credentials; `HttpOnly` does not prevent network
+interception. This option does not enforce EPFL-only access: that restriction
+must be provided by the hosting network. It is not the Internet deployment mode.
+Cookies are not isolated by port; other applications on the same host remain
+part of the trust boundary. Do not treat the distinct name as a security boundary.
+
+To migrate to HTTPS, disable the exception and update `API_PUBLIC_ORIGIN` after
+the infrastructure provides HTTPS. Visitors receive new sessions; transferring
+ownership of searches from HTTP sessions is not implemented.
 
 ## Browser contract
 
@@ -35,8 +71,10 @@ can continue using the existing loopback-only `local` mode.
 3. Send the cookie with subsequent collector requests. Search, progress reads,
    and retries resolve it to the existing `APIPrincipal.owner_id`.
 4. A protected request with a missing or expired cookie returns `401` and does
-   not create another session or start work. The frontend must handle recovery;
-   it must not automatically replay costly POST requests.
+   not create another session or start work. The frontend stops tracking that
+   session and offers an explicit Continue action. Recovery creates/reuses a
+   cookie but does not replay the failed POST. Old results are cleared and the
+   user's typed query is retained.
 
 The cookie is named `__Host-global-health-session`, with `Secure`, `HttpOnly`,
 `SameSite=Lax`, `Path=/`, and no `Domain` attribute. Its seven-day expiration is
@@ -62,10 +100,18 @@ their corresponding deployment modes. `/session` returns `404` outside public
 mode.
 
 Cookie creation and state-changing session requests require an exact allowed
-`Origin` header. Missing, `null`, HTTP, and foreign origins are rejected with
+`Origin` header. Missing, `null`, and foreign origins are rejected with
 `403`, including requests carrying an otherwise valid cookie. CORS is not used
 as authorization. Successful session issuance and protected responses carry
 `Cache-Control: no-store`.
+
+The public frontend waits for bootstrap before protected operations, while the
+catalog remains available. It ignores stored Bearer tokens, handles the empty
+`204`, and sends same-origin cookies. Concurrent initializations in a mounted
+application (including React StrictMode) share an in-flight bootstrap. A `403`
+does not trigger a session refresh. `429` responses expose `Retry-After`; the
+client defers repeat requests to that operation and polling respects that delay.
+Search/classification/collection POST requests are never automatically replayed.
 
 No database migration or user table is needed: the signed identity becomes a
 namespaced `visitor:<random-id>` owner in the current schema. IP and global
@@ -171,8 +217,14 @@ npm run test:browser
 The harness requires OpenSSL and port 9443, generates a temporary self-signed
 certificate and binds only to loopback. Playwright accepts that test certificate;
 browser origin and cookie security checks remain enabled. CI runs this suite
-as a separate validation job.
+as a separate validation job. The suite also serves the real public frontend
+under `/ai-commons/` over HTTP and mounts the production session and collector
+routers under `/ai-commons/api`. Persistence is replaced with controlled fixtures
+for local dataset search; no workers or external providers run. It checks search
+without a token, cookie reuse after reload and foreign-origin rejection. HTTP
+flags are asserted explicitly because browsers treat loopback specially.
 
-Frontend integration and deployment configuration are
-subsequent commits. The current frontend still requires its existing access
-configuration until that integration is completed.
+Unit tests additionally cover failed bootstrap, session expiration, no automatic
+POST replay and quota cooldowns. The local harness does not certify the remote
+Traefik routing, network isolation or forwarded client address: follow the
+checks in [Deployment on EPFL](DEPLOYMENT.md) before enabling internal access.
