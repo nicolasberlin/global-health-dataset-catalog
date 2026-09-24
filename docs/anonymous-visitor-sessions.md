@@ -151,6 +151,28 @@ IP/global budgets, whole-batch rollback, queue capacity across concurrent reques
 and retries that charge only once. External providers are stubbed; tests incur
 no LLM charges.
 
+Browser regression tests exercise the real session route and authentication
+dependency over HTTPS in Chromium, Firefox and WebKit, without supplying `Origin`
+or cookies manually. Same-origin `fetch()` POST must create an HttpOnly cookie
+and authenticate subsequent GET/POST requests. A form POST from a foreign origin
+must receive an actual backend `403`, not merely a CORS error.
+Only quota persistence is simulated in this harness; PostgreSQL tests
+above cover quotas and ownership. This is a session-contract test, not yet a
+test of the frontend search interface.
+
+After installing the Python dependencies, run from `frontend/`:
+
+```sh
+npm ci
+npx playwright install --with-deps chromium firefox webkit
+npm run test:browser
+```
+
+The harness requires OpenSSL and port 9443, generates a temporary self-signed
+certificate and binds only to loopback. Playwright accepts that test certificate;
+browser origin and cookie security checks remain enabled. CI runs this suite
+as a separate validation job.
+
 Frontend integration and deployment configuration are
 subsequent commits. The current frontend still requires its existing access
 configuration until that integration is completed.
