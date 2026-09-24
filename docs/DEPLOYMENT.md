@@ -45,6 +45,20 @@ cannot be inferred from the repository or certified by local browser tests.
 Uvicorn handles the trusted forwarding headers; application code never trusts
 an arbitrary `X-Forwarded-For` header directly.
 
+The network inspection supplied for gpu217 on 2026-09-24 shows
+`root-traefik-1` at `172.18.0.5`, with the frontend at `172.18.0.4` and the API
+at `172.18.0.3`, all on `traefik`. For that deployment, add to the server's `.env`:
+
+```dotenv
+FORWARDED_ALLOW_IPS=172.18.0.5
+```
+
+Use the single address, not the `/16` network: other containers also share this
+network. This records the observed topology, not a permanent IP assignment or
+an end-to-end forwarding test. Verify that Uvicorn receives the expected client
+address after deployment. The repository keeps its conservative loopback default;
+the server environment must supply the deployment-specific value.
+
 Set the deployment environment (in addition to the secrets in the README):
 
 ```bash
