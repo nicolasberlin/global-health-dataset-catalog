@@ -9,6 +9,7 @@ from app.database import (
     CollectionJobReservation,
     normalize_dataset_search_query,
 )
+from app.quota_policy import QuotaExceeded
 from app.routes.collector import (
     _collector_repository_candidate,
     classify_repository_result,
@@ -181,7 +182,7 @@ def _use_candidate_persistence(monkeypatch, *, candidate=None) -> None:
         assert owner_id == PRINCIPAL.owner_id
         return current
 
-    async def fake_enqueue(candidate_id, owner_id, *, retry=False):
+    async def fake_enqueue(candidate_id, owner_id, *, retry=False, admission=None):
         assert candidate_id == CANDIDATE_ID
         assert owner_id == PRINCIPAL.owner_id
         if current["classification_status"] == "pending" or (
@@ -205,7 +206,7 @@ def _use_search_persistence(monkeypatch) -> None:
         assert owner_id == PRINCIPAL.owner_id
         return {"id": search_id, **kwargs}
 
-    async def fake_save(search_id, owner_id, candidates, *, status):
+    async def fake_save(search_id, owner_id, candidates, *, status, admission=None):
         assert search_id == SEARCH_ID
         assert owner_id == PRINCIPAL.owner_id
         return [
@@ -567,15 +568,12 @@ async def test_collector_search_quota_blocks_work_before_database_or_provider(
 
 
 @pytest.mark.parametrize("exhausted", [False, True])
-async def test_search_charges_classification_before_persisting_candidates(monkeypatch, exhausted):
-    _use_search_persistence(monkeypatch)
-    operations = []
-    completed = []
+async def test_search_passes_batch_admission_and_maps_quota_rejection(monkeypatch, exhausted):
+    from app.routes import collector as routes
 
-    async def quota(principal, operation):
-        operations.append(operation)
-        if exhausted and operation == "repository_classification":
-            raise HTTPException(status_code=429, detail="quota exceeded")
+    _use_search_persistence(monkeypatch)
+    original_save = routes.complete_search_session_with_repository_candidates
+    completed = []
 
     async def empty_database(query):
         return []
@@ -583,27 +581,30 @@ async def test_search_charges_classification_before_persisting_candidates(monkey
     async def finish(search_id, owner_id, **kwargs):
         completed.append(kwargs)
 
-    async def no_save(*args, **kwargs):
-        pytest.fail("Quota rejection must not create pending candidates")
+    async def reserve(search_id, owner_id, candidates, *, status, admission):
+        assert len(candidates) == 1  # Duplicate provider results consume one pipeline slot.
+        assert admission.quotas[0].owner_id == PRINCIPAL.owner_id
+        assert admission.quotas[0].operation == "repository_classification"
+        if exhausted:
+            raise QuotaExceeded(17)
+        return await original_save(search_id, owner_id, candidates, status=status)
 
-    monkeypatch.setattr("app.routes.collector.enforce_api_quota", quota)
-    monkeypatch.setattr("app.routes.collector.search_collected_datasets", empty_database)
-    monkeypatch.setattr("app.routes.collector.complete_search_session", finish)
+    monkeypatch.setattr(routes, "complete_search_session_with_repository_candidates", reserve)
+    monkeypatch.setattr(routes, "search_collected_datasets", empty_database)
+    monkeypatch.setattr(routes, "complete_search_session", finish)
     item = RepositorySearchResult(title="Health data", url="https://example.org/data",
                                   source="DataCite")
-    monkeypatch.setattr("app.routes.collector.search_repository_metadata",
+    monkeypatch.setattr(routes, "search_repository_metadata",
                         lambda query: RepositorySearchResponse(results=[item, item]))
     if exhausted:
-        monkeypatch.setattr("app.routes.collector.complete_search_session_with_repository_candidates",
-                            no_save)
         with pytest.raises(HTTPException) as error:
             await search_datasets(CollectorRepositorySearchRequest(query="health"), PRINCIPAL)
         assert error.value.status_code == 429
+        assert error.value.headers == {"Retry-After": "17"}
         assert completed[0]["status"] == "error"
     else:
         result = await search_datasets(CollectorRepositorySearchRequest(query="health"), PRINCIPAL)
         assert all(item.classification_status == "queued" for item in result.items)
-    assert operations == ["repository_search", "repository_classification"]
 
 
 async def test_classification_request_returns_202_without_running_llm(monkeypatch):
@@ -636,20 +637,18 @@ async def test_repeated_classification_does_not_enqueue_or_charge_again(monkeypa
         assert response.status_code == (202 if status in {"queued", "classifying"} else 200)
 
 
-async def test_classification_quota_blocks_enqueue(monkeypatch):
+async def test_classification_maps_atomic_quota_rejection(monkeypatch):
     _use_candidate_persistence(monkeypatch)
 
-    async def quota(*args):
-        raise HTTPException(status_code=429, detail="Quota reached")
+    async def quota(*args, admission, **kwargs):
+        assert admission.quotas[0].owner_id == PRINCIPAL.owner_id
+        raise QuotaExceeded(11)
 
-    async def forbidden(*args, **kwargs):
-        raise AssertionError("Quota must prevent queueing")
-
-    monkeypatch.setattr("app.routes.collector.enforce_api_quota", quota)
-    monkeypatch.setattr("app.routes.collector.enqueue_candidate_classification", forbidden)
+    monkeypatch.setattr("app.routes.collector.enqueue_candidate_classification", quota)
     with pytest.raises(HTTPException) as error:
         await classify_repository_result(CANDIDATE_ID, PRINCIPAL, Response())
     assert error.value.status_code == 429
+    assert error.value.headers == {"Retry-After": "11"}
 
 
 async def test_collector_classify_repository_result_returns_not_found(monkeypatch):

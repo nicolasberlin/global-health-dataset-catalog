@@ -18,6 +18,7 @@ from app.database import (
 )
 from app.db.classification_votes import mark_interrupted_votes_error
 from app.routes.collector import router as collector_router
+from app.routes.sessions import router as sessions_router
 from app.security import validate_api_security_configuration
 
 
@@ -51,6 +52,7 @@ app.add_middleware(
 )
 
 app.include_router(collector_router)
+app.include_router(sessions_router)
 
 
 @app.get("/health")

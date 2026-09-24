@@ -159,6 +159,13 @@ Never enable local mode behind a public reverse proxy.
 The token is stored only in that browser tab's `sessionStorage`; it is not a
 Vite build variable and must never be compiled into the frontend.
 
+The backend also implements an opt-in `API_AUTH_MODE=public` visitor-session
+foundation with per-visitor/IP quotas and global workload limits. It is not
+enabled in Compose or connected to the frontend yet; HTTPS, trusted proxy
+configuration, and general traffic limiting remain deployment prerequisites. See
+[Anonymous visitor sessions](docs/anonymous-visitor-sessions.md) for the API
+contract, configuration, and validation of the backend implementation.
+
 The local Compose file publishes PostgreSQL only on `127.0.0.1`. The main
 `docker-compose.yml` is for internal EPFL HTTP deployment on port 1312 behind the external Traefik and
 does not publish PostgreSQL. See [Deployment on EPFL](docs/DEPLOYMENT.md) for
