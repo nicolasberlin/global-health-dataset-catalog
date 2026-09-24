@@ -26,6 +26,7 @@ from app.quota_policy import (
     validate_quota_configuration,
 )
 from app.visitor_sessions import (
+    HTTP_SESSION_COOKIE_NAME,
     SESSION_COOKIE_NAME,
     VisitorSessionSettings,
     visitor_owner_id,
@@ -42,6 +43,12 @@ _visitor_scheme = APIKeyCookie(
     name=SESSION_COOKIE_NAME,
     auto_error=False,
     description="Used when API_AUTH_MODE=public. Obtain the cookie with POST /session.",
+)
+_http_visitor_scheme = APIKeyCookie(
+    name=HTTP_SESSION_COOKIE_NAME,
+    scheme_name="InternalHTTPSession",
+    auto_error=False,
+    description="Only for explicitly enabled internal HTTP visitor sessions.",
 )
 
 
@@ -72,6 +79,7 @@ async def require_api_principal(
     request: Request,
     response: Response,
     visitor_cookie: Annotated[Optional[str], Depends(_visitor_scheme)] = None,  # noqa: UP045
+    http_cookie: Annotated[Optional[str], Depends(_http_visitor_scheme)] = None,  # noqa: UP045
 ) -> APIPrincipal:
     """Resolve an owner using only the credential accepted by the deployment mode."""
 
@@ -82,7 +90,7 @@ async def require_api_principal(
             _require_session_origin(request, settings)
         if request.headers.get("authorization") is not None:
             raise HTTPException(status_code=401, detail="Public access requires a visitor session.")
-        owner_id = visitor_owner_id(visitor_cookie, settings)
+        owner_id = visitor_owner_id(visitor_cookie if settings.secure else http_cookie, settings)
         if owner_id is None:
             raise HTTPException(status_code=401, detail="Visitor session is missing or expired.")
         response.headers["Cache-Control"] = "no-store"

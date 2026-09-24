@@ -106,7 +106,7 @@ def test_costly_and_mutating_routes_document_both_deployment_authentication_sche
 
     for path, method in protected_operations:
         assert openapi["paths"][path][method]["security"] == [
-            {"HTTPBearer": []}, {"APIKeyCookie": []},
+            {"HTTPBearer": []}, {"APIKeyCookie": []}, {"InternalHTTPSession": []},
         ]
 
 

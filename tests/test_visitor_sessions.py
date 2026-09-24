@@ -7,10 +7,13 @@ from app.routes.collector import router as collector_router
 from app.routes.sessions import router as sessions_router
 from app.security import APIPrincipal, require_api_principal, validate_api_security_configuration
 from app.visitor_sessions import (
+    HTTP_SESSION_COOKIE_NAME,
     SESSION_COOKIE_NAME,
     SESSION_MAX_AGE_SECONDS,
     VisitorSessionSettings,
     new_visitor_cookie,
+    visitor_owner_id,
+    visitor_session_settings,
 )
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -35,6 +38,7 @@ def public_api(monkeypatch):
     monkeypatch.setenv("API_SESSION_SECRET", SECRET)
     monkeypatch.setenv("API_PUBLIC_ORIGIN", ORIGIN)
     monkeypatch.delenv("API_ACCESS_TOKENS", raising=False)
+    monkeypatch.delenv("API_ALLOW_INSECURE_HTTP_SESSIONS", raising=False)
     validate_api_security_configuration()
     app = FastAPI()
     app.include_router(sessions_router)
@@ -217,3 +221,75 @@ async def test_anonymous_ownership_is_enforced_by_database(public_api, database)
         assert denied.status_code == 404
         stored = await database.get_repository_candidate(items[0]["id"], owner)
         assert stored["classification_status"] == "pending"
+
+
+@pytest.mark.parametrize("enabled", [None, "false", "yes", "1"])
+def test_internal_http_requires_explicit_true(public_api, monkeypatch, enabled):
+    monkeypatch.setenv("API_PUBLIC_ORIGIN", "http://health.example:1312")
+    if enabled is not None:
+        monkeypatch.setenv("API_ALLOW_INSECURE_HTTP_SESSIONS", enabled)
+    with pytest.raises(RuntimeError, match="API_"):
+        validate_api_security_configuration()
+
+
+async def test_internal_http_cookie_lifecycle_and_origin_enforcement(public_api, monkeypatch):
+    origin = "http://health.example:1312"
+    monkeypatch.setenv("API_PUBLIC_ORIGIN", origin)
+    monkeypatch.setenv("API_ALLOW_INSECURE_HTTP_SESSIONS", "true")
+    validate_api_security_configuration()
+    async with AsyncClient(transport=ASGITransport(app=public_api), base_url=origin) as client:
+        created = await client.post("/session", headers={"Origin": origin})
+        assert created.status_code == 204
+        cookie = created.headers["set-cookie"]
+        assert cookie.startswith(f"{HTTP_SESSION_COOKIE_NAME}=")
+        assert "Secure" not in cookie
+        assert "HttpOnly" in cookie and "SameSite=lax" in cookie
+        assert "Domain=" not in cookie
+        first = await client.post("/identity", headers={"Origin": origin})
+        assert first.status_code == 200
+        assert (await client.get("/identity")).json() == first.json()
+        assert "set-cookie" not in (await client.post(
+            "/session", headers={"Origin": origin},
+        )).headers
+        for foreign in [None, "null", "http://other.example:1312", "http://health.example"]:
+            headers = {} if foreign is None else {"Origin": foreign}
+            assert (await client.post("/session", headers=headers)).status_code == 403
+            assert (await client.post("/identity", headers=headers)).status_code == 403
+        now = 1_700_000_000
+        monkeypatch.setattr(TimestampSigner, "get_timestamp", lambda _: now)
+        signed = new_visitor_cookie(visitor_session_settings())
+        headers = {"Cookie": f"{HTTP_SESSION_COOKIE_NAME}={signed}", "Origin": origin}
+        assert (await client.post("/identity", headers=headers)).status_code == 200
+        now += SESSION_MAX_AGE_SECONDS + 1
+        assert (await client.post("/identity", headers=headers)).status_code == 401
+        headers["Cookie"] = f"{HTTP_SESSION_COOKIE_NAME}=forged"
+        assert (await client.post("/identity", headers=headers)).status_code == 401
+
+
+async def test_http_opt_in_keeps_https_secure_and_rejects_http_credentials(public_api, monkeypatch):
+    monkeypatch.setenv("API_ALLOW_INSECURE_HTTP_SESSIONS", "true")
+    http_settings = VisitorSessionSettings(secret=SECRET, origin="http://health.example")
+    http_cookie = new_visitor_cookie(http_settings)
+    https_settings = visitor_session_settings()
+    assert https_settings.secure
+    assert visitor_owner_id(http_cookie, https_settings) is None
+    assert visitor_owner_id(new_visitor_cookie(https_settings), http_settings) is None
+    async with browser(public_api) as client:
+        for name in [SESSION_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME]:
+            assert (await client.get("/identity", headers={
+                "Cookie": f"{name}={http_cookie}",
+            })).status_code == 401
+        created = await bootstrap(client)
+        assert created.headers["set-cookie"].startswith(f"{SESSION_COOKIE_NAME}=")
+        assert "Secure" in created.headers["set-cookie"]
+
+
+@pytest.mark.parametrize(("origin", "expected"), [
+    ("http://health.example:80", "http://health.example"),
+    ("http://health.example:1312", "http://health.example:1312"),
+    ("https://health.example:443", "https://health.example"),
+])
+def test_http_origin_normalization(public_api, monkeypatch, origin, expected):
+    monkeypatch.setenv("API_ALLOW_INSECURE_HTTP_SESSIONS", "true")
+    monkeypatch.setenv("API_PUBLIC_ORIGIN", origin)
+    assert visitor_session_settings().origin == expected
