@@ -56,7 +56,9 @@ export function useClassifications(session, onUpdate) {
         };
         const finish = () => state.trackers.delete(id);
         const schedule = () => {
-            if (alive()) tracker.timer = window.setTimeout(poll, Math.min(700 * 2 ** tracker.failures, 15000));
+            if (alive()) tracker.timer = window.setTimeout(poll, Math.max(
+                Math.min(700 * 2 ** tracker.failures, 15000), (tracker.retryAt ?? 0) - Date.now(),
+            ));
         };
         async function poll() {
             if (!alive()) return;
@@ -68,6 +70,7 @@ export function useClassifications(session, onUpdate) {
             } catch (error) {
                 if (!alive() || isAbortError(error)) return;
                 tracker.failures = Math.min(tracker.failures + 1, 5);
+                tracker.retryAt = error.retryAt;
                 publish(item, error.message);
                 if ([401, 403, 404].includes(error.status)) { finish(); return; }
             }

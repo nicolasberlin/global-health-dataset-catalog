@@ -76,6 +76,7 @@ export function useCollectionJobs(session, onSaved) {
             } catch (error) {
                 if (!alive() || isAbortError(error) || state.trackers.get(job.id) !== tracker) return;
                 tracker.failures += 1;
+                tracker.retryAt = error.retryAt;
                 const unavailable = [401, 403, 404].includes(error.status);
                 publish(state.jobs.get(job.id).job, unavailable ? 'unavailable' : 'retrying', error.message);
                 if (unavailable) {
@@ -85,7 +86,8 @@ export function useCollectionJobs(session, onSaved) {
             }
             tracker.controller = null;
             if (alive()) {
-                const delay = Math.min(1500 * 2 ** Math.min(tracker.failures, 5), 30000);
+                const delay = Math.max(Math.min(1500 * 2 ** Math.min(tracker.failures, 5), 30000),
+                    (tracker.retryAt ?? 0) - Date.now());
                 tracker.timer = window.setTimeout(poll, delay);
             }
         }

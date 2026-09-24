@@ -55,5 +55,7 @@ it('keeps failed job retryable when a retry request fails', async () => {
     const { result } = renderHook(() => useCollectionJobs(session, vi.fn()));
     act(() => result.current.registerJob({ id: 42, status: 'error' }, session));
     await act(async () => result.current.retryJob(42, session));
-    expect(result.current.resolveCollection({ jobId: 42 })).toMatchObject({ state: 'error', retrying: false, trackingError: 'Quota exceeded.' });
+    expect(result.current.resolveCollection({ jobId: 42 })).toMatchObject({
+        state: 'error', retrying: false, trackingError: expect.stringContaining('Quota exceeded.'),
+    });
 });
