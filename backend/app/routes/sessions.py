@@ -4,7 +4,6 @@ from fastapi import APIRouter, Request, Response
 
 from app.security import enforce_session_creation_quota, require_public_session_bootstrap
 from app.visitor_sessions import (
-    SESSION_COOKIE_NAME,
     SESSION_MAX_AGE_SECONDS,
     new_visitor_cookie,
     visitor_owner_id,
@@ -19,14 +18,14 @@ async def start_visitor_session(request: Request) -> Response:
 
     settings = require_public_session_bootstrap(request)
     response = Response(status_code=204, headers={"Cache-Control": "no-store"})
-    if visitor_owner_id(request.cookies.get(SESSION_COOKIE_NAME), settings) is None:
+    if visitor_owner_id(request.cookies.get(settings.cookie_name), settings) is None:
         await enforce_session_creation_quota(request, settings)
         response.set_cookie(
-            SESSION_COOKIE_NAME,
+            settings.cookie_name,
             new_visitor_cookie(settings),
             max_age=SESSION_MAX_AGE_SECONDS,
             path="/",
-            secure=True,
+            secure=settings.secure,
             httponly=True,
             samesite="lax",
         )

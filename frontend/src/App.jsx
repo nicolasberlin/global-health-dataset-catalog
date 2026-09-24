@@ -12,13 +12,12 @@ import { useCollectionJobs } from './jobs/useCollectionJobs.js';
 
 export default function App() {
     const [activeView, setActiveView] = useState('search');
-    const LOCAL_ACCESS = import.meta.env.DEV && import.meta.env.VITE_API_AUTH_MODE === 'local';
     const repositorySearchRunRef = useRef(0);
     const repositorySearchIdRef = useRef(null);
     const repositorySearchAbortRef = useRef(null);
     const catalog = useDatasetCatalog();
     const { loadCollectedDatasets } = catalog;
-    const { session } = useApiSession(LOCAL_ACCESS);
+    const { session, status: sessionStatus, error: sessionError, reconnect } = useApiSession();
     const { registerJob, resolveCollection, retryJob } = useCollectionJobs(session, loadCollectedDatasets);
     const { follow } = useClassifications(session, (item, requestSession, trackingError, requesting) => {
         const registered = registerCandidateCollection(item, requestSession);
@@ -43,6 +42,19 @@ export default function App() {
         repositorySearchAbortRef.current?.abort();
     }, []);
 
+    useEffect(() => {
+        if (session.mode !== 'public' || sessionStatus === 'ready') return;
+        repositorySearchRunRef.current += 1;
+        repositorySearchAbortRef.current?.abort();
+        repositorySearchIdRef.current = null;
+        setRepositoryCandidates([]);
+        setLocalRepositoryResults([]);
+        setRepositoryHasSearched(false);
+        setRepositorySearching(false);
+        setRepositoryError('');
+        setRepositoryWarnings([]);
+    }, [session, sessionStatus]);
+
     function registerCandidateCollection(item, requestSession) {
         const collection = item.automatic_collection;
         if (!collection?.job?.id) return item;
@@ -53,7 +65,8 @@ export default function App() {
 
     async function restoreAnalysis(manual = false) {
         const requestSession = session;
-        if (!requestSession.local && !requestSession.token) return;
+        if (!requestSession.ready || !requestSession.isCurrent() ||
+            (requestSession.mode !== 'public' && !requestSession.local && !requestSession.token)) return;
         const runId = ++repositorySearchRunRef.current;
         setRepositorySearching(false);
         repositorySearchAbortRef.current?.abort();
@@ -87,7 +100,7 @@ export default function App() {
         }
     }
 
-    useEffect(() => { void restoreAnalysis(); }, [session]);
+    useEffect(() => { void restoreAnalysis(); }, [session, sessionStatus]);
 
     function analyzeCandidate(candidate) {
         void follow(candidate.item, session, { submit: true, retry: candidate.status === 'error' });
@@ -95,6 +108,7 @@ export default function App() {
 
     async function searchRepositories(event) {
         event.preventDefault();
+        if (!session.ready || !session.isCurrent()) return;
 
         if (repositoryAnalysisInProgress && repositoryQuery.trim() === repositoryResultQuery) {
             return;
@@ -281,7 +295,16 @@ export default function App() {
             </nav>
 
             <div hidden={activeView !== 'search'}>
+            {session.mode === 'public' && sessionStatus !== 'ready' && (
+                <div className="repository-message" role={sessionStatus === 'preparing' ? 'status' : 'alert'}>
+                    <span>{sessionStatus === 'preparing' ? 'Preparing visitor access…' : sessionError}</span>
+                    {sessionStatus !== 'preparing' && <button type="button" onClick={reconnect}>
+                        {sessionStatus === 'expired' ? 'Continue' : 'Retry access'}
+                    </button>}
+                </div>
+            )}
             <RepositorySearchSection
+                accessReady={sessionStatus === 'ready'}
                 analyzeCandidate={analyzeCandidate}
                 retryCollection={candidate => retryJob(candidate.item.automatic_collection.job.id, session)}
                 restoreAnalysis={() => restoreAnalysis(true)}

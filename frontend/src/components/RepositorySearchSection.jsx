@@ -7,6 +7,7 @@ import RepositoryAcceptedCard, { getVoteAgreement } from './RepositoryAcceptedCa
 import RepositoryProgressCard from './RepositoryProgressCard.jsx';
 
 export default function RepositorySearchSection({
+    accessReady = true,
     analyzeCandidate,
     retryCollection,
     restoreAnalysis,
@@ -98,7 +99,7 @@ export default function RepositorySearchSection({
                         autoComplete="off"
                     />
                 </div>
-                <button type="submit" disabled={repositoryAnalysisInProgress && repositoryQuery.trim() === repositoryResultQuery}>
+                <button type="submit" disabled={!accessReady || (repositoryAnalysisInProgress && repositoryQuery.trim() === repositoryResultQuery)}>
                     {repositoryQuery.trim() !== repositoryResultQuery
                         ? 'Search'
                         : repositorySearching
@@ -108,7 +109,7 @@ export default function RepositorySearchSection({
                           : 'Search'}
                 </button>
             </form>
-            <button type="button" className="secondary-button" onClick={restoreAnalysis}>Restore last analysis</button>
+            <button type="button" className="secondary-button" disabled={!accessReady} onClick={restoreAnalysis}>Restore last analysis</button>
 
             {repositoryHasSearched && !repositorySearching && !repositoryError && (
                 <div className="dataset-result-tools">

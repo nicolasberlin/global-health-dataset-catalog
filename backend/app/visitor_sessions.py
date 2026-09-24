@@ -11,6 +11,7 @@ from uuid import uuid4
 from itsdangerous import BadData, URLSafeTimedSerializer
 
 SESSION_COOKIE_NAME = "__Host-global-health-session"
+HTTP_SESSION_COOKIE_NAME = "global-health-session"
 SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 _SIGNING_SALT = "global-health-visitor-session-v1"
 
@@ -20,9 +21,21 @@ class VisitorSessionSettings:
     secret: str = field(repr=False)
     origin: str
 
+    @property
+    def secure(self) -> bool:
+        return self.origin.startswith("https://")
+
+    @property
+    def cookie_name(self) -> str:
+        return SESSION_COOKIE_NAME if self.secure else HTTP_SESSION_COOKIE_NAME
+
 
 def visitor_session_settings() -> VisitorSessionSettings:
-    """Require a server secret and an exact HTTPS browser origin in public mode."""
+    """Require HTTPS unless HTTP is explicitly enabled for an internal deployment."""
+
+    allow_http = os.environ.get("API_ALLOW_INSECURE_HTTP_SESSIONS", "false").lower()
+    if allow_http not in {"true", "false"}:
+        raise RuntimeError("API_ALLOW_INSECURE_HTTP_SESSIONS must be true or false.")
 
     secret = os.environ.get("API_SESSION_SECRET", "")
     if secret != secret.strip() or not 32 <= len(secret) <= 512:
@@ -33,7 +46,7 @@ def visitor_session_settings() -> VisitorSessionSettings:
         parsed = urlsplit(origin)
         port = parsed.port
         valid = (
-            parsed.scheme == "https"
+            (parsed.scheme == "https" or (parsed.scheme == "http" and allow_http == "true"))
             and parsed.hostname
             and parsed.username is None
             and parsed.password is None
@@ -45,12 +58,18 @@ def visitor_session_settings() -> VisitorSessionSettings:
     except ValueError:
         valid = False
     if not valid:
-        raise RuntimeError("API_PUBLIC_ORIGIN must be an HTTPS origin without a path.")
+        raise RuntimeError(
+            "API_PUBLIC_ORIGIN must be an HTTPS origin without a path. "
+            "Internal HTTP requires API_ALLOW_INSECURE_HTTP_SESSIONS=true."
+        )
 
     host = parsed.hostname
     if ":" in host:
         host = f"[{host}]"
-    normalized_origin = f"https://{host}" + (f":{port}" if port not in {None, 443} else "")
+    default_port = 443 if parsed.scheme == "https" else 80
+    normalized_origin = f"{parsed.scheme}://{host}" + (
+        f":{port}" if port not in {None, default_port} else ""
+    )
     return VisitorSessionSettings(secret=secret, origin=normalized_origin)
 
 
@@ -73,4 +92,6 @@ def visitor_owner_id(cookie: str | None, settings: VisitorSessionSettings) -> st
 
 
 def _serializer(settings: VisitorSessionSettings) -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(settings.secret, salt=_SIGNING_SALT)
+    # An exposed internal HTTP credential must not become a valid HTTPS session.
+    salt = _SIGNING_SALT if settings.secure else f"{_SIGNING_SALT}-insecure-http"
+    return URLSafeTimedSerializer(settings.secret, salt=salt)

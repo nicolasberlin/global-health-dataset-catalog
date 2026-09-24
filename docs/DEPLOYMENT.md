@@ -6,7 +6,7 @@ without TLS or HTTPS redirection. It does not publish database or API ports.
 For a Python backend running on your laptop, use `docker-compose.local.yml`
 instead; its database port is bound only to `127.0.0.1`.
 
-## Configure the external Traefik
+## Use the existing external Traefik
 
 The existing `web` entrypoint must receive traffic from host port 1312.
 [The example static configuration](../deploy/traefik.example.yml) listens on
@@ -15,11 +15,49 @@ Traefik container. Preserve the existing mapping if HTTP already reaches
 Traefik successfully. The application Compose file does not start or reconfigure
 that external Traefik.
 
-Remove any global HTTP-to-HTTPS redirection or default TLS configuration on
-`web` in the actual Traefik configuration, including command-line flags.
-If its static configuration changes, recreate/restart the external Traefik
-through its own deployment. No certificate resolver or port 443 is required
-for this internal HTTP deployment.
+Do not modify the shared Traefik configuration or attach the application to
+`root_mmore-prod`. The application uses labels and the external `traefik`
+network specified by the infrastructure administrator. Declaring a network
+external does not attach Traefik to it: verify both sides are already connected.
+If they are not, ask the administrator to confirm the intended network.
+No certificate resolver or port 443 is required for this internal HTTP deployment.
+
+### Anonymous search on internal HTTP
+
+Configure the [temporary HTTP session option](anonymous-visitor-sessions.md#temporary-internal-http-access)
+before rebuilding the app. It is disabled by default. The API base path is
+`/ai-commons/api`; the configured origin is `http://gpu217.rcp.epfl.ch:1312`,
+without a path. Public mode does not require `API_ACCESS_TOKENS`; token mode
+still validates them at backend startup.
+
+Before deployment, inspect only the network information (no credentials):
+
+```sh
+docker network inspect traefik --format '{{range .Containers}}{{println .Name .IPv4Address}}{{end}}'
+```
+
+Confirm that Traefik and the application share this network. Set
+`FORWARDED_ALLOW_IPS` to the verified Traefik peer IP(s) as seen by Uvicorn.
+Do not set it to `*` or trust an entire shared network. The default trusts only
+loopback, so an unconfigured proxy is counted as one client and visitors may
+share its quota. Recheck the peer address if Traefik is recreated. These values
+cannot be inferred from the repository or certified by local browser tests.
+Uvicorn handles the trusted forwarding headers; application code never trusts
+an arbitrary `X-Forwarded-For` header directly.
+
+The network inspection supplied for gpu217 on 2026-09-24 shows
+`root-traefik-1` at `172.18.0.5`, with the frontend at `172.18.0.4` and the API
+at `172.18.0.3`, all on `traefik`. For that deployment, add to the server's `.env`:
+
+```dotenv
+FORWARDED_ALLOW_IPS=172.18.0.5
+```
+
+Use the single address, not the `/16` network: other containers also share this
+network. This records the observed topology, not a permanent IP assignment or
+an end-to-end forwarding test. Verify that Uvicorn receives the expected client
+address after deployment. The repository keeps its conservative loopback default;
+the server environment must supply the deployment-specific value.
 
 Set the deployment environment (in addition to the secrets in the README):
 

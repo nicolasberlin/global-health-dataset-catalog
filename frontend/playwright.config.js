@@ -13,10 +13,14 @@ export default defineConfig({
         name: browserName,
         use: { browserName },
     })),
-    webServer: {
+    webServer: [{
         command: 'PYTHONPATH=../backend:.. ../.venv/bin/python ../tests/browser/session_server.py',
         url: 'https://localhost:9443',
         ignoreHTTPSErrors: true,
         reuseExistingServer: false,
-    },
+    }, {
+        command: 'VITE_API_AUTH_MODE=public VITE_API_BASE_URL=/ai-commons/api VITE_PUBLIC_BASE=/ai-commons/ npm run build -- --outDir dist-browser && PYTHONPATH=../backend:.. ../.venv/bin/python ../tests/browser/frontend_server.py',
+        url: 'http://localhost:9080/ai-commons/',
+        reuseExistingServer: false,
+    }],
 });

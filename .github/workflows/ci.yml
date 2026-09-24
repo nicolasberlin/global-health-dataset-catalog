@@ -73,7 +73,7 @@ jobs:
       - run: npm run build
 
   browser-sessions:
-    name: HTTPS visitor sessions (Chromium, Firefox, WebKit)
+    name: HTTP frontend and HTTPS sessions (Chromium, Firefox, WebKit)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
