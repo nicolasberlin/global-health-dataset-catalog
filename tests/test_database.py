@@ -1829,12 +1829,19 @@ async def test_repository_candidate_classification_reservation_is_atomic(databas
 
     reservations = await asyncio.gather(
         *(
-            _start_candidate(database, candidate["id"], TEST_OWNER_ID)
+            database.enqueue_candidate_classification(candidate["id"], TEST_OWNER_ID)
             for _request in range(4)
         )
     )
 
     assert sum(reservation is not None for reservation in reservations) == 1
+    # SKIP LOCKED may legitimately skip a row while another enqueue is finishing.
+    # Verify admission first, then worker ownership once those transactions have ended.
+    stored = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
+    assert stored["classification_status"] == "queued"
+    claimed = await database.claim_candidate_classification()
+    assert claimed["id"] == candidate["id"]
+    assert await database.claim_candidate_classification() is None
     stored = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
     assert stored["classification_status"] == "classifying"
 
