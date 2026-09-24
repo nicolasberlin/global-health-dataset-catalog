@@ -297,32 +297,28 @@ async def test_collection_retry_route_enforces_owner_and_quota(database, monkeyp
     job_id = completed.collection.job["id"]
     await database.mark_collection_job_running(job_id)
     await database.mark_collection_job_error(job_id, "private provider detail")
-    charged = []
-
-    async def quota(principal, operation):
-        charged.append((principal.owner_id, operation))
-        raise HTTPException(status_code=429, detail="Quota reached.")
-
-    monkeypatch.setattr("app.routes.collector.enforce_api_quota", quota)
+    monkeypatch.setenv("API_CLASSIFICATION_REQUESTS_PER_MINUTE", "1")
+    await database.consume_api_quota("alice", "repository_classification", limit=1)
     with pytest.raises(HTTPException) as unknown:
         await retry_collection_job(job_id, APIPrincipal("bob"))
     assert unknown.value.status_code == 404
-    assert not charged
     with pytest.raises(HTTPException) as denied:
         await retry_collection_job(job_id, APIPrincipal("alice"))
     assert denied.value.status_code == 429
     assert (await database.get_collection_job(job_id))["status"] == "error"
 
-    async def allow(principal, operation):
-        charged.append((principal.owner_id, operation))
-
-    monkeypatch.setattr("app.routes.collector.enforce_api_quota", allow)
-    response = await retry_collection_job(job_id, APIPrincipal("alice"))
+    monkeypatch.setenv("API_CLASSIFICATION_REQUESTS_PER_MINUTE", "2")
+    responses = await asyncio.gather(*(
+        retry_collection_job(job_id, APIPrincipal("alice")) for _ in range(4)
+    ))
+    response = responses[0]
     assert response.job.status == "pending"
     assert "private provider detail" not in response.model_dump_json()
     assert "classification_progress" in response.model_dump_json()
     await retry_collection_job(job_id, APIPrincipal("alice"))
-    assert charged == [("alice", "repository_classification")] * 2
+    async with _require_database_pool().connection() as connection:
+        quotas = await _fetchall(connection, "SELECT owner_id, request_count FROM api_rate_limits")
+    assert quotas == [{"owner_id": "alice", "request_count": 2}]
 
 
 async def test_new_internal_collection_job_inherits_partial_votes(database, transport):

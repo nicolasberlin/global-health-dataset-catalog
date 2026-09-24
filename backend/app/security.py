@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated, Literal, Optional
 
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
 
-from app.db.api_quotas import consume_api_quota
+from app.db.api_quotas import consume_quota_limits
+from app.quota_policy import (
+    QuotaExceeded,
+    QuotaUnavailable,
+    WorkAdmission,
+    classification_admission,
+    owner_quota,
+    public_daily_quota,
+    public_ip_quota,
+    validate_quota_configuration,
+)
 from app.visitor_sessions import (
     SESSION_COOKIE_NAME,
     VisitorSessionSettings,
@@ -24,10 +37,6 @@ APIQuotaOperation = Literal[
     "repository_classification",
 ]
 
-_QUOTA_ENVIRONMENT_VARIABLES: dict[APIQuotaOperation, tuple[str, int]] = {
-    "repository_search": ("API_SEARCH_REQUESTS_PER_MINUTE", 10),
-    "repository_classification": ("API_CLASSIFICATION_REQUESTS_PER_MINUTE", 20),
-}
 _bearer_scheme = HTTPBearer(auto_error=False, description="Used when API_AUTH_MODE=token.")
 _visitor_scheme = APIKeyCookie(
     name=SESSION_COOKIE_NAME,
@@ -41,6 +50,7 @@ class APIPrincipal:
     """Authenticated API caller used to own searches and consume quotas."""
 
     owner_id: str
+    client_key: str | None = None
 
 
 def validate_api_security_configuration() -> None:
@@ -51,8 +61,7 @@ def validate_api_security_configuration() -> None:
         _configured_access_tokens()
     elif mode == "public":
         visitor_session_settings()
-    for operation in _QUOTA_ENVIRONMENT_VARIABLES:
-        _quota_limit(operation)
+    validate_quota_configuration(public=mode == "public")
 
 
 async def require_api_principal(
@@ -77,7 +86,7 @@ async def require_api_principal(
         if owner_id is None:
             raise HTTPException(status_code=401, detail="Visitor session is missing or expired.")
         response.headers["Cache-Control"] = "no-store"
-        return APIPrincipal(owner_id=owner_id)
+        return APIPrincipal(owner_id=owner_id, client_key=public_client_key(request, settings))
 
     if mode == "local":
         local_hosts = {"127.0.0.1", "::1", "localhost"}
@@ -127,26 +136,57 @@ async def enforce_api_quota(
 ) -> None:
     """Consume an atomic PostgreSQL quota unit or reject the request."""
 
+    quotas = (owner_quota(principal.owner_id, operation),)
+    if principal.client_key is not None:
+        quotas += (public_ip_quota(principal.client_key, operation),)
+    with quota_http_errors():
+        await consume_quota_limits(quotas)
+
+
+def work_admission(principal: APIPrincipal) -> WorkAdmission:
+    return classification_admission(principal.owner_id, principal.client_key)
+
+
+async def enforce_public_online_quota(principal: APIPrincipal) -> None:
+    if principal.client_key is not None:
+        with quota_http_errors():
+            await consume_quota_limits((public_daily_quota("online_daily"),))
+
+
+async def enforce_session_creation_quota(
+    request: Request, settings: VisitorSessionSettings,
+) -> None:
+    with quota_http_errors():
+        client_key = public_client_key(request, settings)
+        await consume_quota_limits((public_ip_quota(client_key, "session"),))
+
+
+def public_client_key(request: Request, settings: VisitorSessionSettings) -> str:
+    # The ASGI server resolves trusted proxies. Never parse client-supplied forwarding headers here.
     try:
-        decision = await consume_api_quota(
-            principal.owner_id,
-            operation,
-            limit=_quota_limit(operation),
-        )
-    except Exception as exception:  # noqa: BLE001 - quotas fail closed.
+        address = ipaddress.ip_address(request.client.host if request.client else "")
+    except ValueError as exception:
+        raise HTTPException(status_code=503, detail="Client address is unavailable.") from exception
+    if isinstance(address, ipaddress.IPv6Address):
+        address = address.ipv4_mapped or ipaddress.ip_network(f"{address}/64", strict=False)
+    digest = hmac.new(
+        settings.secret.encode(), f"public-ip:{address}".encode(), "sha256",
+    ).hexdigest()
+    return f"public:ip:{digest}"
+
+
+@contextmanager
+def quota_http_errors() -> Iterator[None]:
+    try:
+        yield
+    except QuotaExceeded as exception:
+        raise HTTPException(status_code=429, detail=str(exception), headers={
+            "Retry-After": str(exception.retry_after_seconds),
+        }) from exception
+    except QuotaUnavailable as exception:
         raise HTTPException(
-            status_code=503,
-            detail="API quota service is unavailable.",
+            status_code=503, detail="API quota service is unavailable.",
         ) from exception
-
-    if decision.allowed:
-        return
-
-    raise HTTPException(
-        status_code=429,
-        detail="API request quota exceeded.",
-        headers={"Retry-After": str(decision.retry_after_seconds)},
-    )
 
 
 def api_auth_mode() -> str:
@@ -204,18 +244,6 @@ def _configured_access_tokens() -> dict[str, str]:
         configured_tokens[owner_value] = token_value
 
     return configured_tokens
-
-
-def _quota_limit(operation: APIQuotaOperation) -> int:
-    environment_name, default_limit = _QUOTA_ENVIRONMENT_VARIABLES[operation]
-    raw_value = os.environ.get(environment_name, str(default_limit))
-    try:
-        limit = int(raw_value)
-    except ValueError as exception:
-        raise RuntimeError(f"{environment_name} must be an integer.") from exception
-    if not 1 <= limit <= 10_000:
-        raise RuntimeError(f"{environment_name} must be between 1 and 10000.")
-    return limit
 
 
 def _authentication_error() -> HTTPException:

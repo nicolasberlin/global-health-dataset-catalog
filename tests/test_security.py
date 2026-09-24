@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from app.db.api_quotas import APIQuotaDecision
+from app.quota_policy import QuotaExceeded, QuotaLimit
 from app.security import (
     APIPrincipal,
     enforce_api_quota,
@@ -118,17 +118,11 @@ def test_security_configuration_requires_access_tokens(monkeypatch):
 
 
 async def test_api_quota_returns_retry_after_when_limit_is_exhausted(monkeypatch):
-    async def reject_request(owner_id, operation, *, limit):
-        assert owner_id == "test-user"
-        assert operation == "repository_search"
-        assert limit == 10
-        return APIQuotaDecision(
-            allowed=False,
-            request_count=10,
-            retry_after_seconds=17,
-        )
+    async def reject_request(quotas):
+        assert quotas == (QuotaLimit("test-user", "repository_search", 10),)
+        raise QuotaExceeded(17)
 
-    monkeypatch.setattr("app.security.consume_api_quota", reject_request)
+    monkeypatch.setattr("app.security.consume_quota_limits", reject_request)
 
     with pytest.raises(HTTPException) as error:
         await enforce_api_quota(APIPrincipal("test-user"), "repository_search")

@@ -46,7 +46,14 @@ from app.routes.collector_schemas import (
     CollectorRepositorySearchWarning,
     CollectorValidation,
 )
-from app.security import APIPrincipal, enforce_api_quota, require_api_principal
+from app.security import (
+    APIPrincipal,
+    enforce_api_quota,
+    enforce_public_online_quota,
+    quota_http_errors,
+    require_api_principal,
+    work_admission,
+)
 from collector.classification.repository import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
@@ -94,10 +101,11 @@ async def retry_collection_job(
     job = await get_collection_job_for_owner(job_id, principal.owner_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Collection job not found")
-    if job["status"] == "error":
-        await enforce_api_quota(principal, "repository_classification")
     try:
-        job = await retry_collection_job_for_owner(job_id, principal.owner_id)
+        with quota_http_errors():
+            job = await retry_collection_job_for_owner(
+                job_id, principal.owner_id, admission=work_admission(principal),
+            )
     except ValueError as exception:
         raise HTTPException(status_code=409, detail=str(exception)) from exception
     if job is None:
@@ -206,7 +214,13 @@ async def search_datasets(
         )
 
     try:
+        await enforce_public_online_quota(principal)
         online_response = await _search_online_repositories(original_query)
+    except HTTPException as exception:
+        await _fail_search_session(
+            search_id, principal.owner_id, origin="online", error=str(exception.detail),
+        )
+        raise
     except Exception as exception:  # noqa: BLE001 - provider failures are persisted.
         logger.exception("Repository search failed for search_id=%s", search_id)
         await _fail_search_session(
@@ -222,15 +236,24 @@ async def search_datasets(
             _bounded_repository_result(item, search_query=original_query)
             for item in online_response.results
         ]
-        # Charge each unique candidate before atomically persisting and enqueueing the batch.
-        for _ in {(item.source.strip(), item.url) for item in bounded_results}:
-            await enforce_api_quota(principal, "repository_classification")
-        persisted_candidates = await complete_search_session_with_repository_candidates(
-            search_id,
-            principal.owner_id,
-            bounded_results,
-            status="partial" if online_response.warnings else "completed",
-        )
+        # Deduplicate before the public batch cap; the database charges only admitted candidates.
+        bounded_results = list({(item.source.strip(), item.url): item
+                                for item in bounded_results}.values())
+        admission = work_admission(principal)
+        warnings = list(online_response.warnings)
+        if admission.max_candidates is not None and len(bounded_results) > admission.max_candidates:
+            bounded_results = bounded_results[:admission.max_candidates]
+            warnings.append(RepositorySearchWarning(
+                message=f"Analysis is limited to {admission.max_candidates} datasets per search.",
+            ))
+        with quota_http_errors():
+            persisted_candidates = await complete_search_session_with_repository_candidates(
+                search_id,
+                principal.owner_id,
+                bounded_results,
+                status="partial" if warnings else "completed",
+                admission=admission,
+            )
     except HTTPException as exception:
         await _fail_search_session(
             search_id, principal.owner_id, origin="online", error=str(exception.detail),
@@ -251,7 +274,7 @@ async def search_datasets(
         query=original_query,
         items=[_collector_repository_candidate(item) for item in persisted_candidates],
         warnings=[
-            _collector_repository_search_warning(warning) for warning in online_response.warnings
+            _collector_repository_search_warning(warning) for warning in warnings
         ],
     )
 
@@ -323,9 +346,10 @@ async def classify_repository_result(
             status_code=409, detail="Candidate classification failed; retry explicitly."
         )
     if status == "pending" or (status == "error" and retry):
-        # Preserve the existing request quota policy; workers do not charge again.
-        await enforce_api_quota(principal, "repository_classification")
-        await enqueue_candidate_classification(candidate_id, principal.owner_id, retry=retry)
+        with quota_http_errors():
+            await enqueue_candidate_classification(
+                candidate_id, principal.owner_id, retry=retry, admission=work_admission(principal),
+            )
         candidate = await get_repository_candidate(candidate_id, principal.owner_id)
         if candidate is None:
             raise HTTPException(status_code=404, detail="Repository candidate not found")

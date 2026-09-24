@@ -8,10 +8,12 @@ from uuid import UUID, uuid4
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
+from app.quota_policy import WorkAdmission
 from collector.classification.repository import RepositoryClassification
 from collector.repository_search.models import RepositorySearchResult
 from collector.url_utils import require_http_url
 
+from .api_quotas import lock_work_admission, reserve_work
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
 from .search_sessions import SearchStatus, _complete_search_session, _normalized_owner_id
@@ -48,6 +50,7 @@ async def complete_search_session_with_repository_candidates(
     candidates: list[RepositorySearchResult],
     *,
     status: SearchStatus,
+    admission: WorkAdmission | None = None,
 ) -> list[dict[str, object]]:
     """Persist and enqueue online candidates, then finish their search atomically."""
 
@@ -57,12 +60,16 @@ async def complete_search_session_with_repository_candidates(
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         async with connection.transaction():
+            await lock_work_admission(connection, admission)
             rows = await _save_repository_candidates(
                 connection,
                 search_id,
                 owner_id,
                 candidates,
             )
+            await reserve_work(connection, admission, amount=sum(
+                row["classification_status"] == "pending" for row in rows
+            ))
             session_row = await _complete_search_session(
                 connection,
                 search_id,
@@ -156,29 +163,34 @@ async def enqueue_candidate_classification(
     owner_id: str,
     *,
     retry: bool = False,
+    admission: WorkAdmission | None = None,
 ) -> dict[str, object] | None:
     """Persist an explicit request; discoveries alone are never consumed by workers."""
 
     eligible_statuses = ("pending", "error") if retry else ("pending",)
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
-        row = await _fetchone(
-            connection,
-            f"""
-            UPDATE repository_candidates AS candidate
-            SET classification_status = 'queued',
-                classification = NULL,
-                error = '',
-                updated_at = NOW()
-            FROM search_sessions AS session
-            WHERE candidate.id = %s
-              AND candidate.search_session_id = session.id
-              AND session.owner_id = %s
-              AND candidate.classification_status = ANY(%s)
-            RETURNING {_RETURNING_CANDIDATE_COLUMNS}
-            """,
-            (candidate_id, _normalized_owner_id(owner_id), list(eligible_statuses)),
-        )
+        async with connection.transaction():
+            await lock_work_admission(connection, admission)
+            candidate = await _fetchone(connection, """
+                SELECT candidate.classification_status FROM repository_candidates AS candidate
+                JOIN search_sessions AS session ON session.id = candidate.search_session_id
+                WHERE candidate.id = %s AND session.owner_id = %s FOR UPDATE OF candidate
+            """, (candidate_id, _normalized_owner_id(owner_id)))
+            if candidate is None or candidate["classification_status"] not in eligible_statuses:
+                return None
+            await reserve_work(connection, admission, amount=1)
+            row = await _fetchone(
+                connection,
+                f"""
+                UPDATE repository_candidates AS candidate
+                SET classification_status = 'queued', classification = NULL, error = '',
+                    updated_at = NOW()
+                FROM search_sessions AS session
+                WHERE candidate.id = %s AND candidate.search_session_id = session.id
+                RETURNING {_RETURNING_CANDIDATE_COLUMNS}
+                """, (candidate_id,),
+            )
     return _repository_candidate_to_dict(row) if row else None
 
 

@@ -6,9 +6,11 @@ from uuid import UUID
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
+from app.quota_policy import WorkAdmission
 from collector.storage.models import CollectionReport
 from collector.url_utils import require_http_url
 
+from .api_quotas import lock_work_admission, reserve_work
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
 from .search_sessions import _normalized_owner_id
@@ -219,10 +221,13 @@ async def _job_dataset_ids(connection, job_id: int) -> list[int]:
     return [int(row["dataset_id"]) for row in rows]
 
 
-async def retry_collection_job_for_owner(job_id: int, owner_id: str) -> dict | None:
+async def retry_collection_job_for_owner(
+    job_id: int, owner_id: str, *, admission: WorkAdmission | None = None,
+) -> dict | None:
     """Requeue an owned failed job, keeping its validated votes and associations."""
     async with _require_database_pool().connection() as connection:
         async with connection.transaction():
+            await lock_work_admission(connection, admission)
             job = await _fetchone(connection, """
                 SELECT job.* FROM collection_jobs AS job
                 WHERE job.id = %s AND EXISTS (
@@ -250,6 +255,7 @@ async def retry_collection_job_for_owner(job_id: int, owner_id: str) -> dict | N
             """, (job["source_url"], job_id))
             if active:
                 raise ValueError("Another collection is already running for this page.")
+            await reserve_work(connection, admission, amount=1)
             row = await _fetchone(connection, """
                 UPDATE collection_jobs SET status = 'pending', error = '',
                     message = 'Collection pending.', finished_at = NULL, updated_at = NOW()

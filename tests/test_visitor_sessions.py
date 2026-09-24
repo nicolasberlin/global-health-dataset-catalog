@@ -26,6 +26,11 @@ SECRET = "test-only-visitor-session-secret-at-least-32-characters"
 
 @pytest.fixture
 def public_api(monkeypatch):
+    async def allow_bootstrap(request, settings):
+        pass
+
+    # Session lifecycle tests isolate signing; real quota enforcement has PostgreSQL tests.
+    monkeypatch.setattr("app.routes.sessions.enforce_session_creation_quota", allow_bootstrap)
     monkeypatch.setenv("API_AUTH_MODE", "public")
     monkeypatch.setenv("API_SESSION_SECRET", SECRET)
     monkeypatch.setenv("API_PUBLIC_ORIGIN", ORIGIN)
