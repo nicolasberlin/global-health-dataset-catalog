@@ -95,6 +95,12 @@ def proxy(tmp_path, request):
     origin, gateway = name + '-origin', name + '-proxy'
     (tmp_path / 'server.py').write_text(SERVER)
     config = configuration()
+    # Test-only readiness route exercises Traefik and the upstream without
+    # consuming either application bucket, even when startup needs retries.
+    config['http']['routers']['test-readiness'] = {
+        'rule': 'Path(`/stats`)', 'entryPoints': ['web'],
+        'service': 'ai-commons-api',
+    }
     if getattr(request, 'param', None) == 'slow-refill':
         # Keep deployed burst sizes and routing; make exhaustion independent of
         # runner throughput. Production periods remain untouched.
@@ -119,7 +125,7 @@ def proxy(tmp_path, request):
         with httpx.Client(base_url=url, headers={'Host': 'test.invalid'}) as client:
             for _ in range(100):
                 try:
-                    if client.get('/ai-commons/api/stats').status_code == 200:
+                    if client.get('/stats').status_code == 200:
                         break
                 except httpx.TransportError:
                     pass
@@ -193,6 +199,9 @@ async def test_frontend_bucket_does_not_consume_api_budget(proxy):
 async def test_shared_ip_bucket_exhaustion(proxy, visitors):
     async with httpx.AsyncClient(base_url=proxy, headers={'Host': 'test.invalid'},
                                 timeout=10) as client:
+        # Repeated readiness probes must leave the full 400-token burst intact.
+        for _ in range(5):
+            assert (await client.get('/stats')).status_code == 200
         before = (await client.get('/ai-commons/stats')).json()['count']
         responses = []
         started = time.monotonic()
@@ -209,7 +218,7 @@ async def test_shared_ip_bucket_exhaustion(proxy, visitors):
         accepted = [r for r in responses if r.status_code == 200]
         rejected = [r for r in responses if r.status_code == 429]
         assert len(accepted) + len(rejected) == 420
-        assert 399 <= len(accepted) <= 400 + int(elapsed * 200 / 3600)
+        assert 400 <= len(accepted) <= 400 + int(elapsed * 200 / 3600)
         assert rejected, 'Same-IP cookies/forwarded headers must share the API bucket'
         assert all('x-test-origin' not in r.headers for r in rejected)
         assert all(r.text == 'Too Many Requests' for r in rejected)
