@@ -53,3 +53,17 @@ it('respects Retry-After without retrying a costly request automatically', async
     fetch.mockResolvedValueOnce(reply(200, { items: [] }));
     await expect(search()).resolves.toEqual({ items: [] });
 });
+
+
+it.each([{ 'Retry-After': '1' }, {}])('handles plain-text proxy throttling (%j)', async headers => {
+    vi.useFakeTimers();
+    const session = visitor();
+    fetch.mockResolvedValueOnce(new Response('Too Many Requests', { status: 429, headers }));
+    const poll = () => requestJson('/collector/repository-candidates/test', { session });
+    await expect(poll()).rejects.toMatchObject({
+        status: 429, retryAt: Date.now() + (headers['Retry-After'] ? 1000 : 5000),
+    });
+    await expect(poll()).rejects.toMatchObject({ status: 429 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(session.expire).not.toHaveBeenCalled();
+});

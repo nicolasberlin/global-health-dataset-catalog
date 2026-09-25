@@ -357,3 +357,43 @@ def test_public_limits_are_validated_at_startup(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(RuntimeError, match=name):
         validate_api_security_configuration()
+
+
+@pytest.mark.parametrize("visitors", [5, 10, 20])
+async def test_shared_ip_sessions_candidate_admission_and_polling(
+    public_api, monkeypatch, visitors
+):
+    """Separate bootstrap, costly work and read polling under the default NAT quotas."""
+    from contextlib import AsyncExitStack
+
+    monkeypatch.setattr(
+        "app.routes.collector.search_repository_metadata",
+        lambda query: RepositorySearchResponse(results=[result(i) for i in range(10)]),
+    )
+    async with AsyncExitStack() as stack:
+        clients = [await stack.enter_async_context(browser(public_api)) for _ in range(visitors)]
+        await asyncio.gather(*(bootstrap(client) for client in clients))
+        # All clients share one IP but receive distinct signed identities.
+        assert len({str(client.cookies) for client in clients}) == visitors
+        started = await rows("SELECT date_trunc('minute', now()) AS bucket")
+        searches = []
+        for client in clients:
+            searches.append(await client.post(
+                "/collector/search-datasets", json={"query": "malaria"}
+            ))
+        if started != await rows("SELECT date_trunc('minute', now()) AS bucket"):
+            pytest.skip("Search batch crossed the fixed quota minute boundary")
+        assert sum(r.status_code == 200 for r in searches) == min(visitors, 6)
+        assert all(r.status_code in (200, 429) for r in searches)
+        for response in searches:
+            if response.status_code == 429:
+                assert response.headers["retry-after"]
+                assert response.json()["detail"]
+        before = await rows("SELECT * FROM api_rate_limits ORDER BY owner_id, operation")
+        # Polling remains usable even for sessions refused costly work.
+        responses = await asyncio.gather(*[
+            client.get("/collector/repository-analyses/latest") for client in clients
+            for _ in range(14)
+        ])
+        assert all(r.status_code in (200, 404) for r in responses)
+        assert await rows("SELECT * FROM api_rate_limits ORDER BY owner_id, operation") == before

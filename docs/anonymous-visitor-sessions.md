@@ -4,8 +4,8 @@ The backend can recognize a browser without asking its visitor to supply an API
 token. The frontend initializes the session automatically in public mode, and
 the backend limits workload. The default remains `API_AUTH_MODE=token`.
 Internet rollout requires HTTPS, trusted proxy configuration, and general
-traffic limits at the reverse proxy. An explicit temporary HTTP exception is
-available for the internal EPFL deployment, as described below.
+traffic limits at the reverse proxy. The internal EPFL deployment uses the
+explicit HTTP mode described below, with no planned migration to HTTPS.
 
 ## Configuration
 
@@ -14,8 +14,8 @@ available for the internal EPFL deployment, as described below.
 | Variable | Requirement |
 | --- | --- |
 | `API_SESSION_SECRET` | Random server-side secret, 32–512 characters, no surrounding whitespace. Keep stable across restarts. |
-| `API_PUBLIC_ORIGIN` | The browser's HTTPS origin, including any non-default port, without a path or trailing slash. Example: `https://health.example`. |
-| `API_ALLOW_INSECURE_HTTP_SESSIONS` | Defaults to `false`. Set to `true` only for the temporary internal HTTP deployment. Other values than `true`/`false` are rejected (case-insensitive). |
+| `API_PUBLIC_ORIGIN` | The browser's origin, including any non-default port, without a path or trailing slash. HTTPS by default; HTTP is allowed with the explicit internal HTTP option below. |
+| `API_ALLOW_INSECURE_HTTP_SESSIONS` | Defaults to `false`. Set to `true` for the internal EPFL HTTP deployment. Other values than `true`/`false` are rejected (case-insensitive). |
 
 Startup rejects missing or invalid settings. `API_ACCESS_TOKENS` is not required
 in public mode. Never put the session secret in a `VITE_*` variable or a browser
@@ -26,7 +26,11 @@ Use one origin for the frontend and API. TLS may terminate at the trusted
 reverse proxy; the API does not need to terminate TLS itself. Local development
 can continue using the existing loopback-only `local` mode.
 
-### Temporary internal HTTP access
+### Internal EPFL HTTP access
+
+HTTP is the intended mode for this internal deployment. It requires no TLS
+certificate or HTTPS redirect. Keep the HTTP option enabled for this site;
+HTTPS remains supported for other hosting environments.
 
 For `http://gpu217.rcp.epfl.ch:1312/ai-commons/`, explicitly set:
 
@@ -44,12 +48,12 @@ Rebuild the frontend when changing modes. No session secret is a build argument.
 Outside Compose, set `VITE_API_AUTH_MODE=public` and a same-origin API base when
 building. Public mode rejects a cross-origin API URL before sending requests.
 
-When the configured origin is HTTP and the exception is enabled, the cookie is
+When the configured origin is HTTP and the HTTP option is enabled, the cookie is
 `global-health-session`, without `Secure` or the `__Host-` prefix. It retains
 `HttpOnly`, `SameSite=Lax`, `Path=/`, host-only scope, signing and expiration.
 Only the configured cookie is accepted. HTTP and HTTPS use different signing
 salts, so an HTTP credential cannot be renamed into a valid HTTPS cookie.
-Enabling the exception with an HTTPS origin does not weaken the HTTPS cookie.
+Enabling the HTTP option with an HTTPS origin does not weaken the HTTPS cookie.
 
 HTTP does not encrypt session credentials; `HttpOnly` does not prevent network
 interception. This option does not enforce EPFL-only access: that restriction
@@ -57,9 +61,9 @@ must be provided by the hosting network. It is not the Internet deployment mode.
 Cookies are not isolated by port; other applications on the same host remain
 part of the trust boundary. Do not treat the distinct name as a security boundary.
 
-To migrate to HTTPS, disable the exception and update `API_PUBLIC_ORIGIN` after
-the infrastructure provides HTTPS. Visitors receive new sessions; transferring
-ownership of searches from HTTP sessions is not implemented.
+For a separate HTTPS deployment, leave the HTTP option disabled and configure
+an HTTPS `API_PUBLIC_ORIGIN`. Changing a deployment from HTTP to HTTPS creates
+new visitor sessions; transferring ownership of HTTP searches is not implemented.
 
 ## Browser contract
 
@@ -76,8 +80,9 @@ ownership of searches from HTTP sessions is not implemented.
    cookie but does not replay the failed POST. Old results are cleared and the
    user's typed query is retained.
 
-The cookie is named `__Host-global-health-session`, with `Secure`, `HttpOnly`,
-`SameSite=Lax`, `Path=/`, and no `Domain` attribute. Its seven-day expiration is
+In HTTPS mode, the cookie is named `__Host-global-health-session`, with `Secure`,
+`HttpOnly`, `SameSite=Lax`, `Path=/`, and no `Domain` attribute. Internal HTTP uses
+the cookie described above. In both modes, the seven-day expiration is
 checked on the server, even if a client retains the cookie longer. It contains
 only a signed random identifier, not provider credentials or user information.
 ItsDangerous implements signing and timestamp validation. The signing key stays
