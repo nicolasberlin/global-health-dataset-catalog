@@ -280,10 +280,23 @@ TRAEFIK_TEST_IMAGE=traefik:v3.7.5 .venv/bin/pytest tests/test_traefik_rate_limit
 
 They translate the deployed Compose router/middleware labels to Traefik's file
 provider, substitute a counting upstream, and exercise 5/10/20 cookie identities
-from one source IP. Each proxy 429 is checked against the upstream counter. A
+from one source IP. CI checks the production defaults separately, then stretches
+only the test bucket refill period to one hour while retaining the deployed burst
+sizes. This tests shared-IP exhaustion without requiring the runner to sustain
+280 req/s. Each proxy 429 is checked against the upstream counter. A
 separate test exhausts the frontend bucket while preserving API access. They do
 not mount the Docker socket, read production `.env`, or call model providers.
 Real signed-session/bootstrap, candidate-admission and polling quotas are covered
 separately by `tests/test_public_quotas.py` against PostgreSQL. This verifies the
 proxy policy and backend policy separately; it does not certify the live EPFL
 forwarding chain or full production throughput.
+
+The original ten-second polling benchmark remains opt-in:
+
+```sh
+TRAEFIK_LOAD_BENCHMARK=1 TRAEFIK_TEST_IMAGE=traefik:v3.7.5 .venv/bin/pytest tests/test_traefik_rate_limits.py -k same_ip_polling -s
+```
+
+It uses the unmodified production periods and requires a sufficiently fast load
+generator. Its duration assertion measures benchmark validity, not application
+correctness; it is not a CI gate. No production limit is increased for slower CI.

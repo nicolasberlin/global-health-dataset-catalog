@@ -90,11 +90,18 @@ def configuration():
 
 
 @pytest.fixture
-def proxy(tmp_path):
+def proxy(tmp_path, request):
     name = 'gh-rate-test-' + uuid.uuid4().hex[:10]
     origin, gateway = name + '-origin', name + '-proxy'
     (tmp_path / 'server.py').write_text(SERVER)
-    (tmp_path / 'dynamic.yml').write_text(json.dumps(configuration()))
+    config = configuration()
+    if getattr(request, 'param', None) == 'slow-refill':
+        # Keep deployed burst sizes and routing; make exhaustion independent of
+        # runner throughput. Production periods remain untouched.
+        for middleware in config['http']['middlewares'].values():
+            if 'rateLimit' in middleware:
+                middleware['rateLimit']['period'] = '1h'
+    (tmp_path / 'dynamic.yml').write_text(json.dumps(config))
     docker('network', 'create', name)
     try:
         docker('create', '--name', origin, '--network', name, '--network-alias', 'origin',
@@ -127,6 +134,10 @@ def proxy(tmp_path):
 
 
 @pytest.mark.anyio
+@pytest.mark.skipif(
+    not os.environ.get('TRAEFIK_LOAD_BENCHMARK'),
+    reason='Optional throughput benchmark; depends on runner capacity',
+)
 @pytest.mark.parametrize('visitors', [5, 10, 20])
 async def test_same_ip_polling(proxy, visitors):
     async with httpx.AsyncClient(base_url=proxy, headers={'Host': 'test.invalid'},
@@ -167,9 +178,56 @@ async def test_same_ip_polling(proxy, visitors):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize('proxy', ['slow-refill'], indirect=True)
 async def test_frontend_bucket_does_not_consume_api_budget(proxy):
     async with httpx.AsyncClient(base_url=proxy, headers={'Host': 'test.invalid'},
                                 timeout=10) as client:
         responses = await asyncio.gather(*[client.get('/ai-commons/') for _ in range(300)])
         assert any(r.status_code == 429 for r in responses)
         assert (await client.get('/ai-commons/api/poll')).status_code == 200
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('proxy', ['slow-refill'], indirect=True)
+@pytest.mark.parametrize('visitors', [5, 10, 20])
+async def test_shared_ip_bucket_exhaustion(proxy, visitors):
+    async with httpx.AsyncClient(base_url=proxy, headers={'Host': 'test.invalid'},
+                                timeout=10) as client:
+        before = (await client.get('/ai-commons/stats')).json()['count']
+        responses = []
+        started = time.monotonic()
+        # 420 requests exceed the unchanged 400-token API burst. Slow refill
+        # gives CI minutes of scheduling margin without requiring 280 req/s.
+        for _ in range(420 // visitors):
+            responses.extend(await asyncio.gather(*[
+                client.get('/ai-commons/api/poll', headers={
+                    'Cookie': f'visitor={i}',
+                    'X-Forwarded-For': f'198.51.100.{i + 1}',
+                }) for i in range(visitors)
+            ]))
+        elapsed = time.monotonic() - started
+        accepted = [r for r in responses if r.status_code == 200]
+        rejected = [r for r in responses if r.status_code == 429]
+        assert len(accepted) + len(rejected) == 420
+        assert 399 <= len(accepted) <= 400 + int(elapsed * 200 / 3600)
+        assert rejected, 'Same-IP cookies/forwarded headers must share the API bucket'
+        assert all('x-test-origin' not in r.headers for r in rejected)
+        assert all(r.text == 'Too Many Requests' for r in rejected)
+        # Independent frontend bucket permits inspection without refilling API.
+        after = (await client.get('/ai-commons/stats')).json()['count']
+        assert after - before == len(accepted)
+        backend = await client.get('/ai-commons/backend-limit')
+        assert backend.status_code == 429
+        assert backend.headers['x-test-origin'] == 'backend'
+        print(f'\n{visitors} visitors / shared IP, slow refill: '
+              f'{len(accepted)} origin, {len(rejected)} proxy 429')
+
+
+def test_deployed_rate_limit_defaults():
+    middlewares = configuration()['http']['middlewares']
+    assert middlewares['limit-ai-commons-api']['rateLimit'] == {
+        'average': 200, 'period': '1s', 'burst': 400,
+    }
+    assert middlewares['limit-ai-commons']['rateLimit'] == {
+        'average': 50, 'period': '1s', 'burst': 100,
+    }
