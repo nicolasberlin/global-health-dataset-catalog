@@ -118,3 +118,22 @@ jobs:
         env:
           EGRESS_TEST_IMAGE: global-health-ci:egress
         run: .venv/bin/pytest tests/test_container_egress.py -ra
+
+  proxy-rate-limits:
+    name: Traefik shared-IP rate limits
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.17'
+          enable-cache: true
+      - run: uv sync --locked --extra dev --python '3.11'
+      - name: Exercise real proxy with isolated upstream
+        env:
+          TRAEFIK_TEST_IMAGE: traefik:v3.7.5
+        run: .venv/bin/pytest tests/test_traefik_rate_limits.py -ra -s

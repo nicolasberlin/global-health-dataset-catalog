@@ -3,6 +3,8 @@
 The main `docker-compose.yml` targets an existing Traefik on the external
 `traefik` network. The gpu217 deployment uses HTTP on external port 1312,
 without TLS or HTTPS redirection. It does not publish database or API ports.
+HTTP is the intended mode for this EPFL-internal deployment; no migration to
+HTTPS is planned. HTTPS support remains available for other hosting environments.
 For a Python backend running on your laptop, use `docker-compose.local.yml`
 instead; its database port is bound only to `127.0.0.1`.
 
@@ -24,7 +26,7 @@ No certificate resolver or port 443 is required for this internal HTTP deploymen
 
 ### Anonymous search on internal HTTP
 
-Configure the [temporary HTTP session option](anonymous-visitor-sessions.md#temporary-internal-http-access)
+Configure the [internal EPFL HTTP session option](anonymous-visitor-sessions.md#internal-epfl-http-access)
 before rebuilding the app. It is disabled by default. The API base path is
 `/ai-commons/api`; the configured origin is `http://gpu217.rcp.epfl.ch:1312`,
 without a path. Public mode does not require `API_ACCESS_TOKENS`; token mode
@@ -224,3 +226,64 @@ The `/sources` administration routes, storage helpers, creation quota, and seed
 inserts are removed. Historical `data_sources` rows are preserved. No data-dropping
 migration is part of this cleanup, and source-discovery adapters still operate
 from URLs independently of the retired administration subsystem.
+
+## Traffic limits and shared EPFL addresses
+
+Application labels attach two independent per-IP token buckets to the existing
+Traefik routers, before prefix stripping. No change to shared Traefik static
+configuration is required.
+
+| Router | Average | Period | Burst |
+| --- | ---: | --- | ---: |
+| API (`/ai-commons/api`) | 200 | 1s | 400 |
+| Frontend (`/ai-commons`) | 50 | 1s | 100 |
+
+Optional deployment variables are `TRAEFIK_API_RATE_AVERAGE`,
+`TRAEFIK_API_RATE_BURST`, `TRAEFIK_FRONTEND_RATE_AVERAGE` and
+`TRAEFIK_FRONTEND_RATE_BURST`. Use positive integers; an average of zero disables
+Traefik limiting. Recreate the application containers after changing labels.
+
+The default source is the direct client IP **seen by Traefik**, not an arbitrary
+`X-Forwarded-For` header or session cookie. Users behind EPFL NAT/VPN share a
+bucket. If another proxy sits in front of Traefik, verify that topology before
+configuring `ipStrategy`; `FORWARDED_ALLOW_IPS` only controls Uvicorn's trust of
+Traefik, not Traefik's own source selection. Limits are per Traefik instance and
+reset when it restarts; these are traffic guards, not durable workload budgets.
+
+At the estimated 14 polls/second per active search, 5 visitors offer 70 req/s,
+10 offer 140, and 20 offer 280. With 20 visitors the API bucket's initial burst
+can hide overload for roughly five seconds; sustained polling will receive 429s.
+Multiple tabs and overlapping searches increase traffic further. The 200/400
+setting is an initial traffic policy, not a measured server capacity or a promise
+that 20 simultaneous searches behind one IP will be unthrottled. Reduce polling
+or revisit the IP threshold if that concurrency is required.
+
+Backend quotas remain independent: 20 new sessions/minute/IP, 10 searches/minute/
+session, 30 searches/minute/IP, and 60 admitted classification work items/minute/IP.
+Thus six searches returning ten candidates can exhaust the IP work budget even
+while Traefik allows all requests. GET polling does not consume backend workload
+quotas. Do not increase workload budgets solely because proxy polling is throttled.
+
+For a 429, inspect the existing Traefik access log (when enabled by infrastructure):
+`DownstreamStatus=429` with no upstream request/`OriginStatus` indicates a proxy
+rejection, whereas `OriginStatus=429` identifies the backend. Backend quota
+responses carry JSON `detail` and `Retry-After`; Traefik normally returns plain
+text. The frontend handles both, respects `Retry-After`, and never automatically
+replays a costly POST. Correlate logs when diagnosing live traffic; body format
+alone is not a permanent identification contract.
+
+Run the isolated proxy tests with:
+
+```sh
+TRAEFIK_TEST_IMAGE=traefik:v3.7.5 .venv/bin/pytest tests/test_traefik_rate_limits.py -s
+```
+
+They translate the deployed Compose router/middleware labels to Traefik's file
+provider, substitute a counting upstream, and exercise 5/10/20 cookie identities
+from one source IP. Each proxy 429 is checked against the upstream counter. A
+separate test exhausts the frontend bucket while preserving API access. They do
+not mount the Docker socket, read production `.env`, or call model providers.
+Real signed-session/bootstrap, candidate-admission and polling quotas are covered
+separately by `tests/test_public_quotas.py` against PostgreSQL. This verifies the
+proxy policy and backend policy separately; it does not certify the live EPFL
+forwarding chain or full production throughput.

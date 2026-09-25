@@ -161,8 +161,9 @@ Vite build variable and must never be compiled into the frontend.
 
 Set `API_AUTH_MODE=public` for automatic anonymous browser sessions, with
 per-visitor/IP quotas and global workload limits. Compose builds the frontend
-in the same mode. HTTPS is the default requirement; internal EPFL HTTP has an
-explicit temporary opt-in. Trusted proxy configuration and network access must
+in the same mode. HTTP is the intended mode for the internal EPFL site and
+requires explicit opt-in. HTTPS remains the default for other deployments.
+Trusted proxy configuration and network access must
 be verified before deployment. See
 [Anonymous visitor sessions](docs/anonymous-visitor-sessions.md) for the API
 contract, configuration, and browser validation.
@@ -170,7 +171,7 @@ contract, configuration, and browser validation.
 The local Compose file publishes PostgreSQL only on `127.0.0.1`. The main
 `docker-compose.yml` is for internal EPFL HTTP deployment on port 1312 behind the external Traefik and
 does not publish PostgreSQL. See [Deployment on EPFL](docs/DEPLOYMENT.md) for
-the required domain, certificates, and container egress policy.
+the required hostname, proxy settings, and container egress policy.
 
 For a more detailed setup and troubleshooting guide, read
 [Developer Onboarding](docs/ONBOARDING.md).
