@@ -317,3 +317,9 @@ class CollectorCollectionResponse(BaseModel):
 
 class CollectorCollectionJobResponse(BaseModel):
     job: CollectorCollectionJob
+
+
+class CollectorSearchProgressResponse(BaseModel):
+    search_id: UUID
+    polling_required: bool
+    items: list[CollectorRepositorySearchItem]

@@ -7,8 +7,7 @@ import CollectedDatasetsSection from './components/CollectedDatasetsSection.jsx'
 import { getVoteAgreement } from './components/RepositoryAcceptedCard.jsx';
 import RepositorySearchSection from './components/RepositorySearchSection.jsx';
 
-import { useClassifications } from './jobs/useClassifications.js';
-import { useCollectionJobs } from './jobs/useCollectionJobs.js';
+import { useSearchProgress } from './jobs/useSearchProgress.js';
 
 export default function App() {
     const [activeView, setActiveView] = useState('search');
@@ -18,15 +17,15 @@ export default function App() {
     const catalog = useDatasetCatalog();
     const { loadCollectedDatasets } = catalog;
     const { session, status: sessionStatus, error: sessionError, reconnect } = useApiSession();
-    const { registerJob, resolveCollection, retryJob } = useCollectionJobs(session, loadCollectedDatasets);
-    const { follow } = useClassifications(session, (item, requestSession, trackingError, requesting) => {
-        const registered = registerCandidateCollection(item, requestSession);
-        if (repositorySearchIdRef.current !== item.search_id) return;
-        setRepositoryCandidates(current => current.map(candidate => candidate.id === item.candidate_id
-            ? { ...candidate, item: registered, status: item.classification_status,
-                error: item.classification_error ?? '', trackingError, requesting }
-            : candidate));
-    });
+    const { followSearch, analyze, retryCollection } = useSearchProgress(session,
+        (searchId, items, requestSession, trackingError) => {
+            if (!requestSession.isCurrent() || repositorySearchIdRef.current !== searchId) return;
+            setRepositoryCandidates(items.map(item => ({
+                id: item.candidate_id, item, status: item.classification_status,
+                error: item.classification_error ?? '',
+                trackingError: item.trackingError || trackingError, requesting: item.requesting,
+            })));
+        }, loadCollectedDatasets);
     const [repositoryQuery, setRepositoryQuery] = useState('');
     const [repositoryResultQuery, setRepositoryResultQuery] = useState('');
     const [repositoryOrigin, setRepositoryOrigin] = useState(null);
@@ -55,14 +54,6 @@ export default function App() {
         setRepositoryWarnings([]);
     }, [session, sessionStatus]);
 
-    function registerCandidateCollection(item, requestSession) {
-        const collection = item.automatic_collection;
-        if (!collection?.job?.id) return item;
-        registerJob(collection.job, requestSession);
-        // Store only the reference; the job manager owns every job status.
-        return { ...item, automatic_collection: { jobId: collection.job.id } };
-    }
-
     async function restoreAnalysis(manual = false) {
         const requestSession = session;
         if (!requestSession.ready || !requestSession.isCurrent() ||
@@ -88,10 +79,10 @@ export default function App() {
             setRepositoryResultQuery(data.query);
             setRepositoryError('');
             setRepositoryCandidates(data.items.map(item => ({
-                id: item.candidate_id, item: registerCandidateCollection(item, requestSession),
+                id: item.candidate_id, item: item,
                 status: item.classification_status, error: item.classification_error ?? '',
             })));
-            for (const item of data.items) void follow(item, requestSession);
+            followSearch(data.search_id, data.items, requestSession);
         } catch (error) {
             if (!isAbortError(error) && requestSession.isCurrent() &&
                 repositorySearchRunRef.current === runId && (manual || error.status !== 404)) {
@@ -103,7 +94,7 @@ export default function App() {
     useEffect(() => { void restoreAnalysis(); }, [session, sessionStatus]);
 
     function analyzeCandidate(candidate) {
-        void follow(candidate.item, session, { submit: true, retry: candidate.status === 'error' });
+        void analyze(candidate.item, session);
     }
 
     async function searchRepositories(event) {
@@ -182,7 +173,7 @@ export default function App() {
 
             const candidates = onlineItems.map((item) => ({
                 id: item.candidate_id,
-                item: registerCandidateCollection(item, requestSession),
+                item: item,
                 status: item.classification_status ?? 'pending',
                 error: item.classification_error ?? '',
             }));
@@ -192,7 +183,7 @@ export default function App() {
                 Array.isArray(responsePayload?.warnings) ? responsePayload.warnings : [],
             );
 
-            for (const candidate of candidates) void follow(candidate.item, requestSession);
+            followSearch(searchId, onlineItems, requestSession);
         } catch (exception) {
             if (isAbortError(exception) || abortController.signal.aborted) {
                 return;
@@ -256,14 +247,8 @@ export default function App() {
                 }
 
                 return getVoteAgreement(candidate.item.classification) === agreementFilter;
-            }).map((candidate) => ({
-                ...candidate,
-                item: {
-                    ...candidate.item,
-                    automatic_collection: resolveCollection(candidate.item.automatic_collection),
-                },
-            })),
-        [agreementFilter, repositoryCandidates, resolveCollection],
+            }),
+        [agreementFilter, repositoryCandidates],
     );
 
     const repositoryClassificationErrors = useMemo(
@@ -306,7 +291,7 @@ export default function App() {
             <RepositorySearchSection
                 accessReady={sessionStatus === 'ready'}
                 analyzeCandidate={analyzeCandidate}
-                retryCollection={candidate => retryJob(candidate.item.automatic_collection.job.id, session)}
+                retryCollection={candidate => retryCollection(candidate.item, session)}
                 restoreAnalysis={() => restoreAnalysis(true)}
                 acceptedRepositoryCandidates={acceptedRepositoryCandidates}
                 agreementFilter={agreementFilter}

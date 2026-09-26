@@ -1,12 +1,16 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App.jsx';
+
+configure({ asyncUtilTimeout: 3000 });
 
 const SEARCH_ID = '11111111-1111-4111-8111-111111111111';
 const CANDIDATE_ID = '22222222-2222-4222-8222-222222222222';
 
 function jsonResponse(payload, { ok = true, status = 200 } = {}) {
+    if (payload.candidate_id) payload = { search_id: SEARCH_ID, items: [payload],
+        polling_required: ['pending', 'running'].includes(payload.automatic_collection?.state) };
     return {
         ok,
         status,
@@ -155,7 +159,7 @@ describe('database-first dataset search', () => {
             }
             if (
                 url.endsWith(
-                    `/collector/repository-candidates/${CANDIDATE_ID}`,
+                    `/collector/searches/${SEARCH_ID}/progress`,
                 )
             ) {
                 return classificationResponse;
@@ -205,7 +209,7 @@ describe('database-first dataset search', () => {
         ).toBeInTheDocument();
         expect(screen.getByText('AI agreement')).toBeInTheDocument();
         const classificationCall = global.fetch.mock.calls.find(([url]) =>
-            String(url).includes(`/repository-candidates/${CANDIDATE_ID}`),
+            String(url).includes(`/searches/${SEARCH_ID}/progress`),
         );
         expect(global.fetch.mock.calls.some(([url]) => String(url).includes('/classify'))).toBe(false);
         expect(classificationCall?.[1]?.body).toBeUndefined();
@@ -229,6 +233,7 @@ describe('database-first dataset search', () => {
             keywords: ['malaria'],
             metadata: {},
         };
+        let polls = 0;
         mockApi((url) => {
             if (url.endsWith('/collector/search-datasets')) {
                 return Promise.resolve(
@@ -243,7 +248,7 @@ describe('database-first dataset search', () => {
             }
             if (
                 url.endsWith(
-                    `/collector/repository-candidates/${CANDIDATE_ID}`,
+                    `/collector/searches/${SEARCH_ID}/progress`,
                 )
             ) {
                 return Promise.resolve(
@@ -264,23 +269,12 @@ describe('database-first dataset search', () => {
                             },
                         },
                         automatic_collection: {
-                            state: 'pending',
+                            state: ++polls === 1 ? 'pending' : 'saved',
                             job: {
                                 id: 55,
-                                status: 'pending',
-                                saved_count: 0,
+                                status: polls === 1 ? 'pending' : 'done',
+                                saved_count: polls === 1 ? 0 : 1,
                             },
-                        },
-                    }),
-                );
-            }
-            if (url.endsWith('/collector/collection-jobs/55')) {
-                return Promise.resolve(
-                    jsonResponse({
-                        job: {
-                            id: 55,
-                            status: 'done',
-                            saved_count: 1,
                         },
                     }),
                 );
@@ -292,7 +286,7 @@ describe('database-first dataset search', () => {
         submitSearch();
 
         expect(
-            await screen.findByText('Automatic collection pending'),
+            await screen.findByText('Automatic collection pending', {}, { timeout: 3000 }),
         ).toBeInTheDocument();
         expect(
             await screen.findByText('Dataset saved to the local catalog', {}, {
@@ -301,7 +295,7 @@ describe('database-first dataset search', () => {
         ).toBeInTheDocument();
         expect(
             global.fetch.mock.calls.some(([url]) =>
-                String(url).endsWith('/collector/collection-jobs/55'),
+                String(url).endsWith(`/collector/searches/${SEARCH_ID}/progress`),
             ),
         ).toBe(true);
     });
@@ -335,7 +329,7 @@ describe('database-first dataset search', () => {
             }
             if (
                 url.endsWith(
-                    `/collector/repository-candidates/${CANDIDATE_ID}`,
+                    `/collector/searches/${SEARCH_ID}/progress`,
                 )
             ) {
                 return Promise.resolve(
@@ -359,7 +353,7 @@ describe('database-first dataset search', () => {
 
         submitSearch();
 
-        expect(await screen.findByText(/1 was rejected/)).toBeInTheDocument();
+        expect(await screen.findByText(/1 was rejected/, {}, { timeout: 3000 })).toBeInTheDocument();
         expect(
             global.fetch.mock.calls.some(([url]) =>
                 String(url).includes('/collector/collection-jobs/'),

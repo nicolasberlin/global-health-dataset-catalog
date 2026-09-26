@@ -12,7 +12,7 @@ const candidate = (id = 'candidate-a') => ({
 });
 const accepted = (item, job = { id: 42, status: 'pending', saved_count: 0 }) => ({
     ...item, classification_status: 'accepted', classification: { accepted: true, ensemble: {} },
-    automatic_collection: { state: job.status, job },
+    automatic_collection: { state: job.status === 'done' ? 'saved' : job.status, job },
 });
 function deferred() {
     let resolve;
@@ -23,9 +23,10 @@ const advance = async (ms = 0) => act(async () => { await vi.advanceTimersByTime
 async function search(query) {
     fireEvent.change(screen.getByLabelText('Search for a health dataset'), { target: { value: query } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-    await advance(700);
+    await advance(2000);
 }
 function installApi({ items = [candidate()], classify, poll, catalog } = {}) {
+    let classified = false;
     global.fetch = vi.fn(async (input, options = {}) => {
         const url = String(input);
         if (url.endsWith('/repository-analyses/latest')) return { ok: false, status: 404, json: async () => ({ detail: 'None' }) };
@@ -36,12 +37,19 @@ function installApi({ items = [candidate()], classify, poll, catalog } = {}) {
                 ? { search_id: 'search-a', origin: 'online', items }
                 : { search_id: 'search-b', origin: 'database', items: [{ ...dataset, dataset_url: 'https://example.org/vaccination', title: 'Vaccination data' }] });
         }
-        if (/\/repository-candidates\/[^/]+$/.test(url)) {
-            const item = items.find((entry) => url.endsWith(`/${entry.candidate_id}`));
-            return classify?.(item, options) ?? response(accepted(item));
-        }
-        if (url.endsWith('/collection-jobs/42')) {
-            return poll?.(options) ?? response({ job: { id: 42, status: 'done', saved_count: 1 } });
+        if (url.endsWith('/searches/search-a/progress')) {
+            if (!classified) {
+                classified = true;
+                const results = await Promise.all(items.map(async item => {
+                    const reply = await (classify?.(item, options) ?? response(accepted(item)));
+                    return reply.json();
+                }));
+                return response({ search_id: 'search-a', polling_required: true, items: results });
+            }
+            const reply = await (poll?.(options) ?? response({ job: { id: 42, status: 'done', saved_count: 1 } }));
+            const { job } = await reply.json();
+            return response({ search_id: 'search-a', polling_required: !['done', 'error'].includes(job.status),
+                items: items.map(item => accepted(item, job)) });
         }
         throw new Error(`Unexpected request ${url}`);
     });
@@ -76,8 +84,9 @@ it('tracks a shared job once across a new search and navigation, then refreshes 
     await search('vaccination');
     expect(screen.getByRole('heading', { name: 'Vaccination data' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Catalog' }));
-    await advance(750);
-    expect(callsTo('/collection-jobs/42')).toHaveLength(1);
+    await advance(2050);
+    expect(callsTo('/searches/search-a/progress')).toHaveLength(2);
+    expect(callsTo('/collection-jobs/42')).toHaveLength(0);
     expect(callsTo('/collected-datasets')).toHaveLength(2);
     expect(screen.getByRole('heading', { name: dataset.title })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Search datasets' }));
@@ -93,8 +102,9 @@ it('registers a job from a late classification in the same session without repla
     await search('malaria');
     await search('vaccination');
     await act(async () => late.resolve(response(accepted(candidate()))));
-    await advance(750);
-    expect(callsTo('/collection-jobs/42')).toHaveLength(1);
+    await advance(2050);
+    expect(callsTo('/searches/search-a/progress')).toHaveLength(2);
+    expect(callsTo('/collection-jobs/42')).toHaveLength(0);
     expect(callsTo('/collected-datasets')).toHaveLength(2);
     expect(screen.getByRole('heading', { name: 'Vaccination data' })).toBeVisible();
     expect(screen.queryByText('Malaria candidate-a')).not.toBeInTheDocument();
@@ -139,12 +149,13 @@ it('aborts polling on unmount and ignores its late completion', async () => {
     const { unmount } = render(<App />);
     await advance(50);
     await search('malaria');
-    await advance(700);
+    await advance(2000);
     unmount();
     expect(pollSignal.aborted).toBe(true);
     await act(async () => late.resolve(response({ job: { id: 42, status: 'done', saved_count: 1 } })));
     await advance(4000);
-    expect(callsTo('/collection-jobs/42')).toHaveLength(1);
+    expect(callsTo('/searches/search-a/progress')).toHaveLength(2);
+    expect(callsTo('/collection-jobs/42')).toHaveLength(0);
     expect(callsTo('/collected-datasets')).toHaveLength(1);
     expect(screen.queryByText('Malaria candidate-a')).not.toBeInTheDocument();
 });
@@ -157,10 +168,10 @@ it('keeps the server status on tracking failure and recovers automatically', asy
     } });
     render(<App />);
     await search('malaria');
-    await advance(700);
+    await advance(2000);
     expect(screen.getByText('Collection tracking temporarily unavailable')).toBeVisible();
     expect(screen.queryByText('Automatic collection failed')).not.toBeInTheDocument();
-    await advance(3000);
+    await advance(4000);
     expect(screen.getByText('Dataset saved to the local catalog')).toBeVisible();
 });
 

@@ -83,17 +83,17 @@ it('follows an online candidate through authenticated polling without posting cl
         classification_status: 'queued', url: 'https://example.org/data', source: 'Test' };
     installApi(() => reply(200, { origin: 'online', search_id: 'search', items: [candidate] }));
     const original = fetch.getMockImplementation();
-    fetch.mockImplementation(url => url.endsWith('/repository-candidates/candidate')
-        ? reply(200, { ...candidate, classification_status: 'accepted',
+    fetch.mockImplementation(url => url.endsWith('/searches/search/progress')
+        ? reply(200, { search_id: 'search', polling_required: false, items: [{ ...candidate, classification_status: 'accepted',
             classification: { accepted: true, ensemble: {} },
-            automatic_collection: { job: { id: 42, status: 'done', saved_count: 1 } } })
+            automatic_collection: { state: 'saved', job: { id: 42, status: 'done', saved_count: 1 } } }] })
         : original(url));
     render(<App />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Search', exact: true })).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Search for a health dataset'), { target: { value: 'malaria' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }));
     await screen.findByText('Dataset saved to the local catalog', {}, { timeout: 3000 });
-    expect(calls('/repository-candidates/candidate')).toHaveLength(1);
+    expect(calls('/searches/search/progress')).toHaveLength(1);
     expect(calls('/classify')).toHaveLength(0);
     expect(calls('/session')).toHaveLength(1);
 });
