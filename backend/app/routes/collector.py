@@ -27,6 +27,7 @@ from app.database import (
     search_collected_datasets,
 )
 from app.db.collection_jobs import retry_collection_job_for_owner
+from app.db.search_progress import read_search_progress
 from app.routes.collector_presenters import (
     public_collection_job,
     public_dataset_signals,
@@ -44,6 +45,7 @@ from app.routes.collector_schemas import (
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorRepositorySearchWarning,
+    CollectorSearchProgressResponse,
     CollectorValidation,
 )
 from app.security import (
@@ -285,6 +287,37 @@ async def _search_online_repositories(
     """Run blocking repository providers off the event loop."""
 
     return await asyncio.to_thread(search_repository_metadata, query)
+
+
+@router.get("/searches/{search_id}/progress")
+async def search_progress(
+    search_id: UUID,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    response: Response,
+) -> CollectorSearchProgressResponse:
+    snapshot = await read_search_progress(search_id, principal.owner_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Search not found")
+    status, candidates, collections = snapshot
+    items = [
+        _collector_repository_candidate(
+            candidate,
+            automatic_collection=(
+                _automatic_collection(collections.get(candidate["id"]))
+                if candidate["classification_status"] == "accepted" else None
+            ),
+        ) for candidate in candidates
+    ]
+    polling_required = status == "running" or any(
+        item.classification_status in {"queued", "classifying"}
+        or (item.automatic_collection is not None
+            and item.automatic_collection.state in {"pending", "running"})
+        for item in items
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return CollectorSearchProgressResponse(
+        search_id=search_id, polling_required=polling_required, items=items,
+    )
 
 
 @router.get("/repository-analyses/latest")

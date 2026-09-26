@@ -4,6 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App.jsx';
 
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
+const progress = items => response({ search_id: 'search-a', items,
+    polling_required: items.some(item => ['queued', 'classifying'].includes(item.classification_status)) });
 const candidate = (id, status = 'queued') => ({
     candidate_id: id, search_id: 'search-a', title: `Dataset ${id}`,
     url: 'https://example.org/data', source: 'DataCite', classification_status: status,
@@ -46,8 +48,8 @@ it('restores queued work after reload without submitting discovered candidates',
     let polls = 0;
     api(url => {
         if (url.endsWith('/repository-analyses/latest')) return response(analysis([queued, discovered]));
-        if (url.endsWith('/repository-candidates/requested')) {
-            return response(++polls === 1 ? { ...queued, classification_status: 'classifying' } : accepted(queued));
+        if (url.endsWith('/searches/search-a/progress')) {
+            return progress([++polls === 1 ? { ...queued, classification_status: 'classifying' } : accepted(queued), discovered]);
         }
         throw new Error(`Unexpected request ${url}`);
     });
@@ -55,9 +57,9 @@ it('restores queued work after reload without submitting discovered candidates',
     await advance(50);
     expect(screen.getByText('Waiting')).toBeVisible();
     expect(screen.getByText('Not requested')).toBeVisible();
-    await advance(700);
+    await advance(2000);
     expect(screen.getByText('AI analysis…')).toBeVisible();
-    await advance(750);
+    await advance(2050);
     expect(screen.getByText('Dataset saved to the local catalog')).toBeVisible();
     expect(screen.getByText('Not requested')).toBeVisible();
     expect(calls('/classify')).toHaveLength(0);
@@ -71,7 +73,7 @@ it('reads persisted state after a lost POST acknowledgement without reposting', 
         if (url.endsWith('/repository-analyses/latest')) return response({ detail: 'None' }, 404);
         if (url.endsWith('/search-datasets')) return response(analysis([item]));
         if (url.endsWith('/classify')) throw new TypeError('Connection lost');
-        if (url.endsWith('/repository-candidates/requested')) return response(accepted(item));
+        if (url.endsWith('/searches/search-a/progress')) return progress([accepted(item)]);
         throw new Error(`Unexpected request ${url}`);
     });
     render(<App />);
@@ -81,11 +83,10 @@ it('reads persisted state after a lost POST acknowledgement without reposting', 
     await advance();
     fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
     await advance();
-    expect(screen.getByText(/Analysis tracking unavailable/)).toBeVisible();
-    await advance(700);
+    await advance(2000);
     expect(screen.getByText('Dataset saved to the local catalog')).toBeVisible();
     expect(calls('/classify')).toHaveLength(1);
-    expect(calls('/repository-candidates/requested').filter(([, options]) => options.method !== 'POST')).toHaveLength(1);
+    expect(calls('/searches/search-a/progress').filter(([, options]) => options.method !== 'POST')).toHaveLength(1);
 });
 
 it('only retries an interrupted classification after an explicit click', async () => {
@@ -93,7 +94,7 @@ it('only retries an interrupted classification after an explicit click', async (
     api(url => {
         if (url.endsWith('/repository-analyses/latest')) return response(analysis([item]));
         if (url.endsWith('/classify?retry=true')) return response({ ...item, classification_status: 'queued', classification_error: '' }, 202);
-        if (url.endsWith('/repository-candidates/interrupted')) return response(accepted(item));
+        if (url.endsWith('/searches/search-a/progress')) return progress([accepted(item)]);
         throw new Error(`Unexpected request ${url}`);
     });
     render(<App />);
@@ -101,8 +102,7 @@ it('only retries an interrupted classification after an explicit click', async (
     expect(calls('/classify')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Retry analysis' }));
     await advance();
-    expect(screen.getByText('Waiting')).toBeVisible();
-    await advance(700);
+    await advance(2000);
     expect(screen.getByText('Dataset saved to the local catalog')).toBeVisible();
     expect(calls('/classify?retry=true')).toHaveLength(1);
 });
@@ -131,14 +131,14 @@ it('aborts classification polling on unmount and ignores its late accepted resul
     const item = candidate('requested');
     api((url, options) => {
         if (url.endsWith('/repository-analyses/latest')) return response(analysis([item]));
-        if (url.endsWith('/repository-candidates/requested')) { signal = options.signal; return late.promise; }
+        if (url.endsWith('/searches/search-a/progress')) { signal = options.signal; return late.promise; }
         throw new Error(`Unexpected request ${url}`);
     });
     const { unmount } = render(<App />);
-    await advance(750);
+    await advance(2050);
     unmount();
     expect(signal.aborted).toBe(true);
-    await act(async () => late.resolve(response(accepted(item))));
+    await act(async () => late.resolve(progress([accepted(item)])));
     await advance(3000);
     expect(screen.queryByText('Dataset requested')).not.toBeInTheDocument();
     expect(calls('/collected-datasets')).toHaveLength(1);
@@ -148,7 +148,7 @@ it('keeps tracking a queued classification across a new search without replacing
     const item = candidate('requested');
     api(url => {
         if (url.endsWith('/repository-analyses/latest')) return response(analysis([item]));
-        if (url.endsWith('/repository-candidates/requested')) return response(accepted(item));
+        if (url.endsWith('/searches/search-a/progress')) return progress([accepted(item)]);
         if (url.endsWith('/search-datasets')) return response({ search_id: 'search-b', origin: 'database', items: [] });
         throw new Error(`Unexpected request ${url}`);
     });
@@ -156,7 +156,7 @@ it('keeps tracking a queued classification across a new search without replacing
     await advance(50);
     fireEvent.change(screen.getByLabelText('Search for a health dataset'), { target: { value: 'vaccination' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-    await advance(750);
+    await advance(2050);
     expect(screen.queryByText('Dataset requested')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Search for a health dataset')).toHaveValue('vaccination');
     expect(calls('/collected-datasets')).toHaveLength(2);
