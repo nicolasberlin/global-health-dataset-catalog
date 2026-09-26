@@ -1,122 +1,388 @@
-GLOBAL HEALTH DATASET CATALOG - PRIORITIZED BACKLOG
-Last reviewed: 2026-09-11
+GLOBAL HEALTH DATASET CATALOG - VERIFIED BACKLOG
+Last reviewed: 2026-09-26
 
-P0 - REQUIRED BEFORE PUBLIC EXPOSURE
+SCOPE AND STATUS
+Reviewed against the current feat/traefik-rate-limits checkout, including local
+uncommitted changes, and the local codex/search-progress worktree (d76afbf).
+Implemented locally does not mean merged, deployed, or verified in production.
+PR #9: https://github.com/nicolasberlin/global-health-dataset-catalog/pull/9
+Its current remote merge status was not verified in this review.
+This review updates documentation only; it does not execute the tasks below.
+Each numbered task uses the requested What / Where / How / Result / Done format.
+Priority order: finish existing work, correct confirmed behavior, improve operations,
+then measure optimizations. Conditional tasks are not release requirements.
 
-1. Scope collection-job reads to their owner.
-   GET /collector/collection-jobs/{job_id} authenticates a principal but currently
-   loads a sequential job ID without checking ownership. Add an owner relationship
-   or join through repository_candidates and search_sessions, then return 404 for
-   jobs owned by another principal.
+ALREADY PRESENT - DO NOT REIMPLEMENT
+- Owner-scoped job/candidate reads and safe public error presenters.
+- Explicit collection retry with ownership checks, atomic workload admission and
+  protection against duplicate active collection. Reads do not enqueue work.
+  Per-job retry cooldown/attempt caps are a separate policy decision (task 16).
+- Persisted classification/collection queues, bounded consumers, automatic enqueue
+  of online candidates, saved individual votes and latest-analysis restoration.
+  Recovery intentionally supports ONE API process/instance; no worker leases.
+- Versioned, data-preserving migrations and initialization checks cached per pool.
+- Paginated catalog with database-side search/filters and lookup by dataset IDs.
+- Three voters constructed through the same RCP client/factory, shared vote execution,
+  model request timeouts, response-size limits and scoped vote fingerprint reuse.
+- Frontend API client/workflow hooks and agreement filters derived from results.
+- Landing-page fallback when structured candidates lack usable distributions.
+- Consistent distribution/validation formats before persistence.
+- Access status/reason, failed validation reports, DOI, licence and metadata provenance.
+  These exist already; their interpretation and completeness can still improve.
+- Validated-address HTTP connections, redirect checks, bounded network reads,
+  container egress filtering and private PostgreSQL in production Compose.
+- CI definitions for PostgreSQL, frontend, browser, container and proxy tests.
+  Presence of CI configuration is not evidence that a particular release passed.
+- Source-administration HTTP routes/UI removed; some legacy storage/worker code remains.
 
-2. Prevent automatic-collection retry and quota bypass.
-   Re-reading an accepted candidate can create a new job after an error or an empty
-   result without consuming a quota. Require an explicit retry operation, apply a
-   dedicated collection quota, and enforce backoff and a maximum attempt count.
+P0 - COMPLETE EXISTING WORK / RELEASE CHECKS
 
-3. Return stable public errors.
-   Log full exceptions with a correlation ID. Persist and return a controlled error
-   code and safe message instead of str(exception).
+TODO 1: Integrate and verify the existing local reliability fixes
+What to do: Finish review and integration of the JSON-prefix validation and durable
+  completion/retry changes already in this checkout. Do not rewrite them.
+Where: collector/validation/{downloads,json_sample}.py, collector/storage/models.py;
+  backend/app/{workers,classification_worker,collection_worker}.py;
+  backend/app/db/{classification_completion,collection_completion,collection_jobs,
+  repository_candidates}.py; their modified tests and workflow/deployment docs.
+How: Review the current diff; run lint, the full Python suite with PostgreSQL and
+  relevant frontend/browser tests on the integration branch. Resolve conflicts with
+  the polling change. Keep model execution outside persistence-only retries.
+Expected result: Valid partial JSON samples are handled conservatively; transient
+  database outages do not discard finished work or rerun successful model calls.
+Done when: Changes are reviewed and integrated; tests cover partial/invalid JSON,
+  lost commit acknowledgements, stale attempts, DB recovery and concurrent retries;
+  the CI result and release revision are recorded. No secrets enter the commit.
 
-4. Apply the supplied CollectorConfig to every network operation.
-   request_timeout_seconds, max_sample_bytes, and user_agent currently fall back to
-   module defaults during HTML fetches and distribution validation. Pass configured
-   dependencies through the whole pipeline and test the effective values.
+TODO 2: Complete integration of grouped search-progress polling
+What to do: Verify PR #9 status and integrate its existing implementation if needed.
+Where: codex/search-progress; backend/app/db/search_progress.py;
+  backend/app/routes/collector.py; frontend/src/jobs/useSearchProgress.js;
+  frontend/src/App.jsx and associated backend/frontend/browser tests.
+How: Reuse the existing search IDs, ownership checks and grouped endpoint. Reconcile
+  with task 1; verify the resulting branch rather than assuming worktree results
+  also cover the final combined changes. Do not add SSE/WebSockets.
+Expected result: One non-overlapping polling loop per followed search, approximately
+  every two seconds, stops at completion and respects 429/Retry-After.
+Done when: Integration tests cover simultaneous searches, foreign-owner 404s,
+  terminal states, explicit retries, session changes and stale responses; the UI
+  resumes saved analysis and no longer polls every candidate independently.
 
-5. Confirm deployment controls.
-   Enforce HTTPS, keep PostgreSQL private, restrict collector egress, store secrets
-   in the deployment secret manager, and verify all three RCP models under realistic
-   concurrency. Add PostgreSQL-backed tests to the release gate.
+TODO 3: Verify the actual release environment before public exposure
+What to do: Record deployment evidence and configure HTTPS if this HTTP-oriented
+  deployment will become publicly accessible. Do not assume external TLS exists.
+Where: docker-compose.yml, docker-compose.local.yml, backend/container_entrypoint.py
+  if applicable, docs/DEPLOYMENT.md, .github/workflows/ci.yml, deployment infrastructure.
+How: Check the actual TLS termination/proxy topology; either enforce HTTPS there or
+  add the appropriate deployment override. Verify secure public-session cookies,
+  trusted forwarding, private PostgreSQL, egress rules and all three RCP models.
+  Reuse the existing CI jobs. Keep the one-instance deployment restriction explicit.
+Expected result: The documented deployment matches the running environment.
+Done when: The target release passes CI; public access uses HTTPS when applicable;
+  database exposure and egress checks pass; session and model smoke checks succeed.
+  This remains a release check, not a claim that today's infrastructure is unsafe.
 
-P1 - RELIABILITY AND DATA INTEGRITY
+P1 - CORRECTNESS AND OPERATIONAL RELIABILITY
 
-6. Move orchestration from React to a durable backend workflow.
-   The browser currently dispatches candidate classifications. A tab close or reload
-   can leave candidates pending. Let the backend own search, classification, and
-   collection, and expose resumable status by search ID.
+TODO 4: Report ambiguous access failures accurately
+What to do: Stop describing every 403 and CAPTCHA as proof that authentication
+  or permission is required. Preserve the existing four access states.
+Where: collector/validation/downloads.py (_response_status),
+  tests/test_download_validation.py, frontend/src/components/DatasetAccessDetails.jsx
+  and its tests if displayed wording needs adjustment.
+How: Treat explicit authentication evidence as restricted; classify bare 403s and
+  ambiguous anti-bot challenges as unconfirmed with a precise reason. Keep 404/410
+  unavailable. Preserve bounded probing and current publication rules.
+Expected result: Users can distinguish an explicit access restriction from a check
+  that could not establish availability.
+Done when: Tests cover 401, bare 403, explicit authentication errors, HTTP-200 login
+  forms and CAPTCHA pages; saved/public reasons agree. No schema migration expected.
 
-7. Replace process-local background tasks with durable workers.
-   Use a PostgreSQL lease/heartbeat queue or a dedicated task queue. Add bounded
-   capacity, idempotency keys, retries with backoff, cancellation, and recovery.
-   Keep queued jobs pending until a worker actually starts them.
+TODO 5: Strengthen bounded validation of non-JSON resources
+What to do: Avoid confirming arbitrary non-empty bytes solely because a URL or
+  response header suggests CSV, ZIP or another recognized format.
+Where: collector/validation/downloads.py (_response_status, _validated_format,
+  _format_from_body_sample), tests/test_download_validation.py,
+  tests/test_validation_persistence.py.
+How: Define conservative evidence rules per supported format. Check recognizable
+  signatures for binary formats and plausible tabular structure for CSV/TSV.
+  Unsupported or ambiguous evidence remains unconfirmed. Never download/unpack a
+  complete archive or claim that a prefix proves the whole file is valid.
+Expected result: A plain error message at a .csv or .zip URL is not called available.
+Done when: Tests cover valid samples, mismatched content, plain-text errors,
+  truncated samples, encoding variants and existing JSON behavior; byte/network
+  limits and distribution-format persistence consistency remain intact.
 
-8. Add data-preserving database migrations and recovery procedures.
-   Adopt a migration tool, automate backups, and test restore and rollback. Add
-   readiness checks for PostgreSQL and required RCP configuration; keep /health as
-   a lightweight liveness endpoint.
+TODO 6: Finish propagating network configuration through the pipeline
+What to do: Address the remaining gaps, not the already-configured HTML fetch path.
+  Discovery helpers still use defaults, and distribution probes do not receive the
+  configured user agent. HTML timeout/user agent and validation sample size/timeout
+  are already forwarded by collect_source_with_report.
+Where: collector/main.py, collector/config.py, collector/discovery/manager.py,
+  collector/discovery/adapters/, collector/validation/downloads.py;
+  tests/test_collector_pipeline.py, test_discovery_adapters.py, test_download_validation.py.
+How: Pass configuration or configured fetch dependencies through default adapters
+  and probe requests. Preserve explicitly injected test/custom callables where
+  practical. Keep DNS pinning, redirect checks and response bounds unchanged.
+Expected result: A custom run configuration controls its actual outbound requests.
+Done when: Tests inspect effective timeouts, sample bounds and user-agent headers
+  during discovery, HTML fetching and distribution HEAD/GET requests.
 
-9. Model validated distributions as one typed aggregate.
-   Replace the parallel distributions and validation_results lists with a
-   ValidatedDistribution type so URL/format evidence cannot become orphaned.
+TODO 7: Add bounded operational measurements
+What to do: Measure queue wait/duration, provider latency/failures and persistence
+  retries without introducing a mandatory distributed monitoring stack.
+Where: backend/app/workers.py, classification_worker.py, collection_worker.py;
+  collector/classification/llm_client.py; backend/app/db/ queue modules;
+  docs/DEPLOYMENT.md and corresponding worker/client tests.
+How: Start with structured events and a documented way to inspect queue depth/age.
+  Use monotonic durations and controlled outcome categories. Correlate existing
+  job/candidate IDs in internal logs; never use URLs, IDs or prompts as metric labels.
+  Exclude credentials, request bodies and sensitive provider responses.
+Expected result: Operators can distinguish slow models, backlog and database outages.
+Done when: Tests verify success/failure/retry events and redaction; an example run
+  can be diagnosed; instrumentation failures cannot fail a collection.
 
-10. Preserve partial collection success.
-    Record a typed PageOutcome for fetch, classification, validation, and acceptance.
-    Keep datasets already collected when a later page fails, and mark the job partial.
+TODO 8: Add a lightweight readiness check
+What to do: Keep /health as liveness and add a bounded readiness check for initialized
+  application/database state. Validate required model configuration without paid calls.
+Where: backend/app/main.py, backend/app/db/connection.py,
+  collector/classification/factory.py/provider configuration, docs/DEPLOYMENT.md;
+  new health/readiness tests alongside tests/test_collector_routes.py.
+How: Reuse the pool and initialization state; bound pool acquisition and database
+  probing. Return generic 503 when unavailable and 200 after recovery. Do not rerun
+  migrations or call the LLM providers on each probe.
+Expected result: A responding process is distinguishable from an API ready to serve.
+Done when: Tests cover startup, missing configuration, database outage, pool timeout,
+  recovery and secret-free errors; /health remains cheap and independent of the DB.
 
-11. Fetch landing pages whenever usable distributions are missing.
-    A structured candidate containing only a title currently skips HTML discovery,
-    spends three LLM calls, and is then rejected for having no distribution. Merge
-    structured metadata with bounded HTML discovery when links are absent.
+TODO 9: Establish backup and restore procedures
+What to do: Complete the operational recovery part of the old migration task;
+  versioned migrations already exist and do not need replacement.
+Where: docs/DEPLOYMENT.md; deployment backup configuration and a new restore check
+  script/test if appropriate. Reuse backend/app/db/schema.py initialization.
+How: Define backup schedule, retention and protected storage; restore into an
+  isolated database, start the supported application version and verify ownership,
+  datasets, jobs and vote history. Document recovery around schema upgrades.
+Expected result: Data can be recovered from a tested backup rather than instructions alone.
+Done when: An isolated restore drill succeeds, its evidence is recorded and recovery
+  steps identify the compatible application/schema versions without overwriting production.
 
-P2 - PERFORMANCE AND MAINTAINABILITY
+TODO 10: Build a reproducible classifier evaluation set
+What to do: Measure relevance and dataset-eligibility decisions separately before
+  changing prompts, models, the 2-positive threshold or 3-response requirement.
+Where: collector/classification/{page_llm_classifier,repository_llm_classifier,
+  ensemble,factory}.py; a new evaluation fixture/runner directory; evaluation docs.
+How: Label representative positive, negative and ambiguous examples; preserve a
+  held-out set and label rationale. Record model/prompt configuration, precision,
+  recall, disagreements, latency and failures. Make live paid evaluations explicit.
+Expected result: Classifier changes can be compared against measured product quality.
+Done when: Offline fixtures run reproducibly; a baseline and error analysis are
+  documented for both classification stages; live evaluation stays out of default CI.
 
-12. Paginate the catalog and apply filters in PostgreSQL.
-    Add a cursor, bounded limit, server-side filters, sorting, and a dataset-detail
-    endpoint. Load distributions only for the requested page.
+P2 - BOUNDED IMPROVEMENTS AFTER THE ABOVE
 
-13. Validate the schema once at startup.
-    Remove repeated schema-version queries from every repository operation after a
-    successful startup check.
+TODO 11: Measure and optimize candidate-to-job lookups
+What to do: Evaluate an index on collection_job_candidates(candidate_id, job_id).
+Where: backend/app/db/schema.py; collection_jobs.py (get_candidate_collection);
+  search_progress.py when integrated; tests/test_database.py; docs/DEPLOYMENT.md.
+How: Compare EXPLAIN (ANALYZE, BUFFERS) on representative data before/after. If useful,
+  register a data-preserving migration and startup index validation. Document locking
+  and write/storage overhead; do not alter ownership or latest-job selection.
+Expected result: Candidate lookups scale better without changing API behavior.
+Done when: Measurements justify the index; fresh initialization, upgrade and repeated
+  startup pass; data, owner isolation and latest-job results are preserved. Do not
+  assert a fixed query plan or a timing threshold in ordinary integration tests.
 
-14. Bound LLM response bodies and improve provider resilience.
-    Reject responses over a configured byte limit. Add controlled transient retries,
-    jittered backoff, and metrics for latency, errors, and model disagreement.
+TODO 12: Define and enforce a total collection budget
+What to do: Complement existing per-request timeouts, page and byte limits with a
+  total deadline and, where justified, cumulative transfer/attempt budgets.
+Where: collector/config.py, collector/main.py, collector/fetch.py,
+  collector/discovery/, collector/validation/, collector/classification/llm_client.py;
+  backend/app/collection_worker.py and focused tests.
+How: Carry a monotonic deadline through stages; cap request timeouts by remaining
+  time and stop starting new work when exhausted. Account for retries and discovery.
+  Explicitly address blocking network/DNS/thread operations: an asyncio timeout
+  alone cannot stop a running thread. Document the actual guarantee achieved.
+Expected result: Long collections have a controlled, explainable stopping policy.
+Done when: Slow/multiple-stage fixtures exhaust the budget predictably; no new calls
+  start after expiry; the worker slot reflects actual execution; partial results
+  follow an explicit policy and network protections remain intact.
 
-15. Split the main backend and frontend orchestrators.
-    Extract SearchService, ClassificationService, and CollectionService from the
-    backend route module. Extract an API client and workflow hooks/reducers from
-    App.jsx. Preserve run-ID checks while browser requests remain asynchronous.
+TODO 13: Revalidate catalog links while retaining access history
+What to do: Schedule bounded repeat checks using last_checked_at and existing access
+  states. Failed initial validations are already recorded; do not recreate that work.
+Where: collector/validation/downloads.py; backend/app/db/collected_datasets.py,
+  schema.py and worker infrastructure; frontend/src/components/DatasetAccessDetails.jsx;
+  tests/test_validation_persistence.py and new scheduling tests.
+How: Persist due work/history with existing distribution IDs; prevent duplicate
+  checks and stale overwrites. Define retry intervals for transient errors. Update
+  access evidence without deleting datasets or rerunning LLM classification.
+Expected result: Catalog availability reflects recent evidence and displays check time.
+Done when: Tests cover concurrent scheduling, restarts, outages, unavailable-to-
+  available transitions and failed checks retaining metadata/history; migrations
+  preserve data and frontend tests verify the resulting access status.
 
-16. Remove hard-coded assumptions about exactly three voters from the UI.
-    Return the voting policy with API results or derive available agreement filters
-    from the ensemble audit.
+TODO 14: Add permanent dataset detail navigation
+What to do: Give collected datasets a stable page URL with their existing metadata,
+  access evidence, licence, DOI and provenance; avoid duplicating catalog storage.
+Where: frontend/src/App.jsx, catalog/ hooks, components/CollectedDatasetsSection.jsx
+  and DatasetAccessDetails.jsx; backend/app/routes/collector.py and schemas as needed.
+How: Reuse database IDs and existing lookup-by-ID support; add a single-record route
+  only if necessary. Preserve authentication/session behavior and pagination state.
+Expected result: A user can reopen/share a dataset detail URL independently of a search.
+Done when: Browser tests cover direct loading, reload, missing IDs, back navigation
+  and deployment subpaths; missing metadata is displayed honestly.
 
-17. Centralize model and voting configuration.
-    Introduce a typed ModelSpec and a shared RCP client builder. Extract common voting
-    execution while keeping page and repository business decisions separate.
+P3 - CONDITIONAL: IMPLEMENT ONLY WHEN THE NEED IS CONFIRMED
 
-18. Remove dormant source-administration code if it is no longer part of the product.
-    This includes backend source routes, seeds, quotas, job variants, schema objects,
-    and tests. Keep reusable discovery adapters independent of source administration.
+TODO 15: Preserve partial results in multi-page source collections
+What to do: Retain successful pages when a later page fails, if generic source
+  collection remains supported. Public repository collection currently targets one page.
+Where: collector/main.py and storage/models.py; backend/app/db/collection_completion.py,
+  schema.py; collection worker/presenters/UI and tests/test_collector_pipeline.py.
+How: Decide supported source scope with task 21 first; model per-page outcomes and
+  an explicit partial result, persist valid datasets atomically/idempotently and
+  distinguish infrastructure failures from legitimate rejection.
+Expected result: One bad page does not discard other confirmed datasets.
+Done when: A success followed by a failure retains the successful dataset with an
+  accurate report; replay is idempotent and all-failed runs are not marked successful.
 
-P3 - PRODUCT QUALITY
+TODO 16: Define per-job retry and provider retry policies if needed
+What to do: Decide cooldown/attempt limits beyond existing workload quotas, and
+  whether bounded transient provider retries are justified by task 7 measurements.
+Where: backend/app/db/{collection_jobs,repository_candidates,api_quotas,schema}.py;
+  collector/classification/llm_client.py; frontend retry handling and workflow tests.
+How: Define retryable failures and attempt semantics; reuse saved votes and atomic
+  admission. Honor provider Retry-After within the total budget. Never blindly retry
+  authentication errors or multiply costs by retrying the whole ensemble.
+Expected result: Retry behavior is predictable and bounded without blocking recovery
+  indefinitely after a transient incident. Circuit breakers require separate evidence.
+Done when: Tests cover concurrency, limits, cooldown, permanent/transient errors,
+  successful-vote reuse and clear UI feedback; any migration preserves history.
 
-19. Define a publication lifecycle.
-    Separate candidate, collected, reviewed, published, stale, and withdrawn states.
-    Define policy for authority, licence, provenance, sensitivity, and restricted access.
+TODO 17: Make external repository discovery durable if request latency warrants it
+What to do: Move the external discovery phase into queued work if measurements show
+  problematic long requests or restart losses. It already uses asyncio.to_thread
+  and does NOT directly block the event loop.
+Where: backend/app/routes/collector.py, db/search_sessions.py, db/schema.py,
+  workers.py; collector/repository_search/service.py; frontend search/progress hooks.
+How: Reuse search IDs, owner checks and grouped progress; persist input/admission
+  atomically, return 202 and report discovery status separately from classification.
+  Preserve database-first behavior, partial-provider warnings and quota semantics.
+Expected result: An admitted external search can survive the initiating HTTP request.
+Done when: Tests cover request disconnects, restarts, duplicate submissions, two
+  owners, provider failures and terminal polling; API changes are documented.
 
-20. Persist stronger identity and provenance.
-    Store DOI, licence, version, repository/provider evidence, and the relationship
-    between repository candidates and saved datasets. Detect duplicates by stable
-    identifiers and semantic identity, not only normalized URLs.
+TODO 18: Support multiple instances only when deployment requires it
+What to do: Replace global interrupted-work recovery with safe claims/leases before
+  allowing overlapping API instances or rolling deployments.
+Where: backend/app/workers.py, main.py, classification_worker.py, collection_worker.py;
+  backend/app/db/{schema,collection_jobs,repository_candidates,classification_votes,
+  classification_completion,collection_completion}.py and concurrency tests.
+How: Cover BOTH queues and vote checkpoints. Add expiring claims, heartbeats and an
+  attempt token/version checked by every progress/final write; reject stale workers
+  after reassignment. Audit shared rate-limit/deployment assumptions as well.
+Expected result: One instance cannot interrupt or overwrite another's live work.
+Done when: Two-process tests cover lease expiry, crashes, delayed old workers,
+  heartbeat failure and idempotent finalization; deployment docs permit multiple
+  instances only after these tests pass. Leases do not guarantee exactly-once LLM calls.
 
-21. Revalidate links on a schedule.
-    Keep access-state history and distinguish available, restricted, unavailable, and
-    unconfirmed resources without erasing datasets after transient failures.
+TODO 19: Introduce a typed validated-distribution aggregate if it simplifies changes
+What to do: Replace parallel distribution/validation lists internally when touching
+  this boundary; the URL/format mismatch itself is already corrected.
+Where: collector/storage/models.py, collector/main.py,
+  backend/app/db/collected_datasets.py; pipeline and persistence tests.
+How: Pair each validated distribution with its evidence; preserve public schemas
+  through adapters and keep persistence invariants. Avoid a database redesign.
+Expected result: Internal code cannot accidentally separate a resource from its check.
+Done when: Existing persistence/API tests pass and construction rejects inconsistent
+  pairs; no unrelated refactoring or mandatory schema migration is introduced.
 
-22. Build an LLM evaluation set.
-    Measure precision, recall, disagreement, latency, failure rate, and cost for both
-    repository relevance and page eligibility. Use the results to decide whether
-    somewhat_relevant should trigger collection and whether quorum must remain 3/3.
+TODO 20: Extract only orchestration that demonstrably needs separation
+What to do: Reduce remaining complex route coordination when feature work requires
+  it. The API client, frontend hooks, shared voter factory and vote runner already exist.
+Where: backend/app/routes/collector.py, existing backend/app/db/ modules;
+  frontend/src/App.jsx only for identified responsibilities and their tests.
+How: Extract one cohesive operation at a time, retaining current IDs, transactions,
+  quota checks and API schemas. Do not rename db/ to repositories/ or create generic
+  services/ensemble frameworks solely to match a preferred directory structure.
+Expected result: Smaller testable operations with unchanged behavior.
+Done when: The targeted duplication/complexity is removed, ownership/concurrency
+  regressions are covered and no new abstraction duplicates an existing helper.
 
-23. Improve discovery and catalog UX.
-    Deferred (2026-09-19): consider a "Search external repositories" button to expand
-    the same query even when local results exist. Keep local results accessible.
-    For now, retain database-first search with automatic external fallback only
-    when no local results are found. This option is not a current priority.
-    Add filterable paginated results, permanent dataset detail URLs, resumable
-    searches, licence, provenance, access status, last-check time, and stable identifiers.
+TODO 21: Decide whether to retire remaining legacy source storage and execution
+What to do: Audit remaining source job variants, data_sources/seed code, unused
+  configuration and references now that source administration routes/UI are gone.
+Where: backend/app/db/schema.py, collection_jobs.py, collection_worker.py;
+  collector/main.py/discovery adapters; docker-compose.yml and source-related tests.
+How: Identify actual callers and historical data first; retain useful reusable
+  adapters. If removal is approved by product scope, migrate/archive historical
+  records without destructive assumptions and remove only unreachable behavior.
+Expected result: The supported collection entry points are explicit and maintained.
+Done when: Every retained entry point has a caller/test; removed configuration is
+  documented; historical jobs/datasets remain readable or have a tested migration.
 
-24. Evaluate additional repository providers against a shared benchmark before
-    enabling them. Keep normalized contracts, per-provider budgets, provenance, and
-    partial-provider failure handling.
+TODO 22: Improve identity and provenance only beyond the existing fields
+What to do: Evaluate DOI-based duplicate detection, dataset versions and missing
+  provider-to-record evidence. DOI, licence and provenance fields already exist.
+Where: collector/extraction/dataset_metadata.py, collector/main.py,
+  collector/repository_search/; backend/app/db/collected_datasets.py and schema.py.
+How: Measure duplicate cases first; distinguish dataset identity from versions and
+  distributions. Normalize stable identifiers and preserve conflicting evidence;
+  never merge records solely on similar titles or overwrite verified page metadata.
+Expected result: Fewer duplicate records with traceable identity decisions.
+Done when: Fixtures cover normalized DOI matches, distinct versions and conflicting
+  metadata; any backfill is reversible/reviewable and preserves references.
+
+TODO 23: Define a broader publication lifecycle only if editorial review is needed
+What to do: Decide whether reviewed/published/withdrawn states add product value
+  beyond the current technical validation and access states.
+Where: docs/collection-workflow-policy.md first; dataset models, schema, routes and
+  catalog UI only after the policy is agreed.
+How: Define transitions, permissions and treatment of stale/restricted datasets.
+  Keep scientific quality distinct from technical reachability. Do not reintroduce
+  administration or mandatory login merely as an architectural preference.
+Expected result: Publication rules have an explicit user need and consistent behavior.
+Done when: Policy is approved; if implemented, transition/authorization tests pass
+  and existing datasets migrate without silently changing visibility.
+
+TODO 24: Benchmark further providers and optional external-search expansion
+What to do: Keep database-first discovery as the default. Evaluate additional
+  providers and a separate external-search action only as explicit product changes.
+Where: collector/repository_search/service.py and providers/;
+  frontend/src/components/LocalDatasetSearchCard.jsx, backend search routes and tests.
+How: Benchmark relevance, coverage, duplicates, latency and provider failures;
+  preserve normalized contracts and provenance. An optional expansion must retain
+  local results and consume the appropriate quotas.
+Expected result: Discovery broadens only when measured benefits justify it.
+Done when: Provider evaluation is documented; enabled integrations have failure/
+  budget tests. Any expansion action has browser tests preserving local results.
+
+NOT AUTOMATIC TODOs
+- No blanket GIN index for the current jsonb_array_elements_text geography filter:
+  measure queries first; an index requires compatible query operators/normalization.
+- No CORS rewrite for the existing same-origin public deployment.
+- No correction of empty exception classes containing pass; they are intentional.
+- No assumed public error leak merely because internal errors are stored; trace the
+  actual presenter/endpoint before reporting a vulnerability.
+- No mandatory OIDC, SSE/WebSockets, distributed tracing, global LLM cache or generic
+  ensemble engine without a concrete product/operational requirement.
+- No full-dataset download or claim of scientific validation in resource probes.
+
+TRACEABILITY TO THE PREVIOUS 24-ITEM BACKLOG
+Old 1: implemented ownership checks. Old 2: implemented explicit/quota-controlled
+  retries; remaining optional policy is 16. Old 3: public presenters implemented;
+  operational diagnostics in 7. Old 4: remaining propagation in 6. Old 5: release 3.
+Old 6: durable classification/collection implemented; polling 2, discovery 17.
+Old 7: persisted single-instance workers implemented; local fixes 1, scaling 18.
+Old 8: migrations implemented; readiness 8, recovery 9. Old 9: conditional 19.
+Old 10: conditional 15. Old 11: landing-page fallback implemented.
+Old 12: pagination/filtering implemented; permanent detail navigation 14.
+Old 13: startup schema validation implemented. Old 14: response limits/timeouts
+  implemented; diagnostics 7, retry policy 16. Old 15: helpers/hooks partly extracted;
+  further targeted extraction 20. Old 16: dynamic agreement filters implemented.
+Old 17: shared model/voting construction implemented; no mandatory further framework.
+Old 18: administration routes/UI removed; legacy scope decision 21.
+Old 19: conditional lifecycle 23. Old 20: fields already present; improvements 22.
+Old 21: revalidation 13. Old 22: evaluation 10. Old 23: detail navigation 14 and
+  optional expansion 24; preserve the earlier deferral of external-search expansion.
+Old 24: provider benchmarking 24.

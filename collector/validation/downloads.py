@@ -17,6 +17,7 @@ from collector.storage.models import (
     ValidationResult,
     ValidationStatus,
 )
+from collector.validation.json_sample import read_json_prefix
 
 ProbeFunction = Callable[..., HTTPProbe]
 
@@ -79,7 +80,8 @@ def probe_url(
 ) -> HTTPProbe:
     """Perform one bounded probe with public-URL and redirect protection.
 
-    Successful responses read at most ``max_bytes``. HTTP, transport, DNS, and
+    Successful responses retain at most ``max_bytes`` plus read one lookahead
+    byte to detect truncation. HTTP, transport, DNS, and
     blocked-destination errors are captured as probe data so distribution
     validation can reject the resource without raising.
     """
@@ -88,13 +90,16 @@ def probe_url(
 
     try:
         with open_public_http_url(request, timeout=timeout) as response:
-            body_sample = response.read(max_bytes) if max_bytes > 0 else b""
+            # One lookahead byte distinguishes a complete body exactly at the
+            # limit from a server that ignored Range. Only max_bytes are kept.
+            body = response.read(max_bytes + 1) if max_bytes > 0 else b""
             return HTTPProbe(
                 url=url,
                 final_url=response.geturl(),
                 status_code=response.status,
                 headers={key.lower(): value for key, value in response.headers.items()},
-                body_sample=body_sample,
+                body_sample=body[:max_bytes],
+                sample_truncated=len(body) > max_bytes,
             )
     except HTTPError as exception:
         body_sample = exception.read(max_bytes) if max_bytes > 0 else b""
@@ -144,8 +149,11 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
         return "unconfirmed", "HTML was returned instead of data."
 
     if "json" in content_type or format_name == "JSON" or sample.startswith((b"{", b"[")):
+        truncated = _sample_is_truncated(probe)
+        if code == 206 and not _prefix_range(probe):
+            return "unconfirmed", "The JSON response is not a confirmed initial byte range."
         try:
-            payload = json.loads(sample)
+            payload = read_json_prefix(probe.body_sample) if truncated else json.loads(sample)
         except (ValueError, UnicodeError, RecursionError):
             # A bounded/ranged sample may end in the middle of a valid document.
             return "unconfirmed", "The JSON sample is incomplete or invalid."
@@ -174,11 +182,39 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
                 payload = {key: value for key, value in payload.items() if key not in metadata_keys}
         if not isinstance(payload, (dict, list)) or not payload:
             return "unconfirmed", "The JSON response contains no confirmed data."
-        return "available", "A JSON data response was confirmed."
+        return "available", (
+            "JSON data was confirmed in a partial sample; the full document was not validated."
+            if truncated else "A JSON data response was confirmed."
+        )
 
     if format_name in {"UNKNOWN", "API"}:
         return "unconfirmed", "The response format could not be confirmed."
     return "available", "A non-empty data response was confirmed."
+
+
+def _prefix_range(probe: HTTPProbe) -> re.Match | None:
+    match = re.fullmatch(r"bytes 0-(\d+)/(\d+|\*)", _header(probe, "content-range"))
+    if match:
+        end, total = match.groups()
+        end_number = _parse_content_length(end)
+        total_number = _parse_content_length(total)
+        if (end_number is not None
+                and (end_number + 1 == len(probe.body_sample)
+                     or (probe.sample_truncated and end_number + 1 > len(probe.body_sample)))
+                and (total == "*" or (total_number is not None and end_number < total_number))):
+            return match
+    return None
+
+
+def _sample_is_truncated(probe: HTTPProbe) -> bool:
+    if probe.sample_truncated:
+        return True
+    if probe.status_code == 206:
+        match = _prefix_range(probe)
+        if match:
+            _, total = match.groups()
+            return total == "*" or int(total) > len(probe.body_sample)
+    return False
 
 
 def _total_size(probe: HTTPProbe, head: HTTPProbe) -> int | None:

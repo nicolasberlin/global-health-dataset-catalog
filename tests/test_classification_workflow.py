@@ -190,7 +190,7 @@ async def test_worker_failure_is_stored_and_only_explicit_retry_queues_again(
             raise RuntimeError("private-provider-diagnostic")
         return None if stage == "no_decision" else decision()
 
-    async def fail_persistence(*args):
+    async def fail_persistence(*args, **kwargs):
         raise RuntimeError("private-database-diagnostic")
 
     monkeypatch.setattr(classification_worker, "_classify", classify)

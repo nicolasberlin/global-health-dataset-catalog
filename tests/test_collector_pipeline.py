@@ -162,7 +162,7 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
         assert requests[2][0].get_header("Range") == f"bytes=0-{config.max_sample_bytes - 1}"
         assert reads == [
             (page_url, "GET", 1_000_001),
-            (file_url, "GET", config.max_sample_bytes),
+            (file_url, "GET", config.max_sample_bytes + 1),
         ]
 
 

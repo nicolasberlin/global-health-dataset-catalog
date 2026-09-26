@@ -330,10 +330,10 @@ async def test_worker_records_error_and_continues_to_next_job(database, monkeypa
             raise RuntimeError("test collection failure")
         return CollectionResult()
 
-    async def complete(job_id, result):
+    async def complete(job_id, result, **kwargs):
         if failure_stage == "finalize" and job_id == first["id"]:
             raise RuntimeError("test persistence failure")
-        return await real_complete(job_id, result)
+        return await real_complete(job_id, result, **kwargs)
 
     monkeypatch.setattr(collection_worker, "collect_source_with_report", collect)
     monkeypatch.setattr(collection_worker, "complete_collection_job", complete)

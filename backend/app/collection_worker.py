@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from functools import partial
 
 from app.database import (
@@ -14,7 +15,7 @@ from app.database import (
     mark_collection_job_error,
 )
 from app.vote_store import PostgresVoteStore
-from app.workers import persisted_workers
+from app.workers import persist_with_retry, persisted_workers
 from collector.classification.factory import build_default_page_classifier
 from collector.main import collect_repository_candidate_with_report, collect_source_with_report
 
@@ -25,6 +26,7 @@ async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecut
     """Execute an already claimed job using its authoritative persisted inputs."""
 
     job_id = int(job["id"])
+    version = datetime.fromisoformat(str(job["updated_at"]))
     try:
         collect = (
             collect_repository_candidate_with_report
@@ -38,10 +40,15 @@ async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecut
             ))),
             str(job["source_url"]),
         )
-        await complete_collection_job(job_id, result)
+        await persist_with_retry(lambda: complete_collection_job(
+            job_id, result, expected_updated_at=version,
+        ))
     except Exception as exception:  # noqa: BLE001 - preserve the job's terminal failure.
         logger.exception("Collection failed for job_id=%s", job_id)
-        await mark_collection_job_error(job_id, str(exception) or exception.__class__.__name__)
+        error = str(exception) or exception.__class__.__name__
+        await persist_with_retry(lambda: mark_collection_job_error(
+            job_id, error, expected_updated_at=version,
+        ))
 
 
 def collection_workers(*, concurrency: int | None = None, poll_interval: float = 1.0):

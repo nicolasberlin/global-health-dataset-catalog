@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from collector.storage.metadata import enrich_from_repository
 from collector.storage.models import CollectionResult
 
@@ -12,19 +14,29 @@ from .schema import _require_current_schema
 async def complete_collection_job(
     job_id: int,
     collection_result: CollectionResult,
-) -> dict[str, object]:
+    *, expected_updated_at: datetime | None = None,
+) -> dict[str, object] | None:
     """Save all collected datasets and mark their running job done atomically.
 
     Collection and LLM calls have already finished before this function opens
     one connection and one transaction. Locking supplies the authoritative
     source URL from the job. Any dataset write or job-state failure rolls back
     every dataset write and prevents the job from becoming ``done``.
+
+    Workers pass the claim's exact updated_at as a version. A guarded call
+    returns None when that version is no longer active, including when a prior
+    commit succeeded but its acknowledgement was lost. No datasets are rewritten.
     """
 
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         async with connection.transaction():
             job = await _lock_running_collection_job(connection, job_id)
+            if expected_updated_at is not None and (
+                job is None or job["updated_at"] != expected_updated_at
+            ):
+                # Already committed (possibly without acknowledgement), or superseded.
+                return None
             if job is None:
                 raise RuntimeError(
                     f"Collection job {job_id} is not running and cannot be completed."

@@ -151,6 +151,7 @@ class HTTPProbe:
     headers: dict[str, str] = field(default_factory=dict)
     body_sample: bytes = b""
     error: str = ""
+    sample_truncated: bool = False
 
 
 ValidationStatus = Literal["available", "restricted", "unavailable", "unconfirmed"]

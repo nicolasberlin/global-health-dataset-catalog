@@ -1,6 +1,6 @@
 # Classification, collection, and retry policy
 
-Created: 2026-09-13. Updated: 2026-09-22.
+Created: 2026-09-13. Updated: 2026-09-25.
 
 This document describes the implemented workflow and the broader target for
 future changes. Sections explicitly marked **proposed** are design decisions,
@@ -18,6 +18,13 @@ exactly-once execution of external calls.
   classifications, running jobs, and running votes become errors at startup;
   they require an explicit retry. Deployment still requires one API process and
   one instance, without overlapping deployments.
+- A worker retains its execution slot and computed outcome while retrying a
+  terminal database write after a temporary PostgreSQL outage. Only persistence
+  is repeated, with exponential backoff and jitter capped at 30 seconds; network
+  collection and model calls are not repeated. Permanent finalization failures
+  become errors. Both success and error writes use the claim's exact `updated_at`
+  as a concurrency guard: lost commit acknowledgements and late attempts cannot
+  overwrite a newer explicit retry. Progress updates must not change this value.
 - The accepted decision, initial job reservation or reuse, and candidate–job
   association commit together. A reservation failure rolls back the decision
   too. An already collected dataset can satisfy the request without a new job.
@@ -40,6 +47,16 @@ exactly-once execution of external calls.
   `unconfirmed`, with a reason. Failed validations are retained in the collection
   report and job audit. A complete distinction between reliable empty outcomes
   and incomplete verification is still proposed.
+- JSON validation retains the bounded sample (64 KiB by default) and reads at
+  most one additional byte to detect a server ignoring `Range`. Initial `206`
+  ranges also identify truncated representations. Complete bodies use strict
+  JSON decoding. Truncated UTF-8 samples can confirm complete array records or
+  record fields, including the usual data envelopes, while checking all sampled
+  syntax and API error indicators. A partial-sample reason makes clear that the
+  full document was not validated. No complete evidence, incomplete error
+  indicators, invalid syntax, or nesting beyond 64 levels stays `unconfirmed`.
+  Errors or malformed content outside the sample cannot be detected; an oversized
+  first value can still prevent confirmation. No unbounded download is introduced.
 - Source administration routes, storage helpers, and startup seeding have been
   removed. Historical `data_sources` rows remain intact. Schema migrations and
   validation run at startup; ordinary operations check initialization in memory

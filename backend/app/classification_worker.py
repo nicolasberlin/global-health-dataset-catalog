@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 from app.database import (
     claim_candidate_classification,
@@ -13,7 +14,7 @@ from app.database import (
     fail_candidate_classification,
 )
 from app.vote_store import PostgresVoteStore
-from app.workers import persisted_workers
+from app.workers import persist_with_retry, persisted_workers
 from collector.classification.factory import build_default_repository_result_classifier
 from collector.repository_search import RepositorySearchResult
 from collector.repository_search import classify_repository_result as classify_one_repository_result
@@ -30,6 +31,7 @@ def _classify(candidate):
 
 async def _run_classification(candidate: dict[str, object], executor: ThreadPoolExecutor) -> None:
     candidate_id, owner_id = candidate["id"], candidate["owner_id"]
+    version = datetime.fromisoformat(str(candidate["updated_at"]))
     try:
         candidate = {**candidate, "_vote_store": PostgresVoteStore(
             asyncio.get_running_loop(), candidate_id=candidate_id,
@@ -37,14 +39,15 @@ async def _run_classification(candidate: dict[str, object], executor: ThreadPool
         decision = await asyncio.get_running_loop().run_in_executor(executor, _classify, candidate)
         if decision is None:
             raise RuntimeError("Repository classifier returned no decision.")
-        await complete_candidate_classification(candidate_id, owner_id, decision)
+        await persist_with_retry(lambda: complete_candidate_classification(
+            candidate_id, owner_id, decision, expected_updated_at=version,
+        ))
     except Exception as exception:  # noqa: BLE001 - keep internal details and a retryable state.
         logger.exception("Classification failed for candidate_id=%s", candidate_id)
-        await fail_candidate_classification(
-            candidate_id,
-            owner_id,
-            str(exception) or exception.__class__.__name__,
-        )
+        error = str(exception) or exception.__class__.__name__
+        await persist_with_retry(lambda: fail_candidate_classification(
+            candidate_id, owner_id, error, expected_updated_at=version,
+        ))
 
 
 def classification_workers(*, concurrency: int | None = None, poll_interval: float = 1.0):

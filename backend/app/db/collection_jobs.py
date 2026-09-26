@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from uuid import UUID
 
 from psycopg import AsyncConnection
@@ -508,6 +509,7 @@ async def _mark_collection_job_done(
 async def mark_collection_job_error(
     job_id: int,
     error: str,
+    *, expected_updated_at: datetime | None = None,
 ) -> dict[str, object] | None:
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
@@ -521,6 +523,7 @@ async def mark_collection_job_error(
                 updated_at = NOW(),
                 finished_at = NOW()
             WHERE id = %s AND status IN ('pending', 'running')
+              AND (%s::timestamptz IS NULL OR updated_at = %s)
             RETURNING id, source_url, kind, repository_candidate_id,
                       status, saved_count, discovered_count,
                       analyzed_count, accepted_count, rejected_count,
@@ -528,7 +531,7 @@ async def mark_collection_job_error(
                       message,
                       error, created_at, updated_at, finished_at
             """,
-            (error, job_id),
+            (error, job_id, expected_updated_at, expected_updated_at),
         )
 
     return _collection_job_to_dict(row) if row else None
@@ -558,7 +561,7 @@ async def _lock_running_collection_job(
     return await _fetchone(
         connection,
         """
-        SELECT id, source_url
+        SELECT id, source_url, updated_at
         FROM collection_jobs
         WHERE id = %s AND status = 'running'
         FOR UPDATE

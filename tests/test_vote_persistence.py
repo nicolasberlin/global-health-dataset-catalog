@@ -207,6 +207,7 @@ async def test_changed_inputs_or_configuration_start_fresh_run(
 async def test_finalization_retry_reuses_all_votes(database, transport, monkeypatch):
     await database.init_database()
     candidate = await candidate_for(database)
+    candidate = await database.get_repository_candidate(candidate["id"], "alice")
     candidate["owner_id"] = "alice"
     calls = []
 
@@ -217,7 +218,7 @@ async def test_finalization_retry_reuses_all_votes(database, transport, monkeypa
     transport(request)
     original = classification_worker.complete_candidate_classification
 
-    async def fail(*args):
+    async def fail(*args, **kwargs):
         raise RuntimeError("temporary finalization failure")
 
     monkeypatch.setattr(classification_worker, "complete_candidate_classification", fail)

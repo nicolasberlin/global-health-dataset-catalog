@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from psycopg import AsyncConnection
@@ -249,7 +250,8 @@ async def _complete_candidate_classification(
     candidate_id: UUID,
     owner_id: str,
     classification: RepositoryClassification,
-) -> dict[str, object]:
+    *, expected_updated_at: datetime | None = None,
+) -> dict[str, object] | None:
     """Persist a decision within the transaction that also reserves its collection."""
 
     status = "accepted" if classification.accepted else "rejected"
@@ -266,6 +268,7 @@ async def _complete_candidate_classification(
           AND candidate.search_session_id = session.id
           AND session.owner_id = %s
           AND candidate.classification_status = 'classifying'
+          AND (%s::timestamptz IS NULL OR candidate.updated_at = %s)
         RETURNING {_RETURNING_CANDIDATE_COLUMNS}
         """,
         (
@@ -273,9 +276,13 @@ async def _complete_candidate_classification(
             _jsonb(asdict(classification)),
             candidate_id,
             _normalized_owner_id(owner_id),
+            expected_updated_at,
+            expected_updated_at,
         ),
     )
     if row is None:
+        if expected_updated_at is not None:
+            return None
         raise RuntimeError("Candidate is missing or is not being classified.")
     return _repository_candidate_to_dict(row)
 
@@ -284,7 +291,8 @@ async def fail_candidate_classification(
     candidate_id: UUID,
     owner_id: str,
     error: str,
-) -> dict[str, object]:
+    *, expected_updated_at: datetime | None = None,
+) -> dict[str, object] | None:
     """Record an operational classifier failure without treating it as rejection."""
 
     normalized_error = error.strip()
@@ -306,11 +314,15 @@ async def fail_candidate_classification(
               AND candidate.search_session_id = session.id
               AND session.owner_id = %s
               AND candidate.classification_status = 'classifying'
+              AND (%s::timestamptz IS NULL OR candidate.updated_at = %s)
             RETURNING {_RETURNING_CANDIDATE_COLUMNS}
             """,
-            (normalized_error, candidate_id, _normalized_owner_id(owner_id)),
+            (normalized_error, candidate_id, _normalized_owner_id(owner_id),
+             expected_updated_at, expected_updated_at),
         )
     if row is None:
+        if expected_updated_at is not None:
+            return None
         raise RuntimeError("Candidate is missing or is not being classified.")
     return _repository_candidate_to_dict(row)
 

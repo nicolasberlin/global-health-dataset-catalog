@@ -91,19 +91,32 @@ jobs. `COLLECTION_MAX_CONCURRENCY` (default `2`) bounds concurrent collection
 runs inside this single process; it is not the number of API processes. Each
 consumer claims one job atomically only when its execution slot is available.
 
+If PostgreSQL becomes unavailable during finalization, the consumer retains its
+slot and the computed result (or execution error) in memory until its terminal
+write can finish. It retries only persistence, with exponential backoff and jitter
+up to 30 seconds; it does not repeat HTTP collection or LLM execution. Temporary
+connection, pool, serialization, and deadlock failures are retryable; other SQL
+errors are not blindly retried. Finalization is guarded by the claim's exact
+`updated_at`, which progress writes leave unchanged. A lost commit acknowledgement
+cannot duplicate finalization or overwrite a newer explicitly retried attempt.
+This uses existing columns and requires no migration or API contract change.
+
 - Pending jobs survive restart and are picked up automatically.
 - Jobs left running by an interrupted process become errors at the next startup;
   they are not automatically retried.
 - Normal application shutdown stops taking new work and waits for current
   collections to finish. The container's stop grace period can force termination
-  before that finishes; allow enough time if draining is required.
+  before that finishes; allow enough time if draining is required. A continuing
+  database outage also delays draining. Forced termination loses in-memory
+  outcomes; the existing startup recovery then marks active work as interrupted.
 - A repeated classification reads its existing collection, including an empty
   or failed result. `POST /collector/collection-jobs/{job_id}/retry` explicitly
   requeues an owned failed job and consumes the existing classification quota.
 
 Classification decisions and initial collection reservations share one
-transaction. If reservation fails, the decision rolls back too; an explicit
-classification retry reuses all already persisted valid votes. LLM and network calls stay outside
+transaction. If reservation fails, the decision rolls back too. Temporary database
+failures retry finalization; other failures require an explicit classification
+retry, which reuses all already persisted valid votes. LLM and network calls stay outside
 the transaction. Classification requests now persist as `queued` on existing candidates before
 HTTP 202 is returned. `pending` means discovered but not requested; workers never
 execute it. `CLASSIFICATION_MAX_CONCURRENCY` (default `2`) bounds the separate
