@@ -79,6 +79,10 @@ There is no TLS, HSTS, or HTTPS redirect middleware in this deployment.
 
 ## Collection execution
 
+See the [2026-09-28 reliability verification record](reliability-verification-2026-09-28.md)
+for tested revisions, local results and CI status. A successful baseline CI run
+does not certify later corrections or establish which revision is deployed.
+
 Run exactly one API process and one API instance against the database. The image
 explicitly starts Uvicorn with `--workers 1`. Do not scale replicas or overlap old
 and new API instances during a deployment: startup recovery would mark the other

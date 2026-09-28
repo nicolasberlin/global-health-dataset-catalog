@@ -38,6 +38,13 @@ ALREADY PRESENT - DO NOT REIMPLEMENT
 P0 - COMPLETE EXISTING WORK / RELEASE CHECKS
 
 TODO 1: Integrate and verify the existing local reliability fixes
+Status 2026-09-28: Reviewed on codex/reliability-verification; existing fixes and
+  grouped polling are already integrated. Corrected non-JSON numeric constants
+  and added concurrent-finalization/polling regressions. Local checks passed:
+  580 Python tests (3 optional benchmarks skipped), 59 frontend, 15 browser, build
+  and lint. Baseline CI is green; corrected-revision CI awaits permission to push.
+  Evidence and exact revisions: docs/reliability-verification-2026-09-28.md.
+  Keep this task open until the new revision's CI result is recorded.
 What to do: Finish review and integration of the JSON-prefix validation and durable
   completion/retry changes already in this checkout. Do not rewrite them.
 Where: collector/validation/{downloads,json_sample}.py, collector/storage/models.py;

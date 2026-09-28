@@ -431,6 +431,11 @@ tests. Those runs used temporary PostgreSQL 16, excluded the container-firewall
 integration test, and passed Ruff; the latter two also passed the frontend build.
 These counts describe those historical revisions, not the current suite.
 
+The [2026-09-28 reliability integration review](reliability-verification-2026-09-28.md)
+records the combined polling/reliability revisions, 580 passing Python tests,
+frontend/browser results, and the remaining corrected-revision CI gate. JSON
+validation now explicitly rejects the non-JSON `NaN` and infinity constants.
+
 ## Design references
 
 - [OWASP — Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html): least privilege, per-access checks, and authorization relationships.
