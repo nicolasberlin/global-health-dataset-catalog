@@ -34,8 +34,10 @@ from collector.repository_search import (
 from collector.storage.models import (
     CollectedDataset,
     DistributionCandidate,
+    HTTPProbe,
     ValidationResult,
 )
+from collector.validation.downloads import validate_distribution
 
 pytestmark = pytest.mark.anyio
 
@@ -996,3 +998,37 @@ async def test_catalog_does_not_expose_persisted_vote_or_validation_exceptions(m
     failure = result.dataset_signals["ensemble"]["failures"][0]
     assert failure["error_code"] == "classifier_vote_failed"
     assert dataset == original
+
+
+@pytest.mark.parametrize("code,body,status", [
+    (401, b"", "restricted"),
+    (403, b"", "unconfirmed"),
+    (403, b"<html>Authentication required</html>", "restricted"),
+    (200, b'<html><form><input type="password"></form></html>', "restricted"),
+    (200, b"<html>CAPTCHA</html>", "unconfirmed"),
+])
+async def test_catalog_preserves_access_diagnosis(monkeypatch, code, body, status):
+    distribution = DistributionCandidate("https://example.org/data.csv", "CSV", .9)
+    validation = validate_distribution(
+        distribution,
+        probe=lambda url, method, **kw: HTTPProbe(
+            url, url, code, {"content-type": "text/html"}, body if method == "GET" else b"",
+            error="internal-only: HTTP failure" if code >= 400 else "",
+        ),
+    )
+    dataset = CollectedDataset(
+        dataset_url="https://example.org/dataset", title="Health", description="",
+        publisher="", hosting_platform="", uploader="", dataset_signals={},
+        distributions=[distribution], validation_results=[validation],
+    )
+
+    async def list_datasets(**kwargs):
+        return [dataset]
+
+    monkeypatch.setattr("app.routes.collector.list_collected_datasets", list_datasets)
+    response = await list_collected()
+    public = response.items[0].validation_results[0]
+    assert public.status == validation.status == status
+    assert public.reason == validation.reason
+    assert public.ok is False
+    assert "internal-only" not in response.model_dump_json()

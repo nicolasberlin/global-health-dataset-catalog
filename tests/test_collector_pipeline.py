@@ -496,7 +496,7 @@ def test_distribution_validation_falls_back_to_partial_get():
             final_url=url,
             status_code=200,
             headers={"content-type": "application/octet-stream"},
-            body_sample=b"country,mortality\\nGBR,10\\n",
+            body_sample=b"country,mortality\nGBR,10\n",
         )
 
     result = validate_distribution(distribution, probe=fake_probe)

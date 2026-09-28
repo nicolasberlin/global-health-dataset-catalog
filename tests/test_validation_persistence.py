@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 from app.db.connection import _fetchone, _require_database_pool
+from app.routes.collector import _collector_validation
 
 from collector.repository_search import RepositorySearchResult
 from collector.storage.models import (
@@ -9,8 +10,10 @@ from collector.storage.models import (
     CollectionReport,
     CollectionResult,
     DistributionCandidate,
+    HTTPProbe,
     ValidationResult,
 )
+from collector.validation.downloads import validate_distribution
 
 pytestmark = pytest.mark.anyio
 URL = "https://example.org/data.csv"
@@ -92,3 +95,43 @@ async def test_search_commits_classification_queue_without_browser_submission(da
     assert claimed["id"] == stored[0]["id"]
     assert claimed["owner_id"] == "alice"
     assert await database.claim_candidate_classification() is None
+
+
+@pytest.mark.parametrize("code,body,status", [
+    (401, b"", "restricted"),
+    (403, b"", "unconfirmed"),
+    (403, b"<html>Authentication required</html>", "restricted"),
+    (200, b'<html><form><input type="password"></form></html>', "restricted"),
+    (200, b"<html>CAPTCHA</html>", "unconfirmed"),
+])
+async def test_access_diagnosis_survives_storage_and_public_conversion(
+    database, code, body, status,
+):
+    await database.init_database()
+    validation = validate_distribution(
+        DistributionCandidate(URL, "CSV", .9),
+        probe=lambda url, method, **kw: HTTPProbe(
+            url, url, code, {"content-type": "text/html"}, body if method == "GET" else b"",
+        ),
+    )
+    # Exercise serialization independently of the collector's publication filter.
+    await database.save_collected_datasets(URL, [dataset(validation)])
+    stored = (await database.list_collected_datasets())[0].validation_results[0]
+    public = _collector_validation(stored)
+    assert stored.status == public.status == validation.status == status
+    assert stored.reason == public.reason == validation.reason
+    assert stored.ok is public.ok is False
+
+    job = await database.create_collection_job(URL)
+    await database.mark_collection_job_running(job["id"])
+    await database.complete_collection_job(job["id"], CollectionResult(
+        report=CollectionReport(invalid_distribution_count=1, validation_failures=[validation]),
+    ))
+    async with _require_database_pool().connection() as connection:
+        row = await _fetchone(connection,
+                             "SELECT validation_failures FROM collection_jobs WHERE id = %s",
+                             (job["id"],))
+    failure = row["validation_failures"][0]
+    assert failure["status"] == public.status
+    assert failure["reason"] == public.reason
+    assert failure["ok"] is False

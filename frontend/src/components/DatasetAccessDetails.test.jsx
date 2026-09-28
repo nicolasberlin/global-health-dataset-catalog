@@ -19,3 +19,26 @@ it('shows the recorded link check and never labels an unchecked link as confirme
     expect(screen.getByText('Last checked: date not provided')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Access data · CSV' })).toHaveAttribute('href', 'https://example.org/checked');
 });
+
+it.each([
+    ['restricted', 'Access restricted at the last check',
+        'The response explicitly requires authentication or access permission.'],
+    ['unconfirmed', 'Access not confirmed at the last check',
+        'HTTP 403 refused the check without explicit authentication or permission requirements.'],
+    ['unconfirmed', 'Access not confirmed at the last check',
+        'An anti-bot challenge prevented verification of data access.'],
+    ['unavailable', 'Data unavailable at the last check',
+        'Resource was not found at this URL.'],
+])('shows %s with its recorded reason: %s', (status, label, reason) => {
+    render(<DatasetAccessDetails item={{
+        distributions: [{ url: 'https://example.org/data', format: 'CSV' }],
+        validation_results: [{ url: 'https://example.org/data', format: 'CSV',
+            ok: false, status, reason }],
+    }} />);
+    expect(screen.getByText(label)).toBeVisible();
+    expect(screen.getByText(reason)).toBeVisible();
+    expect(screen.queryByText('Access confirmed at the last check')).not.toBeInTheDocument();
+    if (status === 'unconfirmed') {
+        expect(screen.queryByText('Access restricted at the last check')).not.toBeInTheDocument();
+    }
+});

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -129,24 +130,45 @@ def _needs_partial_get(probe: HTTPProbe) -> bool:
 
 def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStatus, str]:
     code = probe.status_code
-    if code in {401, 403}:
+    if code == 401:
         return "restricted", "Authentication or access permission is required."
     if code in {404, 410}:
         return "unavailable", "Resource was not found at this URL."
-    if probe.error or code is None or not 200 <= code < 300:
+    forbidden: tuple[ValidationStatus, str] = (
+        "unconfirmed",
+        "HTTP 403 refused the check without explicit authentication or permission requirements.",
+    )
+    if code == 403 and re.match(
+        r"(?:basic|bearer|digest|negotiate)\b", _header(probe, "www-authenticate"), re.I,
+    ):
+        return "restricted", "The server explicitly requests authentication."
+    # HTTPError populates error for 403 too; inspect its bounded body before deciding.
+    if code != 403 and (probe.error or code is None or not 200 <= code < 300):
         return "unconfirmed", "The request did not confirm access to data."
     sample = probe.body_sample.strip()
     if code in {204, 205} or not sample:
-        return "unconfirmed", "No data content was returned."
+        return forbidden if code == 403 else ("unconfirmed", "No data content was returned.")
 
     content_type = _header(probe, "content-type").lower()
     text = sample[:8192].decode("utf-8-sig", errors="replace").lower()
     if "html" in content_type or (text.lstrip().startswith("<") and re.search(
         r"<(?:!doctype\s+html|html|head|body|form)\b", text,
     )):
-        if re.search(r"captcha|type\s*=\s*['\"]?password\b|\blog[ -]?in\b|\bsign[ -]?in\b", text):
-            return "restricted", "A login page or CAPTCHA prevents access to data."
-        return "unconfirmed", "HTML was returned instead of data."
+        page = _AccessPage()
+        try:
+            page.feed(text)
+        except (AssertionError, NotImplementedError):
+            return (
+                "unconfirmed", "The HTML response could not be interpreted to confirm data access.",
+            )
+        if page.password_form:
+            return "restricted", "A login form requires authentication before data can be checked."
+        barrier = _access_barrier(" ".join(page.text))
+        if not barrier and page.captcha_widget:
+            barrier = _access_barrier("captcha")
+        if barrier:
+            return barrier
+        return forbidden if code == 403 else ("unconfirmed", "HTML was returned instead of data.")
 
     if "json" in content_type or format_name == "JSON" or sample.startswith((b"{", b"[")):
         truncated = _sample_is_truncated(probe)
@@ -156,6 +178,8 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
             payload = read_json_prefix(probe.body_sample) if truncated else json.loads(sample)
         except (ValueError, UnicodeError, RecursionError):
             # A bounded/ranged sample may end in the middle of a valid document.
+            if code == 403:
+                return forbidden
             return "unconfirmed", "The JSON sample is incomplete or invalid."
         if isinstance(payload, dict):
             failure = (
@@ -163,13 +187,17 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
                 or payload.get("success") is False
                 or str(payload.get("status", "")).lower() in {"error", "failed", "failure"}
             )
+            error_fields = {"error", "errors", "message", "detail", "status"}
+            if failure or code == 403 or payload.keys() <= error_fields:
+                # Data records mentioning login/API keys are not authentication errors.
+                error_text = json.dumps({key: value for key, value in payload.items()
+                                         if key in error_fields}).lower()
+                barrier = _access_barrier(error_text)
+                if barrier:
+                    return barrier
+            if code == 403:
+                return forbidden
             if failure:
-                error_text = json.dumps(payload).lower()
-                if re.search(
-                    r"authenticat|unauthori[sz]ed|forbidden|api[ _-]?key|captcha|log[ -]?in"
-                    r"|access denied", error_text,
-                ):
-                    return "restricted", "The API requires authentication or access permission."
                 return "unconfirmed", "The API returned an error response."
             # Common data envelopes and plain records; metadata alone is insufficient.
             for key in ("data", "results", "records", "value", "items", "features"):
@@ -180,6 +208,8 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
                 metadata_keys = {"error", "errors", "success", "status", "message", "detail",
                                  "count", "total", "links", "meta", "metadata"}
                 payload = {key: value for key, value in payload.items() if key not in metadata_keys}
+        if code == 403:
+            return forbidden
         if not isinstance(payload, (dict, list)) or not payload:
             return "unconfirmed", "The JSON response contains no confirmed data."
         return "available", (
@@ -187,9 +217,73 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
             if truncated else "A JSON data response was confirmed."
         )
 
+    if code == 403:
+        return _access_barrier(text) or forbidden
     if format_name in {"UNKNOWN", "API"}:
         return "unconfirmed", "The response format could not be confirmed."
     return "available", "A non-empty data response was confirmed."
+
+
+def _access_barrier(text: str) -> tuple[ValidationStatus, str] | None:
+    """Require affirmative access evidence, not a generic denial or keyword mention."""
+    text = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", text.lower()))
+    if re.search(
+        r"\b(?:unauthori[sz]ed|unauthenticated)\b"
+        r"|\b(?:authentication|authorization|authorisation|login|log in|sign in|permissions?)"
+        r" (?:is |are )?required\b"
+        r"|\bauthentication (?:has )?failed\b"
+        r"|\brequires (?:authentication|authorization|authorisation|permissions?)\b"
+        r"|\b(?:please|must|need to) (?:log in|sign in|authenticate)\b"
+        r"|\b(?:missing|invalid|expired|required) (?:api key|access token|credentials)\b"
+        r"|\b(?:api key|access token|credentials) (?:is |are )?"
+        r"(?:required|missing|invalid|expired)\b"
+        r"|\bauthentication credentials (?:were |are )?not provided\b"
+        r"|\b(?:insufficient permissions|permission denied)\b", text,
+    ):
+        return "restricted", "The response explicitly requires authentication or access permission."
+    if re.search(
+        r"\bcaptcha\b|\brecaptcha\b|\bhcaptcha\b|\bverify (?:that )?you are (?:a )?human\b"
+        r"|\bchecking your browser\b|\b(?:anti bot|bot) (?:challenge|verification)\b", text,
+    ):
+        return "unconfirmed", "An anti-bot challenge prevented verification of data access."
+    return None
+
+
+class _AccessPage(HTMLParser):
+    """Inspect visible text and password forms, ignoring scripts and navigation URLs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.text: list[str] = []
+        self.in_form = False
+        self.hidden_depth = 0
+        self.password_form = False
+        self.captcha_widget = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style"}:
+            self.hidden_depth += 1
+        if self.hidden_depth:
+            return
+        if tag == "form":
+            self.in_form = True
+        attributes = dict(attrs)
+        self.captcha_widget |= bool(
+            {"g-recaptcha", "h-captcha", "cf-turnstile"}
+            & set((attributes.get("class") or "").split())
+        )
+        if tag == "input" and self.in_form:
+            self.password_form |= (attributes.get("type") or "").lower() == "password"
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style"}:
+            self.hidden_depth = max(0, self.hidden_depth - 1)
+        if tag == "form":
+            self.in_form = False
+
+    def handle_data(self, data: str) -> None:
+        if not self.hidden_depth:
+            self.text.append(data.strip())
 
 
 def _prefix_range(probe: HTTPProbe) -> re.Match | None:
