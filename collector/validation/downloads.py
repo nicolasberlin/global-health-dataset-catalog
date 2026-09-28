@@ -17,7 +17,7 @@ from collector.storage.models import (
     ValidationResult,
     ValidationStatus,
 )
-from collector.validation.json_sample import read_json_prefix
+from collector.validation.json_sample import read_json_prefix, reject_json_constant
 
 ProbeFunction = Callable[..., HTTPProbe]
 
@@ -153,7 +153,10 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
         if code == 206 and not _prefix_range(probe):
             return "unconfirmed", "The JSON response is not a confirmed initial byte range."
         try:
-            payload = read_json_prefix(probe.body_sample) if truncated else json.loads(sample)
+            payload = (
+                read_json_prefix(probe.body_sample) if truncated
+                else json.loads(sample, parse_constant=reject_json_constant)
+            )
         except (ValueError, UnicodeError, RecursionError):
             # A bounded/ranged sample may end in the middle of a valid document.
             return "unconfirmed", "The JSON sample is incomplete or invalid."

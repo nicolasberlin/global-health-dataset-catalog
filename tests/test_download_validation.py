@@ -65,6 +65,14 @@ def test_truncated_json_requires_evidence_and_valid_sampled_syntax(body, status)
     assert json_validation(body, truncated=True).status == status
 
 
+@pytest.mark.parametrize("constant", [b"NaN", b"Infinity", b"-Infinity"])
+@pytest.mark.parametrize("truncated", [False, True])
+def test_non_json_numeric_constants_never_confirm_data(constant, truncated):
+    body = b'[{"value":1}, {"value":' + constant
+    body += b'},' if truncated else b'}]'
+    assert json_validation(body, truncated=truncated).status == "unconfirmed"
+
+
 def test_json_prefix_accepts_every_byte_boundary_in_valid_utf8_document():
     value = {"data": [{"text": 'é😊\\"\n\t', "number": -1.2e-7, "bool": True,
                        "null": None, "nested": [False, {}, [], 12.5]}] * 2}

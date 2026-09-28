@@ -21,6 +21,11 @@ _STRING_PREFIX = re.compile(
 _NUMBER_PREFIX = re.compile(r'-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][+-]?[0-9]*)?\Z')
 
 
+def reject_json_constant(value: str) -> None:
+    """Reject Python's optional NaN/Infinity extensions to JSON syntax."""
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
 def read_json_prefix(sample: bytes) -> object:
     # An incomplete final UTF-8 code point is expected at a byte boundary;
     # invalid encoding elsewhere must still fail.
@@ -42,7 +47,7 @@ class _PrefixReader:
     def __init__(self, text: str):
         self.text = text
         self.position = 0
-        self.decoder = json.JSONDecoder()
+        self.decoder = json.JSONDecoder(parse_constant=reject_json_constant)
 
     def whitespace(self) -> None:
         while self.position < len(self.text) and self.text[self.position] in " \r\n\t":
