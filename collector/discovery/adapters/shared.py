@@ -119,6 +119,7 @@ def fetch_json_url(
     url: str,
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 5_000_000,
+    user_agent: str = DEFAULT_CONFIG.user_agent,
 ) -> dict[str, object]:
     """Fetch a bounded public URL and require a JSON object response."""
 
@@ -126,7 +127,7 @@ def fetch_json_url(
         url,
         headers={
             "Accept": "application/json",
-            "User-Agent": DEFAULT_CONFIG.user_agent,
+            "User-Agent": user_agent,
         },
         method="GET",
     )

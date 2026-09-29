@@ -1,5 +1,6 @@
 GLOBAL HEALTH DATASET CATALOG - VERIFIED BACKLOG
-Last reviewed: 2026-09-26
+Last full review: 2026-09-26
+Targeted update: 2026-09-29 — tasks 6 and 7
 
 SCOPE AND STATUS
 Reviewed against the current feat/traefik-rate-limits checkout, including local
@@ -7,7 +8,8 @@ uncommitted changes, and the local codex/search-progress worktree (d76afbf).
 Implemented locally does not mean merged, deployed, or verified in production.
 PR #9: https://github.com/nicolasberlin/global-health-dataset-catalog/pull/9
 Its current remote merge status was not verified in this review.
-This review updates documentation only; it does not execute the tasks below.
+The original review updated documentation only. Later implementation and verification
+are recorded in the dated status of each task.
 Each numbered task uses the requested What / Where / How / Result / Done format.
 Priority order: finish existing work, correct confirmed behavior, improve operations,
 then measure optimizations. Conditional tasks are not release requirements.
@@ -90,63 +92,8 @@ Done when: The target release passes CI; public access uses HTTPS when applicabl
 
 P1 - CORRECTNESS AND OPERATIONAL RELIABILITY
 
-TODO 4: Report ambiguous access failures accurately
-What to do: Stop describing every 403 and CAPTCHA as proof that authentication
-  or permission is required. Preserve the existing four access states.
-Where: collector/validation/downloads.py (_response_status),
-  tests/test_download_validation.py, frontend/src/components/DatasetAccessDetails.jsx
-  and its tests if displayed wording needs adjustment.
-How: Treat explicit authentication evidence as restricted; classify bare 403s and
-  ambiguous anti-bot challenges as unconfirmed with a precise reason. Keep 404/410
-  unavailable. Preserve bounded probing and current publication rules.
-Expected result: Users can distinguish an explicit access restriction from a check
-  that could not establish availability.
-Done when: Tests cover 401, bare 403, explicit authentication errors, HTTP-200 login
-  forms and CAPTCHA pages; saved/public reasons agree. No schema migration expected.
 
-TODO 5: Strengthen bounded validation of non-JSON resources
-What to do: Avoid confirming arbitrary non-empty bytes solely because a URL or
-  response header suggests CSV, ZIP or another recognized format.
-Where: collector/validation/downloads.py (_response_status, _validated_format,
-  _format_from_body_sample), tests/test_download_validation.py,
-  tests/test_validation_persistence.py.
-How: Define conservative evidence rules per supported format. Check recognizable
-  signatures for binary formats and plausible tabular structure for CSV/TSV.
-  Unsupported or ambiguous evidence remains unconfirmed. Never download/unpack a
-  complete archive or claim that a prefix proves the whole file is valid.
-Expected result: A plain error message at a .csv or .zip URL is not called available.
-Done when: Tests cover valid samples, mismatched content, plain-text errors,
-  truncated samples, encoding variants and existing JSON behavior; byte/network
-  limits and distribution-format persistence consistency remain intact.
 
-TODO 6: Finish propagating network configuration through the pipeline
-What to do: Address the remaining gaps, not the already-configured HTML fetch path.
-  Discovery helpers still use defaults, and distribution probes do not receive the
-  configured user agent. HTML timeout/user agent and validation sample size/timeout
-  are already forwarded by collect_source_with_report.
-Where: collector/main.py, collector/config.py, collector/discovery/manager.py,
-  collector/discovery/adapters/, collector/validation/downloads.py;
-  tests/test_collector_pipeline.py, test_discovery_adapters.py, test_download_validation.py.
-How: Pass configuration or configured fetch dependencies through default adapters
-  and probe requests. Preserve explicitly injected test/custom callables where
-  practical. Keep DNS pinning, redirect checks and response bounds unchanged.
-Expected result: A custom run configuration controls its actual outbound requests.
-Done when: Tests inspect effective timeouts, sample bounds and user-agent headers
-  during discovery, HTML fetching and distribution HEAD/GET requests.
-
-TODO 7: Add bounded operational measurements
-What to do: Measure queue wait/duration, provider latency/failures and persistence
-  retries without introducing a mandatory distributed monitoring stack.
-Where: backend/app/workers.py, classification_worker.py, collection_worker.py;
-  collector/classification/llm_client.py; backend/app/db/ queue modules;
-  docs/DEPLOYMENT.md and corresponding worker/client tests.
-How: Start with structured events and a documented way to inspect queue depth/age.
-  Use monotonic durations and controlled outcome categories. Correlate existing
-  job/candidate IDs in internal logs; never use URLs, IDs or prompts as metric labels.
-  Exclude credentials, request bodies and sensitive provider responses.
-Expected result: Operators can distinguish slow models, backlog and database outages.
-Done when: Tests verify success/failure/retry events and redaction; an example run
-  can be diagnosed; instrumentation failures cannot fail a collection.
 
 TODO 8: Add a lightweight readiness check
 What to do: Keep /health as liveness and add a bounded readiness check for initialized

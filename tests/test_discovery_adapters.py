@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import io
+import json
+
+import pytest
+
+from collector.config import CollectorConfig
 from collector.discovery.adapters import (
     ADAPTERS,
     CKANAdapter,
@@ -8,6 +14,77 @@ from collector.discovery.adapters import (
     SocrataAdapter,
 )
 from collector.discovery.manager import discover_source
+
+
+@pytest.mark.parametrize("kind", ["ckan", "socrata", "data_json", "sitemap"])
+def test_default_discovery_requests_use_each_runs_settings(monkeypatch, kind):
+    requests = []
+    reads = []
+    source = "https://data.example.org"
+
+    class Response(io.BytesIO):
+        headers = {"Content-Type": "text/plain"}
+
+        def __init__(self, url, body):
+            super().__init__(body)
+            self.url = url
+
+        def geturl(self):
+            return self.url
+
+        def read(self, size=-1):
+            reads.append(size)
+            return super().read(size)
+
+    def open_url(request, *, timeout):
+        requests.append((request, timeout))
+        url = request.full_url
+        data = {}
+        if kind == "ckan":
+            data = {"success": True, "result": {"results": [{"name": "health"}]}}
+        elif kind == "socrata" and "api.us.socrata.com" in url:
+            data = {"results": [{"resource": {"id": "abcd-1234", "type": "dataset"},
+                                 "metadata": {"domain": "data.example.org"}}]}
+        elif kind == "data_json" and url.endswith("data.json"):
+            data = {"dataset": [{"title": "Health", "landingPage": source + "/dataset"}]}
+        body = json.dumps(data).encode()
+        if url.endswith("robots.txt"):
+            body = b"Sitemap: /sitemap.xml"
+        elif url.endswith("sitemap.xml"):
+            body = f"<urlset><url><loc>{source}/dataset</loc></url></urlset>".encode()
+        return Response(url, body)
+
+    monkeypatch.setattr("collector.discovery.adapters.shared.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.discovery.sitemap.open_public_http_url", open_url)
+    for config in (
+        CollectorConfig(user_agent="Discovery/1", request_timeout_seconds=1.5, max_sample_bytes=8),
+        CollectorConfig(user_agent="Discovery/2", request_timeout_seconds=2.5),
+        CollectorConfig(),
+    ):
+        requests.clear()
+        reads.clear()
+        pages = discover_source(source, config=config)
+        assert pages and pages[0].discovery_method == kind
+        assert len(requests) == {"ckan": 2, "socrata": 3, "data_json": 4, "sitemap": 5}[kind]
+        assert all(timeout == config.request_timeout_seconds for _, timeout in requests)
+        assert all(request.get_header("User-agent") == config.user_agent for request, _ in requests)
+        assert reads == [5_000_001] * len(requests)
+
+
+def test_custom_discovery_adapters_keep_their_injected_fetchers():
+    calls = []
+
+    def fetch_json(url):
+        calls.append(url)
+        return {"success": True, "result": {"results": [{"name": "health"}]}}
+
+    pages = discover_source(
+        "https://example.org", adapters=(CKANAdapter(fetch_json=fetch_json),),
+        config=CollectorConfig(user_agent="Unused/1", request_timeout_seconds=.5),
+    )
+    assert pages[0].discovery_method == "ckan"
+    assert len(calls) == 2
+    assert discover_source("https://example.org", adapters=()) == []
 
 
 def test_ckan_adapter_detects_status_endpoint():

@@ -145,6 +145,77 @@ provides a restore button. It never submits its unrequested candidates implicitl
 This is recovery of the last repository analysis, not a complete search history.
 The single-process/single-instance constraint also applies to classification.
 
+## Internal operational logs
+
+The API enables the `collector.operations` logger at startup. It writes JSON lines
+on stderr, available only through server/container logs; no route or frontend view
+exposes them. No external monitoring service is required. Inspect a bounded window:
+
+```sh
+docker compose logs --since 15m --tail 500 --timestamps ai-commons-api
+```
+
+Events cover `collection_started` / `collection_finished`,
+`classification_started` / `classification_finished`, `provider_request`,
+`persistence_retry`, `persistence_finished`, `persistence_duration`, and failures
+in `worker_poll` or collection/classification execution. Durations use a monotonic
+clock. A worker's finish duration includes execution and terminal persistence,
+including retry waits; it excludes time spent queued. Provider duration covers the
+HTTP request and parsing, not subsequent classification-domain validation. Outcomes
+are fixed categories: `started`, `success`, `failed`, `retry`, `timeout`,
+`network_error`, `http_error`, `invalid_response`, and `configuration_error`.
+A failed persistence duration also records a permanent error or interrupted wait.
+
+Internal `job_id` / `candidate_id` fields correlate events across executor and
+voter threads. They are not metric labels. Events never include URLs, prompts,
+request bodies, credentials, provider names/models or response/exception text.
+Existing application persistence and public error presentation are unchanged.
+Logging-handler failures are ignored so they cannot fail model calls, persistence
+or collection. These logs are best-effort diagnostics, not an audit trail.
+
+For example, this illustrative subset of events describes a successful collection
+that waited for the database after a successful model response:
+
+```json
+{"event":"collection_started","outcome":"started","job_id":42}
+{"event":"provider_request","outcome":"success","job_id":42,"duration_seconds":12.4}
+{"event":"persistence_retry","outcome":"retry","job_id":42,"retry_count":1,"delay_seconds":0.8}
+{"event":"persistence_retry","outcome":"retry","job_id":42,"retry_count":2,"delay_seconds":1.5}
+{"event":"persistence_finished","outcome":"success","job_id":42,"retry_count":2}
+{"event":"persistence_duration","outcome":"success","job_id":42,"duration_seconds":2.5}
+{"event":"collection_finished","outcome":"success","job_id":42,"duration_seconds":18.2}
+```
+
+High provider durations point to model-call latency. Repeated persistence retries
+point to a database or pool problem; the model result is retained without repeating
+the model call. A start event with no finish may mean ongoing work or an interrupted
+process: check container status and persisted job status before concluding failure.
+Parallel voter durations overlap and must not be summed as wall-clock duration.
+
+To inspect backlog, run this read-only SQL through an administrative PostgreSQL
+connection. It returns only queue counts and the oldest queued age in seconds.
+`updated_at` is reset when work is enqueued or explicitly retried; once claimed it
+is overwritten, so this query does not measure historical per-task queue wait.
+That extra measurement remains deferred in TODO 7.
+
+```sql
+BEGIN READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SELECT 'collection' AS queue, count(*) AS queued,
+       COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - min(updated_at))), 0)
+           AS oldest_wait_seconds
+FROM collection_jobs WHERE status = 'pending'
+UNION ALL
+SELECT 'classification', count(*),
+       COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - min(updated_at))), 0)
+FROM repository_candidates WHERE classification_status = 'queued';
+COMMIT;
+```
+
+A growing oldest age with active workers suggests backlog. No claimed work plus
+`worker_poll` failures suggests that workers cannot access or finalize queue work.
+These are diagnostic indicators, not guarantees of the underlying cause.
+
 ## Outbound network policy
 
 The backend image starts with a short bootstrap that installs an nftables

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collector.discovery.adapters import ADAPTERS, DiscoveredPage, DiscoveryAdapter
+from collector.config import DEFAULT_CONFIG, CollectorConfig
+from collector.discovery.adapters import DiscoveredPage, DiscoveryAdapter, default_adapters
 
 
 def discover_source(
     source_url: str,
-    adapters: tuple[DiscoveryAdapter, ...] = ADAPTERS,
+    adapters: tuple[DiscoveryAdapter, ...] | None = None,
+    config: CollectorConfig = DEFAULT_CONFIG,
 ) -> list[DiscoveredPage]:
     """Discover pages with the first adapter that detects ``source_url``."""
 
-    for adapter in adapters:
+    for adapter in default_adapters(config) if adapters is None else adapters:
         if adapter.detect(source_url):
             return adapter.discover(source_url)
 

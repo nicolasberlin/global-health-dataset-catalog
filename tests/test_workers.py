@@ -1,10 +1,13 @@
 """Persistence retries retain ownership without repeating external execution."""
 
 import asyncio
+import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
 from unittest.mock import AsyncMock, Mock
+from uuid import UUID
 
 import pytest
 from app import classification_worker, collection_worker, workers
@@ -12,6 +15,7 @@ from psycopg import InterfaceError, OperationalError
 from psycopg.errors import DeadlockDetected, DiskFull, SerializationFailure
 from psycopg_pool import PoolTimeout
 
+from collector import observability
 from collector.storage.models import CollectionResult
 
 pytestmark = pytest.mark.anyio
@@ -108,14 +112,20 @@ async def test_consumer_keeps_slot_until_terminal_write_recovers(monkeypatch):
 
 @pytest.mark.parametrize("kind", ["collection", "classification"])
 @pytest.mark.parametrize("stage", ["success", "execution_error", "permanent_finalization_error"])
-async def test_workers_retry_only_persistence(monkeypatch, kind, stage):
+async def test_workers_retry_only_persistence(monkeypatch, kind, stage, caplog):
+    monkeypatch.setattr(observability.logger, "propagate", True)
+    caplog.set_level(logging.INFO, logger="collector.operations")
     module = collection_worker if kind == "collection" else classification_worker
     monkeypatch.setattr(module, "persist_with_retry",
                         partial(workers.persist_with_retry, initial_delay=0))
     monkeypatch.setattr(module, "PostgresVoteStore", Mock())
-    compute = Mock(return_value=CollectionResult() if kind == "collection" else object())
-    if stage == "execution_error":
-        compute.side_effect = RuntimeError("execution failed")
+    def execute(*args, **kwargs):
+        observability.emit_event("test_execution", outcome="success")
+        if stage == "execution_error":
+            raise RuntimeError("secret-execution-error")
+        return CollectionResult() if kind == "collection" else object()
+
+    compute = Mock(side_effect=execute)
     complete = AsyncMock(side_effect=(
         [OperationalError("offline"), None] if stage == "success"
         else RuntimeError("invalid result")
@@ -133,7 +143,8 @@ async def test_workers_retry_only_persistence(monkeypatch, kind, stage):
         monkeypatch.setattr(module, "_classify", compute)
         monkeypatch.setattr(module, "complete_candidate_classification", complete)
         monkeypatch.setattr(module, "fail_candidate_classification", fail)
-        item = {"id": "candidate", "owner_id": "alice", "updated_at": VERSION.isoformat()}
+        item = {"id": UUID("00000000-0000-0000-0000-000000000001"),
+                "owner_id": "alice", "updated_at": VERSION.isoformat()}
         run = module._run_classification
     with ThreadPoolExecutor(1) as executor:
         await run(item, executor)
@@ -142,3 +153,40 @@ async def test_workers_retry_only_persistence(monkeypatch, kind, stage):
     assert fail.await_count == (0 if stage == "success" else 3)
     for call in complete.await_args_list + fail.await_args_list:
         assert call.kwargs["expected_updated_at"] == VERSION
+
+    records = [json.loads(r.message) for r in caplog.records if r.name == "collector.operations"]
+    assert records[0]["event"] == f"{kind}_started"
+    assert records[-1]["event"] == f"{kind}_finished"
+    assert records[-1]["outcome"] == ("success" if stage == "success" else "failed")
+    assert records[-1]["duration_seconds"] >= 0
+    id_field = "job_id" if kind == "collection" else "candidate_id"
+    expected_id = item["id"] if kind == "collection" else str(item["id"])
+    assert all(r[id_field] == expected_id for r in records)
+    assert "secret-execution-error" not in caplog.text
+
+
+@pytest.mark.parametrize("kind", ["collection", "classification"])
+async def test_logging_failure_cannot_fail_worker(monkeypatch, kind):
+    module = collection_worker if kind == "collection" else classification_worker
+    monkeypatch.setattr(observability.logger, "info", Mock(side_effect=RuntimeError("broken")))
+    monkeypatch.setattr(module, "PostgresVoteStore", Mock())
+    complete = AsyncMock()
+    fail = AsyncMock()
+    item = {"id": 1, "owner_id": "alice", "kind": "source",
+            "source_url": "https://example.org", "updated_at": VERSION.isoformat()}
+    if kind == "collection":
+        monkeypatch.setattr(module, "build_default_page_classifier", Mock())
+        monkeypatch.setattr(module, "collect_source_with_report",
+                            Mock(return_value=CollectionResult()))
+        monkeypatch.setattr(module, "complete_collection_job", complete)
+        monkeypatch.setattr(module, "mark_collection_job_error", fail)
+        run = module._run_collection_job
+    else:
+        monkeypatch.setattr(module, "_classify", Mock(return_value=object()))
+        monkeypatch.setattr(module, "complete_candidate_classification", complete)
+        monkeypatch.setattr(module, "fail_candidate_classification", fail)
+        run = module._run_classification
+    with ThreadPoolExecutor(1) as executor:
+        await run(item, executor)
+    complete.assert_awaited_once()
+    fail.assert_not_awaited()

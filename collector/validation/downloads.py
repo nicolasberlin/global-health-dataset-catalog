@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import codecs
+import csv
+import io
 import json
 import re
+import struct
 from collections.abc import Callable
+from functools import partial
+from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -27,6 +33,7 @@ def validate_distribution(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_sample_bytes: int = DEFAULT_CONFIG.max_sample_bytes,
     probe: ProbeFunction | None = None,
+    user_agent: str = DEFAULT_CONFIG.user_agent,
 ) -> ValidationResult:
     """Normalize one distribution probe into a validation outcome.
 
@@ -36,7 +43,9 @@ def validate_distribution(
 
     if max_sample_bytes < 1:
         raise ValueError("max_sample_bytes must be positive.")
-    probe = probe or probe_url
+    # Custom probes keep their existing calling convention and manage their own headers.
+    if probe is None:
+        probe = partial(probe_url, user_agent=user_agent)
     head_probe = probe(distribution.url, method="HEAD", timeout=timeout, max_bytes=0)
     selected_probe = head_probe
 
@@ -77,6 +86,7 @@ def probe_url(
     timeout: float,
     max_bytes: int,
     headers: dict[str, str] | None = None,
+    user_agent: str = DEFAULT_CONFIG.user_agent,
 ) -> HTTPProbe:
     """Perform one bounded probe with public-URL and redirect protection.
 
@@ -86,7 +96,7 @@ def probe_url(
     validation can reject the resource without raising.
     """
 
-    request = Request(url, method=method, headers=headers or {})
+    request = Request(url, method=method, headers={"User-Agent": user_agent, **(headers or {})})
 
     try:
         with open_public_http_url(request, timeout=timeout) as response:
@@ -129,24 +139,45 @@ def _needs_partial_get(probe: HTTPProbe) -> bool:
 
 def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStatus, str]:
     code = probe.status_code
-    if code in {401, 403}:
+    if code == 401:
         return "restricted", "Authentication or access permission is required."
     if code in {404, 410}:
         return "unavailable", "Resource was not found at this URL."
-    if probe.error or code is None or not 200 <= code < 300:
+    forbidden: tuple[ValidationStatus, str] = (
+        "unconfirmed",
+        "HTTP 403 refused the check without explicit authentication or permission requirements.",
+    )
+    if code == 403 and re.match(
+        r"(?:basic|bearer|digest|negotiate)\b", _header(probe, "www-authenticate"), re.I,
+    ):
+        return "restricted", "The server explicitly requests authentication."
+    # HTTPError populates error for 403 too; inspect its bounded body before deciding.
+    if code != 403 and (probe.error or code is None or not 200 <= code < 300):
         return "unconfirmed", "The request did not confirm access to data."
     sample = probe.body_sample.strip()
     if code in {204, 205} or not sample:
-        return "unconfirmed", "No data content was returned."
+        return forbidden if code == 403 else ("unconfirmed", "No data content was returned.")
 
     content_type = _header(probe, "content-type").lower()
     text = sample[:8192].decode("utf-8-sig", errors="replace").lower()
     if "html" in content_type or (text.lstrip().startswith("<") and re.search(
         r"<(?:!doctype\s+html|html|head|body|form)\b", text,
     )):
-        if re.search(r"captcha|type\s*=\s*['\"]?password\b|\blog[ -]?in\b|\bsign[ -]?in\b", text):
-            return "restricted", "A login page or CAPTCHA prevents access to data."
-        return "unconfirmed", "HTML was returned instead of data."
+        page = _AccessPage()
+        try:
+            page.feed(text)
+        except (AssertionError, NotImplementedError):
+            return (
+                "unconfirmed", "The HTML response could not be interpreted to confirm data access.",
+            )
+        if page.password_form:
+            return "restricted", "A login form requires authentication before data can be checked."
+        barrier = _access_barrier(" ".join(page.text))
+        if not barrier and page.captcha_widget:
+            barrier = _access_barrier("captcha")
+        if barrier:
+            return barrier
+        return forbidden if code == 403 else ("unconfirmed", "HTML was returned instead of data.")
 
     if "json" in content_type or format_name == "JSON" or sample.startswith((b"{", b"[")):
         truncated = _sample_is_truncated(probe)
@@ -159,6 +190,8 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
             )
         except (ValueError, UnicodeError, RecursionError):
             # A bounded/ranged sample may end in the middle of a valid document.
+            if code == 403:
+                return forbidden
             return "unconfirmed", "The JSON sample is incomplete or invalid."
         if isinstance(payload, dict):
             failure = (
@@ -166,13 +199,17 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
                 or payload.get("success") is False
                 or str(payload.get("status", "")).lower() in {"error", "failed", "failure"}
             )
+            error_fields = {"error", "errors", "message", "detail", "status"}
+            if failure or code == 403 or payload.keys() <= error_fields:
+                # Data records mentioning login/API keys are not authentication errors.
+                error_text = json.dumps({key: value for key, value in payload.items()
+                                         if key in error_fields}).lower()
+                barrier = _access_barrier(error_text)
+                if barrier:
+                    return barrier
+            if code == 403:
+                return forbidden
             if failure:
-                error_text = json.dumps(payload).lower()
-                if re.search(
-                    r"authenticat|unauthori[sz]ed|forbidden|api[ _-]?key|captcha|log[ -]?in"
-                    r"|access denied", error_text,
-                ):
-                    return "restricted", "The API requires authentication or access permission."
                 return "unconfirmed", "The API returned an error response."
             # Common data envelopes and plain records; metadata alone is insufficient.
             for key in ("data", "results", "records", "value", "items", "features"):
@@ -183,6 +220,8 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
                 metadata_keys = {"error", "errors", "success", "status", "message", "detail",
                                  "count", "total", "links", "meta", "metadata"}
                 payload = {key: value for key, value in payload.items() if key not in metadata_keys}
+        if code == 403:
+            return forbidden
         if not isinstance(payload, (dict, list)) or not payload:
             return "unconfirmed", "The JSON response contains no confirmed data."
         return "available", (
@@ -190,9 +229,78 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
             if truncated else "A JSON data response was confirmed."
         )
 
-    if format_name in {"UNKNOWN", "API"}:
-        return "unconfirmed", "The response format could not be confirmed."
-    return "available", "A non-empty data response was confirmed."
+    if code == 403:
+        return _access_barrier(text) or forbidden
+    if code == 206 and not _prefix_range(probe):
+        return "unconfirmed", "The response is not a confirmed initial byte range."
+    evidence = _format_from_body_sample(probe.body_sample, _sample_is_truncated(probe))
+    if evidence == "UNKNOWN" or evidence != format_name:
+        return "unconfirmed", "The sampled content does not provide sufficient format evidence."
+    return "available", (
+        f"{evidence} format evidence was found in the sample; the full file was not validated."
+    )
+
+
+def _access_barrier(text: str) -> tuple[ValidationStatus, str] | None:
+    """Require affirmative access evidence, not a generic denial or keyword mention."""
+    text = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", text.lower()))
+    if re.search(
+        r"\b(?:unauthori[sz]ed|unauthenticated)\b"
+        r"|\b(?:authentication|authorization|authorisation|login|log in|sign in|permissions?)"
+        r" (?:is |are )?required\b"
+        r"|\bauthentication (?:has )?failed\b"
+        r"|\brequires (?:authentication|authorization|authorisation|permissions?)\b"
+        r"|\b(?:please|must|need to) (?:log in|sign in|authenticate)\b"
+        r"|\b(?:missing|invalid|expired|required) (?:api key|access token|credentials)\b"
+        r"|\b(?:api key|access token|credentials) (?:is |are )?"
+        r"(?:required|missing|invalid|expired)\b"
+        r"|\bauthentication credentials (?:were |are )?not provided\b"
+        r"|\b(?:insufficient permissions|permission denied)\b", text,
+    ):
+        return "restricted", "The response explicitly requires authentication or access permission."
+    if re.search(
+        r"\bcaptcha\b|\brecaptcha\b|\bhcaptcha\b|\bverify (?:that )?you are (?:a )?human\b"
+        r"|\bchecking your browser\b|\b(?:anti bot|bot) (?:challenge|verification)\b", text,
+    ):
+        return "unconfirmed", "An anti-bot challenge prevented verification of data access."
+    return None
+
+
+class _AccessPage(HTMLParser):
+    """Inspect visible text and password forms, ignoring scripts and navigation URLs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.text: list[str] = []
+        self.in_form = False
+        self.hidden_depth = 0
+        self.password_form = False
+        self.captcha_widget = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style"}:
+            self.hidden_depth += 1
+        if self.hidden_depth:
+            return
+        if tag == "form":
+            self.in_form = True
+        attributes = dict(attrs)
+        self.captcha_widget |= bool(
+            {"g-recaptcha", "h-captcha", "cf-turnstile"}
+            & set((attributes.get("class") or "").split())
+        )
+        if tag == "input" and self.in_form:
+            self.password_form |= (attributes.get("type") or "").lower() == "password"
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style"}:
+            self.hidden_depth = max(0, self.hidden_depth - 1)
+        if tag == "form":
+            self.in_form = False
+
+    def handle_data(self, data: str) -> None:
+        if not self.hidden_depth:
+            self.text.append(data.strip())
 
 
 def _prefix_range(probe: HTTPProbe) -> re.Match | None:
@@ -249,7 +357,15 @@ def _validated_format(
     content_disposition: str,
     probe: HTTPProbe,
 ) -> str:
-    """Prefer response metadata, then sampled bytes, then the discovered format."""
+    """Prefer sampled evidence; metadata remains only a hint when evidence is missing.
+
+    A ZIP signature identifies the container, not XLSX or its contents. Unsupported
+    formats may retain their advertised name for the audit but cannot confirm access.
+    """
+
+    sample_format = _format_from_body_sample(probe.body_sample, _sample_is_truncated(probe))
+    if sample_format != "UNKNOWN":
+        return sample_format
 
     format_from_headers, _ = guess_format(
         probe.final_url or distribution.url,
@@ -258,34 +374,112 @@ def _validated_format(
     if format_from_headers != "UNKNOWN":
         return format_from_headers
 
-    sample_format = _format_from_body_sample(probe.body_sample)
-    if sample_format != "UNKNOWN":
-        return sample_format
-
     return distribution.format
 
 
-def _format_from_body_sample(sample: bytes) -> str:
-    stripped = sample.strip()
-    if not stripped:
+def _format_from_body_sample(sample: bytes, truncated: bool = False) -> str:
+    """Recognize bounded evidence, never validate or unpack an entire file.
+
+    ZIP needs a complete plausible local header and filename; GZ needs its fixed
+    header and payload bytes; Parquet needs its leading magic and additional bytes.
+    OLE does not uniquely identify XLS, and ZIP does not uniquely identify XLSX.
+    XML, JSONL and statistical formats have no evidence rule here and stay unconfirmed.
+    JSON is only a routing hint here: its existing parser makes the access decision.
+    """
+    if not sample:
         return "UNKNOWN"
-    if stripped.startswith(b"PK\x03\x04"):
-        return "ZIP"
-    if stripped.startswith((b"{", b"[")):
+    if sample.startswith(b"PK\x03\x04") and len(sample) >= 30:
+        version, flags, method = struct.unpack_from("<HHH", sample, 4)
+        name_length, extra_length = struct.unpack_from("<HH", sample, 26)
+        header_end = 30 + name_length + extra_length
+        if (10 <= version <= 63 and not flags & 0xC000
+                and method in {0, 8, 12, 14, 93, 95, 98}
+                and name_length > 0 and header_end <= len(sample)
+                and b"\x00" not in sample[30:30 + name_length]):
+            return "ZIP"
+    if (len(sample) > 10 and sample.startswith(b"\x1f\x8b\x08")
+            and not sample[3] & 0xE0):
+        # Optional header sections must also fit inside the bounded sample.
+        offset = 10
+        flags = sample[3]
+        if flags & 4:
+            if len(sample) < offset + 2:
+                return "UNKNOWN"
+            offset += 2 + int.from_bytes(sample[offset:offset + 2], "little")
+        for flag in (8, 16):
+            if flags & flag:
+                end = sample.find(b"\x00", offset)
+                if end < 0:
+                    return "UNKNOWN"
+                offset = end + 1
+        if flags & 2:
+            offset += 2
+        if offset < len(sample):
+            return "GZ"
+    if sample.startswith(b"PAR1") and len(sample) >= 8:
+        return "PARQUET"
+
+    decoded = _decode_tabular_sample(sample, truncated)
+    if decoded is None:
+        return "UNKNOWN"
+    if decoded.lstrip().startswith(("{", "[")):
         return "JSON"
-
-    try:
-        decoded = stripped[:4096].decode("utf-8")
-    except UnicodeDecodeError:
+    if decoded.lstrip().startswith("<"):
         return "UNKNOWN"
+    candidates = [
+        name for delimiter, name in ((",", "CSV"), (";", "CSV"), ("\t", "TSV"))
+        if _plausible_table(decoded, delimiter, truncated)
+    ]
+    return candidates[0] if len(candidates) == 1 else "UNKNOWN"
 
-    first_line = decoded.splitlines()[0] if decoded.splitlines() else ""
-    if "," in first_line:
-        return "CSV"
-    if "\t" in first_line:
-        return "TSV"
 
-    return "UNKNOWN"
+def _decode_tabular_sample(sample: bytes, truncated: bool) -> str | None:
+    """Strictly decode UTF-8 or BOM-marked UTF-16/32, allowing a cut final character.
+
+    Guessing a legacy encoding or replacing malformed bytes would turn arbitrary
+    binary content into apparent text. Such ambiguous samples remain unconfirmed.
+    """
+    encoding = "utf-8-sig"
+    if sample.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        encoding = "utf-32"
+    elif sample.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encoding = "utf-16"
+    try:
+        decoded = codecs.getincrementaldecoder(encoding)().decode(sample, final=not truncated)
+    except UnicodeDecodeError:
+        return None
+    if any(ord(char) < 32 and char not in "\t\r\n" for char in decoded):
+        return None
+    return decoded
+
+
+def _plausible_table(text: str, delimiter: str, truncated: bool) -> bool:
+    """Require at least two nonempty, complete records with matching column counts."""
+    stream = io.StringIO(text, newline="")
+    # Count the same physical lines as csv.reader (Unicode separators are cell data).
+    line_count = sum(1 for _ in stream)
+    stream.seek(0)
+    reader = csv.reader(stream, delimiter=delimiter, strict=True)
+    width = 0
+    records = 0
+    try:
+        for row in reader:
+            # A bounded prefix without a line ending may cut an unquoted field.
+            if truncated and reader.line_num == line_count and not text.endswith(("\r", "\n")):
+                break
+            if not row:
+                continue
+            if len(row) < 2 or not any(cell.strip() for cell in row):
+                return False
+            if width and len(row) != width:
+                return False
+            width = len(row)
+            records += 1
+    except csv.Error as error:
+        # Only an unfinished quoted final record can be ignored in a cut prefix.
+        if not truncated or str(error) != "unexpected end of data":
+            return False
+    return records >= 2
 
 
 def _header(probe: HTTPProbe, name: str) -> str:

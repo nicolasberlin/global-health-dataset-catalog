@@ -221,6 +221,7 @@ def fetch_text_url(
     url: str,
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 5_000_000,
+    user_agent: str = DEFAULT_CONFIG.user_agent,
 ) -> str:
     """Fetch a bounded public text resource for sitemap discovery."""
 
@@ -228,7 +229,7 @@ def fetch_text_url(
         url,
         headers={
             "Accept": "text/plain,application/xml,text/xml,*/*",
-            "User-Agent": DEFAULT_CONFIG.user_agent,
+            "User-Agent": user_agent,
         },
         method="GET",
     )

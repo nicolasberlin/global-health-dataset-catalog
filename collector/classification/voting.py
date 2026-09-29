@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
@@ -47,4 +48,5 @@ def run_voters(
         )
 
     with ThreadPoolExecutor(max_workers=len(voters)) as executor:
-        return list(executor.map(invoke, voters))
+        futures = [executor.submit(copy_context().run, invoke, voter) for voter in voters]
+        return [future.result() for future in futures]

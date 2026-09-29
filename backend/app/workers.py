@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +13,7 @@ from psycopg import InterfaceError, OperationalError
 from psycopg.errors import DeadlockDetected, SerializationFailure
 from psycopg_pool import PoolTimeout
 
-logger = logging.getLogger(__name__)
+from collector.observability import emit_event, measure_operation
 
 WorkItem = dict[str, object]
 Claim = Callable[[], Awaitable[Optional[WorkItem]]]
@@ -32,22 +31,29 @@ async def persist_with_retry(
     attempts. Never pass collection or model execution here. Cancellation is
     deliberately allowed to propagate to startup recovery.
     """
-    delay = initial_delay
-    while True:
-        try:
-            return await operation()
-        except (OperationalError, InterfaceError, PoolTimeout,
-                SerializationFailure, DeadlockDetected) as exception:
-            # OperationalError also includes permanent SQL failures (e.g. disk
-            # full). Retry connection failures and explicitly transient states.
-            state = exception.sqlstate
-            if state and not (state.startswith("08") or state in {
-                "40001", "40P01", "53300", "57P01", "57P02", "57P03",
-            }):
-                raise
-            logger.warning("Persistence unavailable; retaining task and retrying", exc_info=True)
-            await asyncio.sleep(random.uniform(delay / 2, delay))
-            delay = min(max_delay, delay * 2)
+    with measure_operation("persistence_duration"):
+        delay = initial_delay
+        retry_count = 0
+        while True:
+            try:
+                result = await operation()
+                emit_event("persistence_finished", outcome="success", retry_count=retry_count)
+                return result
+            except (OperationalError, InterfaceError, PoolTimeout,
+                    SerializationFailure, DeadlockDetected) as exception:
+                # OperationalError also includes permanent SQL failures (e.g. disk
+                # full). Retry connection failures and explicitly transient states.
+                state = exception.sqlstate
+                if state and not (state.startswith("08") or state in {
+                    "40001", "40P01", "53300", "57P01", "57P02", "57P03",
+                }):
+                    raise
+                retry_count += 1
+                pause = random.uniform(delay / 2, delay)
+                emit_event("persistence_retry", outcome="retry",
+                           retry_count=retry_count, delay_seconds=pause)
+                await asyncio.sleep(pause)
+                delay = min(max_delay, delay * 2)
 
 
 async def _consume(
@@ -65,7 +71,7 @@ async def _consume(
                 await execute(job, executor)
                 continue
         except Exception:  # noqa: BLE001 - a temporary DB outage must not kill the consumer.
-            logger.exception("Worker could not claim or finalize a task")
+            emit_event("worker_poll", outcome="failed")
         try:
             await asyncio.wait_for(stop.wait(), timeout=poll_interval)
         except asyncio.TimeoutError:
