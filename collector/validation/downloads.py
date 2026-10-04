@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from collector.config import DEFAULT_CONFIG
+from collector.diagnostics import Diagnostic
 from collector.extraction.distributions import guess_format
 from collector.fetch import open_public_http_url
 from collector.storage.models import (
@@ -78,6 +79,23 @@ def validate_distribution(
         content_disposition=content_disposition,
         error=selected_probe.error or (reason if status != "available" else ""),
     )
+
+
+def page_access_diagnostic(html: str) -> Diagnostic | None:
+    """Recognize access barriers on a landing page without usable download links."""
+    page = _AccessPage()
+    try:
+        page.feed(html[:65_536])
+    except (AssertionError, NotImplementedError):
+        return Diagnostic("verification_unconfirmed", "collection")
+    if page.password_form:
+        return Diagnostic("access_restricted", "collection", recovery="none")
+    barrier = _access_barrier(" ".join(page.text))
+    if page.captcha_widget or barrier:
+        restricted = barrier is not None and barrier[0] == "restricted"
+        return Diagnostic("access_restricted" if restricted else "verification_unconfirmed",
+                          "collection", recovery="none" if restricted else "manual")
+    return None
 
 
 def probe_url(

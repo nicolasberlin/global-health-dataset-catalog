@@ -13,7 +13,8 @@ async def read_search_progress(search_id: UUID, owner_id: str):
         async with connection.transaction():
             await connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             search = await _fetchone(connection,
-                "SELECT status FROM search_sessions WHERE id = %s AND owner_id = %s",
+                "SELECT status, origin, errors, local_result_count, discovery_complete "
+                "FROM search_sessions WHERE id = %s AND owner_id = %s",
                 (search_id, _normalized_owner_id(owner_id)))
             if search is None:
                 return None
@@ -69,4 +70,4 @@ async def read_search_progress(search_id: UUID, owner_id: str):
                 collections[candidate_id] = CollectionJobReservation(
                     job, False, bool(ids) if job is None else False, tuple(ids),
                 )
-            return search["status"], candidates, collections
+            return search, candidates, collections

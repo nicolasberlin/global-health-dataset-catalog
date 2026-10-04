@@ -168,6 +168,10 @@ async def test_version_four_upgrade_preserves_existing_validation(database):
             ALTER TABLE repository_candidates DROP COLUMN classification_progress;
             ALTER TABLE collection_jobs DROP COLUMN classification_progress,
                 DROP COLUMN classification_root_id;
+            ALTER TABLE search_sessions DROP COLUMN errors,
+                DROP COLUMN local_result_count, DROP COLUMN discovery_complete;
+            ALTER TABLE repository_candidates DROP COLUMN errors;
+            ALTER TABLE collection_jobs DROP COLUMN errors, DROP COLUMN outcome;
             DELETE FROM schema_migrations WHERE version >= 5;
         """)
     await database.init_database()

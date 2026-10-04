@@ -27,6 +27,7 @@ from app.security import APIPrincipal
 from fastapi import HTTPException, Response
 
 from collector.classification.repository import RepositoryClassification
+from collector.diagnostics import Diagnostic
 from collector.repository_search import (
     RepositorySearchResponse,
     RepositorySearchResult,
@@ -208,7 +209,8 @@ def _use_search_persistence(monkeypatch) -> None:
         assert owner_id == PRINCIPAL.owner_id
         return {"id": search_id, **kwargs}
 
-    async def fake_save(search_id, owner_id, candidates, *, status, admission=None):
+    async def fake_save(search_id, owner_id, candidates, *, status, admission=None,
+                        errors=None, discovery_complete=None):
         assert search_id == SEARCH_ID
         assert owner_id == PRINCIPAL.owner_id
         return [
@@ -309,7 +311,7 @@ async def test_collector_search_datasets_marks_session_error_when_local_completi
 
     assert error.value.status_code == 500
     assert completion_calls == [
-        (SEARCH_ID, PRINCIPAL.owner_id, {"origin": "database"}),
+        (SEARCH_ID, PRINCIPAL.owner_id, {"origin": "database", "local_result_count": 1}),
         (
             SEARCH_ID,
             PRINCIPAL.owner_id,
@@ -317,6 +319,7 @@ async def test_collector_search_datasets_marks_session_error_when_local_completi
                 "origin": "database",
                 "status": "error",
                 "error": "Local completion unavailable",
+                    "errors": [Diagnostic("processing_failed", "search").to_dict()],
             },
         ),
     ]
@@ -448,6 +451,7 @@ async def test_collector_search_datasets_marks_session_error_when_bounding_fails
                 "origin": "online",
                 "status": "error",
                 "error": "Invalid provider metadata",
+                "errors": [Diagnostic("processing_failed", "search").to_dict()],
             },
         )
     ]
@@ -583,7 +587,8 @@ async def test_search_passes_batch_admission_and_maps_quota_rejection(monkeypatc
     async def finish(search_id, owner_id, **kwargs):
         completed.append(kwargs)
 
-    async def reserve(search_id, owner_id, candidates, *, status, admission):
+    async def reserve(search_id, owner_id, candidates, *, status, admission,
+                      errors=None, discovery_complete=None):
         assert len(candidates) == 1  # Duplicate provider results consume one pipeline slot.
         assert admission.quotas[0].owner_id == PRINCIPAL.owner_id
         assert admission.quotas[0].operation == "repository_classification"

@@ -13,7 +13,7 @@ from .connection import (
 
 # Historical pre-baseline schemas are unsupported. Explicit versioned migrations
 # preserve data for supported baselines, including the job associations in v2.
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",
     "health_probability",
@@ -327,6 +327,7 @@ CREATE TABLE collection_job_candidates (
 """
 REPOSITORY_PERSISTENCE_COLUMNS = {
     "search_sessions": {
+        "errors", "local_result_count", "discovery_complete",
         "id",
         "owner_id",
         "query",
@@ -342,6 +343,7 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
         "request_count",
     },
     "repository_candidates": {
+        "errors",
         "id",
         "search_session_id",
         "url",
@@ -349,7 +351,8 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
         "classification",
         "error",
     },
-    "collection_jobs": {"kind", "repository_candidate_id"},
+    "collection_jobs": {"kind", "repository_candidate_id", "errors", "outcome"},
+    "classification_votes": {"errors"},
     "collection_job_candidates": {"job_id", "candidate_id"},
 }
 REPOSITORY_PERSISTENCE_INDEXES = {
@@ -443,6 +446,8 @@ def _migration_for_version(version: int):
         return _migrate_4_to_5
     if version == 5:
         return _migrate_5_to_6
+    if version == 6:
+        return _migrate_6_to_7
 
     raise RuntimeError(f"No migration registered for schema version {version}.")
 
@@ -561,6 +566,25 @@ async def _migrate_5_to_6(connection: AsyncConnection[DictRow]) -> None:
                   OR (status <> 'succeeded' AND response IS NULL)),
             CHECK((status = 'running') = (attempt_token IS NOT NULL))
         );
+    """)
+
+
+async def _migrate_6_to_7(connection: AsyncConnection[DictRow]) -> None:
+    # Historical terminal records have no proof of completeness. Preserve all
+    # old diagnostics and use unknown/incomplete rather than guessing a cause.
+    for table in ("search_sessions", "repository_candidates", "collection_jobs",
+                  "classification_votes"):
+        await connection.execute(f"""
+            ALTER TABLE {table} ADD COLUMN errors JSONB NOT NULL DEFAULT '[]'::jsonb
+                CHECK(jsonb_typeof(errors) = 'array')
+        """)
+    await connection.execute("""
+        ALTER TABLE search_sessions
+            ADD COLUMN local_result_count INTEGER CHECK(local_result_count >= 0),
+            ADD COLUMN discovery_complete BOOLEAN;
+        ALTER TABLE collection_jobs
+            ADD COLUMN outcome TEXT CHECK(outcome IN ('results', 'empty', 'incomplete'));
+        UPDATE collection_jobs SET outcome = 'incomplete' WHERE status IN ('done', 'error');
     """)
 
 

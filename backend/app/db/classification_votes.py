@@ -6,7 +6,7 @@ import hashlib
 import json
 from uuid import uuid4
 
-from collector.classification.page import PageClassificationError
+from collector.diagnostics import Diagnostic, PersistenceFailure
 
 from .connection import _fetchall, _fetchone, _require_database_pool
 from .serialization import _jsonb
@@ -45,7 +45,7 @@ async def prepare_vote_run(snapshot, *, candidate_id=None, job_id=None):
                 )
                 column = "collection_job_id"
             if scope is None:
-                raise PageClassificationError("Classification is no longer running.")
+                raise PersistenceFailure("Classification is no longer running.")
             await connection.execute(
                 f"INSERT INTO classification_runs (id, {column}, fingerprint, snapshot) "
                 "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
@@ -74,7 +74,7 @@ async def claim_vote(run_id, voter_id, *, candidate_id=None, job_id=None):
             vote = await _fetchone(
                 connection,
                 "UPDATE classification_votes SET status = 'running', attempts = attempts + 1, "
-                "attempt_token = %s, error = '', updated_at = NOW() "
+                "attempt_token = %s, error = '', errors = '[]'::jsonb, updated_at = NOW() "
                 "WHERE run_id = %s AND voter_id = %s AND status IN ('pending', 'error') "
                 "RETURNING *",
                 (token, run_id, voter_id),
@@ -86,20 +86,21 @@ async def claim_vote(run_id, voter_id, *, candidate_id=None, job_id=None):
                     (run_id, voter_id),
                 )
                 if vote is None or vote["status"] != "succeeded":
-                    raise PageClassificationError("This model vote is already running.")
+                    raise PersistenceFailure("This model vote is already running.")
             await _publish_progress(connection, run_id, candidate_id, job_id)
     return vote
 
 
 async def finish_vote(
-    run_id, voter_id, token, *, response=None, error="", candidate_id=None, job_id=None
+    run_id, voter_id, token, *, response=None, error="", errors=None, candidate_id=None, job_id=None
 ):
     async with _require_database_pool().connection() as connection:
         async with connection.transaction():
             await _lock_run(connection, run_id)
             row = await _fetchone(
                 connection,
-                "UPDATE classification_votes SET status = %s, response = %s, error = %s, "
+                "UPDATE classification_votes SET status = %s, response = %s, "
+                "error = %s, errors = %s, "
                 "attempt_token = NULL, updated_at = NOW() "
                 "WHERE run_id = %s AND voter_id = %s AND status = 'running' "
                 "AND attempt_token = %s RETURNING voter_id",
@@ -107,13 +108,16 @@ async def finish_vote(
                     "succeeded" if response is not None else "error",
                     _jsonb(response) if response is not None else None,
                     error[:2000],
+                    _jsonb(errors or ([Diagnostic("processing_failed", "classification",
+                                                 voter_id=voter_id).to_dict()]
+                                     if response is None else [])),
                     run_id,
                     voter_id,
                     token,
                 ),
             )
             if row is None:
-                raise PageClassificationError("Model vote attempt is no longer current.")
+                raise PersistenceFailure("Model vote attempt is no longer current.")
             await _publish_progress(connection, run_id, candidate_id, job_id)
 
 
@@ -160,8 +164,10 @@ async def mark_interrupted_votes_error():
             )
             await connection.execute(
                 "UPDATE classification_votes SET status = 'error', attempt_token = NULL, "
-                "error = 'Vote interrupted by application restart.', updated_at = NOW() "
-                "WHERE status = 'running'"
+                "error = 'Vote interrupted by application restart.', "
+                "errors = %s, updated_at = NOW() "
+                "WHERE status = 'running'",
+                (_jsonb([Diagnostic("processing_interrupted", "classification").to_dict()]),),
             )
             for run in runs:
                 if run["repository_candidate_id"] is not None:

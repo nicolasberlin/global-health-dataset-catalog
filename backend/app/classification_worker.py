@@ -16,6 +16,7 @@ from app.database import (
 from app.vote_store import PostgresVoteStore
 from app.workers import persist_with_retry, persisted_workers
 from collector.classification.factory import build_default_repository_result_classifier
+from collector.diagnostics import Diagnostic, exception_diagnostics
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.repository_search import RepositorySearchResult
 from collector.repository_search import classify_repository_result as classify_one_repository_result
@@ -34,6 +35,7 @@ async def _run_classification(candidate: dict[str, object], executor: ThreadPool
     with operation_context(candidate_id=candidate_id), \
             measure_operation("classification_finished") as measurement:
         emit_event("classification_started", outcome="started")
+        saving = False
         try:
             candidate = {**candidate, "_vote_store": PostgresVoteStore(
                 asyncio.get_running_loop(), candidate_id=candidate_id,
@@ -43,6 +45,7 @@ async def _run_classification(candidate: dict[str, object], executor: ThreadPool
             )
             if decision is None:
                 raise RuntimeError("Repository classifier returned no decision.")
+            saving = True
             await persist_with_retry(lambda: complete_candidate_classification(
                 candidate_id, owner_id, decision, expected_updated_at=version,
             ))
@@ -50,8 +53,11 @@ async def _run_classification(candidate: dict[str, object], executor: ThreadPool
             measurement["outcome"] = "failed"
             emit_event("classification_execution", outcome="failed")
             error = str(exception) or exception.__class__.__name__
+            diagnostics = ([Diagnostic("persistence_failed", "classification")]
+                           if saving else exception_diagnostics(exception, "classification"))
             await persist_with_retry(lambda: fail_candidate_classification(
-                candidate_id, owner_id, error, expected_updated_at=version,
+                candidate_id, owner_id, error, errors=[item.to_dict() for item in diagnostics],
+                expected_updated_at=version,
             ))
 
 

@@ -48,6 +48,7 @@ from app.routes.collector_schemas import (
     CollectorSearchProgressResponse,
     CollectorValidation,
 )
+from app.search_outcomes import summarize_search
 from app.security import (
     APIPrincipal,
     enforce_api_quota,
@@ -70,6 +71,7 @@ from collector.classification.repository import (
     MAX_REPOSITORY_SOURCE_CHARS,
     MAX_REPOSITORY_TITLE_CHARS,
 )
+from collector.diagnostics import Diagnostic, exception_diagnostics, public_diagnostics
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
 from collector.repository_search import (
     RepositorySearchResponse,
@@ -187,6 +189,7 @@ async def search_datasets(
             principal.owner_id,
             origin="database",
             error=str(exception),
+            errors=[item.to_dict() for item in exception_diagnostics(exception, "search")],
         )
         raise HTTPException(status_code=500, detail="Database search failed.") from exception
 
@@ -196,6 +199,7 @@ async def search_datasets(
                 search_id,
                 principal.owner_id,
                 origin="database",
+                local_result_count=len(local_datasets),
             )
         except Exception as exception:  # noqa: BLE001 - the search must remain durable.
             logger.exception("Local search completion failed for search_id=%s", search_id)
@@ -204,6 +208,7 @@ async def search_datasets(
                 principal.owner_id,
                 origin="database",
                 error=str(exception),
+                errors=[item.to_dict() for item in exception_diagnostics(exception, "search")],
             )
             raise HTTPException(
                 status_code=500,
@@ -221,6 +226,8 @@ async def search_datasets(
     except HTTPException as exception:
         await _fail_search_session(
             search_id, principal.owner_id, origin="online", error=str(exception.detail),
+            errors=[Diagnostic("api_quota_exceeded" if exception.status_code == 429
+                               else "processing_failed", "search").to_dict()],
         )
         raise
     except Exception as exception:  # noqa: BLE001 - provider failures are persisted.
@@ -230,6 +237,7 @@ async def search_datasets(
             principal.owner_id,
             origin="online",
             error=str(exception),
+            errors=[item.to_dict() for item in exception_diagnostics(exception, "search")],
         )
         raise HTTPException(status_code=502, detail="Repository search failed.") from exception
 
@@ -247,6 +255,7 @@ async def search_datasets(
             bounded_results = bounded_results[:admission.max_candidates]
             warnings.append(RepositorySearchWarning(
                 message=f"Analysis is limited to {admission.max_candidates} datasets per search.",
+                code="search_scope_limited", incomplete=False,
             ))
         with quota_http_errors():
             persisted_candidates = await complete_search_session_with_repository_candidates(
@@ -254,11 +263,18 @@ async def search_datasets(
                 principal.owner_id,
                 bounded_results,
                 status="partial" if warnings else "completed",
+                errors=[Diagnostic(
+                    warning.code, "search",
+                    recovery="none" if not warning.incomplete else "manual",
+                ).to_dict() for warning in warnings],
+                discovery_complete=not any(warning.incomplete for warning in warnings),
                 admission=admission,
             )
     except HTTPException as exception:
         await _fail_search_session(
             search_id, principal.owner_id, origin="online", error=str(exception.detail),
+            errors=[Diagnostic("api_quota_exceeded" if exception.status_code == 429
+                               else "processing_failed", "search").to_dict()],
         )
         raise
     except Exception as exception:  # noqa: BLE001 - candidates must be durable.
@@ -268,6 +284,7 @@ async def search_datasets(
             principal.owner_id,
             origin="online",
             error=str(exception),
+            errors=[item.to_dict() for item in exception_diagnostics(exception, "search")],
         )
         raise HTTPException(status_code=500, detail="Database search failed.") from exception
 
@@ -298,7 +315,7 @@ async def search_progress(
     snapshot = await read_search_progress(search_id, principal.owner_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Search not found")
-    status, candidates, collections = snapshot
+    search, candidates, collections = snapshot
     items = [
         _collector_repository_candidate(
             candidate,
@@ -308,16 +325,10 @@ async def search_progress(
             ),
         ) for candidate in candidates
     ]
-    polling_required = status == "running" or any(
-        item.classification_status in {"queued", "classifying"}
-        or (item.automatic_collection is not None
-            and item.automatic_collection.state in {"pending", "running"})
-        for item in items
-    )
+    summary = summarize_search(search, [item.model_dump() for item in items])
+    summary["errors"] = public_diagnostics(summary["errors"])
     response.headers["Cache-Control"] = "no-store"
-    return CollectorSearchProgressResponse(
-        search_id=search_id, polling_required=polling_required, items=items,
-    )
+    return CollectorSearchProgressResponse(search_id=search_id, items=items, **summary)
 
 
 @router.get("/repository-analyses/latest")
@@ -406,18 +417,25 @@ def _automatic_collection(
     """Present existing follow-up; this function never reserves or schedules work."""
 
     if collection is not None and collection.already_collected:
-        return CollectorAutomaticCollection(state="saved", dataset_ids=list(collection.dataset_ids))
+        return CollectorAutomaticCollection(
+            state="saved", dataset_ids=list(collection.dataset_ids),
+            execution_status="finished", outcome="results",
+        )
     if collection is None or collection.job is None:
         # Legacy acceptances without follow-up are visible; reading cannot repair
         # them by silently creating new work.
         return CollectorAutomaticCollection(
-            state="error",
+            state="error", execution_status="failed", outcome="incomplete",
+            errors=[Diagnostic("collection_not_scheduled", "collection").to_dict()],
             error="No collection is associated with this candidate.",
             error_code="collection_not_scheduled",
         )
     job = public_collection_job(collection.job)
     state = ("saved" if job.saved_count else "empty") if job.status == "done" else job.status
-    return CollectorAutomaticCollection(state=state, job=job, dataset_ids=job.dataset_ids)
+    return CollectorAutomaticCollection(
+        state=state, job=job, dataset_ids=job.dataset_ids,
+        execution_status=job.execution_status, outcome=job.outcome, errors=job.errors,
+    )
 
 
 def _collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution:
@@ -477,6 +495,10 @@ def _collector_repository_candidate(
         classification_status=candidate["classification_status"],
         classification_progress=candidate.get("classification_progress", {}),
         classification=public_repository_classification(candidate["classification"]),
+        errors=public_diagnostics(candidate.get("errors") or (
+            [Diagnostic("legacy_unknown", "classification").to_dict()]
+            if candidate["classification_status"] == "error" else []
+        )),
         classification_error=(
             "Candidate classification failed."
             if candidate["classification_status"] == "error"
@@ -531,6 +553,7 @@ async def _fail_search_session(
     *,
     origin: str,
     error: str,
+    errors: list[dict] | None = None,
 ) -> None:
     """Best-effort terminal update after work outside the search transaction fails."""
 
@@ -541,6 +564,7 @@ async def _fail_search_session(
             origin=origin,
             status="error",
             error=error or "Search failed.",
+            errors=errors,
         )
     except Exception:  # noqa: BLE001 - preserve the original route failure.
         logger.exception("Search failure state could not be saved for search_id=%s", search_id)

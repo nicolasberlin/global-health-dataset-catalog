@@ -915,6 +915,7 @@ def test_collect_source_with_report_summarizes_discovery_analysis_and_validation
     assert result.report.discovered_count == 3
     assert result.report.analyzed_count == 3
     assert result.report.accepted_count == 1
-    assert result.report.rejected_count == 2
+    assert result.report.rejected_count == 1
+    assert result.report.errors[0].code == "verification_unconfirmed"
     assert result.report.invalid_distribution_count == 1
     assert result.report.discovery_methods == ("ckan", "sitemap")

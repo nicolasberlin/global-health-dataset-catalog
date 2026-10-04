@@ -388,3 +388,12 @@ TRAEFIK_LOAD_BENCHMARK=1 TRAEFIK_TEST_IMAGE=traefik:v3.7.5 .venv/bin/pytest test
 It uses the unmodified production periods and requires a sufficiently fast load
 generator. Its duration assertion measures benchmark validity, not application
 correctness; it is not a CI gate. No production limit is increased for slower CI.
+
+### Schema version 7: pipeline outcomes
+
+Version 7 adds structured diagnostics, search completeness/local-result counts,
+and collection outcomes. Migration preserves existing datasets and model votes;
+historical terminal jobs are conservatively marked incomplete. See
+[pipeline outcomes](pipeline-outcomes.md) for the additive API and compatibility
+rules. The usual startup migration applies this change; no new service or
+configuration variable is required. Automatic retries remain disabled.

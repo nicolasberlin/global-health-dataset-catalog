@@ -117,6 +117,7 @@ class EnsemblePageClassifier:
             {
                 "voter_id": outcome.voter_id,
                 "error": outcome.error,
+                "errors": [item.to_dict() for item in outcome.diagnostics],
             }
             for outcome in outcomes
             if outcome.error
@@ -128,7 +129,9 @@ class EnsemblePageClassifier:
                     self._minimum_successful_votes,
                     len(votes),
                     failures,
-                )
+                ),
+                diagnostics=[item for outcome in outcomes for item in outcome.diagnostics],
+                code="classification_incomplete",
             )
 
         accepted_votes = sum(1 for vote in votes if vote.accepted)
@@ -233,6 +236,7 @@ class EnsembleRepositoryRelevanceClassifier:
             {
                 "voter_id": outcome.voter_id,
                 "error": outcome.error,
+                "errors": [item.to_dict() for item in outcome.diagnostics],
             }
             for outcome in outcomes
             if outcome.error
@@ -244,7 +248,9 @@ class EnsembleRepositoryRelevanceClassifier:
                     self._minimum_successful_votes,
                     len(votes),
                     failures,
-                )
+                ),
+                diagnostics=[item for outcome in outcomes for item in outcome.diagnostics],
+                code="classification_incomplete",
             )
 
         accepted_votes = sum(

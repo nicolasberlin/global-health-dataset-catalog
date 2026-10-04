@@ -5,7 +5,7 @@ import pytest
 from collector.classification.page import PageClassification
 from collector.config import CollectorConfig
 from collector.discovery.adapters import DiscoveredPage
-from collector.fetch import FetchedPage
+from collector.fetch import FetchedPage, PageFetchError
 from collector.main import collect_source_with_report
 from collector.storage.models import DistributionCandidate, ValidationResult
 
@@ -174,11 +174,12 @@ def test_data_json_catalog_record_is_not_fetched_as_dataset_html():
 
 def test_non_html_response_is_not_classified_as_a_page():
     classifier = Classifier()
-    result = collect_source_with_report(
-        PAGE_URL, discover=lambda _: [DiscoveredPage(PAGE_URL, "ckan", title="Health")],
-        classifier=classifier,
-        fetch_html=lambda url: FetchedPage(url, url, '{"title":"Health"}',
-                                          200, "application/json"),
-    )
+    with pytest.raises(PageFetchError) as caught:
+        collect_source_with_report(
+            PAGE_URL, discover=lambda _: [DiscoveredPage(PAGE_URL, "ckan", title="Health")],
+            classifier=classifier,
+            fetch_html=lambda url: FetchedPage(url, url, '{"title":"Health"}',
+                                              200, "application/json"),
+        )
     assert classifier.pages == []
-    assert result.datasets == []
+    assert caught.value.diagnostics[0].code == "verification_unconfirmed"

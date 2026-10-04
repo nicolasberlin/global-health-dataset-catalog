@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from app.db.classification_votes import claim_vote, finish_vote, prepare_vote_run
+from collector.diagnostics import PersistenceFailure, PipelineFailure, voter_diagnostics
 
 
 class PostgresVoteStore:
@@ -13,7 +14,10 @@ class PostgresVoteStore:
         self.scope = {"candidate_id": candidate_id, "job_id": job_id}
 
     def _wait(self, operation):
-        return asyncio.run_coroutine_threadsafe(operation, self.loop).result()
+        try:
+            return asyncio.run_coroutine_threadsafe(operation, self.loop).result()
+        except Exception as exception:
+            raise PersistenceFailure("Vote persistence failed.") from exception
 
     def run(self, snapshot, voter_id, invoke):
         run_id = self._wait(prepare_vote_run(snapshot, **self.scope))
@@ -23,12 +27,16 @@ class PostgresVoteStore:
         try:
             response = invoke()
         except Exception as exception:
+            diagnostics = voter_diagnostics(exception, voter_id, vote["attempts"])
+            if isinstance(exception, PipelineFailure):
+                exception.diagnostics = diagnostics
             self._wait(
                 finish_vote(
                     run_id,
                     voter_id,
                     vote["attempt_token"],
                     error=str(exception) or type(exception).__name__,
+                    errors=[item.to_dict() for item in diagnostics],
                     **self.scope,
                 )
             )

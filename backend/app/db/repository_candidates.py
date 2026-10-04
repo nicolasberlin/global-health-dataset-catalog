@@ -11,6 +11,7 @@ from psycopg.rows import DictRow
 
 from app.quota_policy import WorkAdmission
 from collector.classification.repository import RepositoryClassification
+from collector.diagnostics import Diagnostic
 from collector.repository_search.models import RepositorySearchResult
 from collector.url_utils import require_http_url
 
@@ -51,6 +52,8 @@ async def complete_search_session_with_repository_candidates(
     candidates: list[RepositorySearchResult],
     *,
     status: SearchStatus,
+    errors: list[dict] | None = None,
+    discovery_complete: bool | None = None,
     admission: WorkAdmission | None = None,
 ) -> list[dict[str, object]]:
     """Persist and enqueue online candidates, then finish their search atomically."""
@@ -77,6 +80,8 @@ async def complete_search_session_with_repository_candidates(
                 owner_id,
                 origin="online",
                 status=status,
+                errors=errors,
+                discovery_complete=discovery_complete,
             )
             if session_row is None:
                 raise RuntimeError("Search session is missing or already completed.")
@@ -185,7 +190,8 @@ async def enqueue_candidate_classification(
                 connection,
                 f"""
                 UPDATE repository_candidates AS candidate
-                SET classification_status = 'queued', classification = NULL, error = '',
+                SET classification_status = 'queued', classification = NULL,
+                    error = '', errors = '[]'::jsonb,
                     updated_at = NOW()
                 FROM search_sessions AS session
                 WHERE candidate.id = %s AND candidate.search_session_id = session.id
@@ -261,7 +267,7 @@ async def _complete_candidate_classification(
         UPDATE repository_candidates AS candidate
         SET classification_status = %s,
             classification = %s,
-            error = '',
+            error = '', errors = '[]'::jsonb,
             updated_at = NOW()
         FROM search_sessions AS session
         WHERE candidate.id = %s
@@ -291,7 +297,7 @@ async def fail_candidate_classification(
     candidate_id: UUID,
     owner_id: str,
     error: str,
-    *, expected_updated_at: datetime | None = None,
+    *, errors: list[dict] | None = None, expected_updated_at: datetime | None = None,
 ) -> dict[str, object] | None:
     """Record an operational classifier failure without treating it as rejection."""
 
@@ -307,7 +313,7 @@ async def fail_candidate_classification(
             UPDATE repository_candidates AS candidate
             SET classification_status = 'error',
                 classification = NULL,
-                error = %s,
+                error = %s, errors = %s,
                 updated_at = NOW()
             FROM search_sessions AS session
             WHERE candidate.id = %s
@@ -317,7 +323,9 @@ async def fail_candidate_classification(
               AND (%s::timestamptz IS NULL OR candidate.updated_at = %s)
             RETURNING {_RETURNING_CANDIDATE_COLUMNS}
             """,
-            (normalized_error, candidate_id, _normalized_owner_id(owner_id),
+            (normalized_error, _jsonb(errors or [Diagnostic("processing_failed",
+                                                          "classification").to_dict()]),
+             candidate_id, _normalized_owner_id(owner_id),
              expected_updated_at, expected_updated_at),
         )
     if row is None:
@@ -339,10 +347,12 @@ async def mark_interrupted_candidate_classifications_error() -> int:
             SET classification_status = 'error',
                 classification = NULL,
                 error = 'Classification interrupted by application restart.',
+                errors = %s,
                 updated_at = NOW()
             WHERE classification_status = 'classifying'
             RETURNING id
             """,
+            (_jsonb([Diagnostic("processing_interrupted", "classification").to_dict()]),),
         )
     return len(rows)
 
@@ -369,7 +379,7 @@ _CANDIDATE_COLUMNS = """
     candidate.title, candidate.description, candidate.url, candidate.source,
     candidate.publisher, candidate.publication_date, candidate.doi,
     candidate.keywords, candidate.metadata, candidate.classification_status,
-    candidate.classification, candidate.error, candidate.created_at,
+    candidate.classification, candidate.error, candidate.errors, candidate.created_at,
     candidate.updated_at, candidate.classification_progress
 """
 _RETURNING_CANDIDATE_COLUMNS = _CANDIDATE_COLUMNS
@@ -411,6 +421,7 @@ def _repository_candidate_to_dict(row: Row) -> dict[str, object]:
             )
         ),
         "error": str(row["error"]),
+        "errors": row.get("errors", []),
         "created_at": _format_timestamp(row["created_at"]),
         "updated_at": _format_timestamp(row["updated_at"]),
     }

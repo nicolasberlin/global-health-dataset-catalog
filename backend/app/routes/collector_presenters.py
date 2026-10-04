@@ -8,6 +8,7 @@ from app.routes.collector_schemas import (
     CollectorCollectionJob,
     CollectorRepositoryClassification,
 )
+from collector.diagnostics import Diagnostic, public_diagnostics
 
 
 def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
@@ -24,7 +25,17 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
         ),
         "error": "Collection failed.",
     }
+    outcome = (job.get("outcome") or "incomplete") if status in {"done", "error"} else None
+    errors = public_diagnostics(job.get("errors", []))
+    if outcome == "incomplete" and not errors:
+        errors = [Diagnostic("legacy_unknown", "collection").to_dict()]
+    if status == "done" and outcome == "incomplete":
+        messages["done"] = f"Collection incomplete; {saved_count} dataset(s) saved."
     return CollectorCollectionJob(
+        execution_status={"pending": "queued", "running": "running", "done": "finished",
+                          "error": "failed"}[status],
+        outcome=outcome,
+        errors=errors,
         id=job["id"],
         source_url=job["source_url"],
         kind=job.get("kind", "source"),
@@ -59,6 +70,10 @@ def _public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]:
                 "voter_id": failure["voter_id"],
                 "error": "Classifier vote failed.",
                 "error_code": "classifier_vote_failed",
+                "errors": public_diagnostics(failure.get("errors") or [
+                    Diagnostic("legacy_unknown", "classification",
+                               voter_id=failure["voter_id"]).to_dict(),
+                ]),
             }
             for failure in ensemble["failures"]
         ],

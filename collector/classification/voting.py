@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generic, TypeVar
+
+from collector.diagnostics import Diagnostic, voter_diagnostics
 
 ClassifierT = TypeVar("ClassifierT")
 ClassificationT = TypeVar("ClassificationT")
@@ -18,6 +20,7 @@ class VoteOutcome(Generic[VoteT]):
     voter_id: str
     vote: VoteT | None = None
     error: str = ""
+    diagnostics: list[Diagnostic] = field(default_factory=list)
 
 
 def run_voters(
@@ -40,7 +43,8 @@ def run_voters(
         try:
             classification = classify(classifier)
         except handled_errors as exception:
-            return VoteOutcome(voter_id=voter_id, error=str(exception))
+            return VoteOutcome(voter_id=voter_id, error=str(exception) or type(exception).__name__,
+                               diagnostics=voter_diagnostics(exception, voter_id))
 
         return VoteOutcome(
             voter_id=voter_id,

@@ -304,6 +304,10 @@ async def test_job_access_migration_preserves_data_and_only_backfills_known_owne
                    "ALTER TABLE repository_candidates DROP COLUMN classification_progress")
     await _execute(database, """ALTER TABLE collection_jobs DROP COLUMN classification_progress,
         DROP COLUMN classification_root_id""")
+    await _execute(database, "ALTER TABLE search_sessions DROP COLUMN errors, "
+                   "DROP COLUMN local_result_count, DROP COLUMN discovery_complete")
+    await _execute(database, "ALTER TABLE repository_candidates DROP COLUMN errors")
+    await _execute(database, "ALTER TABLE collection_jobs DROP COLUMN errors, DROP COLUMN outcome")
     await _execute(database, "DELETE FROM schema_migrations WHERE version >= 2")
     await database.init_database()
     await database.init_database()

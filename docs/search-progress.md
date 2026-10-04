@@ -1,7 +1,8 @@
 # Search progress polling
 
 `GET /collector/searches/{search_id}/progress` returns `search_id`,
-`polling_required`, and the existing public candidate `items`, including vote
+`polling_required`, the execution/outcome fields documented in
+[Pipeline outcomes](pipeline-outcomes.md), and the existing public candidate `items`, including vote
 progress, associated collections and saved dataset IDs. Authentication is the
 same as other protected collector reads. Missing and foreign searches both
 return 404. Responses are not cacheable and never enqueue work or consume work
@@ -31,7 +32,8 @@ Snapshots remain search-scoped, so responses for shared jobs cannot overwrite
 another search's state. Vote counters are accepted even when updated_at is
 unchanged. Catalog refresh notifications are deduplicated per saved job.
 
-No schema, authentication, worker, model, proxy or quota configuration changes
-are required. Ten simultaneous classification polls previously approached 14
+The original grouped-polling implementation needed no configuration changes.
+The additive outcome contract now requires schema migration 7; authentication,
+worker concurrency, model, proxy and quota settings are unchanged. Ten simultaneous classification polls previously approached 14
 requests/second ignoring latency; one grouped loop approaches 0.5. Response size
 still grows with candidate count, and catalog/detail reads are additional traffic.

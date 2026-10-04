@@ -43,6 +43,8 @@ class RepositorySearchResult:
 class RepositorySearchWarning:
     """Non-fatal provider or metadata problem exposed with search results."""
 
+    code: str = "repository_unavailable"
+    incomplete: bool = True
     message: str = PROVIDER_UNAVAILABLE_MESSAGE
     provider: Optional[str] = None  # noqa: UP045 - Keep Python 3.9-compatible typing.
 

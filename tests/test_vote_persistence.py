@@ -23,6 +23,7 @@ from test_collection_workflow import candidate_for, decision, wait_until
 from collector.classification import factory
 from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.page import PageClassificationError
+from collector.diagnostics import PersistenceFailure
 from collector.storage.models import CollectionResult
 
 pytestmark = pytest.mark.anyio
@@ -148,13 +149,13 @@ async def test_restart_and_attempt_tokens_preserve_successes(database):
     first = await votes.claim_vote(run, "a", **scope)
     await votes.finish_vote(run, "a", first["attempt_token"], response={"accepted": False}, **scope)
     old = await votes.claim_vote(run, "b", **scope)
-    with pytest.raises(PageClassificationError, match="already running"):
+    with pytest.raises(PersistenceFailure, match="already running"):
         await votes.claim_vote(run, "b", **scope)
     await votes.mark_interrupted_votes_error()
     await database.mark_interrupted_collection_jobs_error()
     assert (await votes.claim_vote(run, "a", **scope))["response"] == {"accepted": False}
     new = await votes.claim_vote(run, "b", **scope)
-    with pytest.raises(PageClassificationError, match="no longer current"):
+    with pytest.raises(PersistenceFailure, match="no longer current"):
         await votes.finish_vote(
             run, "b", old["attempt_token"], response={"accepted": True}, **scope
         )
