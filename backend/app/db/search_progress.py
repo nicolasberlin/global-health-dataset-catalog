@@ -13,11 +13,17 @@ async def read_search_progress(search_id: UUID, owner_id: str):
         async with connection.transaction():
             await connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             search = await _fetchone(connection,
-                "SELECT status, origin, errors, local_result_count, discovery_complete "
+                "SELECT id, query, status, origin, errors, warnings, local_result_count, "
+                "discovery_complete, created_at, updated_at, attempt_number "
                 "FROM search_sessions WHERE id = %s AND owner_id = %s",
                 (search_id, _normalized_owner_id(owner_id)))
             if search is None:
                 return None
+            local = await _fetchall(connection,
+                "SELECT dataset_id FROM search_local_results "
+                "WHERE search_id = %s ORDER BY position",
+                (search_id,))
+            search["local_dataset_ids"] = [int(item["dataset_id"]) for item in local]
             rows = await _fetchall(connection, f"""
                 SELECT {_CANDIDATE_COLUMNS} FROM repository_candidates AS candidate
                 JOIN search_sessions AS session ON session.id = candidate.search_session_id

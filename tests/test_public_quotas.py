@@ -301,18 +301,19 @@ async def test_local_results_remain_available_when_external_budget_is_exhausted(
     monkeypatch.setenv("API_PUBLIC_ONLINE_SEARCHES_PER_DAY", "1")
     await consume_quota_limits((public_daily_quota("online_daily"),))
 
+    async with _require_database_pool().connection() as connection:
+        row = await connection.execute(
+            "INSERT INTO collected_datasets (dataset_url, title) "
+            "VALUES ('https://example.org/data', 'Malaria') RETURNING id"
+        )
+        dataset_id = (await row.fetchone())["id"]
+
     async def local_result(query):
-        return [
-            CollectedDataset(
-                dataset_url="https://example.org/data",
-                title="Malaria",
-                description="",
-                publisher="",
-                hosting_platform="",
-                uploader="",
-                dataset_signals={},
-            )
-        ]
+        return [CollectedDataset(
+            database_id=dataset_id, dataset_url="https://example.org/data",
+            title="Malaria", description="", publisher="", hosting_platform="",
+            uploader="", dataset_signals={},
+        )]
 
     def forbidden(query):
         pytest.fail("Local results must not require an external search")

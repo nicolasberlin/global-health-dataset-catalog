@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated, Literal, Optional
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
@@ -260,3 +261,24 @@ def _authentication_error() -> HTTPException:
         detail="Valid Bearer authentication is required.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def api_cors_origins() -> list[str]:
+    """Explicit browser integrations; tokens and HTTP clients need no frontend process."""
+    value = os.getenv("API_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    origins = list(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+    for origin in origins:
+        try:
+            parsed = urlsplit(origin)
+            _ = parsed.port
+        except ValueError as exception:
+            raise RuntimeError(
+                "API_CORS_ORIGINS must contain valid HTTP(S) origins."
+            ) from exception
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path
+                or parsed.query or parsed.fragment or parsed.username or parsed.password
+                or any(character.isspace() for character in origin) or "\\" in origin):
+            raise RuntimeError(
+                "API_CORS_ORIGINS must contain explicit HTTP(S) origins without paths."
+            )
+    return origins

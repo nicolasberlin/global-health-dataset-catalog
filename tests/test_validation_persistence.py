@@ -158,6 +158,9 @@ async def test_version_four_upgrade_preserves_existing_validation(database):
     await database.init_database()
     validation = ValidationResult(URL, URL, "CSV", True, 200, size_bytes=123)
     await database.save_collected_datasets(URL, [dataset(validation)])
+    from schema_helpers import restore_schema_seven
+
+    await restore_schema_seven()
     async with _require_database_pool().connection() as connection:
         await connection.execute("""
             ALTER TABLE collected_distributions

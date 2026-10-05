@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import asdict
 from typing import Annotated, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Response
 
 from app.database import (
     CollectionJobReservation,
@@ -23,11 +22,13 @@ from app.database import (
     get_repository_candidate,
     latest_repository_analysis,
     list_collected_datasets,
-    normalize_dataset_search_query,
     search_collected_datasets,
 )
 from app.db.collection_jobs import retry_collection_job_for_owner
+from app.db.commands import CommandConflict
+from app.db.search_jobs import admit_search
 from app.db.search_progress import read_search_progress
+from app.db.search_results import latest_search_id
 from app.routes.collector_presenters import (
     public_collection_job,
     public_dataset_signals,
@@ -45,37 +46,26 @@ from app.routes.collector_schemas import (
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
     CollectorRepositorySearchWarning,
+    CollectorSearchCommandResponse,
+    CollectorSearchCreateRequest,
     CollectorSearchProgressResponse,
+    CollectorSearchRetryRequest,
     CollectorValidation,
 )
 from app.search_outcomes import summarize_search
+from app.search_service import _bounded_repository_result, lookup_local, prepare_online
 from app.security import (
     APIPrincipal,
+    api_auth_mode,
     enforce_api_quota,
     enforce_public_online_quota,
     quota_http_errors,
     require_api_principal,
     work_admission,
 )
-from collector.classification.repository import (
-    MAX_REPOSITORY_DATE_CHARS,
-    MAX_REPOSITORY_DESCRIPTION_CHARS,
-    MAX_REPOSITORY_DOI_CHARS,
-    MAX_REPOSITORY_KEYWORD_CHARS,
-    MAX_REPOSITORY_KEYWORDS,
-    MAX_REPOSITORY_METADATA_BYTES,
-    MAX_REPOSITORY_METADATA_DESCRIPTION_CHARS,
-    MAX_REPOSITORY_METADATA_VALUE_CHARS,
-    MAX_REPOSITORY_PUBLISHER_CHARS,
-    MAX_REPOSITORY_SEARCH_QUERY_CHARS,
-    MAX_REPOSITORY_SOURCE_CHARS,
-    MAX_REPOSITORY_TITLE_CHARS,
-)
 from collector.diagnostics import Diagnostic, exception_diagnostics, public_diagnostics
-from collector.extraction.dataset_metadata import normalize_dataset_metadata
 from collector.repository_search import (
     RepositorySearchResponse,
-    RepositorySearchResult,
     RepositorySearchWarning,
     search_repository_metadata,
 )
@@ -101,6 +91,9 @@ async def read_collection_job(
 async def retry_collection_job(
     job_id: int,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    idempotency_key: Annotated[Optional[str], Header(  # noqa: UP045
+        alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$",
+    )] = None,
 ) -> CollectorCollectionJobResponse:
     job = await get_collection_job_for_owner(job_id, principal.owner_id)
     if job is None:
@@ -109,6 +102,7 @@ async def retry_collection_job(
         with quota_http_errors():
             job = await retry_collection_job_for_owner(
                 job_id, principal.owner_id, admission=work_admission(principal),
+                **({"idempotency_key": idempotency_key} if idempotency_key is not None else {}),
             )
     except ValueError as exception:
         raise HTTPException(status_code=409, detail=str(exception)) from exception
@@ -179,9 +173,8 @@ async def search_datasets(
 
     # Only PostgreSQL uses the reduced query; the persisted original query is
     # authoritative for providers and downstream LLM classification.
-    local_query = normalize_dataset_search_query(original_query)
     try:
-        local_datasets = await search_collected_datasets(local_query) if local_query else []
+        local_datasets = await lookup_local(original_query, lookup=search_collected_datasets)
     except Exception as exception:  # noqa: BLE001 - DB errors must not trigger online calls.
         logger.exception("Collected dataset search failed for query=%r", original_query)
         await _fail_search_session(
@@ -200,6 +193,7 @@ async def search_datasets(
                 principal.owner_id,
                 origin="database",
                 local_result_count=len(local_datasets),
+                local_dataset_ids=[dataset.database_id for dataset in local_datasets],
             )
         except Exception as exception:  # noqa: BLE001 - the search must remain durable.
             logger.exception("Local search completion failed for search_id=%s", search_id)
@@ -242,32 +236,19 @@ async def search_datasets(
         raise HTTPException(status_code=502, detail="Repository search failed.") from exception
 
     try:
-        bounded_results = [
-            _bounded_repository_result(item, search_query=original_query)
-            for item in online_response.results
-        ]
-        # Deduplicate before the public batch cap; the database charges only admitted candidates.
-        bounded_results = list({(item.source.strip(), item.url): item
-                                for item in bounded_results}.values())
         admission = work_admission(principal)
-        warnings = list(online_response.warnings)
-        if admission.max_candidates is not None and len(bounded_results) > admission.max_candidates:
-            bounded_results = bounded_results[:admission.max_candidates]
-            warnings.append(RepositorySearchWarning(
-                message=f"Analysis is limited to {admission.max_candidates} datasets per search.",
-                code="search_scope_limited", incomplete=False,
-            ))
+        prepared = prepare_online(online_response, original_query, admission,
+                                  bound=_bounded_repository_result)
+        warnings = prepared.warnings
         with quota_http_errors():
             persisted_candidates = await complete_search_session_with_repository_candidates(
                 search_id,
                 principal.owner_id,
-                bounded_results,
+                prepared.candidates,
                 status="partial" if warnings else "completed",
-                errors=[Diagnostic(
-                    warning.code, "search",
-                    recovery="none" if not warning.incomplete else "manual",
-                ).to_dict() for warning in warnings],
-                discovery_complete=not any(warning.incomplete for warning in warnings),
+                errors=prepared.diagnostics,
+                discovery_complete=prepared.complete,
+                warnings=prepared.warning_records,
                 admission=admission,
             )
     except HTTPException as exception:
@@ -306,6 +287,83 @@ async def _search_online_repositories(
     return await asyncio.to_thread(search_repository_metadata, query)
 
 
+CommandKey = Annotated[str, Header(
+    alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$",
+)]
+
+
+@router.post(
+    "/searches", status_code=202,
+    responses={200: {"model": CollectorSearchCommandResponse, "description": "Command replay"}},
+)
+async def create_search(
+    payload: CollectorSearchCreateRequest,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    response: Response,
+    idempotency_key: CommandKey,
+) -> CollectorSearchCommandResponse:
+    if not payload.query.strip():
+        raise HTTPException(status_code=400, detail="Search query is required")
+    try:
+        with quota_http_errors():
+            row, replayed = await admit_search(
+                principal.owner_id, idempotency_key, query=payload.query,
+                access_mode=api_auth_mode(), client_key=principal.client_key,
+            )
+    except CommandConflict as exception:
+        raise HTTPException(status_code=409, detail=str(exception)) from exception
+    return await _search_command_response(row, replayed, principal, response)
+
+
+@router.post(
+    "/searches/{search_id}/retry", status_code=202,
+    responses={200: {"model": CollectorSearchCommandResponse, "description": "Command replay"}},
+)
+async def retry_search(
+    search_id: UUID,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    response: Response,
+    idempotency_key: CommandKey,
+    payload: Annotated[Optional[CollectorSearchRetryRequest], Body()] = None,  # noqa: UP045
+) -> CollectorSearchCommandResponse:
+    del payload
+    # Check access before revealing whether a command key or state is eligible.
+    if await read_search_progress(search_id, principal.owner_id) is None:
+        raise HTTPException(status_code=404, detail="Search not found")
+    try:
+        with quota_http_errors():
+            row, replayed = await admit_search(
+                principal.owner_id, idempotency_key, retry_search_id=search_id,
+                access_mode=api_auth_mode(), client_key=principal.client_key,
+            )
+    except CommandConflict as exception:
+        raise HTTPException(status_code=409, detail=str(exception)) from exception
+    return await _search_command_response(row, replayed, principal, response)
+
+
+async def _search_command_response(row, replayed, principal, response):
+    if row is None:
+        raise HTTPException(status_code=404, detail="Search not found")
+    progress = await search_progress(row["id"], principal, response)
+    response.status_code = 200 if replayed else 202
+    progress_url = f"/collector/searches/{row['id']}/progress"
+    response.headers["Location"] = progress_url
+    return CollectorSearchCommandResponse(
+        search_id=row["id"], execution_status=progress.execution_status,
+        attempt=progress.attempt, progress_url=progress_url,
+    )
+
+
+@router.get("/searches/latest")
+async def latest_search(
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response,
+) -> CollectorSearchProgressResponse:
+    search_id = await latest_search_id(principal.owner_id)
+    if search_id is None:
+        raise HTTPException(status_code=404, detail="No previous search")
+    return await search_progress(search_id, principal, response)
+
+
 @router.get("/searches/{search_id}/progress")
 async def search_progress(
     search_id: UUID,
@@ -328,7 +386,19 @@ async def search_progress(
     summary = summarize_search(search, [item.model_dump() for item in items])
     summary["errors"] = public_diagnostics(summary["errors"])
     response.headers["Cache-Control"] = "no-store"
-    return CollectorSearchProgressResponse(search_id=search_id, items=items, **summary)
+    ids = list(dict.fromkeys([
+        *search.get("local_dataset_ids", []),
+        *(dataset_id for item in items if item.automatic_collection is not None
+          for dataset_id in item.automatic_collection.dataset_ids),
+    ]))
+    return CollectorSearchProgressResponse(
+        search_id=search_id, items=items, query=search.get("query", ""),
+        origin=search["origin"] if search["status"] not in {"queued", "running"} else None,
+        local_dataset_ids=search.get("local_dataset_ids", []), dataset_ids=ids,
+        warnings=search.get("warnings", []), attempt=search.get("attempt_number", 1),
+        created_at=str(search.get("created_at", "")), updated_at=str(search.get("updated_at", "")),
+        **summary,
+    )
 
 
 @router.get("/repository-analyses/latest")
@@ -377,6 +447,9 @@ async def classify_repository_result(
         Body(),
     ] = None,
     retry: bool = False,
+    idempotency_key: Annotated[Optional[str], Header(  # noqa: UP045
+        alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$",
+    )] = None,
 ) -> CollectorRepositorySearchItem:
     """Persist a request before acknowledging it; never run an LLM in this route."""
 
@@ -384,6 +457,20 @@ async def classify_repository_result(
     candidate = await get_repository_candidate(candidate_id, principal.owner_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="Repository candidate not found")
+    if idempotency_key is not None:
+        try:
+            with quota_http_errors():
+                candidate = await enqueue_candidate_classification(
+                    candidate_id, principal.owner_id, retry=retry,
+                    admission=work_admission(principal), idempotency_key=idempotency_key,
+                )
+        except CommandConflict as exception:
+            raise HTTPException(status_code=409, detail=str(exception)) from exception
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="Repository candidate not found")
+        if candidate["classification_status"] in {"queued", "classifying"}:
+            response.status_code = 202
+        return await _candidate_with_collection(candidate, principal.owner_id)
     status = candidate["classification_status"]
     if status == "error" and not retry:
         raise HTTPException(
@@ -451,28 +538,6 @@ def _collector_distribution(distribution: DistributionCandidate) -> CollectorDis
     )
 
 
-def _bounded_repository_result(
-    item: RepositorySearchResult,
-    *,
-    search_query: str,
-) -> RepositorySearchResult:
-    """Apply the API trust-boundary limits before provider metadata is stored."""
-
-    data = asdict(item)
-    data["title"] = str(data.get("title", ""))[:MAX_REPOSITORY_TITLE_CHARS]
-    data["description"] = str(data.get("description", ""))[:MAX_REPOSITORY_DESCRIPTION_CHARS]
-    data["source"] = str(data.get("source", ""))[:MAX_REPOSITORY_SOURCE_CHARS]
-    data["search_query"] = search_query[:MAX_REPOSITORY_SEARCH_QUERY_CHARS]
-    data["publisher"] = str(data.get("publisher", ""))[:MAX_REPOSITORY_PUBLISHER_CHARS]
-    data["date"] = str(data.get("date", ""))[:MAX_REPOSITORY_DATE_CHARS]
-    data["doi"] = str(data.get("doi", ""))[:MAX_REPOSITORY_DOI_CHARS]
-    data["keywords"] = [
-        str(keyword)[:MAX_REPOSITORY_KEYWORD_CHARS]
-        for keyword in data.get("keywords", [])[:MAX_REPOSITORY_KEYWORDS]
-    ]
-    data["metadata"] = _bounded_repository_metadata(data.get("metadata"))
-    data["classification"] = None
-    return RepositorySearchResult(**data)
 
 
 def _collector_repository_candidate(
@@ -513,38 +578,6 @@ def _collector_repository_candidate(
     )
 
 
-def _bounded_repository_metadata(value: object) -> dict[str, str]:
-    metadata = normalize_dataset_metadata(value if isinstance(value, dict) else {})
-    bounded_metadata = {
-        key: text[
-            : (
-                MAX_REPOSITORY_METADATA_DESCRIPTION_CHARS
-                if key == "Description of dataset"
-                else MAX_REPOSITORY_METADATA_VALUE_CHARS
-            )
-        ]
-        for key, text in metadata.items()
-    }
-
-    while _json_size_bytes(bounded_metadata) > MAX_REPOSITORY_METADATA_BYTES:
-        largest_key = max(bounded_metadata, key=lambda key: len(bounded_metadata[key]))
-        largest_value = bounded_metadata[largest_key]
-        if not largest_value:
-            break
-        bounded_metadata[largest_key] = largest_value[: len(largest_value) // 2]
-
-    return bounded_metadata
-
-
-def _json_size_bytes(value: dict[str, str]) -> int:
-    return len(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    )
 
 
 async def _fail_search_session(

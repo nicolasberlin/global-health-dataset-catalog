@@ -10,7 +10,9 @@ def summarize_search(search: dict, items: list[dict]) -> dict:
     result_count = search.get("local_result_count") or 0
     completed_branches = 0
     blocked_branches = 0
-    if search["status"] == "running":
+    if search["status"] == "queued":
+        queued.add("search")
+    elif search["status"] == "running":
         active.add("search")
     elif search["status"] == "error":
         if not errors:

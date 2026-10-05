@@ -16,7 +16,8 @@ persisted global state is maintained.
   `collection`. Queued work alone is not an active stage.
 - `errors`: controlled structured diagnostics, also including search warnings.
 - `local_result_count`: the persisted count returned by a local search, or `null`
-  when that information was not recorded. It is not a list of restorable fiches.
+  when that information was not recorded. Schema 8 also provides persisted
+  `local_dataset_ids` and aggregated `dataset_ids`; see [API integration](api-integration.md).
 
 Collection jobs and `automatic_collection` expose `execution_status`, `outcome`,
 and `errors`. Candidates expose classification `errors`. Embedded failed ensemble
@@ -33,7 +34,7 @@ fields and therefore does not yet display the new distinction.
 | Evidence | Execution | Outcome |
 | --- | --- | --- |
 | Initial search or any downstream task executing | `running` | `null` |
-| No executing work, but queued downstream tasks | `queued` | `null` |
+| No executing work, but queued discovery or downstream tasks | `queued` | `null` |
 | All required checks concluded, datasets available | `finished` | `results` |
 | All required checks concluded, no dataset retained | `finished` | `empty` |
 | Processing concluded with an inconclusive necessary check | `finished` | `incomplete` |

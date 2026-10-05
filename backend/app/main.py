@@ -19,7 +19,8 @@ from app.database import (
 from app.db.classification_votes import mark_interrupted_votes_error
 from app.routes.collector import router as collector_router
 from app.routes.sessions import router as sessions_router
-from app.security import validate_api_security_configuration
+from app.search_worker import search_workers
+from app.security import api_cors_origins, validate_api_security_configuration
 from collector.observability import configure_operational_logging
 
 
@@ -34,7 +35,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await mark_interrupted_search_sessions_error()
         await mark_interrupted_candidate_classifications_error()
         await mark_interrupted_collection_jobs_error()
-        async with collection_workers(), classification_workers():
+        async with collection_workers(), classification_workers(), search_workers():
             yield
     finally:
         await close_database_pool()
@@ -44,10 +45,7 @@ app = FastAPI(title="Global Health API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=api_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

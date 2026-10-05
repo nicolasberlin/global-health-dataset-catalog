@@ -12,6 +12,7 @@ from collector.diagnostics import Diagnostic
 
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
+from .search_results import save_local_results
 from .serialization import _format_optional_timestamp, _format_timestamp, _jsonb
 
 SearchOrigin = Literal["database", "online"]
@@ -55,22 +56,28 @@ async def complete_search_session(
     errors: list[dict] | None = None,
     local_result_count: int | None = None,
     discovery_complete: bool | None = None,
+    warnings: list[dict] | None = None,
+    local_dataset_ids: list[int] | None = None,
 ) -> dict[str, object]:
     """Move a running search to one terminal state without overwriting it."""
 
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
-        row = await _complete_search_session(
-            connection,
-            search_id,
-            owner_id,
-            origin=origin,
-            status=status,
-            error=error,
-            errors=errors,
-            local_result_count=local_result_count,
-            discovery_complete=discovery_complete,
-        )
+        async with connection.transaction():
+            row = await _complete_search_session(
+                connection,
+                search_id,
+                owner_id,
+                origin=origin,
+                status=status,
+                error=error,
+                errors=errors,
+                local_result_count=local_result_count,
+                discovery_complete=discovery_complete,
+                warnings=warnings,
+            )
+            if row is not None and local_dataset_ids is not None:
+                await save_local_results(connection, search_id, local_dataset_ids)
 
     if row is None:
         raise RuntimeError("Search session is missing or already completed.")
@@ -88,7 +95,7 @@ async def mark_interrupted_search_sessions_error() -> int:
             UPDATE search_sessions
             SET status = 'error',
                 error = 'Search interrupted by application restart.',
-                errors = %s, discovery_complete = FALSE,
+                errors = %s, discovery_complete = FALSE, attempt_token = NULL,
                 updated_at = NOW(),
                 finished_at = NOW()
             WHERE status = 'running'
@@ -110,6 +117,7 @@ async def _complete_search_session(
     errors: list[dict] | None = None,
     local_result_count: int | None = None,
     discovery_complete: bool | None = None,
+    warnings: list[dict] | None = None,
 ) -> Row | None:
     if origin not in {"database", "online"}:
         raise ValueError(f"Unsupported search origin: {origin!r}.")
@@ -130,6 +138,7 @@ async def _complete_search_session(
             status = %s,
             error = %s,
             errors = %s, local_result_count = %s, discovery_complete = %s,
+            warnings = %s, attempt_token = NULL, retry_at = NULL,
             updated_at = NOW(),
             finished_at = NOW()
         WHERE id = %s AND owner_id = %s AND status = 'running'
@@ -142,7 +151,7 @@ async def _complete_search_session(
                           if status == "error" else [])),
          local_result_count,
          discovery_complete if discovery_complete is not None else status == "completed",
-         search_id, _normalized_owner_id(owner_id)),
+         _jsonb(warnings or []), search_id, _normalized_owner_id(owner_id)),
     )
 
 

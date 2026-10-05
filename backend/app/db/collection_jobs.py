@@ -13,6 +13,7 @@ from collector.storage.models import CollectionReport
 from collector.url_utils import require_http_url
 
 from .api_quotas import lock_work_admission, reserve_work
+from .commands import read_command, record_command
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
 from .search_sessions import _normalized_owner_id
@@ -225,10 +226,16 @@ async def _job_dataset_ids(connection, job_id: int) -> list[int]:
 
 async def retry_collection_job_for_owner(
     job_id: int, owner_id: str, *, admission: WorkAdmission | None = None,
+    idempotency_key: str | None = None,
 ) -> dict | None:
     """Requeue an owned failed job, keeping its validated votes and associations."""
+    payload = {"job_id": job_id}
     async with _require_database_pool().connection() as connection:
         async with connection.transaction():
+            receipt = None
+            if idempotency_key is not None:
+                receipt = await read_command(connection, owner_id, idempotency_key,
+                                             "collection_retry", payload)
             await lock_work_admission(connection, admission)
             job = await _fetchone(connection, """
                 SELECT job.* FROM collection_jobs AS job
@@ -242,12 +249,19 @@ async def retry_collection_job_for_owner(
             """, (job_id, _normalized_owner_id(owner_id)))
             if job is None:
                 return None
+            if receipt is not None:
+                result = _collection_job_to_dict(job)
+                result["dataset_ids"] = await _job_dataset_ids(connection, job_id)
+                return result
             await connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (job["source_url"],),
             )
             job = await _fetchone(connection,
                 "SELECT * FROM collection_jobs WHERE id = %s FOR UPDATE", (job_id,))
             if job["status"] in {"pending", "running"}:
+                if idempotency_key is not None:
+                    await record_command(connection, owner_id, idempotency_key, "collection_retry",
+                                         payload, {"job_id": job_id})
                 return _collection_job_to_dict(job)
             if job["status"] != "error":
                 raise ValueError("Only a failed collection can be retried.")
@@ -264,6 +278,9 @@ async def retry_collection_job_for_owner(
                     message = 'Collection pending.', finished_at = NULL, updated_at = NOW()
                 WHERE id = %s RETURNING *
             """, (job_id,))
+            if idempotency_key is not None:
+                await record_command(connection, owner_id, idempotency_key, "collection_retry",
+                                     payload, {"job_id": job_id})
             return _collection_job_to_dict(row)
 
 

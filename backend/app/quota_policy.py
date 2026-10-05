@@ -72,6 +72,7 @@ def classification_admission(owner_id: str, client_key: str | None) -> WorkAdmis
 
 
 def validate_quota_configuration(*, public: bool) -> None:
+    search_queue_capacity()
     for setting in _OWNER_LIMITS.values():
         _limit(*setting, maximum=10_000)
     if public:
@@ -87,3 +88,14 @@ def _limit(name: str, default: int, *, maximum: int = 1_000_000) -> int:
     if not 1 <= value <= maximum:
         raise RuntimeError(f"{name} must be between 1 and {maximum}.")
     return value
+
+
+def search_command_quotas(owner_id: str, client_key: str | None) -> tuple[QuotaLimit, ...]:
+    quotas = (owner_quota(owner_id, "repository_search"),)
+    if client_key is not None:
+        quotas += (public_ip_quota(client_key, "repository_search"),)
+    return quotas
+
+
+def search_queue_capacity() -> int:
+    return _limit("SEARCH_MAX_ACTIVE", 100)

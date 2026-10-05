@@ -16,6 +16,7 @@ from collector.repository_search.models import RepositorySearchResult
 from collector.url_utils import require_http_url
 
 from .api_quotas import lock_work_admission, reserve_work
+from .commands import CommandConflict, read_command, record_command
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
 from .search_sessions import SearchStatus, _complete_search_session, _normalized_owner_id
@@ -54,6 +55,7 @@ async def complete_search_session_with_repository_candidates(
     status: SearchStatus,
     errors: list[dict] | None = None,
     discovery_complete: bool | None = None,
+    warnings: list[dict] | None = None,
     admission: WorkAdmission | None = None,
 ) -> list[dict[str, object]]:
     """Persist and enqueue online candidates, then finish their search atomically."""
@@ -82,6 +84,7 @@ async def complete_search_session_with_repository_candidates(
                 status=status,
                 errors=errors,
                 discovery_complete=discovery_complete,
+                warnings=warnings,
             )
             if session_row is None:
                 raise RuntimeError("Search session is missing or already completed.")
@@ -170,21 +173,38 @@ async def enqueue_candidate_classification(
     *,
     retry: bool = False,
     admission: WorkAdmission | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, object] | None:
     """Persist an explicit request; discoveries alone are never consumed by workers."""
 
+    payload = {"candidate_id": str(candidate_id), "retry": retry}
     eligible_statuses = ("pending", "error") if retry else ("pending",)
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
         async with connection.transaction():
+            if idempotency_key is not None:
+                receipt = await read_command(connection, owner_id, idempotency_key,
+                                             "classification", payload)
+                if receipt is not None:
+                    row = await _get_repository_candidate_row(connection, candidate_id, owner_id)
+                    return _repository_candidate_to_dict(row) if row else None
             await lock_work_admission(connection, admission)
             candidate = await _fetchone(connection, """
                 SELECT candidate.classification_status FROM repository_candidates AS candidate
                 JOIN search_sessions AS session ON session.id = candidate.search_session_id
                 WHERE candidate.id = %s AND session.owner_id = %s FOR UPDATE OF candidate
             """, (candidate_id, _normalized_owner_id(owner_id)))
-            if candidate is None or candidate["classification_status"] not in eligible_statuses:
+            if candidate is None:
                 return None
+            if candidate["classification_status"] not in eligible_statuses:
+                if idempotency_key is None:
+                    return None
+                if candidate["classification_status"] == "error":
+                    raise CommandConflict("Candidate classification failed; retry explicitly.")
+                await record_command(connection, owner_id, idempotency_key, "classification",
+                                     payload, {"candidate_id": str(candidate_id)})
+                row = await _get_repository_candidate_row(connection, candidate_id, owner_id)
+                return _repository_candidate_to_dict(row)
             await reserve_work(connection, admission, amount=1)
             row = await _fetchone(
                 connection,
@@ -198,6 +218,9 @@ async def enqueue_candidate_classification(
                 RETURNING {_RETURNING_CANDIDATE_COLUMNS}
                 """, (candidate_id,),
             )
+            if idempotency_key is not None:
+                await record_command(connection, owner_id, idempotency_key, "classification",
+                                     payload, {"candidate_id": str(candidate_id)})
     return _repository_candidate_to_dict(row) if row else None
 
 

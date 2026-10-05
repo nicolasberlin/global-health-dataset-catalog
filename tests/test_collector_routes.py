@@ -210,7 +210,7 @@ def _use_search_persistence(monkeypatch) -> None:
         return {"id": search_id, **kwargs}
 
     async def fake_save(search_id, owner_id, candidates, *, status, admission=None,
-                        errors=None, discovery_complete=None):
+                        errors=None, discovery_complete=None, warnings=None):
         assert search_id == SEARCH_ID
         assert owner_id == PRINCIPAL.owner_id
         return [
@@ -292,7 +292,8 @@ async def test_collector_search_datasets_marks_session_error_when_local_completi
     completion_calls = []
 
     async def local_result(query):
-        return [object()]
+        from types import SimpleNamespace
+        return [SimpleNamespace(database_id=1)]
 
     async def fail_then_record(search_id, owner_id, **kwargs):
         completion_calls.append((search_id, owner_id, kwargs))
@@ -311,7 +312,8 @@ async def test_collector_search_datasets_marks_session_error_when_local_completi
 
     assert error.value.status_code == 500
     assert completion_calls == [
-        (SEARCH_ID, PRINCIPAL.owner_id, {"origin": "database", "local_result_count": 1}),
+        (SEARCH_ID, PRINCIPAL.owner_id,
+         {"origin": "database", "local_result_count": 1, "local_dataset_ids": [1]}),
         (
             SEARCH_ID,
             PRINCIPAL.owner_id,
@@ -588,7 +590,7 @@ async def test_search_passes_batch_admission_and_maps_quota_rejection(monkeypatc
         completed.append(kwargs)
 
     async def reserve(search_id, owner_id, candidates, *, status, admission,
-                      errors=None, discovery_complete=None):
+                      errors=None, discovery_complete=None, warnings=None):
         assert len(candidates) == 1  # Duplicate provider results consume one pipeline slot.
         assert admission.quotas[0].owner_id == PRINCIPAL.owner_id
         assert admission.quotas[0].operation == "repository_classification"

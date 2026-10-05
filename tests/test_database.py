@@ -43,6 +43,8 @@ SCHEMA_TABLES = (
     "collection_job_candidates",
     "classification_runs",
     "classification_votes",
+    "api_commands",
+    "search_local_results",
 )
 
 TEST_OWNER_ID = "test-user"
@@ -291,6 +293,9 @@ async def test_job_access_migration_preserves_data_and_only_backfills_known_owne
     await _accept_repository_candidate(database, first["id"], "alice")
     reservation = await database.reserve_repository_candidate_collection_job(first["id"], "alice")
     job_id = int(reservation.job["id"])
+    from schema_helpers import restore_schema_seven
+
+    await restore_schema_seven()
     # Reproduce the previous schema, whose only durable association was the origin candidate.
     await _execute(database, "DROP TABLE collection_job_candidates")
     await _execute(database, """ALTER TABLE collected_datasets

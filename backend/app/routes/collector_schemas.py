@@ -262,6 +262,8 @@ class CollectorRepositorySearchItem(BaseModel):
 
 
 class CollectorRepositorySearchWarning(BaseModel):
+    code: str = "repository_unavailable"
+    incomplete: bool = True
     message: str
     provider: Optional[str] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
 
@@ -344,6 +346,14 @@ class CollectorCollectionJobResponse(BaseModel):
 
 class CollectorSearchProgressResponse(BaseModel):
     search_id: UUID
+    query: str = ""
+    origin: Optional[Literal["database", "online"]] = None  # noqa: UP045
+    local_dataset_ids: list[int] = Field(default_factory=list)
+    dataset_ids: list[int] = Field(default_factory=list)
+    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
+    attempt: int = 1
+    created_at: str = ""
+    updated_at: str = ""
     polling_required: bool
     execution_status: ExecutionStatus
     outcome: Optional[Outcome] = None  # noqa: UP045
@@ -351,3 +361,18 @@ class CollectorSearchProgressResponse(BaseModel):
     errors: list[CollectorDiagnostic] = Field(default_factory=list)
     local_result_count: Optional[int] = Field(default=None, ge=0)  # noqa: UP045
     items: list[CollectorRepositorySearchItem]
+
+
+class CollectorSearchCreateRequest(CollectorRepositorySearchRequest):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CollectorSearchRetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CollectorSearchCommandResponse(BaseModel):
+    search_id: UUID
+    execution_status: ExecutionStatus
+    attempt: int
+    progress_url: str

@@ -169,6 +169,9 @@ async def test_migration_preserves_old_data_without_claiming_complete_outcomes(d
             report=CollectionReport(verification_complete=True),
         ),
     )
+    from schema_helpers import restore_schema_seven
+
+    await restore_schema_seven()
     async with _require_database_pool().connection() as connection:
         for table in (
             "search_sessions",

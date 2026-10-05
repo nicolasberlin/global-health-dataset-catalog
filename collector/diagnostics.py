@@ -36,6 +36,7 @@ _MESSAGES = {
     "verification_unconfirmed": "A required data access check was inconclusive.",
     "access_restricted": "Data access requires authentication or permission.",
     "resource_unavailable": "The data resource is unavailable.",
+    "quota_service_unavailable": "The work quota could not be checked.",
     "api_quota_exceeded": "The API work quota was reached.",
     "search_scope_limited": "The search was limited to the configured candidate count.",
     "invalid_repository_metadata": "Some repository records had invalid metadata.",

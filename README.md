@@ -39,6 +39,13 @@ Collector
       +-- Distribution validation
 ```
 
+## Standalone API
+
+The backend can run independently of the React frontend. Submit one asynchronous
+search, disconnect, and retrieve its progress and saved datasets later.
+See the [API integration guide](docs/api-integration.md) for backend-only Docker
+deployment, authentication, curl examples, idempotency and retries.
+
 ## Quick start
 
 ### Requirements
