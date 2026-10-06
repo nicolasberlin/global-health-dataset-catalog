@@ -19,11 +19,17 @@ from urllib.request import (
 )
 
 from collector.config import DEFAULT_CONFIG
+from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.network_policy import is_public_address
 
 
-class PageFetchError(RuntimeError):
+class PageFetchError(PipelineFailure):
     """Raised when an HTML page could not be retrieved for classification."""
+
+    def __init__(self, message: str, *, code="repository_unavailable"):
+        super().__init__(message, diagnostics=[Diagnostic(
+            code, "collection", recovery="none" if code == "access_restricted" else "manual",
+        )])
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,11 @@ from collector.storage.metadata import enrich_from_repository
 from collector.storage.models import CollectionResult
 
 from .collected_datasets import _save_collected_dataset
-from .collection_jobs import _lock_running_collection_job, _mark_collection_job_done
+from .collection_jobs import (
+    _job_dataset_ids,
+    _lock_running_collection_job,
+    _mark_collection_job_done,
+)
 from .connection import _fetchall, _require_database_pool
 from .schema import _require_current_schema
 
@@ -74,7 +78,7 @@ async def complete_collection_job(
             completed_job = await _mark_collection_job_done(
                 connection,
                 job_id,
-                len(saved_datasets),
+                max(len(saved_datasets), len(await _job_dataset_ids(connection, job_id))),
                 collection_result.report,
             )
             if completed_job is None:

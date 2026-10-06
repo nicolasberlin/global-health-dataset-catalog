@@ -23,7 +23,8 @@ from test_collection_workflow import candidate_for, decision, wait_until
 from collector.classification import factory
 from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.page import PageClassificationError
-from collector.storage.models import CollectionResult
+from collector.diagnostics import PersistenceFailure
+from collector.storage.models import CollectionReport, CollectionResult
 
 pytestmark = pytest.mark.anyio
 
@@ -142,19 +143,26 @@ async def test_fast_votes_are_saved_before_slowest_model_finishes(database, tran
 
 async def test_restart_and_attempt_tokens_preserve_successes(database):
     await database.init_database()
-    scope = await scope_for(database, "page")
+    candidate = await candidate_for(database)
+    await database.complete_candidate_classification(candidate["id"], "alice", decision())
+    job = await database.claim_pending_collection_job()
+    scope = {"job_id": job["id"]}
     snapshot = {"configuration": [{"voter_id": "a"}, {"voter_id": "b"}], "payload": {}}
     run = await votes.prepare_vote_run(snapshot, **scope)
     first = await votes.claim_vote(run, "a", **scope)
     await votes.finish_vote(run, "a", first["attempt_token"], response={"accepted": False}, **scope)
     old = await votes.claim_vote(run, "b", **scope)
-    with pytest.raises(PageClassificationError, match="already running"):
+    with pytest.raises(PersistenceFailure, match="already running"):
         await votes.claim_vote(run, "b", **scope)
     await votes.mark_interrupted_votes_error()
     await database.mark_interrupted_collection_jobs_error()
+    with pytest.raises(PersistenceFailure, match="no longer running"):
+        await votes.claim_vote(run, "a", **scope)
+    await retry_collection_job_for_owner(scope["job_id"], "alice")
+    await database.claim_pending_collection_job()
     assert (await votes.claim_vote(run, "a", **scope))["response"] == {"accepted": False}
     new = await votes.claim_vote(run, "b", **scope)
-    with pytest.raises(PageClassificationError, match="no longer current"):
+    with pytest.raises(PersistenceFailure, match="no longer current"):
         await votes.finish_vote(
             run, "b", old["attempt_token"], response={"accepted": True}, **scope
         )
@@ -243,6 +251,8 @@ async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
     transport,
     monkeypatch,
 ):
+    monkeypatch.setenv("LLM_MAX_ATTEMPTS", "1")
+    monkeypatch.setenv("LLM_INVALID_MAX_ATTEMPTS", "1")
     await database.init_database()
     candidate = await candidate_for(database)
     completion = await database.complete_candidate_classification(
@@ -260,7 +270,7 @@ async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
 
     def collect(url, *, classifier):
         assert classifier.classify(PAGE, []).accepted
-        return CollectionResult()
+        return CollectionResult(report=CollectionReport(verification_complete=True))
 
     transport(request)
     monkeypatch.setattr(collection_worker, "collect_repository_candidate_with_report", collect)

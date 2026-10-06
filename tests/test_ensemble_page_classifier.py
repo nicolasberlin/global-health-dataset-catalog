@@ -102,7 +102,9 @@ def test_ensemble_classifier_accepts_with_one_failure_and_two_accepting_votes():
     assert ensemble["failed_votes"] == 1
     assert ensemble["accepted_votes"] == 2
     assert ensemble["decision_reason"] == "enough_accept_votes"
-    assert ensemble["failures"] == [{"voter_id": "llm_a", "error": "timeout"}]
+    assert ensemble["failures"][0]["voter_id"] == "llm_a"
+    assert ensemble["failures"][0]["error"] == "timeout"
+    assert ensemble["failures"][0]["errors"][0]["voter_id"] == "llm_a"
 
 
 def test_ensemble_classifier_rejects_with_one_failure_one_accept_and_one_reject():

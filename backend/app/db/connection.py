@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Mapping, Sequence
 from typing import Any, Union
@@ -13,6 +14,33 @@ Row = dict[str, Any]
 
 _database_pool: AsyncConnectionPool[DictRow] | None = None
 _initialized_pool: AsyncConnectionPool[DictRow] | None = None
+READINESS_TIMEOUT_SECONDS = 2.0
+
+
+async def check_database_readiness() -> None:
+    """Probe the initialized pool within one acquisition/query time budget."""
+    _require_database_initialized()
+    pool = _require_database_pool()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + READINESS_TIMEOUT_SECONDS
+    async with pool.connection(timeout=READINESS_TIMEOUT_SECONDS) as connection:
+        probe = asyncio.create_task(_fetchone(connection, "SELECT 1 AS ready"))
+        try:
+            done, _ = await asyncio.wait({probe}, timeout=max(0.0, deadline - loop.time()))
+            if not done:
+                raise asyncio.TimeoutError("Database readiness timed out.")
+            if probe.result() != {"ready": 1}:
+                raise RuntimeError("Database readiness probe failed.")
+        finally:
+            if not probe.done():
+                # Close before cancellation: psycopg's normal query cancellation can
+                # wait for an unreachable server beyond the readiness time budget.
+                await connection.close()
+                probe.cancel()
+            await asyncio.gather(probe, return_exceptions=True)
+    _require_database_initialized()
+    if pool is not _require_database_pool():
+        raise RuntimeError("Database pool changed during readiness probe.")
 
 
 def _database_url_from_env() -> str:

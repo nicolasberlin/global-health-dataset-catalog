@@ -10,12 +10,13 @@ from urllib.parse import urlsplit
 from collector.classification.factory import build_default_page_classifier
 from collector.classification.page import PageClassifier
 from collector.config import DEFAULT_CONFIG, CollectorConfig
+from collector.diagnostics import Diagnostic
 from collector.discovery.adapters import DiscoveredPage
 from collector.discovery.adapters.shared import EXCLUDED_RESOURCE_FORMATS
 from collector.discovery.manager import discover_source
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
-from collector.fetch import FetchedPage, fetch_public_html
+from collector.fetch import FetchedPage, PageFetchError, fetch_public_html
 from collector.storage.metadata import metadata_evidence
 from collector.storage.models import (
     CollectedDataset,
@@ -26,7 +27,7 @@ from collector.storage.models import (
     ValidationResult,
 )
 from collector.url_utils import normalize_http_url
-from collector.validation.downloads import validate_distribution
+from collector.validation.downloads import page_access_diagnostic, validate_distribution
 
 DiscoverFunction = Callable[[str], list[DiscoveredPage]]
 FetchHTMLFunction = Callable[[str], FetchedPage]
@@ -60,6 +61,9 @@ def analyze_html_page(
                 })
     distributions = [item for item in extract_distributions(page) if _usable_distribution(item)]
     if not distributions:
+        barrier = page_access_diagnostic(html)
+        if barrier is not None:
+            raise PageFetchError(barrier.message, code=barrier.code)
         return None
     page_classifier = _classifier_or_default(classifier)
     classification = page_classifier.classify(page, distributions)
@@ -87,7 +91,7 @@ def analyze_html_page(
 def collect_source_with_report(
     source_url: str,
     config: CollectorConfig = DEFAULT_CONFIG,
-    discover: DiscoverFunction = discover_source,
+    discover: DiscoverFunction | None = None,
     fetch_html: FetchHTMLFunction | None = None,
     validate: ValidateDistributionFunction | None = None,
     classifier: PageClassifier | None = None,
@@ -104,11 +108,13 @@ def collect_source_with_report(
     The returned result is not saved here. Fetch, classifier, and validation
     errors propagate to the caller instead of being counted as rejections.
 
-    Default fetch and validation functions use this run's network settings.
+    Default discovery, fetch and validation functions use this run's network settings.
     Explicitly supplied functions retain their single-argument interface and
     are responsible for their own network settings.
     """
 
+    if discover is None:
+        discover = partial(discover_source, config=config)
     if fetch_html is None:
         fetch_html = partial(
             fetch_public_html,
@@ -120,10 +126,12 @@ def collect_source_with_report(
             validate_distribution,
             timeout=config.request_timeout_seconds,
             max_sample_bytes=config.max_sample_bytes,
+            user_agent=config.user_agent,
         )
 
     collected_datasets: list[CollectedDataset] = []
     validation_failures: list[ValidationResult] = []
+    errors: list[Diagnostic] = []
 
     def validate_and_record(distribution: DistributionCandidate) -> ValidationResult:
         result = validate(distribution)
@@ -140,6 +148,7 @@ def collect_source_with_report(
     page_classifier = _classifier_or_default(classifier)
 
     for discovered_page in selected_pages:
+        failure_start = len(validation_failures)
         dataset, invalid_count = _collect_discovered_page_with_report(
             discovered_page,
             config,
@@ -151,7 +160,17 @@ def collect_source_with_report(
         if dataset is not None:
             collected_datasets.append(dataset)
         else:
-            rejected_count += 1
+            # An alternative failed link does not invalidate a retained dataset.
+            inconclusive = [failure for failure in validation_failures[failure_start:]
+                            if failure.status in {"unconfirmed", "restricted"}]
+            if inconclusive:
+                errors.extend(Diagnostic(
+                    "access_restricted" if failure.status == "restricted"
+                    else "verification_unconfirmed", "validation",
+                    recovery="none" if failure.status == "restricted" else "manual",
+                ) for failure in inconclusive)
+            else:
+                rejected_count += 1
 
     return CollectionResult(
         datasets=collected_datasets,
@@ -162,6 +181,8 @@ def collect_source_with_report(
             rejected_count=rejected_count,
             invalid_distribution_count=invalid_distribution_count,
             validation_failures=validation_failures,
+            errors=errors,
+            verification_complete=not errors,
             discovery_methods=tuple(
                 sorted(
                     {
@@ -235,7 +256,8 @@ def _collect_discovered_page_with_report(
         fetched_page = fetch_html(discovered_page.url)
         mime_type = fetched_page.content_type.split(";", 1)[0].strip().lower()
         if mime_type and mime_type not in {"text/html", "application/xhtml+xml"}:
-            return None, 0
+            raise PageFetchError("Landing page did not return HTML.",
+                                 code="verification_unconfirmed")
         dataset = analyze_html_page(
             fetched_page.final_url,
             fetched_page.html,

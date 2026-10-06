@@ -45,8 +45,8 @@ exactly-once execution of external calls.
   use each result's vote counts, so historical results retain their own totals.
 - Distribution validation records `available`, `restricted`, `unavailable`, or
   `unconfirmed`, with a reason. Failed validations are retained in the collection
-  report and job audit. A complete distinction between reliable empty outcomes
-  and incomplete verification is still proposed.
+  report and job audit. The additive [outcome contract](pipeline-outcomes.md)
+  now distinguishes complete empty outcomes from incomplete verification.
 - JSON validation retains the bounded sample (64 KiB by default) and reads at
   most one additional byte to detect a server ignoring `Range`. Initial `206`
   ranges also identify truncated representations. Complete bodies use strict
@@ -354,7 +354,7 @@ References name functions and files so they remain useful when line numbers move
 | Acceptance transaction | [classification_completion.py](../backend/app/db/classification_completion.py), `complete_candidate_classification`, commits decision and reservation together. | Separate deferred-admission intent if introduced. |
 | Partial votes | [classification_votes.py](../backend/app/db/classification_votes.py) stores validated responses, fingerprints, errors, and attempt tokens. | No automatic retry scheduler or job leases. |
 | Collection retry | `retry_collection_job_for_owner` requeues an owned failed job; active retries are idempotent. Internal new-job retries can inherit compatible votes. | Stable command IDs, immutable collection-attempt history, and empty-result retries. |
-| Validation diagnostics | [downloads.py](../collector/validation/downloads.py) and [main.py](../collector/main.py) retain validation states/reasons and failed-validation audit. | Reliable empty/incomplete outcome distinction before introducing cooldowns. |
+| Validation diagnostics | [downloads.py](../collector/validation/downloads.py) and [main.py](../collector/main.py) retain validation states/reasons and failed-validation audit. | Frontend adoption of the new outcome fields; cooldowns remain future work. |
 | Public responses | [collector_presenters.py](../backend/app/routes/collector_presenters.py) sanitizes technical diagnostics consistently. | Structured retry eligibility and timing. |
 | Quotas | [api_quotas.py](../backend/app/db/api_quotas.py) and [security.py](../backend/app/security.py) enforce existing request quotas. | Atomic collection-admission quota and waiting limits. |
 | Consumers and restart | [workers.py](../backend/app/workers.py) bounds execution; [main.py](../backend/app/main.py) recovers startup state. | Renewable ownership, bounded automatic recovery, and multiple instances. |
@@ -430,6 +430,11 @@ tests; persistent classification then passed 355 Python tests and 33 frontend
 tests. Those runs used temporary PostgreSQL 16, excluded the container-firewall
 integration test, and passed Ruff; the latter two also passed the frontend build.
 These counts describe those historical revisions, not the current suite.
+
+The [2026-09-28 reliability integration review](reliability-verification-2026-09-28.md)
+records the combined polling/reliability revisions, 580 passing Python tests,
+frontend/browser results, and the remaining corrected-revision CI gate. JSON
+validation now explicitly rejects the non-JSON `NaN` and infinity constants.
 
 ## Design references
 

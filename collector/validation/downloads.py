@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import codecs
+import csv
+import io
 import json
 import re
+import struct
 from collections.abc import Callable
+from functools import partial
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from collector.config import DEFAULT_CONFIG
+from collector.diagnostics import Diagnostic
 from collector.extraction.distributions import guess_format
 from collector.fetch import open_public_http_url
 from collector.storage.models import (
@@ -18,7 +24,7 @@ from collector.storage.models import (
     ValidationResult,
     ValidationStatus,
 )
-from collector.validation.json_sample import read_json_prefix
+from collector.validation.json_sample import read_json_prefix, reject_json_constant
 
 ProbeFunction = Callable[..., HTTPProbe]
 
@@ -28,6 +34,7 @@ def validate_distribution(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_sample_bytes: int = DEFAULT_CONFIG.max_sample_bytes,
     probe: ProbeFunction | None = None,
+    user_agent: str = DEFAULT_CONFIG.user_agent,
 ) -> ValidationResult:
     """Normalize one distribution probe into a validation outcome.
 
@@ -37,7 +44,9 @@ def validate_distribution(
 
     if max_sample_bytes < 1:
         raise ValueError("max_sample_bytes must be positive.")
-    probe = probe or probe_url
+    # Custom probes keep their existing calling convention and manage their own headers.
+    if probe is None:
+        probe = partial(probe_url, user_agent=user_agent)
     head_probe = probe(distribution.url, method="HEAD", timeout=timeout, max_bytes=0)
     selected_probe = head_probe
 
@@ -72,12 +81,30 @@ def validate_distribution(
     )
 
 
+def page_access_diagnostic(html: str) -> Diagnostic | None:
+    """Recognize access barriers on a landing page without usable download links."""
+    page = _AccessPage()
+    try:
+        page.feed(html[:65_536])
+    except (AssertionError, NotImplementedError):
+        return Diagnostic("verification_unconfirmed", "collection")
+    if page.password_form:
+        return Diagnostic("access_restricted", "collection", recovery="none")
+    barrier = _access_barrier(" ".join(page.text))
+    if page.captcha_widget or barrier:
+        restricted = barrier is not None and barrier[0] == "restricted"
+        return Diagnostic("access_restricted" if restricted else "verification_unconfirmed",
+                          "collection", recovery="none" if restricted else "manual")
+    return None
+
+
 def probe_url(
     url: str,
     method: str,
     timeout: float,
     max_bytes: int,
     headers: dict[str, str] | None = None,
+    user_agent: str = DEFAULT_CONFIG.user_agent,
 ) -> HTTPProbe:
     """Perform one bounded probe with public-URL and redirect protection.
 
@@ -87,7 +114,7 @@ def probe_url(
     validation can reject the resource without raising.
     """
 
-    request = Request(url, method=method, headers=headers or {})
+    request = Request(url, method=method, headers={"User-Agent": user_agent, **(headers or {})})
 
     try:
         with open_public_http_url(request, timeout=timeout) as response:
@@ -175,7 +202,10 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
         if code == 206 and not _prefix_range(probe):
             return "unconfirmed", "The JSON response is not a confirmed initial byte range."
         try:
-            payload = read_json_prefix(probe.body_sample) if truncated else json.loads(sample)
+            payload = (
+                read_json_prefix(probe.body_sample) if truncated
+                else json.loads(sample, parse_constant=reject_json_constant)
+            )
         except (ValueError, UnicodeError, RecursionError):
             # A bounded/ranged sample may end in the middle of a valid document.
             if code == 403:
@@ -219,9 +249,14 @@ def _response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStat
 
     if code == 403:
         return _access_barrier(text) or forbidden
-    if format_name in {"UNKNOWN", "API"}:
-        return "unconfirmed", "The response format could not be confirmed."
-    return "available", "A non-empty data response was confirmed."
+    if code == 206 and not _prefix_range(probe):
+        return "unconfirmed", "The response is not a confirmed initial byte range."
+    evidence = _format_from_body_sample(probe.body_sample, _sample_is_truncated(probe))
+    if evidence == "UNKNOWN" or evidence != format_name:
+        return "unconfirmed", "The sampled content does not provide sufficient format evidence."
+    return "available", (
+        f"{evidence} format evidence was found in the sample; the full file was not validated."
+    )
 
 
 def _access_barrier(text: str) -> tuple[ValidationStatus, str] | None:
@@ -340,7 +375,15 @@ def _validated_format(
     content_disposition: str,
     probe: HTTPProbe,
 ) -> str:
-    """Prefer response metadata, then sampled bytes, then the discovered format."""
+    """Prefer sampled evidence; metadata remains only a hint when evidence is missing.
+
+    A ZIP signature identifies the container, not XLSX or its contents. Unsupported
+    formats may retain their advertised name for the audit but cannot confirm access.
+    """
+
+    sample_format = _format_from_body_sample(probe.body_sample, _sample_is_truncated(probe))
+    if sample_format != "UNKNOWN":
+        return sample_format
 
     format_from_headers, _ = guess_format(
         probe.final_url or distribution.url,
@@ -349,34 +392,112 @@ def _validated_format(
     if format_from_headers != "UNKNOWN":
         return format_from_headers
 
-    sample_format = _format_from_body_sample(probe.body_sample)
-    if sample_format != "UNKNOWN":
-        return sample_format
-
     return distribution.format
 
 
-def _format_from_body_sample(sample: bytes) -> str:
-    stripped = sample.strip()
-    if not stripped:
+def _format_from_body_sample(sample: bytes, truncated: bool = False) -> str:
+    """Recognize bounded evidence, never validate or unpack an entire file.
+
+    ZIP needs a complete plausible local header and filename; GZ needs its fixed
+    header and payload bytes; Parquet needs its leading magic and additional bytes.
+    OLE does not uniquely identify XLS, and ZIP does not uniquely identify XLSX.
+    XML, JSONL and statistical formats have no evidence rule here and stay unconfirmed.
+    JSON is only a routing hint here: its existing parser makes the access decision.
+    """
+    if not sample:
         return "UNKNOWN"
-    if stripped.startswith(b"PK\x03\x04"):
-        return "ZIP"
-    if stripped.startswith((b"{", b"[")):
+    if sample.startswith(b"PK\x03\x04") and len(sample) >= 30:
+        version, flags, method = struct.unpack_from("<HHH", sample, 4)
+        name_length, extra_length = struct.unpack_from("<HH", sample, 26)
+        header_end = 30 + name_length + extra_length
+        if (10 <= version <= 63 and not flags & 0xC000
+                and method in {0, 8, 12, 14, 93, 95, 98}
+                and name_length > 0 and header_end <= len(sample)
+                and b"\x00" not in sample[30:30 + name_length]):
+            return "ZIP"
+    if (len(sample) > 10 and sample.startswith(b"\x1f\x8b\x08")
+            and not sample[3] & 0xE0):
+        # Optional header sections must also fit inside the bounded sample.
+        offset = 10
+        flags = sample[3]
+        if flags & 4:
+            if len(sample) < offset + 2:
+                return "UNKNOWN"
+            offset += 2 + int.from_bytes(sample[offset:offset + 2], "little")
+        for flag in (8, 16):
+            if flags & flag:
+                end = sample.find(b"\x00", offset)
+                if end < 0:
+                    return "UNKNOWN"
+                offset = end + 1
+        if flags & 2:
+            offset += 2
+        if offset < len(sample):
+            return "GZ"
+    if sample.startswith(b"PAR1") and len(sample) >= 8:
+        return "PARQUET"
+
+    decoded = _decode_tabular_sample(sample, truncated)
+    if decoded is None:
+        return "UNKNOWN"
+    if decoded.lstrip().startswith(("{", "[")):
         return "JSON"
-
-    try:
-        decoded = stripped[:4096].decode("utf-8")
-    except UnicodeDecodeError:
+    if decoded.lstrip().startswith("<"):
         return "UNKNOWN"
+    candidates = [
+        name for delimiter, name in ((",", "CSV"), (";", "CSV"), ("\t", "TSV"))
+        if _plausible_table(decoded, delimiter, truncated)
+    ]
+    return candidates[0] if len(candidates) == 1 else "UNKNOWN"
 
-    first_line = decoded.splitlines()[0] if decoded.splitlines() else ""
-    if "," in first_line:
-        return "CSV"
-    if "\t" in first_line:
-        return "TSV"
 
-    return "UNKNOWN"
+def _decode_tabular_sample(sample: bytes, truncated: bool) -> str | None:
+    """Strictly decode UTF-8 or BOM-marked UTF-16/32, allowing a cut final character.
+
+    Guessing a legacy encoding or replacing malformed bytes would turn arbitrary
+    binary content into apparent text. Such ambiguous samples remain unconfirmed.
+    """
+    encoding = "utf-8-sig"
+    if sample.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        encoding = "utf-32"
+    elif sample.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encoding = "utf-16"
+    try:
+        decoded = codecs.getincrementaldecoder(encoding)().decode(sample, final=not truncated)
+    except UnicodeDecodeError:
+        return None
+    if any(ord(char) < 32 and char not in "\t\r\n" for char in decoded):
+        return None
+    return decoded
+
+
+def _plausible_table(text: str, delimiter: str, truncated: bool) -> bool:
+    """Require at least two nonempty, complete records with matching column counts."""
+    stream = io.StringIO(text, newline="")
+    # Count the same physical lines as csv.reader (Unicode separators are cell data).
+    line_count = sum(1 for _ in stream)
+    stream.seek(0)
+    reader = csv.reader(stream, delimiter=delimiter, strict=True)
+    width = 0
+    records = 0
+    try:
+        for row in reader:
+            # A bounded prefix without a line ending may cut an unquoted field.
+            if truncated and reader.line_num == line_count and not text.endswith(("\r", "\n")):
+                break
+            if not row:
+                continue
+            if len(row) < 2 or not any(cell.strip() for cell in row):
+                return False
+            if width and len(row) != width:
+                return False
+            width = len(row)
+            records += 1
+    except csv.Error as error:
+        # Only an unfinished quoted final record can be ignored in a cut prefix.
+        if not truncated or str(error) != "unexpected end of data":
+            return False
+    return records >= 2
 
 
 def _header(probe: HTTPProbe, name: str) -> str:

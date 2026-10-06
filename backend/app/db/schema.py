@@ -13,7 +13,7 @@ from .connection import (
 
 # Historical pre-baseline schemas are unsupported. Explicit versioned migrations
 # preserve data for supported baselines, including the job associations in v2.
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 9
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",
     "health_probability",
@@ -327,6 +327,9 @@ CREATE TABLE collection_job_candidates (
 """
 REPOSITORY_PERSISTENCE_COLUMNS = {
     "search_sessions": {
+        "errors", "local_result_count", "discovery_complete", "execution_mode",
+        "access_mode", "client_key", "attempt_number", "attempt_token",
+        "online_quota_attempt", "warnings", "retry_at",
         "id",
         "owner_id",
         "query",
@@ -342,6 +345,7 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
         "request_count",
     },
     "repository_candidates": {
+        "errors",
         "id",
         "search_session_id",
         "url",
@@ -349,10 +353,22 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
         "classification",
         "error",
     },
-    "collection_jobs": {"kind", "repository_candidate_id"},
+    "collection_jobs": {"kind", "repository_candidate_id", "errors", "outcome"},
+    "classification_votes": {"errors"},
+    "api_commands": {"owner_id", "command_key", "fingerprint", "result"},
+    "search_local_results": {"search_id", "dataset_id", "position"},
     "collection_job_candidates": {"job_id", "candidate_id"},
 }
+for _table in ("repository_candidates", "collection_jobs"):
+    REPOSITORY_PERSISTENCE_COLUMNS[_table].update({
+        "retry_cycle", "retry_round", "retry_started_at", "next_retry_at",
+    })
+REPOSITORY_PERSISTENCE_COLUMNS["classification_votes"].update({
+    "retry_cycle", "cycle_attempts", "last_attempt_token",
+})
+
 REPOSITORY_PERSISTENCE_INDEXES = {
+    "candidate_retry_due_idx", "collection_retry_due_idx",
     "collection_jobs_active_repository_candidate_idx",
     "collection_jobs_active_repository_url_idx",
 }
@@ -385,6 +401,8 @@ MANAGED_TABLES = (
     "collection_job_candidates",
     "classification_runs",
     "classification_votes",
+    "api_commands",
+    "search_local_results",
 )
 
 
@@ -443,6 +461,12 @@ def _migration_for_version(version: int):
         return _migrate_4_to_5
     if version == 5:
         return _migrate_5_to_6
+    if version == 6:
+        return _migrate_6_to_7
+    if version == 7:
+        return _migrate_7_to_8
+    if version == 8:
+        return _migrate_8_to_9
 
     raise RuntimeError(f"No migration registered for schema version {version}.")
 
@@ -561,6 +585,89 @@ async def _migrate_5_to_6(connection: AsyncConnection[DictRow]) -> None:
                   OR (status <> 'succeeded' AND response IS NULL)),
             CHECK((status = 'running') = (attempt_token IS NOT NULL))
         );
+    """)
+
+
+async def _migrate_6_to_7(connection: AsyncConnection[DictRow]) -> None:
+    # Historical terminal records have no proof of completeness. Preserve all
+    # old diagnostics and use unknown/incomplete rather than guessing a cause.
+    for table in ("search_sessions", "repository_candidates", "collection_jobs",
+                  "classification_votes"):
+        await connection.execute(f"""
+            ALTER TABLE {table} ADD COLUMN errors JSONB NOT NULL DEFAULT '[]'::jsonb
+                CHECK(jsonb_typeof(errors) = 'array')
+        """)
+    await connection.execute("""
+        ALTER TABLE search_sessions
+            ADD COLUMN local_result_count INTEGER CHECK(local_result_count >= 0),
+            ADD COLUMN discovery_complete BOOLEAN;
+        ALTER TABLE collection_jobs
+            ADD COLUMN outcome TEXT CHECK(outcome IN ('results', 'empty', 'incomplete'));
+        UPDATE collection_jobs SET outcome = 'incomplete' WHERE status IN ('done', 'error');
+    """)
+
+
+async def _migrate_7_to_8(connection: AsyncConnection[DictRow]) -> None:
+    await connection.execute("""
+        ALTER TABLE search_sessions
+            DROP CONSTRAINT search_sessions_status_check,
+            DROP CONSTRAINT search_sessions_check,
+            ADD CONSTRAINT search_sessions_status_check
+                CHECK(status IN ('queued', 'running', 'completed', 'partial', 'error')),
+            ADD CONSTRAINT search_sessions_lifecycle_check CHECK(
+                (status IN ('queued', 'running') AND finished_at IS NULL)
+                OR (status NOT IN ('queued', 'running') AND finished_at IS NOT NULL)),
+            ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'inline'
+                CHECK(execution_mode IN ('inline', 'worker')),
+            ADD COLUMN access_mode TEXT CHECK(access_mode IN ('token', 'local', 'public')),
+            ADD COLUMN client_key TEXT,
+            ADD COLUMN attempt_number INTEGER NOT NULL DEFAULT 1 CHECK(attempt_number >= 1),
+            ADD COLUMN attempt_token UUID,
+            ADD COLUMN online_quota_attempt INTEGER NOT NULL DEFAULT 0
+                CHECK(online_quota_attempt >= 0),
+            ADD COLUMN warnings JSONB NOT NULL DEFAULT '[]'::jsonb
+                CHECK(jsonb_typeof(warnings) = 'array'),
+            ADD COLUMN retry_at TIMESTAMPTZ;
+        CREATE INDEX search_sessions_queue_idx ON search_sessions(created_at, id)
+            WHERE status = 'queued' AND execution_mode = 'worker';
+        CREATE INDEX search_sessions_owner_latest_idx ON search_sessions(owner_id, created_at DESC);
+        CREATE TABLE search_local_results (
+            search_id UUID NOT NULL REFERENCES search_sessions(id) ON DELETE CASCADE,
+            dataset_id INTEGER NOT NULL REFERENCES collected_datasets(id),
+            position INTEGER NOT NULL CHECK(position >= 0),
+            PRIMARY KEY(search_id, dataset_id),
+            UNIQUE(search_id, position)
+        );
+        CREATE TABLE api_commands (
+            owner_id TEXT NOT NULL CHECK(btrim(owner_id) <> '' AND char_length(owner_id) <= 200),
+            command_key TEXT NOT NULL CHECK(command_key ~ '^[A-Za-z0-9._:-]{1,128}$'),
+            operation TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            result JSONB NOT NULL CHECK(jsonb_typeof(result) = 'object'),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY(owner_id, command_key)
+        );
+    """)
+
+
+async def _migrate_8_to_9(connection: AsyncConnection[DictRow]) -> None:
+    for table in ("repository_candidates", "collection_jobs"):
+        await connection.execute(f"""
+            ALTER TABLE {table}
+                ADD COLUMN retry_cycle UUID NOT NULL DEFAULT gen_random_uuid(),
+                ADD COLUMN retry_round INTEGER NOT NULL DEFAULT 0 CHECK(retry_round >= 0),
+                ADD COLUMN retry_started_at TIMESTAMPTZ,
+                ADD COLUMN next_retry_at TIMESTAMPTZ;
+        """)
+    await connection.execute("""
+        ALTER TABLE classification_votes
+            ADD COLUMN retry_cycle UUID,
+            ADD COLUMN cycle_attempts INTEGER NOT NULL DEFAULT 0 CHECK(cycle_attempts >= 0),
+            ADD COLUMN last_attempt_token UUID;
+        CREATE INDEX candidate_retry_due_idx ON repository_candidates(next_retry_at, id)
+            WHERE classification_status = 'queued';
+        CREATE INDEX collection_retry_due_idx ON collection_jobs(next_retry_at, id)
+            WHERE status = 'pending';
     """)
 
 

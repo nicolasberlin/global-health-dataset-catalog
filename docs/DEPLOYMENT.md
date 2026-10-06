@@ -79,6 +79,10 @@ There is no TLS, HSTS, or HTTPS redirect middleware in this deployment.
 
 ## Collection execution
 
+See the [2026-09-28 reliability verification record](reliability-verification-2026-09-28.md)
+for tested revisions, local results and CI status. A successful baseline CI run
+does not certify later corrections or establish which revision is deployed.
+
 Run exactly one API process and one API instance against the database. The image
 explicitly starts Uvicorn with `--workers 1`. Do not scale replicas or overlap old
 and new API instances during a deployment: startup recovery would mark the other
@@ -141,6 +145,77 @@ provides a restore button. It never submits its unrequested candidates implicitl
 This is recovery of the last repository analysis, not a complete search history.
 The single-process/single-instance constraint also applies to classification.
 
+## Internal operational logs
+
+The API enables the `collector.operations` logger at startup. It writes JSON lines
+on stderr, available only through server/container logs; no route or frontend view
+exposes them. No external monitoring service is required. Inspect a bounded window:
+
+```sh
+docker compose logs --since 15m --tail 500 --timestamps ai-commons-api
+```
+
+Events cover `collection_started` / `collection_finished`,
+`classification_started` / `classification_finished`, `provider_request`,
+`persistence_retry`, `persistence_finished`, `persistence_duration`, and failures
+in `worker_poll` or collection/classification execution. Durations use a monotonic
+clock. A worker's finish duration includes execution and terminal persistence,
+including retry waits; it excludes time spent queued. Provider duration covers the
+HTTP request and parsing, not subsequent classification-domain validation. Outcomes
+are fixed categories: `started`, `success`, `failed`, `retry`, `timeout`,
+`network_error`, `http_error`, `invalid_response`, and `configuration_error`.
+A failed persistence duration also records a permanent error or interrupted wait.
+
+Internal `job_id` / `candidate_id` fields correlate events across executor and
+voter threads. They are not metric labels. Events never include URLs, prompts,
+request bodies, credentials, provider names/models or response/exception text.
+Existing application persistence and public error presentation are unchanged.
+Logging-handler failures are ignored so they cannot fail model calls, persistence
+or collection. These logs are best-effort diagnostics, not an audit trail.
+
+For example, this illustrative subset of events describes a successful collection
+that waited for the database after a successful model response:
+
+```json
+{"event":"collection_started","outcome":"started","job_id":42}
+{"event":"provider_request","outcome":"success","job_id":42,"duration_seconds":12.4}
+{"event":"persistence_retry","outcome":"retry","job_id":42,"retry_count":1,"delay_seconds":0.8}
+{"event":"persistence_retry","outcome":"retry","job_id":42,"retry_count":2,"delay_seconds":1.5}
+{"event":"persistence_finished","outcome":"success","job_id":42,"retry_count":2}
+{"event":"persistence_duration","outcome":"success","job_id":42,"duration_seconds":2.5}
+{"event":"collection_finished","outcome":"success","job_id":42,"duration_seconds":18.2}
+```
+
+High provider durations point to model-call latency. Repeated persistence retries
+point to a database or pool problem; the model result is retained without repeating
+the model call. A start event with no finish may mean ongoing work or an interrupted
+process: check container status and persisted job status before concluding failure.
+Parallel voter durations overlap and must not be summed as wall-clock duration.
+
+To inspect backlog, run this read-only SQL through an administrative PostgreSQL
+connection. It returns only queue counts and the oldest queued age in seconds.
+`updated_at` is reset when work is enqueued or explicitly retried; once claimed it
+is overwritten, so this query does not measure historical per-task queue wait.
+That extra measurement remains deferred in TODO 7.
+
+```sql
+BEGIN READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SELECT 'collection' AS queue, count(*) AS queued,
+       COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - min(updated_at))), 0)
+           AS oldest_wait_seconds
+FROM collection_jobs WHERE status = 'pending'
+UNION ALL
+SELECT 'classification', count(*),
+       COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - min(updated_at))), 0)
+FROM repository_candidates WHERE classification_status = 'queued';
+COMMIT;
+```
+
+A growing oldest age with active workers suggests backlog. No claimed work plus
+`worker_poll` failures suggests that workers cannot access or finalize queue work.
+These are diagnostic indicators, not guarantees of the underlying cause.
+
 ## Outbound network policy
 
 The backend image starts with a short bootstrap that installs an nftables
@@ -190,16 +265,56 @@ After deploying on gpu217:
 ```bash
 curl -I "http://${PUBLIC_HOST}:1312/ai-commons/"
 curl --fail --show-error --silent "http://${PUBLIC_HOST}:1312/ai-commons/api/health"
+curl --fail --show-error --silent --max-time 3 "http://${PUBLIC_HOST}:1312/ai-commons/api/ready"
 docker compose port postgres 5432
 docker compose exec ai-commons-api nft list table inet collector_egress
 ```
 
 Expect a successful frontend response without an HTTPS redirect, a successful
-health response, and no published PostgreSQL port. If curl succeeds but the
+health and readiness responses, and no published PostgreSQL port. If curl succeeds but the
 browser still redirects, clear its cached redirect/site data and retry the
 explicit HTTP URL. The firewall inspection uses `docker exec` as the trusted container
 administrator; the application process itself has no capabilities. Verify
 its `Uid`, `Gid`, `CapEff`, `CapBnd`, and `NoNewPrivs` in `/proc/1/status`.
+
+### Liveness and readiness
+
+`GET /health` is cheap liveness: HTTP 200 with `{"status":"ok"}` means the
+process can serve a request. It never accesses PostgreSQL or model configuration.
+`GET /ready` is readiness: HTTP 200 with `{"status":"ok"}` requires completed
+startup, an initialized current database pool, nonblank API keys and effective
+model names for all three default voters, and a successful `SELECT 1` through
+that pool. Default model names are accepted when their overrides are absent;
+explicitly blank overrides and missing/blank keys fail readiness. These local
+configuration checks cannot establish whether a provider accepts a key or serves
+a model. Neither endpoint calls LLM providers or incurs model charges.
+
+The database readiness probe has one two-second acquisition/query budget.
+Timed-out query connections are closed before cancellation and returned to the
+pool for replacement. No new pool is created and no migration or schema scan is
+run by a probe. Failures return only HTTP 503 with `{"status":"unavailable"}`;
+exception messages and configuration values are not returned or logged by the
+endpoint. Readiness responses use `Cache-Control: no-store` and require no login.
+The next probe can return 200 after database recovery, without restarting the
+application or rerunning migrations. A reopened pool still needs normal schema
+initialization. Deployment environment changes normally require recreating the
+API container; editing an environment file does not update a running process.
+
+Uvicorn does not serve HTTP until startup finishes: during migrations or failed
+startup a monitor may get a connection failure, not a 503. The application clears
+its ready state before workers drain on shutdown. This check does not certify
+provider reachability, every business operation or ongoing worker health, and
+does not stop queued work or repair failures.
+
+Use the external deployment URL above for release checks and monitoring, for
+example every 30 seconds with a three-second client timeout. Treat connection
+failures, timeouts and non-200 responses as unavailable; investigate repeated
+failures. Do not automatically restart the API for database unavailability or a
+temporarily exhausted pool. The existing container firewall blocks loopback HTTP,
+so an in-container localhost Docker healthcheck is not added. These endpoints do
+not themselves configure alerts or change Traefik routing. Shared proxy rate
+limits also apply; avoid aggressive polling. Existing database-IP firewall rules
+still require an API restart if recreating PostgreSQL changes its address.
 Also check from another machine that no legacy port mapping or host/provider
 firewall rule exposes PostgreSQL or a direct API port. These are deployment
 checks; repository tests cannot certify an external Traefik installation.
@@ -313,3 +428,21 @@ TRAEFIK_LOAD_BENCHMARK=1 TRAEFIK_TEST_IMAGE=traefik:v3.7.5 .venv/bin/pytest test
 It uses the unmodified production periods and requires a sufficiently fast load
 generator. Its duration assertion measures benchmark validity, not application
 correctness; it is not a CI gate. No production limit is increased for slower CI.
+
+### Schema version 7: pipeline outcomes
+
+Version 7 adds structured diagnostics, search completeness/local-result counts,
+and collection outcomes. Migration preserves existing datasets and model votes;
+historical terminal jobs are conservatively marked incomplete. See
+[pipeline outcomes](pipeline-outcomes.md) for the additive API and compatibility
+rules. The usual startup migration applies this change; no new service or
+configuration variable is required. Automatic retries remain disabled.
+
+### Bounded model recovery
+
+Schema 9 preserves data and adds durable LLM retry scheduling. The default policy
+allows three total transient attempts, two for invalid responses, and a 120-second
+window for starting automatic retries. Compose forwards `LLM_MAX_ATTEMPTS`,
+`LLM_INVALID_MAX_ATTEMPTS` and `LLM_RETRY_WINDOW_SECONDS`. Set both attempt limits
+to 1 to disable automatic model retries. Keep one API instance/process. See
+[LLM recovery](llm-recovery.md) for deadline, persistence and restart behavior.

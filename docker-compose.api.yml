@@ -1,0 +1,53 @@
+# Standalone API and PostgreSQL. No frontend build, Node service or external proxy required.
+name: global-health-api
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-global_health}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-global_health}
+      API_AUTH_MODE: token
+      API_ACCESS_TOKENS: ${API_ACCESS_TOKENS:?Set API_ACCESS_TOKENS}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS-http://localhost:5173,http://127.0.0.1:5173}
+      RCP_DEEPSEEK_API_KEY: ${RCP_DEEPSEEK_API_KEY:?Set RCP_DEEPSEEK_API_KEY}
+      RCP_GEMMA_MEDITRON_API_KEY: ${RCP_GEMMA_MEDITRON_API_KEY:?Set RCP_GEMMA_MEDITRON_API_KEY}
+      RCP_APERTUS_MEDITRON_API_KEY: ${RCP_APERTUS_MEDITRON_API_KEY:?Set RCP_APERTUS_MEDITRON_API_KEY}
+      RCP_DEEPSEEK_MODEL: ${RCP_DEEPSEEK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-0731}
+      RCP_GEMMA_MEDITRON_MODEL: ${RCP_GEMMA_MEDITRON_MODEL:-EPFLiGHT/Gemma-3-27B-MeditronFO}
+      RCP_APERTUS_MEDITRON_MODEL: ${RCP_APERTUS_MEDITRON_MODEL:-EPFLiGHT/Apertus-70B-MeditronFO}
+      SEARCH_MAX_CONCURRENCY: ${SEARCH_MAX_CONCURRENCY:-1}
+      SEARCH_MAX_ACTIVE: ${SEARCH_MAX_ACTIVE:-100}
+      CLASSIFICATION_MAX_CONCURRENCY: ${CLASSIFICATION_MAX_CONCURRENCY:-2}
+      COLLECTION_MAX_CONCURRENCY: ${COLLECTION_MAX_CONCURRENCY:-2}
+      LLM_MAX_ATTEMPTS: ${LLM_MAX_ATTEMPTS:-3}
+      LLM_INVALID_MAX_ATTEMPTS: ${LLM_INVALID_MAX_ATTEMPTS:-2}
+      LLM_RETRY_WINDOW_SECONDS: ${LLM_RETRY_WINDOW_SECONDS:-120}
+      API_SEARCH_REQUESTS_PER_MINUTE: ${API_SEARCH_REQUESTS_PER_MINUTE:-10}
+      API_CLASSIFICATION_REQUESTS_PER_MINUTE: ${API_CLASSIFICATION_REQUESTS_PER_MINUTE:-20}
+      EGRESS_BLOCKED_CIDRS: ${EGRESS_BLOCKED_CIDRS:-}
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8001}:8001"
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-global_health}
+      POSTGRES_USER: ${POSTGRES_USER:-global_health}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - api-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U ${POSTGRES_USER:-global_health} -d ${POSTGRES_DB:-global_health}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+volumes:
+  api-postgres-data:

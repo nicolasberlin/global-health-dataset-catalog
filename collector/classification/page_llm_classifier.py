@@ -6,6 +6,7 @@ import math
 
 from collector.classification.llm_client import LLMPageClassificationClient
 from collector.classification.page import PageClassification, PageClassificationError
+from collector.diagnostics import PipelineFailure
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 # Bound untrusted evidence so model requests have predictable size.
@@ -44,10 +45,12 @@ class LLMPageClassifier:
 
         try:
             raw_classification = self._client.classify_page(payload)
-        except PageClassificationError:
+        except PipelineFailure:
             raise
         except Exception as exception:
-            raise PageClassificationError("LLM page classification failed.") from exception
+            raise PageClassificationError(
+                "LLM page classification failed.", code="processing_failed"
+            ) from exception
 
         return _parse_page_classification(raw_classification)
 
@@ -57,8 +60,7 @@ def _build_llm_payload(
     distributions: list[DistributionCandidate],
 ) -> dict[str, object]:
     metadata = {
-        key: _bounded_metadata_value(key, value)
-        for key, value in page.dataset_metadata().items()
+        key: _bounded_metadata_value(key, value) for key, value in page.dataset_metadata().items()
     }
 
     return {
@@ -71,8 +73,7 @@ def _build_llm_payload(
             "og_title": page.og_title[:MAX_PAGE_SHORT_TEXT_CHARS],
             "og_description": page.og_description[:MAX_PAGE_DESCRIPTION_CHARS],
             "headings": [
-                heading[:MAX_PAGE_SHORT_TEXT_CHARS]
-                for heading in page.headings[:MAX_HEADINGS]
+                heading[:MAX_PAGE_SHORT_TEXT_CHARS] for heading in page.headings[:MAX_HEADINGS]
             ],
             "publisher": page.publisher[:MAX_PAGE_SHORT_TEXT_CHARS],
             "hosting_platform": page.hosting_platform[:MAX_PAGE_SHORT_TEXT_CHARS],
@@ -87,9 +88,7 @@ def _build_llm_payload(
                 "probability": distribution.probability,
                 "anchor": distribution.anchor[:MAX_PAGE_DISTRIBUTION_CONTEXT_CHARS],
                 "mime_type": distribution.mime_type[:MAX_PAGE_FORMAT_CHARS],
-                "nearby_text": distribution.nearby_text[
-                    :MAX_PAGE_DISTRIBUTION_CONTEXT_CHARS
-                ],
+                "nearby_text": distribution.nearby_text[:MAX_PAGE_DISTRIBUTION_CONTEXT_CHARS],
             }
             for distribution in distributions[:MAX_DISTRIBUTIONS]
         ],
@@ -113,7 +112,9 @@ def _parse_page_classification(
     raw: dict[str, object],
 ) -> PageClassification:
     if not isinstance(raw, dict):
-        raise PageClassificationError("LLM classification output must be a JSON object.")
+        raise PageClassificationError(
+            "LLM classification output must be a JSON object.", code="llm_invalid_response"
+        )
 
     accepted = _required_bool(raw, "accepted")
     dataset_signals = _required_signal_object(raw, "dataset_signals")
@@ -128,7 +129,7 @@ def _required_bool(raw: dict[str, object], field_name: str) -> bool:
     value = raw.get(field_name)
     if not isinstance(value, bool):
         raise PageClassificationError(
-            f"LLM classification field {field_name} must be a boolean."
+            f"LLM classification field {field_name} must be a boolean.", code="llm_invalid_response"
         )
     return value
 
@@ -136,7 +137,9 @@ def _required_bool(raw: dict[str, object], field_name: str) -> bool:
 def _required_json_object(raw: dict[str, object], field_name: str) -> dict[str, object]:
     value = raw.get(field_name)
     if not isinstance(value, dict):
-        raise PageClassificationError(f"LLM classification field {field_name} must be an object.")
+        raise PageClassificationError(
+            f"LLM classification field {field_name} must be an object.", code="llm_invalid_response"
+        )
 
     return _json_safe_object(value, field_name)
 
@@ -149,14 +152,14 @@ def _required_signal_object(
     expected_fields = {"reason", "evidence"}
     if set(value) != expected_fields:
         raise PageClassificationError(
-            f"LLM classification field {field_name} must contain exactly "
-            "reason and evidence."
+            f"LLM classification field {field_name} must contain exactly reason and evidence.",
+            code="llm_invalid_response",
         )
     for signal_field in expected_fields:
         if not isinstance(value[signal_field], str):
             raise PageClassificationError(
-                f"LLM classification field {field_name}.{signal_field} "
-                "must be a string."
+                f"LLM classification field {field_name}.{signal_field} must be a string.",
+                code="llm_invalid_response",
             )
     return value
 
@@ -166,11 +169,13 @@ def _json_safe_object(value: dict[object, object], field_name: str) -> dict[str,
         safe_value = _json_safe_value(value)
     except (TypeError, ValueError) as exception:
         raise PageClassificationError(
-            f"LLM classification field {field_name} must be JSON-safe."
+            f"LLM classification field {field_name} must be JSON-safe.", code="llm_invalid_response"
         ) from exception
 
     if not isinstance(safe_value, dict):
-        raise PageClassificationError(f"LLM classification field {field_name} must be an object.")
+        raise PageClassificationError(
+            f"LLM classification field {field_name} must be an object.", code="llm_invalid_response"
+        )
 
     return safe_value
 

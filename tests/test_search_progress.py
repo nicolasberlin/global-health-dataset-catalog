@@ -117,11 +117,11 @@ async def test_query_count_is_constant_and_snapshot_does_not_mix_commits(
     assert len(result.items) == count
     assert all(item.classification_status == "pending" for item in result.items)
     assert not result.polling_required
-    assert len(counts) == 4
+    assert len(counts) == 5
     counts.clear()
     next_result = await read(search["id"])
     assert next_result.polling_required
-    assert len(counts) == 4
+    assert len(counts) == 5
     async with _require_database_pool().connection() as connection:
         assert await _fetchall(connection, "SELECT * FROM collection_jobs") == []
         assert await _fetchall(connection, "SELECT * FROM api_rate_limits") == []

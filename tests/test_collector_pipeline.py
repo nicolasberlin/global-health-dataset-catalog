@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 
@@ -158,12 +159,63 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
             (file_url, "HEAD", config.request_timeout_seconds),
             (file_url, "GET", config.request_timeout_seconds),
         ]
-        assert requests[0][0].get_header("User-agent") == config.user_agent
+        assert all(request.get_header("User-agent") == config.user_agent for request, _ in requests)
         assert requests[2][0].get_header("Range") == f"bytes=0-{config.max_sample_bytes - 1}"
         assert reads == [
             (page_url, "GET", 1_000_001),
             (file_url, "GET", config.max_sample_bytes + 1),
         ]
+
+
+def test_pipeline_config_reaches_default_discovery_and_distribution_requests(monkeypatch):
+    requests = []
+    reads = []
+    source = "https://example.org"
+    file_url = source + "/data.csv"
+
+    class Response(io.BytesIO):
+        status = 200
+
+        def __init__(self, request, body, mime):
+            super().__init__(body)
+            self.request = request
+            self.headers = {"Content-Type": mime}
+
+        def geturl(self):
+            return self.request.full_url
+
+        def read(self, size=-1):
+            reads.append(size)
+            return super().read(size)
+
+    def open_url(request, *, timeout):
+        requests.append((request, timeout))
+        if request.full_url == file_url:
+            return Response(request, b"country,value\nCH,1\n" * 100, "text/csv")
+        data = {"success": True, "result": {"results": [{
+            "name": "health", "title": "Health data",
+            "resources": [{"url": file_url, "format": "CSV"}],
+        }]}}
+        return Response(request, json.dumps(data).encode(), "application/json")
+
+    monkeypatch.setattr("collector.discovery.adapters.shared.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", open_url)
+    for config in (
+        CollectorConfig(user_agent="Pipeline/1", request_timeout_seconds=1.25, max_sample_bytes=64),
+        CollectorConfig(user_agent="Pipeline/2", request_timeout_seconds=2.5, max_sample_bytes=128),
+        CollectorConfig(),
+    ):
+        requests.clear()
+        reads.clear()
+        result = collect_source_with_report(
+            source, config=config, classifier=AcceptingPageClassifier(),
+        )
+        assert len(result.datasets) == 1
+        assert [request.get_method() for request, _ in requests] == ["GET", "GET", "HEAD", "GET"]
+        assert all(timeout == config.request_timeout_seconds for _, timeout in requests)
+        assert all(request.get_header("User-agent") == config.user_agent for request, _ in requests)
+        assert requests[-1][0].get_header("Range") == f"bytes=0-{config.max_sample_bytes - 1}"
+        assert reads == [5_000_001, 5_000_001, config.max_sample_bytes + 1]
 
 
 def test_collector_extracts_dataset_page_and_distributions():
@@ -863,6 +915,7 @@ def test_collect_source_with_report_summarizes_discovery_analysis_and_validation
     assert result.report.discovered_count == 3
     assert result.report.analyzed_count == 3
     assert result.report.accepted_count == 1
-    assert result.report.rejected_count == 2
+    assert result.report.rejected_count == 1
+    assert result.report.errors[0].code == "verification_unconfirmed"
     assert result.report.invalid_distribution_count == 1
     assert result.report.discovery_methods == ("ckan", "sitemap")

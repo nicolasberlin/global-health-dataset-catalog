@@ -11,6 +11,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from collector.classification.page import PageClassificationError
+from collector.diagnostics import retry_after
+from collector.observability import measure_operation
 
 RequestBodyBuilder = Callable[[dict[str, object], str], dict[str, object]]
 ResponseTextExtractor = Callable[[object], str]
@@ -20,7 +22,9 @@ MAX_LLM_RESPONSE_BYTES = 2 * 1024 * 1024
 def extract_chat_completions_message_text(response_payload: object) -> str:
     """Extract assistant text from an OpenAI-compatible Chat Completions envelope."""
     if not isinstance(response_payload, dict):
-        raise PageClassificationError("LLM response must be a JSON object.")
+        raise PageClassificationError(
+            "LLM response must be a JSON object.", code="llm_invalid_response"
+        )
 
     choices = response_payload.get("choices")
     if isinstance(choices, list):
@@ -34,14 +38,15 @@ def extract_chat_completions_message_text(response_payload: object) -> str:
             if isinstance(content, str) and content.strip():
                 return content
 
-    raise PageClassificationError("LLM response did not include classification text.")
+    raise PageClassificationError(
+        "LLM response did not include classification text.", code="llm_invalid_response"
+    )
 
 
 class LLMPageClassificationClient(Protocol):
     """Client capable of returning one structured page-classification decision."""
 
-    def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
-        ...
+    def classify_page(self, payload: dict[str, object]) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True)
@@ -95,10 +100,17 @@ class HTTPJSONLLMClient:
         ``PageClassificationError``.
         """
 
+        with measure_operation("provider_request") as measurement:
+            return self._classify_request(request_body, measurement)
+
+    def _classify_request(self, request_body, measurement):
         api_key = self._api_key or os.getenv(self._provider.api_key_env_var, "")
         if not api_key:
+            measurement["outcome"] = "configuration_error"
             raise PageClassificationError(
-                f"{self._provider.api_key_env_var} is required for LLM page classification."
+                f"{self._provider.api_key_env_var} is required for LLM page classification.",
+                code="llm_configuration_error",
+                recovery="configuration_required",
             )
 
         headers = {
@@ -113,23 +125,52 @@ class HTTPJSONLLMClient:
             method="POST",
         )
 
+        measurement["outcome"] = "failed"
         try:
             with self._request(request, timeout=self._timeout_seconds) as response:
                 payload_bytes = response.read(MAX_LLM_RESPONSE_BYTES + 1)
+                measurement["outcome"] = "invalid_response"
                 if len(payload_bytes) > MAX_LLM_RESPONSE_BYTES:
-                    raise PageClassificationError("Provider response is too large.")
+                    raise PageClassificationError(
+                        "Provider response is too large.",
+                        code="llm_response_too_large",
+                        recovery="none",
+                    )
                 response_payload = json.loads(payload_bytes.decode("utf-8"))
         except HTTPError as exception:
+            measurement["outcome"] = "http_error"
+            code = {
+                400: "llm_configuration_error", 401: "llm_configuration_error",
+                403: "llm_configuration_error", 404: "llm_configuration_error",
+                422: "llm_configuration_error", 429: "llm_rate_limited",
+                500: "llm_unavailable", 502: "llm_unavailable",
+                503: "llm_unavailable", 504: "llm_unavailable",
+            }.get(exception.code, "processing_failed")
             raise PageClassificationError(
-                f"{self._provider.name} classification request failed with HTTP {exception.code}."
+                f"{self._provider.name} classification request failed with HTTP {exception.code}.",
+                code=code,
+                recovery="configuration_required"
+                if code == "llm_configuration_error"
+                else "manual",
+                retry_at=retry_after(
+                    exception.headers.get("Retry-After") if exception.headers else None
+                ),
             ) from exception
-        except (TimeoutError, URLError) as exception:
+        except (TimeoutError, URLError, OSError) as exception:
+            measurement["outcome"] = (
+                "timeout"
+                if isinstance(exception, TimeoutError)
+                or isinstance(getattr(exception, "reason", None), TimeoutError)
+                else "network_error"
+            )
             raise PageClassificationError(
-                f"{self._provider.name} classification request failed."
+                f"{self._provider.name} classification request failed.",
+                code="llm_timeout" if measurement["outcome"] == "timeout" else "llm_network_error",
             ) from exception
         except (json.JSONDecodeError, UnicodeDecodeError) as exception:
             raise PageClassificationError(
-                f"{self._provider.name} classification response was not valid JSON."
+                f"{self._provider.name} classification response was not valid JSON.",
+                code="llm_invalid_response",
             ) from exception
 
         output_text = self._provider.response_text_extractor(response_payload)
@@ -140,14 +181,17 @@ class HTTPJSONLLMClient:
             raw_classification = json.loads(output_text)
         except json.JSONDecodeError as exception:
             raise PageClassificationError(
-                f"{self._provider.name} classification output was not valid JSON."
+                f"{self._provider.name} classification output was not valid JSON.",
+                code="llm_invalid_response",
             ) from exception
 
         if not isinstance(raw_classification, dict):
             raise PageClassificationError(
-                f"{self._provider.name} classification output must be a JSON object."
+                f"{self._provider.name} classification output must be a JSON object.",
+                code="llm_invalid_response",
             )
 
+        measurement["outcome"] = "success"
         return raw_classification
 
     def _request_body(self, payload: dict[str, object]) -> dict[str, object]:

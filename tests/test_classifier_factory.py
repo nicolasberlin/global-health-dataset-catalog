@@ -153,3 +153,29 @@ def test_failed_model_is_an_error_even_when_other_two_accept(
     _inject_transport(monkeypatch, request)
     with pytest.raises(PageClassificationError, match="At least 3 classifier votes"):
         _classify(kind)
+
+
+@pytest.mark.parametrize("variable", KEY_VARIABLES + MODEL_VARIABLES)
+@pytest.mark.parametrize("value", ["", " \t\n"])
+def test_readiness_rejects_blank_required_configuration(monkeypatch, variable, value):
+    monkeypatch.setenv(variable, value)
+    with pytest.raises(ValueError, match="Required model configuration is missing or blank"):
+        factory.validate_default_classifier_configuration()
+
+
+@pytest.mark.parametrize("variable", KEY_VARIABLES)
+def test_readiness_rejects_missing_keys(monkeypatch, variable):
+    monkeypatch.delenv(variable)
+    with pytest.raises(ValueError):
+        factory.validate_default_classifier_configuration()
+
+
+def test_readiness_accepts_default_and_overridden_models_without_clients(monkeypatch):
+    def unexpected_client(*args, **kwargs):
+        pytest.fail("Configuration checks must not create provider clients")
+
+    monkeypatch.setattr(factory, "HTTPJSONLLMClient", unexpected_client)
+    factory.validate_default_classifier_configuration()
+    for variable in MODEL_VARIABLES:
+        monkeypatch.setenv(variable, "test-model")
+    factory.validate_default_classifier_configuration()

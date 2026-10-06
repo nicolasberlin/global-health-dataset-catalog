@@ -23,6 +23,21 @@ from collector.classification.repository import (
     REPOSITORY_ACCEPTED_RELEVANCE_LABELS,
     RepositoryRelevanceLabel,
 )
+from collector.diagnostics import ExecutionStatus, Outcome, Recovery, Stage
+
+
+class CollectorDiagnostic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    stage: Stage
+    message: str
+    recovery: Recovery
+    retry_at: Optional[str] = None  # noqa: UP045 - Pydantic on Python 3.9.
+    attempt: Optional[int] = Field(default=None, ge=1)  # noqa: UP045
+    max_attempts: Optional[int] = Field(default=None, ge=1)  # noqa: UP045
+    voter_id: Optional[str] = None  # noqa: UP045
+
 
 
 # Query-driven repository search endpoint.
@@ -84,6 +99,7 @@ class CollectorRepositoryClassificationFailure(BaseModel):
     voter_id: RepositoryVoterId
     error: str = Field(min_length=1, max_length=2_000)
     error_code: Literal["classifier_vote_failed"] = "classifier_vote_failed"
+    errors: list[CollectorDiagnostic] = Field(default_factory=list)
 
 
 class CollectorRepositoryClassificationEnsemble(BaseModel):
@@ -165,6 +181,9 @@ class CollectorCollectionJob(BaseModel):
     source_url: str
     kind: Literal["source", "repository_candidate"] = "source"
     status: Literal["pending", "running", "done", "error"]
+    execution_status: ExecutionStatus
+    outcome: Optional[Outcome] = None  # noqa: UP045
+    errors: list[CollectorDiagnostic] = Field(default_factory=list)
     saved_count: int
     classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
     dataset_ids: list[int] = Field(default_factory=list)
@@ -183,6 +202,9 @@ class CollectorCollectionJob(BaseModel):
 
 
 class CollectorAutomaticCollection(BaseModel):
+    execution_status: ExecutionStatus
+    outcome: Optional[Outcome] = None  # noqa: UP045
+    errors: list[CollectorDiagnostic] = Field(default_factory=list)
     dataset_ids: list[int] = Field(default_factory=list)
     state: Literal["pending", "running", "saved", "empty", "error"]
     job: Optional[CollectorCollectionJob] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
@@ -212,6 +234,7 @@ class CollectorRepositorySearchItem(BaseModel):
     ] = "pending"
     classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
     classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
+    errors: list[CollectorDiagnostic] = Field(default_factory=list)
     classification_error: str = Field(default="", max_length=2_000)
     classification_error_code: Literal["", "classification_failed"] = ""
     automatic_collection: Optional[CollectorAutomaticCollection] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
@@ -239,6 +262,8 @@ class CollectorRepositorySearchItem(BaseModel):
 
 
 class CollectorRepositorySearchWarning(BaseModel):
+    code: str = "repository_unavailable"
+    incomplete: bool = True
     message: str
     provider: Optional[str] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
 
@@ -321,5 +346,33 @@ class CollectorCollectionJobResponse(BaseModel):
 
 class CollectorSearchProgressResponse(BaseModel):
     search_id: UUID
+    query: str = ""
+    origin: Optional[Literal["database", "online"]] = None  # noqa: UP045
+    local_dataset_ids: list[int] = Field(default_factory=list)
+    dataset_ids: list[int] = Field(default_factory=list)
+    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
+    attempt: int = 1
+    created_at: str = ""
+    updated_at: str = ""
     polling_required: bool
+    execution_status: ExecutionStatus
+    outcome: Optional[Outcome] = None  # noqa: UP045
+    active_stages: list[Stage]
+    errors: list[CollectorDiagnostic] = Field(default_factory=list)
+    local_result_count: Optional[int] = Field(default=None, ge=0)  # noqa: UP045
     items: list[CollectorRepositorySearchItem]
+
+
+class CollectorSearchCreateRequest(CollectorRepositorySearchRequest):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CollectorSearchRetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CollectorSearchCommandResponse(BaseModel):
+    search_id: UUID
+    execution_status: ExecutionStatus
+    attempt: int
+    progress_url: str

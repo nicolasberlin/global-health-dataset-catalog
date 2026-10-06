@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from collector.classification.repository import RepositoryResultClassifier
+from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
 from collector.repository_search.filtering import filter_repository_results
 from collector.repository_search.models import (
@@ -21,6 +22,10 @@ from collector.repository_search.providers.datacite import DataCiteRepositorySea
 from collector.storage.models import PageSnapshot
 
 logger = logging.getLogger(__name__)
+
+
+class RepositorySearchFailure(PipelineFailure, ValueError):
+    """Preserve the historical ValueError contract with a structured cause."""
 
 
 def search_repository_metadata(
@@ -64,11 +69,13 @@ def search_repository_metadata(
         )
 
     if successful_provider_count == 0 and errors:
-        raise ValueError("All repository providers failed.")
+        raise RepositorySearchFailure("All repository providers failed.",
+                                      diagnostics=[Diagnostic("repository_unavailable", "search")])
 
     filtered_results, rejected_result_count = filter_repository_results(results)
     if rejected_result_count:
-        warnings.append(RepositorySearchWarning(message=INVALID_METADATA_MESSAGE))
+        warnings.append(RepositorySearchWarning(message=INVALID_METADATA_MESSAGE,
+                                                code="invalid_repository_metadata"))
 
     return RepositorySearchResponse(results=filtered_results, warnings=warnings)
 

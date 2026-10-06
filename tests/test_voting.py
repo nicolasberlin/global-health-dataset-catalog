@@ -92,7 +92,10 @@ def test_ensembles_preserve_their_expected_error_policy(kind, error_type):
     assert result.accepted is True
     assert summary["successful_votes"] == 2
     assert summary["failed_votes"] == 1
-    assert summary["failures"] == [{"voter_id": "failed", "error": "invalid response"}]
+    assert len(summary["failures"]) == 1
+    assert summary["failures"][0]["voter_id"] == "failed"
+    assert summary["failures"][0]["error"] == "invalid response"
+    assert summary["failures"][0]["errors"][0]["code"] == "processing_failed"
 
 
 def test_vote_construction_errors_are_not_swallowed():

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import datetime
 
 from app.database import (
@@ -13,13 +13,15 @@ from app.database import (
     complete_candidate_classification,
     fail_candidate_classification,
 )
+from app.db.task_retries import schedule_llm_retry
+from app.retry_policy import TRANSIENT
 from app.vote_store import PostgresVoteStore
 from app.workers import persist_with_retry, persisted_workers
 from collector.classification.factory import build_default_repository_result_classifier
+from collector.diagnostics import Diagnostic, exception_diagnostics
+from collector.observability import emit_event, measure_operation, operation_context
 from collector.repository_search import RepositorySearchResult
 from collector.repository_search import classify_repository_result as classify_one_repository_result
-
-logger = logging.getLogger(__name__)
 
 
 def _classify(candidate):
@@ -32,22 +34,40 @@ def _classify(candidate):
 async def _run_classification(candidate: dict[str, object], executor: ThreadPoolExecutor) -> None:
     candidate_id, owner_id = candidate["id"], candidate["owner_id"]
     version = datetime.fromisoformat(str(candidate["updated_at"]))
-    try:
-        candidate = {**candidate, "_vote_store": PostgresVoteStore(
-            asyncio.get_running_loop(), candidate_id=candidate_id,
-        )}
-        decision = await asyncio.get_running_loop().run_in_executor(executor, _classify, candidate)
-        if decision is None:
-            raise RuntimeError("Repository classifier returned no decision.")
-        await persist_with_retry(lambda: complete_candidate_classification(
-            candidate_id, owner_id, decision, expected_updated_at=version,
-        ))
-    except Exception as exception:  # noqa: BLE001 - keep internal details and a retryable state.
-        logger.exception("Classification failed for candidate_id=%s", candidate_id)
-        error = str(exception) or exception.__class__.__name__
-        await persist_with_retry(lambda: fail_candidate_classification(
-            candidate_id, owner_id, error, expected_updated_at=version,
-        ))
+    with operation_context(candidate_id=candidate_id), \
+            measure_operation("classification_finished") as measurement:
+        emit_event("classification_started", outcome="started")
+        saving = False
+        try:
+            candidate = {**candidate, "_vote_store": PostgresVoteStore(
+                asyncio.get_running_loop(), candidate_id=candidate_id, expected_updated_at=version,
+            )}
+            decision = await asyncio.get_running_loop().run_in_executor(
+                executor, copy_context().run, _classify, candidate,
+            )
+            if decision is None:
+                raise RuntimeError("Repository classifier returned no decision.")
+            saving = True
+            await persist_with_retry(lambda: complete_candidate_classification(
+                candidate_id, owner_id, decision, expected_updated_at=version,
+            ))
+        except Exception as exception:  # noqa: BLE001 - keep internal details and a retryable state.
+            measurement["outcome"] = "failed"
+            emit_event("classification_execution", outcome="failed")
+            error = str(exception) or exception.__class__.__name__
+            diagnostics = ([Diagnostic("persistence_failed", "classification")]
+                           if saving else exception_diagnostics(exception, "classification"))
+            if not saving and any(item.code in TRANSIENT | {"llm_invalid_response"}
+                                  for item in diagnostics):
+                scheduled, diagnostics = await persist_with_retry(lambda: schedule_llm_retry(
+                    candidate_id, version, diagnostics, collection=False,
+                ))
+                if scheduled:
+                    return
+            await persist_with_retry(lambda: fail_candidate_classification(
+                candidate_id, owner_id, error, errors=[item.to_dict() for item in diagnostics],
+                expected_updated_at=version,
+            ))
 
 
 def classification_workers(*, concurrency: int | None = None, poll_interval: float = 1.0):

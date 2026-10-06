@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from collector.diagnostics import Diagnostic
 from collector.extraction.dataset_metadata import (
     build_dataset_metadata,
 )
@@ -231,7 +232,8 @@ class CollectionReport:
     """Aggregate counters and discovery methods for one collection run.
 
     ``accepted_count`` counts datasets retained after distribution validation,
-    not every positive page-classifier response.
+    not every positive page-classifier response. ``verification_complete`` is
+    explicit evidence for this run; absent evidence must not imply an empty result.
     """
 
     discovered_count: int = 0
@@ -241,6 +243,8 @@ class CollectionReport:
     invalid_distribution_count: int = 0
     discovery_methods: tuple[str, ...] = ()
     validation_failures: list[ValidationResult] = field(default_factory=list)
+    errors: list[Diagnostic] = field(default_factory=list)
+    verification_complete: bool | None = None
 
 
 @dataclass(frozen=True)
