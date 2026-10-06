@@ -13,7 +13,7 @@ from .connection import (
 
 # Historical pre-baseline schemas are unsupported. Explicit versioned migrations
 # preserve data for supported baselines, including the job associations in v2.
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",
     "health_probability",
@@ -359,7 +359,16 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
     "search_local_results": {"search_id", "dataset_id", "position"},
     "collection_job_candidates": {"job_id", "candidate_id"},
 }
+for _table in ("repository_candidates", "collection_jobs"):
+    REPOSITORY_PERSISTENCE_COLUMNS[_table].update({
+        "retry_cycle", "retry_round", "retry_started_at", "next_retry_at",
+    })
+REPOSITORY_PERSISTENCE_COLUMNS["classification_votes"].update({
+    "retry_cycle", "cycle_attempts", "last_attempt_token",
+})
+
 REPOSITORY_PERSISTENCE_INDEXES = {
+    "candidate_retry_due_idx", "collection_retry_due_idx",
     "collection_jobs_active_repository_candidate_idx",
     "collection_jobs_active_repository_url_idx",
 }
@@ -456,6 +465,8 @@ def _migration_for_version(version: int):
         return _migrate_6_to_7
     if version == 7:
         return _migrate_7_to_8
+    if version == 8:
+        return _migrate_8_to_9
 
     raise RuntimeError(f"No migration registered for schema version {version}.")
 
@@ -636,6 +647,27 @@ async def _migrate_7_to_8(connection: AsyncConnection[DictRow]) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY(owner_id, command_key)
         );
+    """)
+
+
+async def _migrate_8_to_9(connection: AsyncConnection[DictRow]) -> None:
+    for table in ("repository_candidates", "collection_jobs"):
+        await connection.execute(f"""
+            ALTER TABLE {table}
+                ADD COLUMN retry_cycle UUID NOT NULL DEFAULT gen_random_uuid(),
+                ADD COLUMN retry_round INTEGER NOT NULL DEFAULT 0 CHECK(retry_round >= 0),
+                ADD COLUMN retry_started_at TIMESTAMPTZ,
+                ADD COLUMN next_retry_at TIMESTAMPTZ;
+        """)
+    await connection.execute("""
+        ALTER TABLE classification_votes
+            ADD COLUMN retry_cycle UUID,
+            ADD COLUMN cycle_attempts INTEGER NOT NULL DEFAULT 0 CHECK(cycle_attempts >= 0),
+            ADD COLUMN last_attempt_token UUID;
+        CREATE INDEX candidate_retry_due_idx ON repository_candidates(next_retry_at, id)
+            WHERE classification_status = 'queued';
+        CREATE INDEX collection_retry_due_idx ON collection_jobs(next_retry_at, id)
+            WHERE status = 'pending';
     """)
 
 

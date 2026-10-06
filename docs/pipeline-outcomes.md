@@ -35,12 +35,13 @@ fields and therefore does not yet display the new distinction.
 | --- | --- | --- |
 | Initial search or any downstream task executing | `running` | `null` |
 | No executing work, but queued discovery or downstream tasks | `queued` | `null` |
+| No running or immediately queued work, automatic retry scheduled | `waiting_retry` | `null` |
 | All required checks concluded, datasets available | `finished` | `results` |
 | All required checks concluded, no dataset retained | `finished` | `empty` |
 | Processing concluded with an inconclusive necessary check | `finished` | `incomplete` |
 | Initial discovery failed, or every attempted downstream branch failed | `failed` | `incomplete` |
 
-Active or queued work takes precedence over a failure in another branch. A
+Active, queued, or scheduled retry work takes precedence over a failure in another branch. A
 successful rejection is a concluded branch, not an operational failure. Thus a
 mixture of rejected and failed candidates finishes with `incomplete`, whereas
 all failed candidates produce `failed/incomplete`. Unrequested legacy `pending`
@@ -92,8 +93,8 @@ persisted attempt count. A valid negative vote remains successful and reusable.
 
 | Codes | Recovery indication |
 | --- | --- |
-| `llm_timeout`, `llm_network_error`, `llm_rate_limited`, `llm_unavailable` | `manual` |
-| `llm_invalid_response`, `classification_incomplete` | `manual` |
+| `llm_timeout`, `llm_network_error`, `llm_rate_limited`, `llm_unavailable` | `automatic` when scheduled; otherwise `manual` |
+| `llm_invalid_response`, `classification_incomplete` | `automatic` when a bounded retry is scheduled; otherwise `manual` |
 | `llm_configuration_error` | `configuration_required` |
 | `llm_response_too_large` | `none` |
 | `repository_unavailable`, `verification_unconfirmed` | `manual` |
@@ -101,23 +102,23 @@ persisted attempt count. A valid negative vote remains successful and reusable.
 | `processing_interrupted`, `persistence_failed`, `processing_failed` | `manual` |
 | `legacy_unknown` | Diagnosis unavailable; no inferred historical cause |
 
-`recovery` describes the kind of intervention, not authorization or a guarantee
-that a retry endpoint exists. Existing retry commands and quotas remain in force:
-failed candidates/jobs can be retried; completed incomplete jobs have no new retry
-command in this phase. No automatic retries or retry budgets are introduced.
-`waiting_retry` and recovery `automatic` are reserved and are never emitted by
-this implementation. `max_attempts` remains `null`; `attempt` is populated where
-the persisted vote counter is known.
+`recovery` describes the kind of intervention, not authorization. The existing
+owned retry commands and admission quotas remain in force. Failed candidates and
+failed or completed incomplete jobs can be retried explicitly. Schema 9 adds
+bounded automatic LLM retries and emits `waiting_retry` while waiting; polling
+continues. `max_attempts` reports the configured limit on retryable LLM failures,
+and `attempt` counts that model's invocations in the current retry cycle.
 
-A provider's valid `Retry-After` is retained as `retry_at`, including dates beyond
-a future automatic retry budget. It is informative in this phase: scheduling and
-retry-command enforcement belong to the subsequent retry work. API admission
-quotas use `api_quota_exceeded` and HTTP 429, independently of model-provider 429
-errors occurring during already accepted processing.
+A valid provider `Retry-After` is retained as `retry_at`. It is enforced for both
+automatic and explicit retries, including dates beyond the automatic retry window.
+An early explicit retry returns HTTP 429 with `Retry-After` and consumes no new
+work quota. An acknowledgement of already pending/running work does not advance
+its deadline. API admission limits remain separate from provider failures.
 
-Vote storage failures use `persistence_failed` and bypass model-vote failure
-aggregation. This change does not add a retry loop to vote persistence. Existing
-worker finalization retries and stale-write protections are preserved.
+Transient vote-storage failures retry only persistence, retaining the response
+in memory. Idempotent writes and attempt tokens handle lost acknowledgements and
+stale workers. No provider is recalled by a persistence retry. See
+[LLM recovery](llm-recovery.md) for configuration, restart semantics and limitations.
 
 ## Persistence and verification
 
@@ -138,3 +139,7 @@ errors, sanitization, provider deadlines, and access checks with simulated
 providers. `tests/test_pipeline_outcomes_persistence.py` exercises migration,
 local results, report publication, failed-vote causes, partial usable results and
 restart/stale-write behavior with a real isolated PostgreSQL database.
+
+Migration 8 → 9 adds retry-cycle, due-time and attempt-token fields without deleting
+existing votes, datasets or associations. `tests/test_llm_recovery.py` verifies the
+policy, real database transitions, lost acknowledgements and owned HTTP retries.

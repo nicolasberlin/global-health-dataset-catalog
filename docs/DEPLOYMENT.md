@@ -265,16 +265,56 @@ After deploying on gpu217:
 ```bash
 curl -I "http://${PUBLIC_HOST}:1312/ai-commons/"
 curl --fail --show-error --silent "http://${PUBLIC_HOST}:1312/ai-commons/api/health"
+curl --fail --show-error --silent --max-time 3 "http://${PUBLIC_HOST}:1312/ai-commons/api/ready"
 docker compose port postgres 5432
 docker compose exec ai-commons-api nft list table inet collector_egress
 ```
 
 Expect a successful frontend response without an HTTPS redirect, a successful
-health response, and no published PostgreSQL port. If curl succeeds but the
+health and readiness responses, and no published PostgreSQL port. If curl succeeds but the
 browser still redirects, clear its cached redirect/site data and retry the
 explicit HTTP URL. The firewall inspection uses `docker exec` as the trusted container
 administrator; the application process itself has no capabilities. Verify
 its `Uid`, `Gid`, `CapEff`, `CapBnd`, and `NoNewPrivs` in `/proc/1/status`.
+
+### Liveness and readiness
+
+`GET /health` is cheap liveness: HTTP 200 with `{"status":"ok"}` means the
+process can serve a request. It never accesses PostgreSQL or model configuration.
+`GET /ready` is readiness: HTTP 200 with `{"status":"ok"}` requires completed
+startup, an initialized current database pool, nonblank API keys and effective
+model names for all three default voters, and a successful `SELECT 1` through
+that pool. Default model names are accepted when their overrides are absent;
+explicitly blank overrides and missing/blank keys fail readiness. These local
+configuration checks cannot establish whether a provider accepts a key or serves
+a model. Neither endpoint calls LLM providers or incurs model charges.
+
+The database readiness probe has one two-second acquisition/query budget.
+Timed-out query connections are closed before cancellation and returned to the
+pool for replacement. No new pool is created and no migration or schema scan is
+run by a probe. Failures return only HTTP 503 with `{"status":"unavailable"}`;
+exception messages and configuration values are not returned or logged by the
+endpoint. Readiness responses use `Cache-Control: no-store` and require no login.
+The next probe can return 200 after database recovery, without restarting the
+application or rerunning migrations. A reopened pool still needs normal schema
+initialization. Deployment environment changes normally require recreating the
+API container; editing an environment file does not update a running process.
+
+Uvicorn does not serve HTTP until startup finishes: during migrations or failed
+startup a monitor may get a connection failure, not a 503. The application clears
+its ready state before workers drain on shutdown. This check does not certify
+provider reachability, every business operation or ongoing worker health, and
+does not stop queued work or repair failures.
+
+Use the external deployment URL above for release checks and monitoring, for
+example every 30 seconds with a three-second client timeout. Treat connection
+failures, timeouts and non-200 responses as unavailable; investigate repeated
+failures. Do not automatically restart the API for database unavailability or a
+temporarily exhausted pool. The existing container firewall blocks loopback HTTP,
+so an in-container localhost Docker healthcheck is not added. These endpoints do
+not themselves configure alerts or change Traefik routing. Shared proxy rate
+limits also apply; avoid aggressive polling. Existing database-IP firewall rules
+still require an API restart if recreating PostgreSQL changes its address.
 Also check from another machine that no legacy port mapping or host/provider
 firewall rule exposes PostgreSQL or a direct API port. These are deployment
 checks; repository tests cannot certify an external Traefik installation.
@@ -397,3 +437,12 @@ historical terminal jobs are conservatively marked incomplete. See
 [pipeline outcomes](pipeline-outcomes.md) for the additive API and compatibility
 rules. The usual startup migration applies this change; no new service or
 configuration variable is required. Automatic retries remain disabled.
+
+### Bounded model recovery
+
+Schema 9 preserves data and adds durable LLM retry scheduling. The default policy
+allows three total transient attempts, two for invalid responses, and a 120-second
+window for starting automatic retries. Compose forwards `LLM_MAX_ATTEMPTS`,
+`LLM_INVALID_MAX_ATTEMPTS` and `LLM_RETRY_WINDOW_SECONDS`. Set both attempt limits
+to 1 to disable automatic model retries. Keep one API instance/process. See
+[LLM recovery](llm-recovery.md) for deadline, persistence and restart behavior.

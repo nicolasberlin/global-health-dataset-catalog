@@ -2,7 +2,7 @@
 
 Messages are selected here, never copied from external exceptions. Recovery is
 advisory: ``manual`` does not bypass admission or promise an available command.
-No automatic retries are scheduled by this contract.
+Scheduling and retry budgets are enforced by backend workers.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ Outcome = Literal["results", "empty", "incomplete"]
 Recovery = Literal["automatic", "manual", "configuration_required", "none"]
 
 _MESSAGES = {
+    "llm_retry_exhausted": "The automatic model retry budget was exhausted.",
     "llm_timeout": "The model request timed out.",
     "llm_network_error": "The model could not be reached.",
     "llm_rate_limited": "The model provider rate limit was reached.",

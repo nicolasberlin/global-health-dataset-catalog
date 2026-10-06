@@ -4,7 +4,7 @@ from collector.diagnostics import Diagnostic
 
 
 def summarize_search(search: dict, items: list[dict]) -> dict:
-    active, queued = set(), set()
+    active, queued, waiting = set(), set(), set()
     errors = list(search.get("errors", []))
     incomplete = search.get("discovery_complete") is not True
     result_count = search.get("local_result_count") or 0
@@ -32,7 +32,10 @@ def summarize_search(search: dict, items: list[dict]) -> dict:
         if status == "classifying":
             active.add("classification")
         elif status == "queued":
-            queued.add("classification")
+            if any(error.get("recovery") == "automatic" for error in item.get("errors", [])):
+                waiting.add("classification")
+            else:
+                queued.add("classification")
         elif status in {"pending", "error"}:
             incomplete = True
             blocked_branches += int(status == "error")
@@ -48,6 +51,8 @@ def summarize_search(search: dict, items: list[dict]) -> dict:
             execution = collection.get("execution_status", "failed")
             if execution == "running":
                 active.add("collection")
+            elif execution == "waiting_retry":
+                waiting.add("collection")
             elif execution == "queued":
                 queued.add("collection")
             else:
@@ -58,8 +63,8 @@ def summarize_search(search: dict, items: list[dict]) -> dict:
                     completed_branches += 1
 
     result_count += len(dataset_ids)
-    if active or queued:
-        execution = "running" if active else "queued"
+    if active or queued or waiting:
+        execution = "running" if active else "queued" if queued else "waiting_retry"
         outcome = None
     else:
         execution = (
@@ -83,5 +88,5 @@ def summarize_search(search: dict, items: list[dict]) -> dict:
         "active_stages": sorted(active),
         "errors": errors,
         "local_result_count": search.get("local_result_count"),
-        "polling_required": bool(active or queued),
+        "polling_required": bool(active or queued or waiting),
     }

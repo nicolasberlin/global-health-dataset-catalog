@@ -14,6 +14,8 @@ from app.database import (
     complete_collection_job,
     mark_collection_job_error,
 )
+from app.db.task_retries import schedule_llm_retry
+from app.retry_policy import TRANSIENT
 from app.vote_store import PostgresVoteStore
 from app.workers import persist_with_retry, persisted_workers
 from collector.classification.factory import build_default_page_classifier
@@ -39,25 +41,54 @@ async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecut
             result = await asyncio.get_running_loop().run_in_executor(
                 executor,
                 copy_context().run,
-                partial(collect, classifier=build_default_page_classifier(
-                    vote_store=PostgresVoteStore(asyncio.get_running_loop(), job_id=job_id),
-                )),
+                partial(
+                    collect,
+                    classifier=build_default_page_classifier(
+                        vote_store=PostgresVoteStore(
+                            asyncio.get_running_loop(), job_id=job_id, expected_updated_at=version
+                        ),
+                    ),
+                ),
                 str(job["source_url"]),
             )
             saving = True
-            await persist_with_retry(lambda: complete_collection_job(
-                job_id, result, expected_updated_at=version,
-            ))
+            await persist_with_retry(
+                lambda: complete_collection_job(
+                    job_id,
+                    result,
+                    expected_updated_at=version,
+                )
+            )
         except Exception as exception:  # noqa: BLE001 - preserve the job's terminal failure.
             measurement["outcome"] = "failed"
             emit_event("collection_execution", outcome="failed")
             error = str(exception) or exception.__class__.__name__
-            diagnostics = ([Diagnostic("persistence_failed", "collection")]
-                           if saving else exception_diagnostics(exception, "collection"))
-            await persist_with_retry(lambda: mark_collection_job_error(
-                job_id, error, errors=[item.to_dict() for item in diagnostics],
-                expected_updated_at=version,
-            ))
+            diagnostics = (
+                [Diagnostic("persistence_failed", "collection")]
+                if saving
+                else exception_diagnostics(exception, "collection")
+            )
+            if not saving and any(
+                item.code in TRANSIENT | {"llm_invalid_response"} for item in diagnostics
+            ):
+                scheduled, diagnostics = await persist_with_retry(
+                    lambda: schedule_llm_retry(
+                        job_id,
+                        version,
+                        diagnostics,
+                        collection=True,
+                    )
+                )
+                if scheduled:
+                    return
+            await persist_with_retry(
+                lambda: mark_collection_job_error(
+                    job_id,
+                    error,
+                    errors=[item.to_dict() for item in diagnostics],
+                    expected_updated_at=version,
+                )
+            )
 
 
 def collection_workers(*, concurrency: int | None = None, poll_interval: float = 1.0):

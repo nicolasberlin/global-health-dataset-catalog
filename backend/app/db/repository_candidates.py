@@ -10,6 +10,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
 from app.quota_policy import WorkAdmission
+from app.retry_policy import enforce_retry_date
 from collector.classification.repository import RepositoryClassification
 from collector.diagnostics import Diagnostic
 from collector.repository_search.models import RepositorySearchResult
@@ -190,7 +191,8 @@ async def enqueue_candidate_classification(
                     return _repository_candidate_to_dict(row) if row else None
             await lock_work_admission(connection, admission)
             candidate = await _fetchone(connection, """
-                SELECT candidate.classification_status FROM repository_candidates AS candidate
+                SELECT candidate.classification_status, candidate.errors
+                FROM repository_candidates AS candidate
                 JOIN search_sessions AS session ON session.id = candidate.search_session_id
                 WHERE candidate.id = %s AND session.owner_id = %s FOR UPDATE OF candidate
             """, (candidate_id, _normalized_owner_id(owner_id)))
@@ -205,6 +207,7 @@ async def enqueue_candidate_classification(
                                      payload, {"candidate_id": str(candidate_id)})
                 row = await _get_repository_candidate_row(connection, candidate_id, owner_id)
                 return _repository_candidate_to_dict(row)
+            enforce_retry_date(candidate["errors"])
             await reserve_work(connection, admission, amount=1)
             row = await _fetchone(
                 connection,
@@ -212,7 +215,8 @@ async def enqueue_candidate_classification(
                 UPDATE repository_candidates AS candidate
                 SET classification_status = 'queued', classification = NULL,
                     error = '', errors = '[]'::jsonb,
-                    updated_at = NOW()
+                    retry_cycle = gen_random_uuid(), retry_round = 0, retry_started_at = NULL,
+                    next_retry_at = NULL, updated_at = NOW()
                 FROM search_sessions AS session
                 WHERE candidate.id = %s AND candidate.search_session_id = session.id
                 RETURNING {_RETURNING_CANDIDATE_COLUMNS}
@@ -233,11 +237,14 @@ async def claim_candidate_classification() -> dict[str, object] | None:
             connection,
             f"""
             UPDATE repository_candidates AS candidate
-            SET classification_status = 'classifying', updated_at = NOW()
+            SET classification_status = 'classifying', updated_at = NOW(),
+                retry_started_at = COALESCE(candidate.retry_started_at, NOW()),
+                next_retry_at = NULL, errors = '[]'::jsonb
             FROM search_sessions AS session
             WHERE candidate.id = (
                 SELECT id FROM repository_candidates
                 WHERE classification_status = 'queued'
+                  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
                 ORDER BY updated_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
             ) AND candidate.search_session_id = session.id
               AND candidate.classification_status = 'queued'

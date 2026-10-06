@@ -1,6 +1,15 @@
 GLOBAL HEALTH DATASET CATALOG - VERIFIED BACKLOG
 Last full review: 2026-09-26
-Targeted update: 2026-09-29 — tasks 6 and 7
+Targeted update: 2026-10-06 — recovery completed and next-work priorities agreed
+
+CURRENT USER-AGREED PRIORITIES (2026-10-06)
+- NEXT: TODO 12, the total collection time budget (plan point 1).
+  Implement after committing/pushing the completed backend recovery work to main.
+- LONG-TERM DEFERRED, with no scheduled implementation: TODO 10 classifier
+  evaluation (plan point 2), TODO 13 link revalidation (plan point 3), and TODO 9
+  backup/restore procedures (plan point 4). Revisit only on an explicit request.
+- Frontend integration remains separate and deferred.
+These decisions override the older priority headings below.
 
 SCOPE AND STATUS
 Reviewed against the current feat/traefik-rate-limits checkout, including local
@@ -18,7 +27,8 @@ ALREADY PRESENT - DO NOT REIMPLEMENT
 - Owner-scoped job/candidate reads and safe public error presenters.
 - Explicit collection retry with ownership checks, atomic workload admission and
   protection against duplicate active collection. Reads do not enqueue work.
-  Per-job retry cooldown/attempt caps are a separate policy decision (task 16).
+  Bounded automatic LLM retries and provider deadlines are implemented (task 16).
+  Lifetime limits on explicit manual retries remain separate from admission quotas.
 - Persisted classification/collection queues, bounded consumers, automatic enqueue
   of online candidates, saved individual votes and latest-analysis restoration.
   Recovery intentionally supports ONE API process/instance; no worker leases.
@@ -96,6 +106,11 @@ P1 - CORRECTNESS AND OPERATIONAL RELIABILITY
 
 
 TODO 8: Add a lightweight readiness check
+Status (2026-09-29): Implemented locally, not deployed. /ready reuses initialized
+  pool state with a two-second acquisition/query budget and local model checks.
+  Validation: 851 Python tests passed with an isolated PostgreSQL 16 database,
+  including readiness timeout/recovery tests; Ruff passed. Container firewall
+  and Traefik suites were excluded from this run (their configuration is unchanged).
 What to do: Keep /health as liveness and add a bounded readiness check for initialized
   application/database state. Validate required model configuration without paid calls.
 Where: backend/app/main.py, backend/app/db/connection.py,
@@ -109,6 +124,8 @@ Done when: Tests cover startup, missing configuration, database outage, pool tim
   recovery and secret-free errors; /health remains cheap and independent of the DB.
 
 TODO 9: Establish backup and restore procedures
+Status (2026-10-06): LONG-TERM DEFERRED by user decision; no implementation date.
+  Keep this plan for later; it is not part of the next backend milestone.
 What to do: Complete the operational recovery part of the old migration task;
   versioned migrations already exist and do not need replacement.
 Where: docs/DEPLOYMENT.md; deployment backup configuration and a new restore check
@@ -121,6 +138,8 @@ Done when: An isolated restore drill succeeds, its evidence is recorded and reco
   steps identify the compatible application/schema versions without overwriting production.
 
 TODO 10: Build a reproducible classifier evaluation set
+Status (2026-10-06): LONG-TERM DEFERRED by user decision; no implementation date.
+  Keep this plan for later; it is not part of the next backend milestone.
 What to do: Measure relevance and dataset-eligibility decisions separately before
   changing prompts, models, the 2-positive threshold or 3-response requirement.
 Where: collector/classification/{page_llm_classifier,repository_llm_classifier,
@@ -147,12 +166,20 @@ Done when: Measurements justify the index; fresh initialization, upgrade and rep
   assert a fixed query plan or a timing threshold in ordinary integration tests.
 
 TODO 12: Define and enforce a total collection budget
+Status (2026-10-06): NEXT IMPLEMENTATION, explicitly prioritized by the user.
+  Planning only so far; not included in the backend recovery implementation.
 What to do: Complement existing per-request timeouts, page and byte limits with a
   total deadline and, where justified, cumulative transfer/attempt budgets.
 Where: collector/config.py, collector/main.py, collector/fetch.py,
   collector/discovery/, collector/validation/, collector/classification/llm_client.py;
-  backend/app/collection_worker.py and focused tests.
-How: Carry a monotonic deadline through stages; cap request timeouts by remaining
+  backend/app/collection_worker.py, db/{schema,collection_jobs,task_retries}.py,
+  diagnostics, storage reports and focused tests.
+How: Persist a collection deadline from the first execution. Automatic retries
+  retain it; an explicitly admitted manual retry starts a new budget. Add a
+  data-preserving migration and configuration; choose the default from observed
+  durations. Preserve fully validated results and existing votes on expiry, and
+  return an incomplete outcome with collection_budget_exhausted diagnostics.
+  Carry a monotonic deadline through stages; cap request timeouts by remaining
   time and stop starting new work when exhausted. Account for retries and discovery.
   Explicitly address blocking network/DNS/thread operations: an asyncio timeout
   alone cannot stop a running thread. Document the actual guarantee achieved.
@@ -162,6 +189,8 @@ Done when: Slow/multiple-stage fixtures exhaust the budget predictably; no new c
   follow an explicit policy and network protections remain intact.
 
 TODO 13: Revalidate catalog links while retaining access history
+Status (2026-10-06): LONG-TERM DEFERRED by user decision; no implementation date.
+  Keep this plan for later; it is not part of the next backend milestone.
 What to do: Schedule bounded repeat checks using last_checked_at and existing access
   states. Failed initial validations are already recorded; do not recreate that work.
 Where: collector/validation/downloads.py; backend/app/db/collected_datasets.py,
@@ -201,6 +230,16 @@ Done when: A success followed by a failure retains the successful dataset with a
   accurate report; replay is idempotent and all-failed runs are not marked successful.
 
 TODO 16: Define per-job retry and provider retry policies if needed
+Status (2026-10-06): Backend recovery implemented locally, frontend intentionally
+  not connected yet. Schema 9 persists retry cycles/deadlines; transient failures
+  allow 3 total attempts and invalid responses 2, in a 120-second retry-start window.
+  Successful positive/negative votes are reused; database retries do not recall
+  models. Provider Retry-After is enforced for automatic/manual retries. Owned
+  incomplete jobs can resume without removing saved results. See docs/llm-recovery.md.
+  Verification: full Python suite 948 passed, 9 optional container/proxy tests
+  skipped; final focused recovery/database run 105 passed. Ruff and Compose checks passed.
+  Remaining integration: consume waiting_retry and structured diagnostics in the
+  frontend only after backend acceptance; no UI changes in this delivery.
 What to do: Decide cooldown/attempt limits beyond existing workload quotas, and
   whether bounded transient provider retries are justified by task 7 measurements.
 Where: backend/app/db/{collection_jobs,repository_candidates,api_quotas,schema}.py;

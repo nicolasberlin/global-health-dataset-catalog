@@ -47,6 +47,15 @@ _DEFAULT_VOTERS = (
 )
 
 
+def validate_default_classifier_configuration() -> None:
+    """Validate required local settings without creating clients or calling providers."""
+    for _, model_env_var, default_model, api_key_env_var in _DEFAULT_VOTERS:
+        if not os.getenv(api_key_env_var, "").strip() or not os.getenv(
+            model_env_var, default_model,
+        ).strip():
+            raise ValueError("Required model configuration is missing or blank.")
+
+
 def _voters(provider_builder, classifier_type, validate, vote_store):
     clients = [
         (

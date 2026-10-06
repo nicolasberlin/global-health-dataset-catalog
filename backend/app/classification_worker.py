@@ -13,6 +13,8 @@ from app.database import (
     complete_candidate_classification,
     fail_candidate_classification,
 )
+from app.db.task_retries import schedule_llm_retry
+from app.retry_policy import TRANSIENT
 from app.vote_store import PostgresVoteStore
 from app.workers import persist_with_retry, persisted_workers
 from collector.classification.factory import build_default_repository_result_classifier
@@ -38,7 +40,7 @@ async def _run_classification(candidate: dict[str, object], executor: ThreadPool
         saving = False
         try:
             candidate = {**candidate, "_vote_store": PostgresVoteStore(
-                asyncio.get_running_loop(), candidate_id=candidate_id,
+                asyncio.get_running_loop(), candidate_id=candidate_id, expected_updated_at=version,
             )}
             decision = await asyncio.get_running_loop().run_in_executor(
                 executor, copy_context().run, _classify, candidate,
@@ -55,6 +57,13 @@ async def _run_classification(candidate: dict[str, object], executor: ThreadPool
             error = str(exception) or exception.__class__.__name__
             diagnostics = ([Diagnostic("persistence_failed", "classification")]
                            if saving else exception_diagnostics(exception, "classification"))
+            if not saving and any(item.code in TRANSIENT | {"llm_invalid_response"}
+                                  for item in diagnostics):
+                scheduled, diagnostics = await persist_with_retry(lambda: schedule_llm_retry(
+                    candidate_id, version, diagnostics, collection=False,
+                ))
+                if scheduled:
+                    return
             await persist_with_retry(lambda: fail_candidate_classification(
                 candidate_id, owner_id, error, errors=[item.to_dict() for item in diagnostics],
                 expected_updated_at=version,

@@ -21,7 +21,8 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
         "running": "Collection in progress.",
         "done": (
             f"{saved_count} dataset(s) saved."
-            if saved_count else "Collection completed without saved datasets."
+            if saved_count
+            else "Collection completed without saved datasets."
         ),
         "error": "Collection failed.",
     }
@@ -32,8 +33,13 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
     if status == "done" and outcome == "incomplete":
         messages["done"] = f"Collection incomplete; {saved_count} dataset(s) saved."
     return CollectorCollectionJob(
-        execution_status={"pending": "queued", "running": "running", "done": "finished",
-                          "error": "failed"}[status],
+        execution_status=(
+            "waiting_retry"
+            if status == "pending" and any(item["recovery"] == "automatic" for item in errors)
+            else {"pending": "queued", "running": "running", "done": "finished", "error": "failed"}[
+                status
+            ]
+        ),
         outcome=outcome,
         errors=errors,
         id=job["id"],
@@ -70,10 +76,14 @@ def _public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]:
                 "voter_id": failure["voter_id"],
                 "error": "Classifier vote failed.",
                 "error_code": "classifier_vote_failed",
-                "errors": public_diagnostics(failure.get("errors") or [
-                    Diagnostic("legacy_unknown", "classification",
-                               voter_id=failure["voter_id"]).to_dict(),
-                ]),
+                "errors": public_diagnostics(
+                    failure.get("errors")
+                    or [
+                        Diagnostic(
+                            "legacy_unknown", "classification", voter_id=failure["voter_id"]
+                        ).to_dict(),
+                    ]
+                ),
             }
             for failure in ensemble["failures"]
         ],

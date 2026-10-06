@@ -8,6 +8,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
 from app.quota_policy import WorkAdmission
+from app.retry_policy import enforce_retry_date
 from collector.diagnostics import Diagnostic
 from collector.storage.models import CollectionReport
 from collector.url_utils import require_http_url
@@ -263,8 +264,14 @@ async def retry_collection_job_for_owner(
                     await record_command(connection, owner_id, idempotency_key, "collection_retry",
                                          payload, {"job_id": job_id})
                 return _collection_job_to_dict(job)
-            if job["status"] != "error":
-                raise ValueError("Only a failed collection can be retried.")
+            if job["status"] != "error" and not (
+                job["status"] == "done" and job["outcome"] == "incomplete"
+            ):
+                raise ValueError("Only a failed or incomplete collection can be retried.")
+            errors = job.get("errors", [])
+            if errors and all(item.get("recovery") == "none" for item in errors):
+                raise ValueError("This collection has no supported recovery action.")
+            enforce_retry_date(errors)
             active = await _fetchone(connection, """
                 SELECT id FROM collection_jobs WHERE source_url = %s
                 AND status IN ('pending', 'running') AND id <> %s
@@ -275,7 +282,9 @@ async def retry_collection_job_for_owner(
             row = await _fetchone(connection, """
                 UPDATE collection_jobs SET status = 'pending', error = '',
                     errors = '[]'::jsonb, outcome = NULL,
-                    message = 'Collection pending.', finished_at = NULL, updated_at = NOW()
+                    retry_cycle = gen_random_uuid(), retry_round = 0, retry_started_at = NULL,
+                    next_retry_at = NULL, message = 'Collection pending.',
+                    finished_at = NULL, updated_at = NOW()
                 WHERE id = %s RETURNING *
             """, (job_id,))
             if idempotency_key is not None:
@@ -335,9 +344,12 @@ async def claim_pending_collection_job() -> dict[str, object] | None:
             connection,
             """
             UPDATE collection_jobs
-            SET status = 'running', message = 'Collection in progress.', updated_at = NOW()
+            SET status = 'running', message = 'Collection in progress.', updated_at = NOW(),
+                retry_started_at = COALESCE(retry_started_at, NOW()),
+                next_retry_at = NULL, errors = '[]'::jsonb
             WHERE id = (
                 SELECT id FROM collection_jobs WHERE status = 'pending'
+                    AND (next_retry_at IS NULL OR next_retry_at <= NOW())
                 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
             ) AND status = 'pending'
             RETURNING *

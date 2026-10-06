@@ -25,7 +25,7 @@ Use **one API instance with one Uvicorn process**. Workers run inside that proce
 `SEARCH_MAX_CONCURRENCY` (default 1) controls discovery concurrency;
 `SEARCH_MAX_ACTIVE` (default 100) caps queued and running asynchronous discoveries.
 Classification and collection retain their separate worker and quota settings.
-Schema migration 7 → 8 runs at startup and preserves historical records and votes.
+Schema migrations through version 9 run at startup and preserve historical records and votes.
 
 For remote access, put the API behind your HTTPS proxy and configure its upstream
 to this port. `API_BIND_ADDRESS` defaults to loopback; change it only to the bind
@@ -97,9 +97,9 @@ same snapshot format, including:
 | Field | Meaning |
 | --- | --- |
 | `query`, `search_id`, `attempt` | Original query, stable search ID and discovery attempt |
-| `execution_status` | `queued`, `running`, `finished` or `failed` |
+| `execution_status` | `queued`, `running`, `waiting_retry`, `finished` or `failed` |
 | `outcome` | `null` while active; `results`, `empty` or `incomplete` afterward |
-| `polling_required` | Whether work is still queued or running |
+| `polling_required` | Whether work is queued, running or waiting for an automatic retry |
 | `active_stages` | Currently executing stages; queues alone are not active stages |
 | `origin` | `database` or `online` after discovery; `null` before it concludes |
 | `local_dataset_ids` | Local results in their saved ranking order |
@@ -175,8 +175,15 @@ should always provide one:
 
 Reuse that key only to resend that exact command. Successful model votes remain
 available through the existing vote store. Retrying a whole search does not
-reset or replay downstream work. Automatic model retries are a separate future
-change; this delivery does not emit `waiting_retry`.
+reset or replay downstream work. Failed collections and completed collections with
+`outcome=incomplete` can be retried while retaining their saved dataset IDs.
+
+Transient model failures now receive bounded automatic retries, reusing valid
+positive and negative votes. While waiting, `execution_status=waiting_retry`,
+`outcome=null`, and `polling_required=true`; diagnostics include `retry_at`,
+`attempt`, and `max_attempts`. Both explicit retry commands honor provider deadlines
+and can return HTTP 429 with `Retry-After`. See [LLM recovery](llm-recovery.md).
+The existing frontend remains unchanged; client integration is a separate step.
 
 ## Restart and compatibility
 

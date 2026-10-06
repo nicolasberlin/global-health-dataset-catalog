@@ -112,10 +112,10 @@ async def test_worker_preserves_failed_voter_cause_and_attempt(database, transpo
     with ThreadPoolExecutor(1) as executor:
         await classification_worker._run_classification(claimed, executor)
     progress = await read(candidate["search_session_id"])
-    assert (progress.execution_status, progress.outcome) == ("failed", "incomplete")
+    assert (progress.execution_status, progress.outcome) == ("waiting_retry", None)
     diagnostic = progress.items[0].errors[0]
     assert diagnostic.code == "llm_timeout" and diagnostic.voter_id
-    assert diagnostic.attempt == 1 and diagnostic.max_attempts is None
+    assert diagnostic.attempt == 1 and diagnostic.max_attempts == 3
     assert "private-secret" not in progress.model_dump_json()
     saved = await query("SELECT * FROM classification_votes WHERE status = 'error'")
     assert saved[0]["errors"][0]["code"] == "llm_timeout"
