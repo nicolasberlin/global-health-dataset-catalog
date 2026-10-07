@@ -140,7 +140,7 @@ class EnsemblePageClassifier:
         decision_votes = _decision_votes(votes, accepted)
 
         ensemble_arguments = dict(
-            votes=votes,
+            voters=[_vote_summary(vote) for vote in votes],
             failures=failures,
             votes_required=self._votes_required,
             minimum_successful_votes=self._minimum_successful_votes,
@@ -272,8 +272,8 @@ class EnsembleRepositoryRelevanceClassifier:
             decision_votes
         )
 
-        ensemble_summary = _repository_ensemble_summary(
-            votes=votes,
+        ensemble_summary = _ensemble_summary(
+            voters=[_repository_vote_summary(vote) for vote in votes],
             failures=failures,
             votes_required=self._votes_required,
             minimum_successful_votes=self._minimum_successful_votes,
@@ -350,8 +350,8 @@ def _minimum_votes_error(
 
 def _ensemble_summary(
     *,
-    votes: list[PageClassificationVote],
-    failures: list[dict[str, str]],
+    voters: list[dict[str, object]],
+    failures: list[dict[str, object]],
     votes_required: int,
     minimum_successful_votes: int,
     accepted_votes: int,
@@ -362,16 +362,13 @@ def _ensemble_summary(
     return {
         "votes_required": votes_required,
         "minimum_successful_votes": minimum_successful_votes,
-        "successful_votes": len(votes),
+        "successful_votes": len(voters),
         "failed_votes": len(failures),
         "accepted_votes": accepted_votes,
         "decision": decision,
         "decision_reason": decision_reason,
         "decision_voter_ids": decision_voter_ids,
-        "voters": [
-            _vote_summary(vote)
-            for vote in votes
-        ],
+        "voters": voters,
         "failures": failures,
     }
 
@@ -383,34 +380,6 @@ def _vote_summary(
         "voter_id": vote.voter_id,
         "accepted": vote.accepted,
         "signals": vote.dataset_signals,
-    }
-
-
-def _repository_ensemble_summary(
-    *,
-    votes: list[RepositoryClassificationVote],
-    failures: list[dict[str, str]],
-    votes_required: int,
-    minimum_successful_votes: int,
-    accepted_votes: int,
-    decision: str,
-    decision_reason: str,
-    decision_voter_ids: list[str],
-) -> dict[str, object]:
-    return {
-        "votes_required": votes_required,
-        "minimum_successful_votes": minimum_successful_votes,
-        "successful_votes": len(votes),
-        "failed_votes": len(failures),
-        "accepted_votes": accepted_votes,
-        "decision": decision,
-        "decision_reason": decision_reason,
-        "decision_voter_ids": decision_voter_ids,
-        "voters": [
-            _repository_vote_summary(vote)
-            for vote in votes
-        ],
-        "failures": failures,
     }
 
 

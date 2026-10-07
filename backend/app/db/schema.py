@@ -13,7 +13,7 @@ from .connection import (
 
 # Historical pre-baseline schemas are unsupported. Explicit versioned migrations
 # preserve data for supported baselines, including the job associations in v2.
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 11
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",
     "health_probability",
@@ -353,9 +353,12 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
         "classification",
         "error",
     },
-    "collection_jobs": {"kind", "repository_candidate_id", "errors", "outcome"},
+    "collection_jobs": {
+        "kind", "repository_candidate_id", "errors", "outcome", "collection_deadline_at",
+    },
     "classification_votes": {"errors"},
     "api_commands": {"owner_id", "command_key", "fingerprint", "result"},
+    "worker_claims": {"token", "queue", "resource_id", "claim_version"},
     "search_local_results": {"search_id", "dataset_id", "position"},
     "collection_job_candidates": {"job_id", "candidate_id"},
 }
@@ -402,6 +405,7 @@ MANAGED_TABLES = (
     "classification_runs",
     "classification_votes",
     "api_commands",
+    "worker_claims",
     "search_local_results",
 )
 
@@ -467,6 +471,10 @@ def _migration_for_version(version: int):
         return _migrate_7_to_8
     if version == 8:
         return _migrate_8_to_9
+    if version == 9:
+        return _migrate_9_to_10
+    if version == 10:
+        return _migrate_10_to_11
 
     raise RuntimeError(f"No migration registered for schema version {version}.")
 
@@ -668,6 +676,23 @@ async def _migrate_8_to_9(connection: AsyncConnection[DictRow]) -> None:
             WHERE classification_status = 'queued';
         CREATE INDEX collection_retry_due_idx ON collection_jobs(next_retry_at, id)
             WHERE status = 'pending';
+    """)
+
+
+async def _migrate_9_to_10(connection: AsyncConnection[DictRow]) -> None:
+    await connection.execute("""
+        ALTER TABLE collection_jobs ADD COLUMN collection_deadline_at TIMESTAMPTZ;
+    """)
+
+
+async def _migrate_10_to_11(connection: AsyncConnection[DictRow]) -> None:
+    await connection.execute("""
+        CREATE TABLE worker_claims (
+            token UUID PRIMARY KEY,
+            queue TEXT NOT NULL CHECK(queue IN ('search', 'classification', 'collection')),
+            resource_id TEXT NOT NULL CHECK(resource_id <> ''),
+            claim_version TIMESTAMPTZ NOT NULL
+        );
     """)
 
 

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
 from app.quota_policy import WorkAdmission
 from app.retry_policy import enforce_retry_date
+from collector.config import configured_collection_budget_seconds
 from collector.diagnostics import Diagnostic
 from collector.storage.models import CollectionReport
 from collector.url_utils import require_http_url
@@ -25,6 +26,7 @@ from .serialization import (
     _jsonb,
     _serialize_discovery_methods,
 )
+from .worker_claims import read_worker_claim, record_worker_claim
 
 
 @dataclass(frozen=True)
@@ -125,7 +127,7 @@ async def _reserve_repository_candidate_collection_job(
             active_job.error, active_job.errors, active_job.outcome,
             active_job.created_at,
             active_job.updated_at,
-            active_job.finished_at
+            active_job.finished_at, active_job.collection_deadline_at
         FROM (VALUES (1)) AS singleton(value)
         LEFT JOIN LATERAL (
             SELECT id, source_url, kind, repository_candidate_id,
@@ -133,7 +135,8 @@ async def _reserve_repository_candidate_collection_job(
                    analyzed_count, accepted_count, rejected_count,
                    invalid_distribution_count, discovery_methods, classification_progress,
                    message,
-                   error, errors, outcome, created_at, updated_at, finished_at
+                   error, errors, outcome, created_at, updated_at, finished_at,
+                   collection_deadline_at
             FROM collection_jobs
             WHERE (
                 repository_candidate_id = %s
@@ -283,7 +286,8 @@ async def retry_collection_job_for_owner(
                 UPDATE collection_jobs SET status = 'pending', error = '',
                     errors = '[]'::jsonb, outcome = NULL,
                     retry_cycle = gen_random_uuid(), retry_round = 0, retry_started_at = NULL,
-                    next_retry_at = NULL, message = 'Collection pending.',
+                    next_retry_at = NULL, collection_deadline_at = NULL,
+                    message = 'Collection pending.',
                     finished_at = NULL, updated_at = NOW()
                 WHERE id = %s RETURNING *
             """, (job_id,))
@@ -335,26 +339,47 @@ async def mark_interrupted_collection_jobs_error() -> int:
     return len(rows)
 
 
-async def claim_pending_collection_job() -> dict[str, object] | None:
-    """Claim one persisted job only when a worker has a free execution slot."""
+async def claim_pending_collection_job(
+    *, claim_token: UUID | None = None,
+) -> dict[str, object] | None:
+    """Acquire or recover the same job after an ambiguous database commit."""
 
+    claim_token = claim_token or uuid4()
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
-        row = await _fetchone(
-            connection,
-            """
-            UPDATE collection_jobs
-            SET status = 'running', message = 'Collection in progress.', updated_at = NOW(),
-                retry_started_at = COALESCE(retry_started_at, NOW()),
-                next_retry_at = NULL, errors = '[]'::jsonb
-            WHERE id = (
-                SELECT id FROM collection_jobs WHERE status = 'pending'
-                    AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-                ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
-            ) AND status = 'pending'
-            RETURNING *
-            """,
-        )
+        async with connection.transaction():
+            receipt = await read_worker_claim(connection, claim_token, "collection")
+            if receipt is not None:
+                row = await _fetchone(
+                    connection,
+                    """SELECT * FROM collection_jobs
+                       WHERE id = %s AND status = 'running' AND updated_at = %s""",
+                    (int(receipt["resource_id"]), receipt["claim_version"]),
+                )
+                return _collection_job_to_dict(row) if row else None
+            row = await _fetchone(
+                connection,
+                """
+                UPDATE collection_jobs
+                SET status = 'running', message = 'Collection in progress.', updated_at = NOW(),
+                    retry_started_at = COALESCE(retry_started_at, NOW()),
+                    collection_deadline_at = COALESCE(
+                        collection_deadline_at, NOW() + %s * INTERVAL '1 second'
+                    ),
+                    next_retry_at = NULL, errors = '[]'::jsonb
+                WHERE id = (
+                    SELECT id FROM collection_jobs WHERE status = 'pending'
+                        AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+                    ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+                ) AND status = 'pending'
+                RETURNING *
+                """,
+                (configured_collection_budget_seconds(),),
+            )
+            if row is not None:
+                await record_worker_claim(
+                    connection, claim_token, "collection", row["id"], row["updated_at"],
+                )
     return _collection_job_to_dict(row) if row else None
 
 
@@ -434,7 +459,8 @@ async def _insert_collection_job(
                   analyzed_count, accepted_count, rejected_count,
                   invalid_distribution_count, discovery_methods, classification_progress,
                   message,
-                  error, errors, outcome, created_at, updated_at, finished_at
+                  error, errors, outcome, created_at, updated_at, finished_at,
+                  collection_deadline_at
         """,
         (source_url, kind, repository_candidate_id, root_id),
     )
@@ -456,6 +482,9 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
             """
             UPDATE collection_jobs
             SET status = 'running',
+                collection_deadline_at = COALESCE(
+                    collection_deadline_at, NOW() + %s * INTERVAL '1 second'
+                ),
                 saved_count = 0,
                 discovered_count = 0,
                 analyzed_count = 0,
@@ -473,9 +502,10 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
                       analyzed_count, accepted_count, rejected_count,
                       invalid_distribution_count, discovery_methods, classification_progress,
                       message,
-                      error, errors, outcome, created_at, updated_at, finished_at
+                      error, errors, outcome, created_at, updated_at, finished_at,
+                      collection_deadline_at
             """,
-            (job_id,),
+            (configured_collection_budget_seconds(), job_id),
         )
 
     return _collection_job_to_dict(row) if row else None
@@ -522,7 +552,8 @@ async def _mark_collection_job_done(
                   analyzed_count, accepted_count, rejected_count,
                   invalid_distribution_count, discovery_methods, classification_progress,
                   message,
-                  error, errors, outcome, created_at, updated_at, finished_at
+                  error, errors, outcome, created_at, updated_at, finished_at,
+                  collection_deadline_at
         """,
         (
             saved_count,
@@ -566,7 +597,8 @@ async def mark_collection_job_error(
                       analyzed_count, accepted_count, rejected_count,
                       invalid_distribution_count, discovery_methods, classification_progress,
                       message,
-                      error, errors, outcome, created_at, updated_at, finished_at
+                      error, errors, outcome, created_at, updated_at, finished_at,
+                      collection_deadline_at
             """,
             (error, _jsonb(errors or [Diagnostic("processing_failed", "collection").to_dict()]),
              job_id, expected_updated_at, expected_updated_at),
@@ -584,7 +616,7 @@ async def _get_collection_job_row(connection, job_id: int) -> Row | None:
                analyzed_count, accepted_count, rejected_count,
                invalid_distribution_count, discovery_methods, classification_progress,
                message, error, errors, outcome,
-               created_at, updated_at, finished_at
+               created_at, updated_at, finished_at, collection_deadline_at
         FROM collection_jobs
         WHERE id = %s
         """,
@@ -634,6 +666,10 @@ def _collection_job_to_dict(row: Row) -> dict[str, object]:
         "created_at": _format_timestamp(row["created_at"]),
         "updated_at": _format_timestamp(row["updated_at"]),
         "finished_at": _format_optional_timestamp(row["finished_at"]),
+        "collection_deadline_at": (
+            _format_timestamp(row["collection_deadline_at"])
+            if row.get("collection_deadline_at") is not None else None
+        ),
     }
 
 

@@ -106,7 +106,7 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
         def geturl(self):
             return self.request.full_url
 
-        def read(self, size=-1):
+        def read1(self, size=-1):
             reads.append((self.request.full_url, self.request.get_method(), size))
             return super().read(size)
 
@@ -162,8 +162,10 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
         assert all(request.get_header("User-agent") == config.user_agent for request, _ in requests)
         assert requests[2][0].get_header("Range") == f"bytes=0-{config.max_sample_bytes - 1}"
         assert reads == [
-            (page_url, "GET", 1_000_001),
-            (file_url, "GET", config.max_sample_bytes + 1),
+            (page_url, "GET", 65_536),
+            (page_url, "GET", 65_536),
+            (file_url, "GET", min(config.max_sample_bytes + 1, 65_536)),
+            *([(file_url, "GET", 1)] if config.max_sample_bytes == 65_536 else []),
         ]
 
 
@@ -184,7 +186,7 @@ def test_pipeline_config_reaches_default_discovery_and_distribution_requests(mon
         def geturl(self):
             return self.request.full_url
 
-        def read(self, size=-1):
+        def read1(self, size=-1):
             reads.append(size)
             return super().read(size)
 
@@ -215,7 +217,9 @@ def test_pipeline_config_reaches_default_discovery_and_distribution_requests(mon
         assert all(timeout == config.request_timeout_seconds for _, timeout in requests)
         assert all(request.get_header("User-agent") == config.user_agent for request, _ in requests)
         assert requests[-1][0].get_header("Range") == f"bytes=0-{config.max_sample_bytes - 1}"
-        assert reads == [5_000_001, 5_000_001, config.max_sample_bytes + 1]
+        assert reads[:4] == [65_536] * 4  # Two bounded JSON discovery responses, then EOF.
+        assert reads[4] == min(65_536, config.max_sample_bytes + 1)
+        assert all(0 < size <= 65_536 for size in reads)
 
 
 def test_collector_extracts_dataset_page_and_distributions():

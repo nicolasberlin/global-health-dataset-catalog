@@ -21,6 +21,7 @@ from .schema import _require_current_schema
 from .search_results import save_local_results
 from .search_sessions import _complete_search_session, _normalized_owner_id
 from .serialization import _jsonb
+from .worker_claims import read_worker_claim, record_worker_claim
 
 
 async def admit_search(
@@ -143,21 +144,37 @@ async def admit_search(
     return row, False
 
 
-async def claim_search():
+async def claim_search(*, claim_token: UUID | None = None):
+    claim_token = claim_token or uuid4()
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
-        return await _fetchone(
-            connection,
-            """
-            UPDATE search_sessions SET status = 'running', attempt_token = %s, updated_at = NOW()
-            WHERE id = (SELECT id FROM search_sessions
-                        WHERE status = 'queued' AND execution_mode = 'worker'
-                        ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
-                AND status = 'queued'
-            RETURNING *
-        """,
-            (uuid4(),),
-        )
+        async with connection.transaction():
+            receipt = await read_worker_claim(connection, claim_token, "search")
+            if receipt is not None:
+                return await _fetchone(
+                    connection,
+                    """SELECT * FROM search_sessions
+                       WHERE id = %s AND status = 'running' AND updated_at = %s""",
+                    (UUID(receipt["resource_id"]), receipt["claim_version"]),
+                )
+            row = await _fetchone(
+                connection,
+                """
+                UPDATE search_sessions
+                SET status = 'running', attempt_token = %s, updated_at = NOW()
+                WHERE id = (SELECT id FROM search_sessions
+                            WHERE status = 'queued' AND execution_mode = 'worker'
+                            ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
+                    AND status = 'queued'
+                RETURNING *
+            """,
+                (claim_token,),
+            )
+            if row is not None:
+                await record_worker_claim(
+                    connection, claim_token, "search", row["id"], row["updated_at"],
+                )
+    return row
 
 
 async def _lock_attempt(connection, job):

@@ -64,12 +64,24 @@ async def test_persistence_wait_is_cancellable():
         await task
 
 
+async def test_acquisition_logging_skips_idle_polls_but_reports_retries(monkeypatch):
+    events = Mock()
+    monkeypatch.setattr(workers, "emit_event", events)
+    await workers.persist_with_retry(AsyncMock(return_value=None), log_operation=False)
+    events.assert_not_called()
+    await workers.persist_with_retry(
+        AsyncMock(side_effect=[OperationalError("offline"), None]),
+        initial_delay=0, log_operation=False,
+    )
+    assert [call.args[0] for call in events.call_args_list] == ["persistence_retry"]
+
+
 async def test_consumer_keeps_slot_until_terminal_write_recovers(monkeypatch):
     stop, blocked, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
     claims = 0
     writes = 0
 
-    async def claim():
+    async def claim(*, claim_token):
         nonlocal claims
         claims += 1
         if claims == 1:

@@ -25,6 +25,7 @@ from app.routes.sessions import router as sessions_router
 from app.search_worker import search_workers
 from app.security import api_cors_origins, validate_api_security_configuration
 from collector.classification.factory import validate_default_classifier_configuration
+from collector.config import configured_collection_budget_seconds
 from collector.observability import configure_operational_logging
 
 
@@ -34,6 +35,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     configure_operational_logging()
     validate_api_security_configuration()
     RetryPolicy.configured()
+    configured_collection_budget_seconds()
     await open_database_pool()
     try:
         await init_database()
@@ -59,6 +61,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After", "Location"],
 )
 
 app.include_router(collector_router)

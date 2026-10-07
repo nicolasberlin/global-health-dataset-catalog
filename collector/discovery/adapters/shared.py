@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request
 
+from collector.budget import check_collection_budget, read_with_budget
 from collector.config import DEFAULT_CONFIG
 from collector.fetch import open_public_http_url
 from collector.storage.models import DistributionCandidate
@@ -134,10 +135,12 @@ def fetch_json_url(
 
     try:
         with open_public_http_url(request, timeout=timeout) as response:
-            body = response.read(max_bytes + 1)
+            body = read_with_budget(response, max_bytes + 1)
     except HTTPError as exception:
+        check_collection_budget()
         raise ValueError(f"JSON URL returned HTTP {exception.code}.") from exception
     except (TimeoutError, URLError, OSError) as exception:
+        check_collection_budget()
         raise ValueError(f"Could not fetch JSON URL: {exception}") from exception
 
     if len(body) > max_bytes:

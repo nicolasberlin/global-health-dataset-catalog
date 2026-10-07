@@ -7,6 +7,7 @@ from dataclasses import replace
 from functools import partial
 from urllib.parse import urlsplit
 
+from collector.budget import CollectionBudgetExceeded, check_collection_budget, collection_budget
 from collector.classification.factory import build_default_page_classifier
 from collector.classification.page import PageClassifier
 from collector.config import DEFAULT_CONFIG, CollectorConfig
@@ -66,6 +67,7 @@ def analyze_html_page(
             raise PageFetchError(barrier.message, code=barrier.code)
         return None
     page_classifier = _classifier_or_default(classifier)
+    check_collection_budget()
     classification = page_classifier.classify(page, distributions)
 
     if not classification.accepted:
@@ -113,6 +115,12 @@ def collect_source_with_report(
     are responsible for their own network settings.
     """
 
+    with collection_budget(seconds=config.collection_max_duration_seconds):
+        return _collect_source_within_budget(source_url, config, discover, fetch_html, validate,
+                                             classifier)
+
+
+def _collect_source_within_budget(source_url, config, discover, fetch_html, validate, classifier):
     if discover is None:
         discover = partial(discover_source, config=config)
     if fetch_html is None:
@@ -134,52 +142,62 @@ def collect_source_with_report(
     errors: list[Diagnostic] = []
 
     def validate_and_record(distribution: DistributionCandidate) -> ValidationResult:
+        check_collection_budget()
         result = validate(distribution)
         if not result.ok:
             validation_failures.append(result)
         return result
 
     rejected_count = 0
-    invalid_distribution_count = 0
-    discovered_pages = discover(source_url)
-    # Keep the full discovery count for reporting while bounding costly page
-    # fetches and LLM calls to the configured analysis limit.
-    selected_pages = discovered_pages[: config.max_pages_per_source]
-    page_classifier = _classifier_or_default(classifier)
+    analyzed_count = 0
+    discovered_pages: list[DiscoveredPage] = []
+    try:
+        check_collection_budget()
+        discovered_pages = discover(source_url)
+        check_collection_budget()
+        # Keep the full discovery count for reporting while bounding costly page
+        # fetches and LLM calls to the configured analysis limit.
+        selected_pages = discovered_pages[: config.max_pages_per_source]
+        page_classifier = _classifier_or_default(classifier)
 
-    for discovered_page in selected_pages:
-        failure_start = len(validation_failures)
-        dataset, invalid_count = _collect_discovered_page_with_report(
-            discovered_page,
-            config,
-            fetch_html,
-            validate_and_record,
-            page_classifier,
-        )
-        invalid_distribution_count += invalid_count
-        if dataset is not None:
-            collected_datasets.append(dataset)
-        else:
-            # An alternative failed link does not invalidate a retained dataset.
-            inconclusive = [failure for failure in validation_failures[failure_start:]
-                            if failure.status in {"unconfirmed", "restricted"}]
-            if inconclusive:
-                errors.extend(Diagnostic(
-                    "access_restricted" if failure.status == "restricted"
-                    else "verification_unconfirmed", "validation",
-                    recovery="none" if failure.status == "restricted" else "manual",
-                ) for failure in inconclusive)
+        for discovered_page in selected_pages:
+            check_collection_budget()
+            analyzed_count += 1
+            failure_start = len(validation_failures)
+            dataset, _ = _collect_discovered_page_with_report(
+                discovered_page,
+                config,
+                fetch_html,
+                validate_and_record,
+                page_classifier,
+            )
+            if dataset is not None:
+                collected_datasets.append(dataset)
             else:
-                rejected_count += 1
+                # An alternative failed link does not invalidate a retained dataset.
+                inconclusive = [failure for failure in validation_failures[failure_start:]
+                                if failure.status in {"unconfirmed", "restricted"}]
+                if inconclusive:
+                    errors.extend(Diagnostic(
+                        "access_restricted" if failure.status == "restricted"
+                        else "verification_unconfirmed", "validation",
+                        recovery="none" if failure.status == "restricted" else "manual",
+                    ) for failure in inconclusive)
+                else:
+                    rejected_count += 1
+
+            check_collection_budget()
+    except CollectionBudgetExceeded as exception:
+        errors.extend(exception.diagnostics)
 
     return CollectionResult(
         datasets=collected_datasets,
         report=CollectionReport(
             discovered_count=len(discovered_pages),
-            analyzed_count=len(selected_pages),
+            analyzed_count=analyzed_count,
             accepted_count=len(collected_datasets),
             rejected_count=rejected_count,
-            invalid_distribution_count=invalid_distribution_count,
+            invalid_distribution_count=len(validation_failures),
             validation_failures=validation_failures,
             errors=errors,
             verification_complete=not errors,
@@ -253,6 +271,7 @@ def _collect_discovered_page_with_report(
         ):
             # data.json can synthesize record URLs on the catalog itself.
             return None, 0
+        check_collection_budget()
         fetched_page = fetch_html(discovered_page.url)
         mime_type = fetched_page.content_type.split(";", 1)[0].strip().lower()
         if mime_type and mime_type not in {"text/html", "application/xhtml+xml"}:
@@ -321,6 +340,7 @@ def analyze_discovered_page(
     if not distributions:
         return None
     page_classifier = _classifier_or_default(classifier)
+    check_collection_budget()
     classification = page_classifier.classify(page, distributions)
 
     if not classification.accepted:
@@ -400,7 +420,14 @@ def _with_valid_distributions_and_report(
         if url is None or url in attempted_urls:
             continue
         attempted_urls.add(url)
-        validation_result = validate(distribution)
+        try:
+            check_collection_budget()
+            validation_result = validate(distribution)
+        except CollectionBudgetExceeded:
+            if not valid_distributions:
+                raise
+            # Return already proven links; the outer loop records expired scope.
+            break
         if not validation_result.ok:
             invalid_count += 1
             continue

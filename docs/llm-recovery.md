@@ -25,7 +25,9 @@ Provider `Retry-After` takes precedence whenever later. If the next due date wou
 fall outside the window, processing ends as incomplete and requires intervention.
 The provider deadline is never shortened. A queued retry that is claimed after
 its window expires cannot invoke an unsuccessful model again automatically.
-The window is a retry-start budget, not a wall-clock deadline for an in-flight
+Collection jobs additionally enforce their persisted [collection budget](collection-budget.md);
+an automatic retry must be due before both deadlines.
+The LLM window is a retry-start budget, not a wall-clock deadline for an in-flight
 request; existing per-request timeouts still apply.
 
 Authentication/configuration errors, oversized responses and unrelated pipeline
@@ -61,6 +63,17 @@ Scheduled retries survive restart. Work interrupted while executing is marked
 votes remain reusable. A provider response lost before commit during a process
 crash cannot be recovered: exactly-once external invocation is not guaranteed.
 The existing **single API process/instance** requirement remains in force.
+
+Schema migration 10 → 11 also records worker acquisitions atomically in
+`worker_claims`. A transient connection failure after commit replays the same
+internal acquisition token, retrieving the original attempt rather than leaving
+it running without a consumer. Terminal or superseded attempts cannot be
+reacquired with an old token. No receipt is written for an empty poll.
+
+The default model HTTP transport refuses redirects; configure the provider's
+direct endpoint. Redirect responses report `llm_configuration_error` and require
+configuration correction. Malformed or excessively nested JSON responses report
+`llm_invalid_response` and follow the bounded invalid-response retry policy.
 
 ## API recovery
 

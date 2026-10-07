@@ -18,6 +18,7 @@ from urllib.request import (
     build_opener,
 )
 
+from collector.budget import check_collection_budget, read_with_budget, remaining_timeout
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.network_policy import is_public_address
@@ -68,7 +69,7 @@ def fetch_public_html(
     try:
         with open_public_http_url(request, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type", "")
-            body = response.read(max_bytes + 1)
+            body = read_with_budget(response, max_bytes + 1)
             if len(body) > max_bytes:
                 raise PageFetchError("HTML response is too large for collection.")
             return FetchedPage(
@@ -79,8 +80,10 @@ def fetch_public_html(
                 content_type=content_type,
             )
     except HTTPError as exception:
+        check_collection_budget()
         raise PageFetchError(f"URL returned HTTP {exception.code}.") from exception
     except (TimeoutError, URLError, OSError) as exception:
+        check_collection_budget()
         raise PageFetchError(f"Could not fetch URL: {exception}") from exception
 
 
@@ -112,7 +115,9 @@ def _ensure_public_http_url(url: str) -> None:
 def _connect_public(host: str, port: int, timeout: float) -> socket.socket:
     """Connect only to numeric addresses from one fully validated DNS answer."""
 
+    check_collection_budget()
     addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    check_collection_budget()
     if not addresses:
         raise OSError("DNS returned no addresses.")
     for family, _, _, _, sockaddr in addresses:
@@ -123,17 +128,24 @@ def _connect_public(host: str, port: int, timeout: float) -> socket.socket:
 
     last_error = OSError("No public address could be reached.")
     for family, socktype, proto, _, sockaddr in addresses:
+        check_collection_budget()
         connection = None
         try:
             connection = socket.socket(family, socktype, proto)
-            connection.settimeout(timeout)
+            connection.settimeout(remaining_timeout(timeout))
             # sockaddr contains a numeric IP, never the hostname. No second DNS lookup.
             connection.connect(sockaddr)
+            check_collection_budget()
             return connection
         except OSError as exception:
             last_error = exception
             if connection is not None:
                 connection.close()
+            check_collection_budget()
+        except Exception:
+            if connection is not None:
+                connection.close()
+            raise
     raise last_error
 
 
@@ -153,7 +165,9 @@ class _PublicHTTPSConnection(_PublicHTTPConnection):
         context.set_alpn_protocols(["http/1.1"])
         super().connect()
         try:
+            self.sock.settimeout(remaining_timeout(self.timeout))
             self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            check_collection_budget()
         except Exception:
             self.close()
             raise
@@ -173,12 +187,20 @@ class _PublicHTTPRedirectHandler(HTTPRedirectHandler):
     """Reapply public-network validation before following each redirect."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        _ensure_public_http_url(newurl)
-        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if redirected is not None and req.get_method() == "HEAD":
-            # urllib otherwise turns HEAD probes into GET requests on redirects.
-            redirected.method = "HEAD"
-        return redirected
+        try:
+            check_collection_budget()
+            _ensure_public_http_url(newurl)
+            redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if redirected is not None and req.get_method() == "HEAD":
+                # urllib otherwise turns HEAD probes into GET requests on redirects.
+                redirected.method = "HEAD"
+            return redirected
+        finally:
+            # urllib otherwise drains this body with an unbounded fp.read().
+            # Connections are not reused, so closing it needs no body download.
+            if fp is not None:
+                fp.close()
+
 
 
 def open_public_http_url(request: Request, *, timeout: float):
@@ -190,6 +212,7 @@ def open_public_http_url(request: Request, *, timeout: float):
     _ensure_public_http_url(request.full_url)
     if request.has_proxy() or request._tunnel_host:
         raise ValueError("Explicit proxies are not supported for public URL fetching.")
+    timeout = remaining_timeout(timeout)
     return build_opener(
         ProxyHandler({}),
         _PublicHTTPHandler(),

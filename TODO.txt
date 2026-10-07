@@ -1,14 +1,19 @@
 GLOBAL HEALTH DATASET CATALOG - VERIFIED BACKLOG
 Last full review: 2026-09-26
-Targeted update: 2026-10-06 — recovery completed and next-work priorities agreed
+Targeted update: 2026-10-07 — total collection budget and seven review fixes implemented locally
 
 CURRENT USER-AGREED PRIORITIES (2026-10-06)
-- NEXT: TODO 12, the total collection time budget (plan point 1).
-  Implement after committing/pushing the completed backend recovery work to main.
+- TODO 12, the total collection time budget (plan point 1), is implemented locally.
+  Verification and deployment status are recorded below; not yet committed/deployed.
 - LONG-TERM DEFERRED, with no scheduled implementation: TODO 10 classifier
   evaluation (plan point 2), TODO 13 link revalidation (plan point 3), and TODO 9
   backup/restore procedures (plan point 4). Revisit only on an explicit request.
 - Frontend integration remains separate and deferred.
+- The seven confirmed review findings are corrected locally: durable worker
+  acquisition receipts (schema 11), refused LLM redirects, HTTP error-body recovery,
+  exposed retry/location response headers, bounded sitemap decompression,
+  deeply nested JSON diagnostics and shared ensemble summaries.
+  These changes are not yet committed or deployed; see docs/review-fixes-2026-10-07.md.
 These decisions override the older priority headings below.
 
 SCOPE AND STATUS
@@ -166,8 +171,16 @@ Done when: Measurements justify the index; fresh initialization, upgrade and rep
   assert a fixed query plan or a timing threshold in ordinary integration tests.
 
 TODO 12: Define and enforce a total collection budget
-Status (2026-10-06): NEXT IMPLEMENTATION, explicitly prioritized by the user.
-  Planning only so far; not included in the backend recovery implementation.
+Status (2026-10-07): Implemented locally, not committed or deployed. Migration 10
+  adds a durable collection deadline; configurable default 180 seconds. Automatic
+  retries preserve it; explicit manual cycles renew it. Shared monotonic checks
+  cap network/LLM timeouts and stop new work after expiry. Proven datasets and
+  votes survive; expiry reports an incomplete outcome. This is cooperative:
+  ongoing DNS/header reads may exceed the deadline and keep their worker slot.
+  Validation (2026-10-07): 1001 Python tests passed on isolated PostgreSQL 16;
+  9 optional Docker/proxy tests skipped. Ruff, whitespace and both Compose checks
+  passed. See docs/collection-budget.md. Production database not migrated.
+  No frontend change. Deferred tasks 9, 10 and 13 remain deferred.
 What to do: Complement existing per-request timeouts, page and byte limits with a
   total deadline and, where justified, cumulative transfer/attempt budgets.
 Where: collector/config.py, collector/main.py, collector/fetch.py,

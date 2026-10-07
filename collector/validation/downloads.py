@@ -9,11 +9,13 @@ import json
 import re
 import struct
 from collections.abc import Callable
+from contextlib import nullcontext
 from functools import partial
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
+from collector.budget import check_collection_budget, read_with_budget, remaining_timeout
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic
 from collector.extraction.distributions import guess_format
@@ -47,14 +49,16 @@ def validate_distribution(
     # Custom probes keep their existing calling convention and manage their own headers.
     if probe is None:
         probe = partial(probe_url, user_agent=user_agent)
-    head_probe = probe(distribution.url, method="HEAD", timeout=timeout, max_bytes=0)
+    head_probe = probe(
+        distribution.url, method="HEAD", timeout=remaining_timeout(timeout), max_bytes=0,
+    )
     selected_probe = head_probe
 
     if _needs_partial_get(head_probe):
         selected_probe = probe(
             distribution.url,
             method="GET",
-            timeout=timeout,
+            timeout=remaining_timeout(timeout),
             max_bytes=max_sample_bytes,
             headers={"Range": f"bytes=0-{max_sample_bytes - 1}"},
         )
@@ -120,7 +124,7 @@ def probe_url(
         with open_public_http_url(request, timeout=timeout) as response:
             # One lookahead byte distinguishes a complete body exactly at the
             # limit from a server that ignored Range. Only max_bytes are kept.
-            body = response.read(max_bytes + 1) if max_bytes > 0 else b""
+            body = read_with_budget(response, max_bytes + 1) if max_bytes > 0 else b""
             return HTTPProbe(
                 url=url,
                 final_url=response.geturl(),
@@ -130,16 +134,31 @@ def probe_url(
                 sample_truncated=len(body) > max_bytes,
             )
     except HTTPError as exception:
-        body_sample = exception.read(max_bytes) if max_bytes > 0 else b""
-        return HTTPProbe(
-            url=url,
-            final_url=exception.geturl(),
-            status_code=exception.code,
-            headers={key.lower(): value for key, value in exception.headers.items()},
-            body_sample=body_sample,
-            error=str(exception),
-        )
+        with exception if exception.fp is not None else nullcontext():
+            check_collection_budget()
+            try:
+                body_sample = (
+                    read_with_budget(exception, max_bytes)
+                    if max_bytes > 0 and exception.fp is not None else b""
+                )
+            except (TimeoutError, URLError, OSError) as read_error:
+                check_collection_budget()
+                return HTTPProbe(
+                    url=url,
+                    final_url=exception.filename or url,
+                    status_code=None,
+                    error=str(read_error),
+                )
+            return HTTPProbe(
+                url=url,
+                final_url=exception.filename or url,
+                status_code=exception.code,
+                headers={key.lower(): value for key, value in (exception.headers or {}).items()},
+                body_sample=body_sample,
+                error=str(exception),
+            )
     except (TimeoutError, URLError, OSError, ValueError) as exception:
+        check_collection_budget()
         return HTTPProbe(
             url=url,
             final_url=url,

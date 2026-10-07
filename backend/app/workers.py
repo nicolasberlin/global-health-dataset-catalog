@@ -6,8 +6,10 @@ import asyncio
 import random
 from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
-from typing import Optional, TypeVar
+from contextlib import asynccontextmanager, nullcontext
+from functools import partial
+from typing import Protocol, TypeVar
+from uuid import UUID, uuid4
 
 from psycopg import InterfaceError, OperationalError
 from psycopg.errors import DeadlockDetected, SerializationFailure
@@ -16,28 +18,33 @@ from psycopg_pool import PoolTimeout
 from collector.observability import emit_event, measure_operation
 
 WorkItem = dict[str, object]
-Claim = Callable[[], Awaitable[Optional[WorkItem]]]
 Execute = Callable[[WorkItem, ThreadPoolExecutor], Awaitable[None]]
 T = TypeVar("T")
 
 
+class Claim(Protocol):
+    async def __call__(self, *, claim_token: UUID) -> WorkItem | None: ...
+
+
 async def persist_with_retry(
     operation: Callable[[], Awaitable[T]], *, initial_delay: float = 1.0,
-    max_delay: float = 30.0,
+    max_delay: float = 30.0, log_operation: bool = True,
 ) -> T:
     """Retain the worker slot until a transient persistence failure clears.
 
     The operation must guard against a lost commit acknowledgement and stale
     attempts. Never pass collection or model execution here. Cancellation is
     deliberately allowed to propagate to startup recovery.
+    Empty-queue polling can suppress routine events; retries remain observable.
     """
-    with measure_operation("persistence_duration"):
+    with measure_operation("persistence_duration") if log_operation else nullcontext():
         delay = initial_delay
         retry_count = 0
         while True:
             try:
                 result = await operation()
-                emit_event("persistence_finished", outcome="success", retry_count=retry_count)
+                if log_operation:
+                    emit_event("persistence_finished", outcome="success", retry_count=retry_count)
                 return result
             except (OperationalError, InterfaceError, PoolTimeout,
                     SerializationFailure, DeadlockDetected) as exception:
@@ -65,7 +72,12 @@ async def _consume(
 ) -> None:
     while not stop.is_set():
         try:
-            job = await claim()
+            # Keep this token until SQL acknowledges the acquisition. A fresh
+            # token after an ambiguous commit could strand an already claimed job.
+            claim_token = uuid4()
+            job = await persist_with_retry(
+                partial(claim, claim_token=claim_token), log_operation=False,
+            )
             if job is not None:
                 # One loop owns at most one job until execution AND persistence finish.
                 await execute(job, executor)

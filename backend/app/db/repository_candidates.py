@@ -27,6 +27,7 @@ from .serialization import (
     _format_timestamp,
     _jsonb,
 )
+from .worker_claims import read_worker_claim, record_worker_claim
 
 
 async def save_repository_candidates(
@@ -228,29 +229,52 @@ async def enqueue_candidate_classification(
     return _repository_candidate_to_dict(row) if row else None
 
 
-async def claim_candidate_classification() -> dict[str, object] | None:
+async def claim_candidate_classification(
+    *, claim_token: UUID | None = None,
+) -> dict[str, object] | None:
     """Internal worker claim; ownership comes from the persisted search session."""
 
+    claim_token = claim_token or uuid4()
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
-        row = await _fetchone(
-            connection,
-            f"""
-            UPDATE repository_candidates AS candidate
-            SET classification_status = 'classifying', updated_at = NOW(),
-                retry_started_at = COALESCE(candidate.retry_started_at, NOW()),
-                next_retry_at = NULL, errors = '[]'::jsonb
-            FROM search_sessions AS session
-            WHERE candidate.id = (
-                SELECT id FROM repository_candidates
-                WHERE classification_status = 'queued'
-                  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-                ORDER BY updated_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
-            ) AND candidate.search_session_id = session.id
-              AND candidate.classification_status = 'queued'
-            RETURNING {_CANDIDATE_COLUMNS}, session.owner_id
-        """,
-        )
+        async with connection.transaction():
+            receipt = await read_worker_claim(connection, claim_token, "classification")
+            if receipt is not None:
+                row = await _fetchone(
+                    connection,
+                    f"""SELECT {_CANDIDATE_COLUMNS}, session.owner_id
+                        FROM repository_candidates AS candidate
+                        JOIN search_sessions AS session ON session.id = candidate.search_session_id
+                        WHERE candidate.id = %s AND candidate.classification_status = 'classifying'
+                          AND candidate.updated_at = %s""",
+                    (UUID(receipt["resource_id"]), receipt["claim_version"]),
+                )
+                return (
+                    {**_repository_candidate_to_dict(row), "owner_id": str(row["owner_id"])}
+                    if row else None
+                )
+            row = await _fetchone(
+                connection,
+                f"""
+                UPDATE repository_candidates AS candidate
+                SET classification_status = 'classifying', updated_at = NOW(),
+                    retry_started_at = COALESCE(candidate.retry_started_at, NOW()),
+                    next_retry_at = NULL, errors = '[]'::jsonb
+                FROM search_sessions AS session
+                WHERE candidate.id = (
+                    SELECT id FROM repository_candidates
+                    WHERE classification_status = 'queued'
+                      AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+                    ORDER BY updated_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
+                ) AND candidate.search_session_id = session.id
+                  AND candidate.classification_status = 'queued'
+                RETURNING {_CANDIDATE_COLUMNS}, session.owner_id
+            """,
+            )
+            if row is not None:
+                await record_worker_claim(
+                    connection, claim_token, "classification", row["id"], row["updated_at"],
+                )
     if row is None:
         return None
     return {**_repository_candidate_to_dict(row), "owner_id": str(row["owner_id"])}

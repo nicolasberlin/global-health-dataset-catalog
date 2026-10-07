@@ -3,7 +3,22 @@
 from app.db.connection import _require_database_pool
 
 
+async def restore_schema_ten():
+    async with _require_database_pool().connection() as connection:
+        await connection.execute("""DROP TABLE worker_claims;
+            DELETE FROM schema_migrations WHERE version >= 11""")
+
+
+async def restore_schema_nine():
+    await restore_schema_ten()
+    async with _require_database_pool().connection() as connection:
+        await connection.execute("""ALTER TABLE collection_jobs
+            DROP COLUMN collection_deadline_at;
+            DELETE FROM schema_migrations WHERE version >= 10""")
+
+
 async def restore_schema_eight():
+    await restore_schema_nine()
     async with _require_database_pool().connection() as connection:
         for table in ("repository_candidates", "collection_jobs"):
             await connection.execute(f"""ALTER TABLE {table}

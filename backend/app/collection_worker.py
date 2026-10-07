@@ -18,7 +18,9 @@ from app.db.task_retries import schedule_llm_retry
 from app.retry_policy import TRANSIENT
 from app.vote_store import PostgresVoteStore
 from app.workers import persist_with_retry, persisted_workers
+from collector.budget import collection_budget
 from collector.classification.factory import build_default_page_classifier
+from collector.config import configured_collection_budget_seconds
 from collector.diagnostics import Diagnostic, exception_diagnostics
 from collector.main import collect_repository_candidate_with_report, collect_source_with_report
 from collector.observability import emit_event, measure_operation, operation_context
@@ -38,19 +40,25 @@ async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecut
                 if job["kind"] == "repository_candidate"
                 else collect_source_with_report
             )
-            result = await asyncio.get_running_loop().run_in_executor(
-                executor,
-                copy_context().run,
-                partial(
-                    collect,
-                    classifier=build_default_page_classifier(
-                        vote_store=PostgresVoteStore(
-                            asyncio.get_running_loop(), job_id=job_id, expected_updated_at=version
+            with collection_budget(
+                seconds=configured_collection_budget_seconds(),
+                deadline_at=job.get("collection_deadline_at"),
+            ):
+                result = await asyncio.get_running_loop().run_in_executor(
+                    executor,
+                    copy_context().run,
+                    partial(
+                        collect,
+                        classifier=build_default_page_classifier(
+                            vote_store=PostgresVoteStore(
+                                asyncio.get_running_loop(),
+                                job_id=job_id,
+                                expected_updated_at=version,
+                            ),
                         ),
                     ),
-                ),
-                str(job["source_url"]),
-            )
+                    str(job["source_url"]),
+                )
             saving = True
             await persist_with_retry(
                 lambda: complete_collection_job(

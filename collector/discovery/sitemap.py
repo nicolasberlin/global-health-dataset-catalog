@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import gzip
+import io
 import re
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.request import Request
 
+from collector.budget import check_collection_budget, read_with_budget
 from collector.config import DEFAULT_CONFIG
 from collector.fetch import open_public_http_url
 from collector.url_utils import canonicalize_url, same_domain
@@ -237,15 +240,21 @@ def fetch_text_url(
     try:
         with open_public_http_url(request, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type", "")
-            body = response.read(max_bytes + 1)
+            body = read_with_budget(response, max_bytes + 1)
             if len(body) > max_bytes:
                 raise ValueError("Sitemap response is too large for discovery.")
             if urlsplit(response.geturl()).path.endswith(".gz") or "gzip" in content_type:
-                body = gzip.decompress(body)
+                with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:
+                    body = read_with_budget(stream, max_bytes + 1)
+                if len(body) > max_bytes:
+                    raise ValueError("Decompressed sitemap is too large for discovery.")
             return _decode_text(body, content_type)
     except HTTPError as exception:
-        raise ValueError(f"Sitemap URL returned HTTP {exception.code}.") from exception
-    except (TimeoutError, URLError, OSError) as exception:
+        with exception if exception.fp is not None else nullcontext():
+            check_collection_budget()
+            raise ValueError(f"Sitemap URL returned HTTP {exception.code}.") from exception
+    except (TimeoutError, URLError, OSError, EOFError) as exception:
+        check_collection_budget()
         raise ValueError(f"Could not fetch sitemap URL: {exception}") from exception
 
 

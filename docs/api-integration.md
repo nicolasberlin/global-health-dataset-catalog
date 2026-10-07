@@ -25,7 +25,7 @@ Use **one API instance with one Uvicorn process**. Workers run inside that proce
 `SEARCH_MAX_CONCURRENCY` (default 1) controls discovery concurrency;
 `SEARCH_MAX_ACTIVE` (default 100) caps queued and running asynchronous discoveries.
 Classification and collection retain their separate worker and quota settings.
-Schema migrations through version 9 run at startup and preserve historical records and votes.
+Schema migrations through version 10 run at startup and preserve historical records and votes.
 
 For remote access, put the API behind your HTTPS proxy and configure its upstream
 to this port. `API_BIND_ADDRESS` defaults to loopback; change it only to the bind
@@ -46,7 +46,9 @@ The dataset catalogue remains publicly readable, as in the existing API.
 
 Set `API_CORS_ORIGINS` to a comma-separated list of exact browser origins, for
 example `https://catalog.example.org,http://localhost:3000`. An empty value disables
-cross-origin browser access. CORS is not needed for server-to-server calls. Keep a
+cross-origin browser access. Allowed origins can read the `Retry-After` and
+`Location` response headers for retry scheduling and accepted-resource URLs.
+CORS is not needed for server-to-server calls. Keep a
 shared integration token on your application server; for a public browser client,
 use the existing visitor-session mode described in [deployment](DEPLOYMENT.md).
 Visitor sessions also own durable searches, but an expired or lost session cannot
@@ -183,6 +185,12 @@ positive and negative votes. While waiting, `execution_status=waiting_retry`,
 `outcome=null`, and `polling_required=true`; diagnostics include `retry_at`,
 `attempt`, and `max_attempts`. Both explicit retry commands honor provider deadlines
 and can return HTTP 429 with `Retry-After`. See [LLM recovery](llm-recovery.md).
+Collection jobs also have a total execution budget (default 180 seconds) starting
+at their first execution, including automatic retry waits. Expiry produces an
+incomplete outcome with `collection_budget_exhausted`; already saved dataset IDs
+remain accessible. The existing owned job retry command starts a new budget only
+for a newly admitted manual retry, never for an idempotent replay. See
+[collection budget](collection-budget.md). No new endpoint or public field is required.
 The existing frontend remains unchanged; client integration is a separate step.
 
 ## Restart and compatibility

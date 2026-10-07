@@ -18,6 +18,7 @@ Outcome = Literal["results", "empty", "incomplete"]
 Recovery = Literal["automatic", "manual", "configuration_required", "none"]
 
 _MESSAGES = {
+    "collection_budget_exhausted": "The collection time budget was exhausted.",
     "llm_retry_exhausted": "The automatic model retry budget was exhausted.",
     "llm_timeout": "The model request timed out.",
     "llm_network_error": "The model could not be reached.",

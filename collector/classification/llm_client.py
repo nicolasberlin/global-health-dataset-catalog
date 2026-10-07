@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from collector.budget import check_collection_budget, read_with_budget, remaining_timeout
 from collector.classification.page import PageClassificationError
 from collector.diagnostics import retry_after
 from collector.observability import measure_operation
@@ -17,6 +19,13 @@ from collector.observability import measure_operation
 RequestBodyBuilder = Callable[[dict[str, object], str], dict[str, object]]
 ResponseTextExtractor = Callable[[object], str]
 MAX_LLM_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+class _RejectLLMRedirects(HTTPRedirectHandler):
+    """Require a direct provider endpoint; never forward credentials on redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def extract_chat_completions_message_text(response_payload: object) -> str:
@@ -74,13 +83,13 @@ class HTTPJSONLLMClient:
         api_key: str | None = None,
         model: str | None = None,
         timeout_seconds: float = 20.0,
-        request: Callable[..., object] = urlopen,
+        request: Callable[..., object] | None = None,
     ) -> None:
         self._provider = provider
         self._api_key = api_key
         self._model = model
         self._timeout_seconds = timeout_seconds
-        self._request = request
+        self._request = request if request is not None else build_opener(_RejectLLMRedirects()).open
 
     def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
         return self.classify_request(self.prepare_request(payload))
@@ -104,6 +113,7 @@ class HTTPJSONLLMClient:
             return self._classify_request(request_body, measurement)
 
     def _classify_request(self, request_body, measurement):
+        check_collection_budget()
         api_key = self._api_key or os.getenv(self._provider.api_key_env_var, "")
         if not api_key:
             measurement["outcome"] = "configuration_error"
@@ -127,8 +137,10 @@ class HTTPJSONLLMClient:
 
         measurement["outcome"] = "failed"
         try:
-            with self._request(request, timeout=self._timeout_seconds) as response:
-                payload_bytes = response.read(MAX_LLM_RESPONSE_BYTES + 1)
+            with self._request(
+                request, timeout=remaining_timeout(self._timeout_seconds),
+            ) as response:
+                payload_bytes = read_with_budget(response, MAX_LLM_RESPONSE_BYTES + 1)
                 measurement["outcome"] = "invalid_response"
                 if len(payload_bytes) > MAX_LLM_RESPONSE_BYTES:
                     raise PageClassificationError(
@@ -138,25 +150,31 @@ class HTTPJSONLLMClient:
                     )
                 response_payload = json.loads(payload_bytes.decode("utf-8"))
         except HTTPError as exception:
-            measurement["outcome"] = "http_error"
-            code = {
-                400: "llm_configuration_error", 401: "llm_configuration_error",
-                403: "llm_configuration_error", 404: "llm_configuration_error",
-                422: "llm_configuration_error", 429: "llm_rate_limited",
-                500: "llm_unavailable", 502: "llm_unavailable",
-                503: "llm_unavailable", 504: "llm_unavailable",
-            }.get(exception.code, "processing_failed")
-            raise PageClassificationError(
-                f"{self._provider.name} classification request failed with HTTP {exception.code}.",
-                code=code,
-                recovery="configuration_required"
-                if code == "llm_configuration_error"
-                else "manual",
-                retry_at=retry_after(
-                    exception.headers.get("Retry-After") if exception.headers else None
-                ),
-            ) from exception
+            with exception if exception.fp is not None else nullcontext():
+                check_collection_budget()
+                measurement["outcome"] = "http_error"
+                code = {
+                    400: "llm_configuration_error", 401: "llm_configuration_error",
+                    403: "llm_configuration_error", 404: "llm_configuration_error",
+                    422: "llm_configuration_error", 429: "llm_rate_limited",
+                    500: "llm_unavailable", 502: "llm_unavailable",
+                    503: "llm_unavailable", 504: "llm_unavailable",
+                }.get(exception.code, "processing_failed")
+                if 300 <= exception.code < 400:
+                    code = "llm_configuration_error"
+                raise PageClassificationError(
+                    f"{self._provider.name} classification request failed "
+                    f"with HTTP {exception.code}.",
+                    code=code,
+                    recovery="configuration_required"
+                    if code == "llm_configuration_error"
+                    else "manual",
+                    retry_at=retry_after(
+                        exception.headers.get("Retry-After") if exception.headers else None
+                    ),
+                ) from exception
         except (TimeoutError, URLError, OSError) as exception:
+            check_collection_budget()
             measurement["outcome"] = (
                 "timeout"
                 if isinstance(exception, TimeoutError)
@@ -167,7 +185,7 @@ class HTTPJSONLLMClient:
                 f"{self._provider.name} classification request failed.",
                 code="llm_timeout" if measurement["outcome"] == "timeout" else "llm_network_error",
             ) from exception
-        except (json.JSONDecodeError, UnicodeDecodeError) as exception:
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exception:
             raise PageClassificationError(
                 f"{self._provider.name} classification response was not valid JSON.",
                 code="llm_invalid_response",
@@ -179,7 +197,7 @@ class HTTPJSONLLMClient:
         # separate JSON classification document.
         try:
             raw_classification = json.loads(output_text)
-        except json.JSONDecodeError as exception:
+        except (json.JSONDecodeError, RecursionError) as exception:
             raise PageClassificationError(
                 f"{self._provider.name} classification output was not valid JSON.",
                 code="llm_invalid_response",

@@ -89,7 +89,7 @@ and new API instances during a deployment: startup recovery would mark the other
 instance's running jobs as interrupted. Stop the old instance before starting
 its replacement. Worker leases and multi-instance recovery are not implemented.
 
-`collection_jobs` is the persistent queue; no additional broker or table is
+`collection_jobs` is the persistent collection queue; no additional broker is
 required. After startup recovery, backend consumers poll committed `pending`
 jobs. `COLLECTION_MAX_CONCURRENCY` (default `2`) bounds concurrent collection
 runs inside this single process; it is not the number of API processes. Each
@@ -103,7 +103,18 @@ connection, pool, serialization, and deadlock failures are retryable; other SQL
 errors are not blindly retried. Finalization is guarded by the claim's exact
 `updated_at`, which progress writes leave unchanged. A lost commit acknowledgement
 cannot duplicate finalization or overwrite a newer explicitly retried attempt.
-This uses existing columns and requires no migration or API contract change.
+This finalization guard uses existing columns without an API contract change.
+
+Acquisition also retries transient SQL failures, using one internal UUID per
+consumer acquisition. Schema migration 10 → 11 adds `worker_claims`: the task
+transition and its receipt commit together. After a lost commit acknowledgement,
+the same token retrieves the same running attempt without changing its deadline
+or spending another admission. An obsolete receipt cannot acquire another task.
+This applies to discovery, repository classification and collection. Empty polls
+do not create receipts; one small row is retained per acquired attempt. These
+receipts have no expiry yet, like API command receipts. They are internal and
+do not replace the single-process recovery policy or guarantee exactly-once
+external calls after a process crash.
 
 - Pending jobs survive restart and are picked up automatically.
 - Jobs left running by an interrupted process become errors at the next startup;
@@ -446,3 +457,17 @@ window for starting automatic retries. Compose forwards `LLM_MAX_ATTEMPTS`,
 `LLM_INVALID_MAX_ATTEMPTS` and `LLM_RETRY_WINDOW_SECONDS`. Set both attempt limits
 to 1 to disable automatic model retries. Keep one API instance/process. See
 [LLM recovery](llm-recovery.md) for deadline, persistence and restart behavior.
+
+### Collection execution budget
+
+`COLLECTION_MAX_DURATION_SECONDS` (default 180, allowed 1–3600 seconds) sets the
+execution window of each collection cycle. Both Compose deployments forward it.
+Schema migration 9 → 10 adds a nullable `collection_deadline_at`, preserving
+historical records. Initial queue time does not count. Automatic retries retain
+the first execution's deadline; an admitted manual retry receives a new window.
+
+Expiry returns `collection_budget_exhausted` and an incomplete outcome, retaining
+validated datasets and committed model votes. It does not cancel persistence or
+release a worker while blocking work is still running. DNS, HTTP header reads and
+other in-flight blocking operations can exceed the window; this is a cooperative
+limit. See [collection budget](collection-budget.md) for guarantees and tests.
