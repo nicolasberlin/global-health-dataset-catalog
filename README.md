@@ -278,6 +278,7 @@ Start with:
 Detailed documentation:
 
 - [Collector Pipeline](docs/collector-pipeline-diagram.md)
+- [Search Diagnostics — trace and report templates (French)](docs/diagnostic-recherche.md)
 - [Classification Architecture](docs/classification-architecture.md)
 - [Database Schema](docs/database-schema-diagram.md)
 - [Secure Deployment](docs/DEPLOYMENT.md)

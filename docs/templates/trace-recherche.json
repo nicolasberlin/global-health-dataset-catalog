@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "document_type": "search_diagnostic_trace",
+  "is_template": true,
+  "export": {
+    "created_at": null,
+    "method": "manual",
+    "coverage": "unknown",
+    "missing_evidence": [],
+    "redactions": []
+  },
+  "context": {
+    "search_id": null,
+    "query": null,
+    "attempt": null,
+    "environment": null,
+    "frontend_revision": null,
+    "backend_revision": null,
+    "working_tree_dirty": null,
+    "database_schema_version": null,
+    "started_at": null,
+    "finished_at": null,
+    "display_timezone": "Europe/Zurich",
+    "models": [],
+    "parameters": {},
+    "expected_results": [],
+    "expectations_defined_before_run": null
+  },
+  "summary": {
+    "execution_status": null,
+    "outcome": null,
+    "local_result_count": null,
+    "discovered_candidate_count": null,
+    "accepted_candidate_count": null,
+    "rejected_candidate_count": null,
+    "classification_error_count": null,
+    "active_candidate_count": null,
+    "saved_dataset_ids": [],
+    "saved_dataset_count": null,
+    "duration_ms": null,
+    "errors": [],
+    "warnings": [],
+    "evidence_refs": []
+  },
+  "stages": {
+    "local_search": { "status": "unknown", "evidence_refs": [] },
+    "discovery": { "status": "unknown", "evidence_refs": [] },
+    "classification": { "status": "unknown", "evidence_refs": [] },
+    "collection": { "status": "unknown", "evidence_refs": [] },
+    "validation": { "status": "unknown", "evidence_refs": [] },
+    "persistence": { "status": "unknown", "evidence_refs": [] }
+  },
+  "sources": [],
+  "candidates": [],
+  "events": [],
+  "tracking": {
+    "status": "unknown",
+    "last_success_at": null,
+    "consecutive_failures": null,
+    "max_consecutive_failures": null,
+    "request_timeout_ms": null,
+    "stop_reason": null,
+    "evidence_refs": []
+  },
+  "evidence": [],
+  "findings": [],
+  "proposed_actions": []
+}
