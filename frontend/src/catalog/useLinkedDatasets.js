@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 
 import { isAbortError, requestJson } from '../api/client.js';
 
-export function useLinkedDatasets(candidates) {
+export function useLinkedDatasets(candidates, localIds = []) {
     const [datasets, setDatasets] = useState({});
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
     const [retry, setRetry] = useState(0);
-    const ids = [...new Set(candidates.flatMap(candidate =>
+    const ids = [...new Set([...localIds, ...candidates.flatMap(candidate =>
         candidate.item.automatic_collection?.dataset_ids ?? [],
-    ))].sort((a, b) => a - b);
+    )])];
     const signature = JSON.stringify({
         ids,
         revisions: candidates.map(candidate => candidate.item.automatic_collection?.job?.finished_at ?? ''),
@@ -18,6 +19,7 @@ export function useLinkedDatasets(candidates) {
         const controller = new AbortController();
         const requested = JSON.parse(signature).ids;
         setError('');
+        setLoading(requested.length > 0);
         if (!requested.length) {
             setDatasets({});
             return () => controller.abort();
@@ -37,16 +39,21 @@ export function useLinkedDatasets(candidates) {
                         result[item.id] = item;
                     }
                 }
-                if (!controller.signal.aborted) setDatasets(result);
+                if (!controller.signal.aborted) {
+                    setDatasets(result);
+                    if (requested.some(id => !result[id])) setError('Some saved datasets are no longer available.');
+                }
             } catch (exception) {
                 if (!controller.signal.aborted && !isAbortError(exception)) {
                     setError(exception.message || 'Unable to load saved dataset details.');
                 }
+            } finally {
+                if (!controller.signal.aborted) setLoading(false);
             }
         }
         load();
         return () => controller.abort();
     }, [signature, retry]);
 
-    return { datasets, error, retry: () => setRetry(value => value + 1) };
+    return { datasets, error, loading, retry: () => setRetry(value => value + 1) };
 }

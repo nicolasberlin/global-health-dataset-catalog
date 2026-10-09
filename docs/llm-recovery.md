@@ -102,7 +102,8 @@ manual recovery, ownership, migration and preservation of saved results. Provide
 are simulated; no external LLM calls are made. Existing asynchronous pipeline tests
 also exercise completion after the submitting HTTP client disconnects.
 
-Frontend integration and production rollout are separate from these backend changes.
+Frontend recovery integration was added on 2026-10-08; see
+[frontend integration](frontend-async-integration.md). Production rollout remains separate.
 
 Local verification on 2026-10-06: full Python suite **948 passed, 9 skipped**
 (optional Docker egress/Traefik tests). After adding three final expiry/mixed-error

@@ -1,3 +1,4 @@
+import { searchApi } from './test/searchApi.js';
 import { act, cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,9 +20,9 @@ function jsonResponse(payload, { ok = true, status = 200 } = {}) {
 }
 
 function mockApi(searchHandler) {
-    global.fetch = vi.fn((input, options = {}) => {
+    global.fetch = vi.fn(searchApi((input, options = {}) => {
         const url = String(input);
-        if (url.endsWith('/repository-analyses/latest')) return Promise.resolve(jsonResponse({ detail: 'None' }, { ok: false, status: 404 }));
+        if (url.endsWith('/searches/latest')) return Promise.resolve(jsonResponse({ detail: 'None' }, { ok: false, status: 404 }));
         if (url.endsWith('/sources')) {
             return Promise.resolve(jsonResponse({ items: [] }));
         }
@@ -29,7 +30,7 @@ function mockApi(searchHandler) {
             return Promise.resolve(jsonResponse({ items: [] }));
         }
         return searchHandler(url, options);
-    });
+    }));
 }
 
 function submitSearch(query = 'malaria mortality') {
@@ -84,7 +85,7 @@ describe('database-first dataset search', () => {
 
     it('shows local results immediately without classification controls or calls', async () => {
         mockApi((url) => {
-            if (url.endsWith('/collector/search-datasets')) {
+            if (url.endsWith('/collector/searches')) {
                 return Promise.resolve(
                     jsonResponse({
                         search_id: SEARCH_ID,
@@ -146,7 +147,7 @@ describe('database-first dataset search', () => {
             metadata: {},
         };
         mockApi((url) => {
-            if (url.endsWith('/collector/search-datasets')) {
+            if (url.endsWith('/collector/searches')) {
                 return Promise.resolve(
                     jsonResponse({
                         search_id: SEARCH_ID,
@@ -235,7 +236,7 @@ describe('database-first dataset search', () => {
         };
         let polls = 0;
         mockApi((url) => {
-            if (url.endsWith('/collector/search-datasets')) {
+            if (url.endsWith('/collector/searches')) {
                 return Promise.resolve(
                     jsonResponse({
                         search_id: SEARCH_ID,
@@ -316,7 +317,7 @@ describe('database-first dataset search', () => {
             metadata: {},
         };
         mockApi((url) => {
-            if (url.endsWith('/collector/search-datasets')) {
+            if (url.endsWith('/collector/searches')) {
                 return Promise.resolve(
                     jsonResponse({
                         search_id: SEARCH_ID,
@@ -367,7 +368,7 @@ describe('database-first dataset search', () => {
             resolveSearch = resolve;
         });
         mockApi((url) => {
-            if (url.endsWith('/collector/search-datasets')) {
+            if (url.endsWith('/collector/searches')) {
                 return searchResponse;
             }
             throw new Error(`Unexpected request: ${url}`);
@@ -396,7 +397,7 @@ describe('database-first dataset search', () => {
 
     it('shows API search errors', async () => {
         mockApi((url) => {
-            if (url.endsWith('/collector/search-datasets')) {
+            if (url.endsWith('/collector/searches')) {
                 return Promise.resolve(
                     jsonResponse(
                         { detail: 'Database search failed.' },
@@ -410,7 +411,7 @@ describe('database-first dataset search', () => {
 
         submitSearch();
 
-        expect(await screen.findByText('Search failed')).toBeInTheDocument();
+        expect(await screen.findByText('Search request or tracking unavailable')).toBeInTheDocument();
         expect(screen.getByText('Database search failed.')).toBeInTheDocument();
     });
 });
@@ -428,7 +429,7 @@ describe('protected API access', () => {
         submitSearch();
         await waitFor(() => {
             const call = global.fetch.mock.calls.find(([url]) =>
-                String(url).endsWith('/collector/search-datasets'));
+                String(url).endsWith('/collector/searches'));
             expect(call).toBeDefined();
             expect(call[1]?.headers?.Authorization).toBeUndefined();
         });
@@ -448,7 +449,7 @@ describe('protected API access', () => {
         ).toBeInTheDocument();
         expect(
             global.fetch.mock.calls.some(([url]) =>
-                String(url).endsWith('/collector/search-datasets'),
+                String(url).endsWith('/collector/searches'),
             ),
         ).toBe(false);
     });
@@ -456,7 +457,7 @@ describe('protected API access', () => {
     it('uses an existing session token without displaying token controls', async () => {
         window.sessionStorage.setItem('global-health-api-token', 'runtime-test-token');
         mockApi((url) => {
-            if (url.endsWith('/collector/search-datasets')) {
+            if (url.endsWith('/collector/searches')) {
                 return Promise.resolve(
                     jsonResponse({
                         search_id: SEARCH_ID,
@@ -478,7 +479,7 @@ describe('protected API access', () => {
             expect(
                 global.fetch.mock.calls.some(
                     ([url, options]) =>
-                        String(url).endsWith('/collector/search-datasets') &&
+                        String(url).endsWith('/collector/searches') &&
                         options?.headers?.Authorization === 'Bearer runtime-test-token',
                 ),
             ).toBe(true);

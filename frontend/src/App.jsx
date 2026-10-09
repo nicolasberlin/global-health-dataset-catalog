@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { sendCommand } from './api/commands.js';
 import { isAbortError, requestJson } from './api/client.js';
 import { useApiSession } from './auth/useApiSession.js';
 import { useDatasetCatalog } from './catalog/useDatasetCatalog.js';
@@ -7,7 +8,7 @@ import CollectedDatasetsSection from './components/CollectedDatasetsSection.jsx'
 import { getVoteAgreement } from './components/RepositoryAcceptedCard.jsx';
 import RepositorySearchSection from './components/RepositorySearchSection.jsx';
 
-import { useSearchProgress } from './jobs/useSearchProgress.js';
+import { useSearchProgress, validateSearchProgress } from './jobs/useSearchProgress.js';
 
 export default function App() {
     const [activeView, setActiveView] = useState('search');
@@ -17,9 +18,17 @@ export default function App() {
     const catalog = useDatasetCatalog();
     const { loadCollectedDatasets } = catalog;
     const { session, status: sessionStatus, error: sessionError, reconnect } = useApiSession();
-    const { followSearch, analyze, retryCollection } = useSearchProgress(session,
-        (searchId, items, requestSession, trackingError) => {
+    const { followSearch, pauseSearch, stopTracking, resumeTracking, analyze, retryCollection } = useSearchProgress(session,
+        (searchId, items, requestSession, trackingError, snapshot, tracking) => {
             if (!requestSession.isCurrent() || repositorySearchIdRef.current !== searchId) return;
+            setTrackingStopped(tracking === 'stopped');
+            if (snapshot) {
+                if (snapshot.attempt > (searchSnapshot?.attempt ?? 0)) setCommandError('');
+                setSearchSnapshot(snapshot);
+                setRepositoryOrigin(snapshot.origin);
+                setRepositoryWarnings(snapshot.warnings ?? []);
+            }
+            setRepositoryError(trackingError ? `Progress temporarily unavailable: ${trackingError}` : '');
             setRepositoryCandidates(items.map(item => ({
                 id: item.candidate_id, item, status: item.classification_status,
                 error: item.classification_error ?? '',
@@ -29,10 +38,13 @@ export default function App() {
     const [repositoryQuery, setRepositoryQuery] = useState('');
     const [repositoryResultQuery, setRepositoryResultQuery] = useState('');
     const [repositoryOrigin, setRepositoryOrigin] = useState(null);
-    const [localRepositoryResults, setLocalRepositoryResults] = useState([]);
+    const [searchSnapshot, setSearchSnapshot] = useState(null);
+    const [trackingStopped, setTrackingStopped] = useState(false);
     const [repositoryCandidates, setRepositoryCandidates] = useState([]);
     const [repositoryWarnings, setRepositoryWarnings] = useState([]);
     const [repositoryError, setRepositoryError] = useState('');
+    const [commandError, setCommandError] = useState('');
+    const [searchRetryAt, setSearchRetryAt] = useState(0);
     const [repositorySearching, setRepositorySearching] = useState(false);
     const [repositoryHasSearched, setRepositoryHasSearched] = useState(false);
     const [agreementFilter, setAgreementFilter] = useState('all');
@@ -47,10 +59,13 @@ export default function App() {
         repositorySearchAbortRef.current?.abort();
         repositorySearchIdRef.current = null;
         setRepositoryCandidates([]);
-        setLocalRepositoryResults([]);
+        setSearchSnapshot(null);
+        setTrackingStopped(false);
         setRepositoryHasSearched(false);
         setRepositorySearching(false);
         setRepositoryError('');
+        setCommandError('');
+        setSearchRetryAt(0);
         setRepositoryWarnings([]);
     }, [session, sessionStatus]);
 
@@ -63,26 +78,30 @@ export default function App() {
         repositorySearchAbortRef.current?.abort();
         repositorySearchAbortRef.current = null;
         try {
-            const data = await requestJson('/collector/repository-analyses/latest', { session: requestSession });
+            const data = await requestJson('/collector/searches/latest', { session: requestSession });
             if (!requestSession.isCurrent() || repositorySearchRunRef.current !== runId) return;
             if (typeof data?.search_id !== 'string' || typeof data.query !== 'string' ||
                 !Array.isArray(data.items) || data.items.some(item => item.search_id !== data.search_id ||
                     typeof item.candidate_id !== 'string')) throw new Error('The saved analysis is incomplete.');
+            validateSearchProgress(data, data.search_id);
+            stopTracking();
             repositorySearchIdRef.current = data.search_id;
-            setRepositoryOrigin('online');
+            setRepositoryOrigin(data.origin);
             setRepositoryHasSearched(true);
             setRepositoryQuery(current => manual || !current ? data.query : current);
             setRepositorySearching(false);
             setRepositoryWarnings([]);
-            setLocalRepositoryResults([]);
+            setSearchSnapshot(data);
             setAgreementFilter('all');
             setRepositoryResultQuery(data.query);
             setRepositoryError('');
+            setCommandError('');
+            setSearchRetryAt(0);
             setRepositoryCandidates(data.items.map(item => ({
                 id: item.candidate_id, item: item,
                 status: item.classification_status, error: item.classification_error ?? '',
             })));
-            followSearch(data.search_id, data.items, requestSession);
+            followSearch(data.search_id, data.items, requestSession, data);
         } catch (error) {
             if (!isAbortError(error) && requestSession.isCurrent() &&
                 repositorySearchRunRef.current === runId && (manual || error.status !== 404)) {
@@ -114,6 +133,8 @@ export default function App() {
 
         const requestSession = session;
         const runId = repositorySearchRunRef.current + 1;
+        stopTracking();
+        setTrackingStopped(false);
         repositorySearchAbortRef.current?.abort();
         const abortController = new AbortController();
         repositorySearchRunRef.current = runId;
@@ -123,67 +144,29 @@ export default function App() {
         setRepositoryHasSearched(true);
         setRepositoryResultQuery(query);
         setRepositoryOrigin(null);
-        setLocalRepositoryResults([]);
+        setSearchSnapshot(null);
         setRepositoryCandidates([]);
         setRepositoryWarnings([]);
         setRepositoryError('');
+        setCommandError('');
+        setSearchRetryAt(0);
 
         try {
-            const responsePayload = await requestJson('/collector/search-datasets', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query }),
-                signal: abortController.signal,
-                session: requestSession,
+            const responsePayload = await sendCommand('/collector/searches', {
+                body: { query }, signal: abortController.signal, session: requestSession,
+                validate: data => {
+                    if (typeof data?.search_id !== 'string' || !Number.isInteger(data.attempt)) {
+                        throw new Error('The search response is incomplete. Retry the same request.');
+                    }
+                },
             });
-
             if (!requestSession.isCurrent() || repositorySearchRunRef.current !== runId) return;
-
-            if (!['database', 'online'].includes(responsePayload?.origin)) {
-                throw new Error('The search response is incomplete.');
-            }
-            if (typeof responsePayload?.search_id !== 'string') {
-                throw new Error('The search response is incomplete.');
-            }
-
             const searchId = responsePayload.search_id;
             repositorySearchIdRef.current = searchId;
-
-            setRepositoryOrigin(responsePayload.origin);
-            if (responsePayload.origin === 'database') {
-                setLocalRepositoryResults(
-                    Array.isArray(responsePayload.items) ? responsePayload.items : [],
-                );
-                setRepositoryWarnings([]);
-                return;
-            }
-
-            const onlineItems = Array.isArray(responsePayload.items)
-                ? responsePayload.items
-                : [];
-            if (
-                onlineItems.some(
-                    (item) =>
-                        typeof item?.candidate_id !== 'string' ||
-                        item.search_id !== searchId,
-                )
-            ) {
-                throw new Error('The search response is incomplete.');
-            }
-
-            const candidates = onlineItems.map((item) => ({
-                id: item.candidate_id,
-                item: item,
-                status: item.classification_status ?? 'pending',
-                error: item.classification_error ?? '',
-            }));
-
-            setRepositoryCandidates(candidates);
-            setRepositoryWarnings(
-                Array.isArray(responsePayload?.warnings) ? responsePayload.warnings : [],
-            );
-
-            followSearch(searchId, onlineItems, requestSession);
+            const initial = { ...responsePayload, query, items: [], origin: null,
+                dataset_ids: [], local_dataset_ids: [], outcome: null, polling_required: true };
+            setSearchSnapshot(initial);
+            followSearch(searchId, [], requestSession, initial);
         } catch (exception) {
             if (isAbortError(exception) || abortController.signal.aborted) {
                 return;
@@ -193,7 +176,7 @@ export default function App() {
                 return;
             }
 
-            setRepositoryError(
+            setCommandError(
                 exception instanceof Error ? exception.message : 'Search error.',
             );
         } finally {
@@ -203,6 +186,31 @@ export default function App() {
 
             if (repositorySearchAbortRef.current === abortController) {
                 repositorySearchAbortRef.current = null;
+            }
+        }
+    }
+
+    async function retrySearch() {
+        if (!searchSnapshot || repositorySearching) return;
+        const requestSession = session;
+        const searchId = searchSnapshot.search_id;
+        const resume = pauseSearch(searchId);
+        setRepositorySearching(true);
+        setRepositoryError('');
+        setCommandError('');
+        setSearchRetryAt(0);
+        try {
+            await sendCommand(`/collector/searches/${searchId}/retry`, { session: requestSession });
+        } catch (error) {
+            if (requestSession.isCurrent() && repositorySearchIdRef.current === searchId) {
+                setCommandError(error.message);
+                setSearchRetryAt(error.retryAt ?? 0);
+            }
+        } finally {
+            resume();
+            if (requestSession.isCurrent() && repositorySearchIdRef.current === searchId) {
+                setRepositorySearching(false);
+                followSearch(searchId, searchSnapshot.items, requestSession, searchSnapshot);
             }
         }
     }
@@ -257,7 +265,7 @@ export default function App() {
     );
 
     const repositoryAnalysisInProgress =
-        repositorySearching || repositoryCandidates.some(candidate => candidate.requesting) ||
+        repositorySearching || Boolean(searchSnapshot?.polling_required) || repositoryCandidates.some(candidate => candidate.requesting) ||
         repositoryStatusCounts.queued > 0 ||
         repositoryStatusCounts.classifying > 0;
 
@@ -299,7 +307,8 @@ export default function App() {
                 repositoryAnalysisInProgress={repositoryAnalysisInProgress}
                 repositoryCandidates={repositoryCandidates}
                 repositoryClassificationErrors={repositoryClassificationErrors}
-                repositoryError={repositoryError}
+                repositoryError={commandError || repositoryError}
+                searchRetryAt={searchRetryAt}
                 repositoryHasSearched={repositoryHasSearched}
                 repositoryOrigin={repositoryOrigin}
                 repositoryQuery={repositoryQuery}
@@ -307,7 +316,10 @@ export default function App() {
                 repositorySearching={repositorySearching}
                 repositoryStatusCounts={repositoryStatusCounts}
                 repositoryWarnings={repositoryWarnings}
-                localRepositoryResults={localRepositoryResults}
+                searchSnapshot={searchSnapshot}
+                trackingStopped={trackingStopped}
+                resumeTracking={() => resumeTracking(repositorySearchIdRef.current)}
+                retrySearch={retrySearch}
                 searchRepositories={searchRepositories}
                 setAgreementFilter={setAgreementFilter}
                 setRepositoryQuery={setRepositoryQuery}

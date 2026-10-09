@@ -1,3 +1,4 @@
+import { snapshot } from '../test/searchApi.js';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -5,7 +6,7 @@ import { useSearchProgress } from './useSearchProgress.js';
 const item = (search = 'a', id = 'one') => ({ search_id: search, candidate_id: id, classification_status: 'queued' });
 const done = value => ({ ...value, classification_status: 'rejected', classification: { accepted: false } });
 const reply = (items, polling_required = true) => ({ ok: true, status: 200,
-    json: async () => ({ search_id: items[0]?.search_id ?? 'a', items, polling_required }) });
+    json: async () => snapshot({ search_id: items[0]?.search_id ?? 'a', items, polling_required }) });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; };
 const tick = async (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 function session() {
@@ -36,7 +37,7 @@ it('does not overlap slow requests or publish into a replacement session', async
     const late = deferred(); fetch.mockReturnValue(late.promise);
     const { result, owner, update, rerender } = setup();
     act(() => result.current.followSearch('a', [item()], owner));
-    await tick(2000); await tick(20000); expect(fetch).toHaveBeenCalledTimes(1);
+    await tick(2000); await tick(10000); expect(fetch).toHaveBeenCalledTimes(1);
     const signal = fetch.mock.calls[0][1].signal;
     rerender({ current: session() }); expect(signal.aborted).toBe(true);
     update.mockClear();
@@ -131,4 +132,84 @@ it('notifies once when two searches share a saved job and restores stopped searc
     act(() => result.current.followSearch('a', [completed('a')], owner));
     await tick(); expect(fetch).toHaveBeenCalledTimes(1);
     await tick(10000); expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('does not publish a pre-retry snapshot and resumes the paused search only once', async () => {
+    const old = deferred();
+    const { result, owner, update } = setup();
+    fetch.mockReturnValueOnce(old.promise).mockResolvedValue(reply([done(item())], false));
+    act(() => result.current.followSearch('a', [item()], owner));
+    await tick(2000);
+    let resume;
+    act(() => { resume = result.current.pauseSearch('a'); });
+    update.mockClear();
+    await act(async () => old.resolve(reply([done(item())], false)));
+    expect(update).not.toHaveBeenCalled();
+    await tick(10000); expect(fetch).toHaveBeenCalledTimes(1);
+    act(() => resume()); await tick(); expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+
+it('stops after three consecutive failures, stays stopped on visibility changes, and resumes with GET only', async () => {
+    fetch.mockRejectedValue(new TypeError('Load failed'));
+    const { result, owner, update } = setup();
+    act(() => result.current.followSearch('a', [item()], owner));
+    await tick(2000); await tick(4000); await tick(8000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(update.mock.calls.at(-1)[5]).toBe('stopped');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await tick(60000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    fetch.mockResolvedValue(reply([done(item())], false));
+    act(() => result.current.resumeTracking('a'));
+    await tick();
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(update.mock.calls.at(-1)[5]).toBe('current');
+    expect(fetch.mock.calls.every(([, options]) => !options.method || options.method === 'GET')).toBe(true);
+});
+
+it('resets consecutive failures after a valid response', async () => {
+    fetch.mockRejectedValueOnce(new TypeError('Load failed'))
+        .mockRejectedValueOnce(new TypeError('Load failed'))
+        .mockResolvedValueOnce(reply([item()]))
+        .mockRejectedValue(new TypeError('Load failed'));
+    const { result, owner, update } = setup();
+    act(() => result.current.followSearch('a', [item()], owner));
+    await tick(2000); await tick(4000); await tick(8000);
+    await tick(2000); await tick(4000);
+    expect(update.mock.calls.at(-1)[5]).toBe('retrying');
+    await tick(8000);
+    expect(update.mock.calls.at(-1)[5]).toBe('stopped');
+    expect(fetch).toHaveBeenCalledTimes(6);
+});
+
+it('times out hanging requests after 15 seconds and stops after three timeouts', async () => {
+    fetch.mockImplementation(() => new Promise(() => {}));
+    const { result, owner, update } = setup();
+    act(() => result.current.followSearch('a', [item()], owner));
+    await tick(2000); await tick(14999);
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(false);
+    await tick(1);
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(update.mock.calls.at(-1)[3]).toMatch(/15 seconds/);
+    await tick(4000); await tick(15000); await tick(8000); await tick(15000);
+    expect(update.mock.calls.at(-1)[5]).toBe('stopped');
+    await tick(60000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+});
+
+it('stops old tracking including in-flight responses and visibility refreshes', async () => {
+    const late = deferred();
+    fetch.mockReturnValueOnce(late.promise).mockResolvedValue(reply([done(item('b'))], false));
+    const { result, owner, update } = setup();
+    act(() => result.current.followSearch('a', [item()], owner));
+    await tick(2000);
+    act(() => { result.current.stopTracking(); result.current.followSearch('b', [item('b')], owner); });
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    update.mockClear();
+    await act(async () => late.resolve(reply([item()])));
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await tick(60000);
+    expect(fetch.mock.calls.filter(([url]) => url.includes('/a/'))).toHaveLength(1);
+    expect(update.mock.calls.every(call => call[0] === 'b')).toBe(true);
 });

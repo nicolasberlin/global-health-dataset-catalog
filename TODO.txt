@@ -1,19 +1,22 @@
 GLOBAL HEALTH DATASET CATALOG - VERIFIED BACKLOG
 Last full review: 2026-09-26
-Targeted update: 2026-10-07 — total collection budget and seven review fixes implemented locally
+Targeted update: 2026-10-08 — asynchronous frontend integration verified locally
 
 CURRENT USER-AGREED PRIORITIES (2026-10-06)
-- TODO 12, the total collection time budget (plan point 1), is implemented locally.
-  Verification and deployment status are recorded below; not yet committed/deployed.
+- TODO 12, the total collection time budget (plan point 1), was committed and pushed
+  to main in bc1ef64. Production deployment has not been verified.
 - LONG-TERM DEFERRED, with no scheduled implementation: TODO 10 classifier
   evaluation (plan point 2), TODO 13 link revalidation (plan point 3), and TODO 9
   backup/restore procedures (plan point 4). Revisit only on an explicit request.
-- Frontend integration remains separate and deferred.
+- Frontend integration implemented locally on 2026-10-08: asynchronous submission,
+  complete progress snapshots, restore, partial results and scoped retries.
+  See docs/frontend-async-integration.md; deployment remains separate.
 - The seven confirmed review findings are corrected locally: durable worker
   acquisition receipts (schema 11), refused LLM redirects, HTTP error-body recovery,
   exposed retry/location response headers, bounded sitemap decompression,
   deeply nested JSON diagnostics and shared ensemble summaries.
-  These changes are not yet committed or deployed; see docs/review-fixes-2026-10-07.md.
+  These fixes were committed and pushed to main in bc1ef64; deployment is unverified.
+  See docs/review-fixes-2026-10-07.md.
 These decisions override the older priority headings below.
 
 SCOPE AND STATUS
@@ -251,8 +254,9 @@ Status (2026-10-06): Backend recovery implemented locally, frontend intentionall
   incomplete jobs can resume without removing saved results. See docs/llm-recovery.md.
   Verification: full Python suite 948 passed, 9 optional container/proxy tests
   skipped; final focused recovery/database run 105 passed. Ruff and Compose checks passed.
-  Remaining integration: consume waiting_retry and structured diagnostics in the
-  frontend only after backend acceptance; no UI changes in this delivery.
+  Update 2026-10-08: frontend now consumes waiting_retry and structured diagnostics,
+  supports incomplete collections and submits/restores through the asynchronous API.
+  This supersedes the earlier frontend deferral; no additional migration is required.
 What to do: Decide cooldown/attempt limits beyond existing workload quotas, and
   whether bounded transient provider retries are justified by task 7 measurements.
 Where: backend/app/db/{collection_jobs,repository_candidates,api_quotas,schema}.py;

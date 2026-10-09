@@ -1,3 +1,4 @@
+import RecoveryDetails, { RetryAction } from './RecoveryDetails.jsx';
 import ClassificationProgress from './ClassificationProgress.jsx';
 import DatasetAccessDetails from './DatasetAccessDetails.jsx';
 
@@ -75,6 +76,11 @@ function formatDecisionReason(reason) {
 
 function automaticCollectionStatus(automaticCollection) {
     const job = automaticCollection?.job;
+    if (automaticCollection?.tracking === 'stopped') return {
+        title: 'Collection tracking stopped',
+        detail: 'Collection status is unknown. Resume tracking to check its progress.',
+        tone: 'empty',
+    };
     if (['retrying', 'unavailable'].includes(automaticCollection?.tracking)) {
         return {
             title: 'Collection tracking temporarily unavailable',
@@ -84,6 +90,12 @@ function automaticCollectionStatus(automaticCollection) {
             tone: 'empty',
         };
     }
+    if (automaticCollection?.execution_status === 'waiting_retry') return {
+        title: 'Automatic collection waiting to retry', detail: 'Available results are retained.', tone: 'loading',
+    };
+    if (automaticCollection?.outcome === 'incomplete' || job?.outcome === 'incomplete') return {
+        title: 'Collection incomplete', detail: 'Some checks could not finish. Saved datasets remain available.', tone: 'error',
+    };
     const statuses = {
         pending: {
             title: 'Automatic collection pending',
@@ -119,6 +131,8 @@ function automaticCollectionStatus(automaticCollection) {
 
     return statuses[automaticCollection?.state] ?? null;
 }
+
+function jobErrors(item) { return item.automatic_collection?.job?.errors ?? []; }
 
 export default function RepositoryAcceptedCard({ candidate, onRetryCollection }) {
     const { item } = candidate;
@@ -182,11 +196,10 @@ export default function RepositoryAcceptedCard({ candidate, onRetryCollection })
                 >
                     <strong>{collectionStatus.title}</strong>
                     <ClassificationProgress progress={item.automatic_collection?.job?.classification_progress} />
-                    {item.automatic_collection?.state === 'error' && item.automatic_collection.job && onRetryCollection && (
-                        <button type="button" disabled={item.automatic_collection.retrying} onClick={onRetryCollection}>
-                            {item.automatic_collection.retrying ? 'Requesting retry…' : 'Retry collection'}
-                        </button>
-                    )}
+                    <RecoveryDetails errors={item.automatic_collection?.errors ?? jobErrors(item)} />
+                    {(item.automatic_collection?.state === 'error' || item.automatic_collection?.outcome === 'incomplete' || item.automatic_collection?.job?.outcome === 'incomplete') && item.automatic_collection.job &&
+                        <RetryAction errors={item.automatic_collection.errors ?? jobErrors(item)}
+                            busy={item.automatic_collection.retrying} retryAt={item.automatic_collection.trackingRetryAt} onRetry={onRetryCollection} label="Retry collection" />}
                     {item.automatic_collection?.trackingError && <span>{item.automatic_collection.trackingError}</span>}
                     {collectionStatus.detail ? <span>{collectionStatus.detail}</span> : null}
                 </div>

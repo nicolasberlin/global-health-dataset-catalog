@@ -1,3 +1,4 @@
+import { searchApi } from './test/searchApi.js';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -19,11 +20,11 @@ const analysis = items => ({ search_id: 'search-a', query: 'mortality', origin: 
 const advance = async (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 const calls = part => global.fetch.mock.calls.filter(([url]) => String(url).includes(part));
 function api(handler) {
-    global.fetch = vi.fn(async (input, options) => {
+    global.fetch = vi.fn(searchApi(async (input, options) => {
         const url = String(input);
         if (url.endsWith('/collected-datasets')) return response({ items: [] });
         return handler(url, options);
-    });
+    }));
 }
 function deferred() {
     let resolve;
@@ -47,7 +48,7 @@ it('restores queued work after reload without submitting discovered candidates',
     const discovered = candidate('discovered', 'pending');
     let polls = 0;
     api(url => {
-        if (url.endsWith('/repository-analyses/latest')) return response(analysis([queued, discovered]));
+        if (url.endsWith('/searches/latest')) return response(analysis([queued, discovered]));
         if (url.endsWith('/searches/search-a/progress')) {
             return progress([++polls === 1 ? { ...queued, classification_status: 'classifying' } : accepted(queued), discovered]);
         }
@@ -64,14 +65,14 @@ it('restores queued work after reload without submitting discovered candidates',
     expect(screen.getByText('Not requested')).toBeVisible();
     expect(calls('/classify')).toHaveLength(0);
     expect(calls('/collected-datasets')).toHaveLength(2);
-    expect(calls('/repository-analyses/latest')[0][1].headers.Authorization).toBe('Bearer test-token');
+    expect(calls('/searches/latest')[0][1].headers.Authorization).toBe('Bearer test-token');
 });
 
 it('reads persisted state after a lost POST acknowledgement without reposting', async () => {
     const item = candidate('requested', 'pending');
     api(url => {
-        if (url.endsWith('/repository-analyses/latest')) return response({ detail: 'None' }, 404);
-        if (url.endsWith('/search-datasets')) return response(analysis([item]));
+        if (url.endsWith('/searches/latest')) return response({ detail: 'None' }, 404);
+        if (url.endsWith('/searches')) return response(analysis([item]));
         if (url.endsWith('/classify')) throw new TypeError('Connection lost');
         if (url.endsWith('/searches/search-a/progress')) return progress([accepted(item)]);
         throw new Error(`Unexpected request ${url}`);
@@ -86,13 +87,13 @@ it('reads persisted state after a lost POST acknowledgement without reposting', 
     await advance(2000);
     expect(screen.getByText('Dataset saved to the local catalog')).toBeVisible();
     expect(calls('/classify')).toHaveLength(1);
-    expect(calls('/searches/search-a/progress').filter(([, options]) => options.method !== 'POST')).toHaveLength(1);
+    expect(calls('/searches/search-a/progress').filter(([, options]) => options.method !== 'POST')).toHaveLength(2);
 });
 
 it('only retries an interrupted classification after an explicit click', async () => {
     const item = candidate('interrupted', 'error');
     api(url => {
-        if (url.endsWith('/repository-analyses/latest')) return response(analysis([item]));
+        if (url.endsWith('/searches/latest')) return response(analysis([item]));
         if (url.endsWith('/classify?retry=true')) return response({ ...item, classification_status: 'queued', classification_error: '' }, 202);
         if (url.endsWith('/searches/search-a/progress')) return progress([accepted(item)]);
         throw new Error(`Unexpected request ${url}`);
@@ -110,8 +111,8 @@ it('only retries an interrupted classification after an explicit click', async (
 it('ignores a late restored analysis after the user starts a new search', async () => {
     const late = deferred();
     api(url => {
-        if (url.endsWith('/repository-analyses/latest')) return late.promise;
-        if (url.endsWith('/search-datasets')) return response({ search_id: 'search-b', origin: 'database', items: [] });
+        if (url.endsWith('/searches/latest')) return late.promise;
+        if (url.endsWith('/searches')) return response({ search_id: 'search-b', origin: 'database', items: [] });
         throw new Error(`Unexpected request ${url}`);
     });
     render(<App />);
@@ -130,7 +131,7 @@ it('aborts classification polling on unmount and ignores its late accepted resul
     let signal;
     const item = candidate('requested');
     api((url, options) => {
-        if (url.endsWith('/repository-analyses/latest')) return response(analysis([item]));
+        if (url.endsWith('/searches/latest')) return response(analysis([item]));
         if (url.endsWith('/searches/search-a/progress')) { signal = options.signal; return late.promise; }
         throw new Error(`Unexpected request ${url}`);
     });
@@ -144,12 +145,12 @@ it('aborts classification polling on unmount and ignores its late accepted resul
     expect(calls('/collected-datasets')).toHaveLength(1);
 });
 
-it('keeps tracking a queued classification across a new search without replacing its results', async () => {
+it('stops tracking a queued classification when a new search starts', async () => {
     const item = candidate('requested');
     api(url => {
-        if (url.endsWith('/repository-analyses/latest')) return response(analysis([item]));
+        if (url.endsWith('/searches/latest')) return response(analysis([item]));
         if (url.endsWith('/searches/search-a/progress')) return progress([accepted(item)]);
-        if (url.endsWith('/search-datasets')) return response({ search_id: 'search-b', origin: 'database', items: [] });
+        if (url.endsWith('/searches')) return response({ search_id: 'search-b', origin: 'database', items: [] });
         throw new Error(`Unexpected request ${url}`);
     });
     render(<App />);
@@ -159,15 +160,16 @@ it('keeps tracking a queued classification across a new search without replacing
     await advance(2050);
     expect(screen.queryByText('Dataset requested')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Search for a health dataset')).toHaveValue('vaccination');
-    expect(calls('/collected-datasets')).toHaveLength(2);
+    expect(calls('/collected-datasets')).toHaveLength(1);
+    expect(calls('/searches/search-a/progress')).toHaveLength(0);
 });
 
 it('leaves the interface usable when restoring interrupts a search and no analysis exists', async () => {
     const late = deferred();
     let searchSignal;
     api((url, options) => {
-        if (url.endsWith('/repository-analyses/latest')) return response({ detail: 'No previous analysis.' }, 404);
-        if (url.endsWith('/search-datasets')) { searchSignal = options.signal; return late.promise; }
+        if (url.endsWith('/searches/latest')) return response({ detail: 'No previous analysis.' }, 404);
+        if (url.endsWith('/searches')) { searchSignal = options.signal; return late.promise; }
         throw new Error(`Unexpected request ${url}`);
     });
     render(<App />);
@@ -192,7 +194,7 @@ it('builds agreement filters from each result and keeps three- and four-model de
         } },
     });
     api(url => {
-        if (url.endsWith('/repository-analyses/latest')) return response(analysis([
+        if (url.endsWith('/searches/latest')) return response(analysis([
             voted('old', 3, 3), voted('partial', 3, 4), voted('unanimous', 4, 4),
             accepted(candidate('unknown')),
         ]));

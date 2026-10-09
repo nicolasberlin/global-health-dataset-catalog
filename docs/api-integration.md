@@ -191,7 +191,13 @@ incomplete outcome with `collection_budget_exhausted`; already saved dataset IDs
 remain accessible. The existing owned job retry command starts a new budget only
 for a newly admitted manual retry, never for an idempotent replay. See
 [collection budget](collection-budget.md). No new endpoint or public field is required.
-The existing frontend remains unchanged; client integration is a separate step.
+The frontend now submits to `/collector/searches`, restores with `/searches/latest`,
+tracks the complete snapshot and loads saved dataset IDs in batches of 100.
+It distinguishes automatic retry waits, incomplete outcomes and tracking outages.
+Manual commands use owner-session-scoped idempotency keys; uncertain responses
+retain their key in memory until acknowledgement or observed attempt advancement.
+A full reload restores the latest owned search; no bearer token is added for visitors.
+See [frontend integration](frontend-async-integration.md) for verification and limits.
 
 ## Restart and compatibility
 
@@ -202,7 +208,7 @@ prevent an old discovery from overwriting a newer retry. Temporary failures whil
 saving discovery results retry persistence without recalling the provider.
 
 `POST /collector/search-datasets` remains available with its synchronous discovery
-response for the existing frontend. It shares normalization and candidate
+response for older clients. It shares normalization and candidate
 preparation with the worker. New integrations should use `/collector/searches`.
 The frontend does not need to be installed, built, open or polling.
 

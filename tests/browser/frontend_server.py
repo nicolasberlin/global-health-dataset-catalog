@@ -33,9 +33,32 @@ async def foreign_page():
     return "<!doctype html><title>Foreign origin test</title>"
 
 
-async def create_search(query, owner_id):
+searches = {}
+commands = {}
+
+
+async def admit(owner_id, key, *, query, **kwargs):
     assert owner_id.startswith("visitor:")
-    return {"id": uuid4()}
+    identity = (owner_id, key)
+    if identity in commands:
+        return searches[commands[identity]], True
+    row = {"id": uuid4(), "owner_id": owner_id, "query": query,
+           "status": "completed", "origin": "database", "errors": [], "warnings": [],
+           "local_dataset_ids": [1], "local_result_count": 1, "discovery_complete": True,
+           "attempt_number": 1}
+    searches[row["id"]] = row
+    commands[identity] = row["id"]
+    return row, False
+
+
+async def latest(owner_id):
+    return next((row["id"] for row in reversed(list(searches.values()))
+                 if row["owner_id"] == owner_id), None)
+
+
+async def progress(search_id, owner_id):
+    row = searches.get(search_id)
+    return (row, [], {}) if row and row["owner_id"] == owner_id else None
 
 
 if __name__ == "__main__":
@@ -49,14 +72,17 @@ if __name__ == "__main__":
     dataset = CollectedDataset(
         dataset_url="https://example.org/malaria", title="Malaria browser fixture",
         description="Isolated browser test data", publisher="Test", hosting_platform="Test",
-        uploader="Test", dataset_signals={},
+        uploader="Test", dataset_signals={}, database_id=1,
     )
     # These replace I/O only: authentication, quotas' HTTP mapping, route validation,
     # response schemas, and the built React application are not mocked.
     with ExitStack() as stack:
         for target, implementation in {
             "app.security.consume_quota_limits": AsyncMock(),
-            "app.routes.collector.create_search_session": create_search,
+            "app.routes.collector.admit_search": admit,
+            "app.routes.collector.latest_search_id": latest,
+            "app.routes.collector.read_search_progress": progress,
+            "app.routes.collector.get_collected_datasets": AsyncMock(return_value=[dataset]),
             "app.routes.collector.complete_search_session": AsyncMock(),
             "app.routes.collector.search_collected_datasets": AsyncMock(return_value=[dataset]),
             "app.routes.collector.list_collected_datasets": AsyncMock(return_value=[dataset]),

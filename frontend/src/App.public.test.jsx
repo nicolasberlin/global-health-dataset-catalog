@@ -1,3 +1,4 @@
+import { searchApi, snapshot } from './test/searchApi.js';
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -6,13 +7,13 @@ import App from './App.jsx';
 const reply = (status, payload) => new Response(status === 204 ? null : JSON.stringify(payload), { status });
 const calls = path => fetch.mock.calls.filter(([url]) => String(url).endsWith(path));
 function installApi(search = () => reply(200, { origin: 'database', search_id: 'search', items: [] })) {
-    vi.stubGlobal('fetch', vi.fn(async url => {
+    vi.stubGlobal('fetch', vi.fn(searchApi(async url => {
         if (url.endsWith('/session')) return reply(204);
-        if (url.endsWith('/repository-analyses/latest')) return reply(404, { detail: 'None' });
+        if (url.endsWith('/searches/latest')) return reply(404, { detail: 'None' });
         if (url.endsWith('/collected-datasets')) return reply(200, { items: [] });
-        if (url.endsWith('/search-datasets')) return search();
+        if (url.endsWith('/searches')) return search();
         throw new Error(`Unexpected request ${url}`);
-    }));
+    })));
 }
 beforeEach(() => {
     vi.stubEnv('VITE_API_AUTH_MODE', 'public');
@@ -30,7 +31,7 @@ it('bootstraps once in StrictMode and searches without using a stored token', as
     expect(calls('/session')).toHaveLength(1);
     fireEvent.change(screen.getByLabelText('Search for a health dataset'), { target: { value: 'malaria' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }));
-    await waitFor(() => expect(calls('/search-datasets')).toHaveLength(1));
+    await waitFor(() => expect(calls('/searches')).toHaveLength(1));
     for (const [, options] of fetch.mock.calls) {
         expect(new Headers(options.headers).has('Authorization')).toBe(false);
         expect(options.credentials).toBe('same-origin');
@@ -42,12 +43,12 @@ it('keeps the catalog usable while session preparation is pending', async () => 
     const original = fetch.getMockImplementation();
     let finish;
     const pending = new Promise(resolve => { finish = resolve; });
-    fetch.mockImplementation(url => url.endsWith('/session') ? pending : original(url));
+    fetch.mockImplementation((url, options) => url.endsWith('/session') ? pending : original(url, options));
     render(<App />);
     expect(screen.getByRole('button', { name: 'Search', exact: true })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Catalog', exact: true }));
     await waitFor(() => expect(calls('/collected-datasets')).toHaveLength(1));
-    expect(calls('/repository-analyses/latest')).toHaveLength(0);
+    expect(calls('/searches/latest')).toHaveLength(0);
     await act(async () => { finish(reply(204)); });
 });
 
@@ -63,7 +64,7 @@ it('stops on expiration and requires an explicit new search after reconnecting',
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Search', exact: true })).toBeEnabled());
     expect(calls('/session')).toHaveLength(2);
-    expect(calls('/search-datasets')).toHaveLength(1);
+    expect(calls('/searches')).toHaveLength(1);
     expect(screen.getByLabelText('Search for a health dataset')).toHaveValue('malaria');
 });
 
@@ -83,11 +84,11 @@ it('follows an online candidate through authenticated polling without posting cl
         classification_status: 'queued', url: 'https://example.org/data', source: 'Test' };
     installApi(() => reply(200, { origin: 'online', search_id: 'search', items: [candidate] }));
     const original = fetch.getMockImplementation();
-    fetch.mockImplementation(url => url.endsWith('/searches/search/progress')
-        ? reply(200, { search_id: 'search', polling_required: false, items: [{ ...candidate, classification_status: 'accepted',
+    fetch.mockImplementation((url, options) => url.endsWith('/searches/search/progress')
+        ? reply(200, snapshot({ search_id: 'search', polling_required: false, items: [{ ...candidate, classification_status: 'accepted',
             classification: { accepted: true, ensemble: {} },
-            automatic_collection: { state: 'saved', job: { id: 42, status: 'done', saved_count: 1 } } }] })
-        : original(url));
+            automatic_collection: { state: 'saved', job: { id: 42, status: 'done', saved_count: 1 } } }] }))
+        : original(url, options));
     render(<App />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Search', exact: true })).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Search for a health dataset'), { target: { value: 'malaria' } });

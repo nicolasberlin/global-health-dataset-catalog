@@ -1,3 +1,4 @@
+import RecoveryDetails from './RecoveryDetails.jsx';
 import ClassificationProgress from './ClassificationProgress.jsx';
 
 function getHostname(url) {
@@ -24,6 +25,7 @@ export default function RepositoryProgressCard({ candidate, onAnalyze }) {
             </div>
             <h3>{item.title}</h3>
             <ClassificationProgress progress={item.classification_progress} />
+            <RecoveryDetails errors={item.errors} />
             {candidate.trackingError && <p role="status">Analysis tracking unavailable: {candidate.trackingError}</p>}
             {status === 'pending' && <button disabled={candidate.requesting} type="button" onClick={onAnalyze}>Analyze</button>}
             <p>{item.description || 'Description unavailable.'}</p>

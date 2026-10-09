@@ -1,3 +1,4 @@
+import { searchApi } from './test/searchApi.js';
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -27,11 +28,11 @@ async function search(query) {
 }
 function installApi({ items = [candidate()], classify, poll, catalog } = {}) {
     let classified = false;
-    global.fetch = vi.fn(async (input, options = {}) => {
+    global.fetch = vi.fn(searchApi(async (input, options = {}) => {
         const url = String(input);
-        if (url.endsWith('/repository-analyses/latest')) return { ok: false, status: 404, json: async () => ({ detail: 'None' }) };
+        if (url.endsWith('/searches/latest')) return { ok: false, status: 404, json: async () => ({ detail: 'None' }) };
         if (url.endsWith('/collected-datasets')) return catalog?.() ?? response({ items: [] });
-        if (url.endsWith('/search-datasets')) {
+        if (url.endsWith('/searches')) {
             const query = JSON.parse(options.body).query;
             return response(query === 'malaria'
                 ? { search_id: 'search-a', origin: 'online', items }
@@ -52,7 +53,7 @@ function installApi({ items = [candidate()], classify, poll, catalog } = {}) {
                 items: items.map(item => accepted(item, job)) });
         }
         throw new Error(`Unexpected request ${url}`);
-    });
+    }));
 }
 const callsTo = (path) => global.fetch.mock.calls.filter(([url]) => String(url).endsWith(path));
 
@@ -67,7 +68,7 @@ afterEach(() => {
     vi.useRealTimers();
 });
 
-it('tracks a shared job once across a new search and navigation, then refreshes the catalog', async () => {
+it('stops the old shared-job tracking across a new search and navigation', async () => {
     let saved = false;
     installApi({
         items: [candidate(), candidate('candidate-b')],
@@ -87,14 +88,14 @@ it('tracks a shared job once across a new search and navigation, then refreshes 
     await advance(2050);
     expect(callsTo('/searches/search-a/progress')).toHaveLength(2);
     expect(callsTo('/collection-jobs/42')).toHaveLength(0);
-    expect(callsTo('/collected-datasets')).toHaveLength(2);
-    expect(screen.getByRole('heading', { name: dataset.title })).toBeVisible();
+    expect(callsTo('/collected-datasets')).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: dataset.title })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Search datasets' }));
     expect(screen.getByRole('heading', { name: 'Vaccination data' })).toBeVisible();
     expect(screen.queryByText('Malaria candidate-a')).not.toBeInTheDocument();
 });
 
-it('registers a job from a late classification in the same session without replacing search B', async () => {
+it('ignores a late classification from the stopped search without replacing search B', async () => {
     const late = deferred();
     installApi({ classify: () => late.promise });
     render(<App />);
@@ -105,7 +106,7 @@ it('registers a job from a late classification in the same session without repla
     await advance(2050);
     expect(callsTo('/searches/search-a/progress')).toHaveLength(2);
     expect(callsTo('/collection-jobs/42')).toHaveLength(0);
-    expect(callsTo('/collected-datasets')).toHaveLength(2);
+    expect(callsTo('/collected-datasets')).toHaveLength(1);
     expect(screen.getByRole('heading', { name: 'Vaccination data' })).toBeVisible();
     expect(screen.queryByText('Malaria candidate-a')).not.toBeInTheDocument();
 });
@@ -134,7 +135,7 @@ it('rejects a late search response after unmount', async () => {
         ? Promise.resolve(response({ items: [] })) : late.promise);
     const { unmount } = render(<App />);
     await search('malaria');
-    const signal = callsTo('/search-datasets')[0][1].signal;
+    const signal = callsTo('/searches')[0][1].signal;
     unmount();
     expect(signal.aborted).toBe(true);
     await act(async () => late.resolve(response({ search_id: 'search-a', origin: 'online', items: [candidate()] })));
@@ -154,7 +155,7 @@ it('aborts polling on unmount and ignores its late completion', async () => {
     expect(pollSignal.aborted).toBe(true);
     await act(async () => late.resolve(response({ job: { id: 42, status: 'done', saved_count: 1 } })));
     await advance(4000);
-    expect(callsTo('/searches/search-a/progress')).toHaveLength(2);
+    expect(callsTo('/searches/search-a/progress')).toHaveLength(3);
     expect(callsTo('/collection-jobs/42')).toHaveLength(0);
     expect(callsTo('/collected-datasets')).toHaveLength(1);
     expect(screen.queryByText('Malaria candidate-a')).not.toBeInTheDocument();

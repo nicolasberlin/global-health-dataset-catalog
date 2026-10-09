@@ -1,3 +1,4 @@
+import RecoveryDetails, { RetryAction } from './RecoveryDetails.jsx';
 import { useState } from 'react';
 import { useLinkedDatasets } from '../catalog/useLinkedDatasets.js';
 import ClassificationProgress from './ClassificationProgress.jsx';
@@ -25,7 +26,11 @@ export default function RepositorySearchSection({
     repositorySearching,
     repositoryStatusCounts,
     repositoryWarnings,
-    localRepositoryResults,
+    searchSnapshot,
+    trackingStopped = false,
+    resumeTracking,
+    retrySearch,
+    searchRetryAt,
     searchRepositories,
     setAgreementFilter,
     setRepositoryQuery,
@@ -39,8 +44,9 @@ export default function RepositorySearchSection({
     const [subject, setSubject] = useState('');
     const [country, setCountry] = useState('');
     const [format, setFormat] = useState('');
-    const linked = useLinkedDatasets(acceptedRepositoryCandidates);
-    const localItems = localRepositoryResults;
+    const localIds = searchSnapshot?.local_dataset_ids ?? [];
+    const linked = useLinkedDatasets(acceptedRepositoryCandidates, localIds);
+    const localItems = localIds.map(id => linked.datasets[id]).filter(Boolean);
     const acceptedCandidates = acceptedRepositoryCandidates.map(candidate => ({
         ...candidate,
         item: {
@@ -165,10 +171,27 @@ export default function RepositorySearchSection({
 
             {repositoryError ? (
                 <div className="repository-message repository-message--error" role="alert">
-                    <strong>Search failed</strong>
+                    <strong>{trackingStopped ? 'Tracking stopped — collection status unknown' : 'Search request or tracking unavailable'}</strong>
                     <span>{repositoryError}</span>
+                    {trackingStopped && <button type="button" disabled={!accessReady}
+                        onClick={resumeTracking}>Resume tracking</button>}
                 </div>
             ) : null}
+
+            {searchSnapshot && <div className="repository-message" role="status">
+                <strong>{trackingStopped ? 'Last known search status (tracking stopped)' :
+                    searchSnapshot.execution_status === 'waiting_retry' ? 'Waiting for an automatic retry' :
+                    searchSnapshot.polling_required ? 'Search in progress' :
+                    searchSnapshot.outcome === 'incomplete' ? 'Search incomplete' :
+                    searchSnapshot.outcome === 'empty' ? 'No datasets found' : 'Search completed'}</strong>
+                {searchSnapshot.outcome === 'incomplete' && <p>Some steps could not finish. Available results are kept below.</p>}
+                <RecoveryDetails errors={searchSnapshot.errors} />
+                {!searchSnapshot.polling_required && searchSnapshot.outcome === 'incomplete' &&
+                    !searchSnapshot.items?.length && !localIds.length &&
+                    <RetryAction errors={searchSnapshot.errors} busy={repositorySearching}
+                        onRetry={retrySearch} retryAt={searchRetryAt} label="Retry search" />}
+            </div>}
+            {linked.loading && <p role="status">Loading dataset details…</p>}
 
             {repositoryWarnings.length > 0 ? (
                 <div className="repository-message repository-message--warning" role="status">
@@ -244,6 +267,7 @@ export default function RepositorySearchSection({
             {repositoryHasSearched &&
             !repositoryAnalysisInProgress &&
             repositoryOrigin === 'online' &&
+            searchSnapshot?.outcome === 'empty' &&
             repositoryStatusCounts.accepted === 0 && repositoryStatusCounts.pending === 0 &&
             !repositoryError ? (
                 <div className="repository-empty-state">
@@ -284,7 +308,8 @@ export default function RepositorySearchSection({
                                     {candidate.error ? <small>{candidate.error}</small> : null}
                                     {candidate.trackingError ? <small>{candidate.trackingError}</small> : null}
                                 </span>
-                                <button disabled={candidate.requesting} type="button" onClick={() => analyzeCandidate(candidate)}>Retry analysis</button>
+                                <RecoveryDetails errors={candidate.item.errors} />
+                                <RetryAction errors={candidate.item.errors} busy={candidate.requesting} retryAt={candidate.item.trackingRetryAt} onRetry={() => analyzeCandidate(candidate)} label="Retry analysis" />
                             </li>
                         ))}
                     </ul>
