@@ -1,0 +1,15 @@
+{
+  "status": "OK",
+  "data":
+    {
+      "id": 9000,
+      "label": "survey.tab",
+      "restricted": false,
+      "dataFile": {
+        "id": 123,
+        "filename": "survey.tab",
+        "contentType": "text/tab-separated-values",
+        "persistentId": "doi:10.7910/DVN/HEALTH/SURVEY"
+      }
+    }
+}

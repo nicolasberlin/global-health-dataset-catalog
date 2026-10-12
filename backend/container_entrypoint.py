@@ -13,7 +13,10 @@ from collector.network_policy import BLOCKED_IPV4, BLOCKED_IPV6, PUBLIC_IPV6
 
 
 def build_rules(
-    database_addresses: list[str], resolver_addresses: list[str], extra: str = ""
+    database_addresses: list[str],
+    resolver_addresses: list[str],
+    extra: str = "",
+    browser_addresses: list[str] | None = None,
 ) -> str:
     """Render nft input using validated addresses only, never arbitrary config text."""
     if not database_addresses or not resolver_addresses:
@@ -40,6 +43,10 @@ def build_rules(
         address = ipaddress.ip_address(value)
         family = "ip" if address.version == 4 else "ip6"
         rules.append(f"{family} daddr {address} tcp dport 5432 accept")
+    for value in browser_addresses or []:
+        address = ipaddress.ip_address(value)
+        family = "ip" if address.version == 4 else "ip6"
+        rules.append(f"{family} daddr {address} tcp dport 8002 accept")
     for value in extra.split(","):
         if value.strip():
             network = ipaddress.ip_network(value.strip(), strict=True)
@@ -73,8 +80,33 @@ def install_egress_rules() -> None:
         parts = line.split()
         if len(parts) >= 2 and parts[0] == "nameserver":
             resolver_addresses.append(parts[1])
+    browser_addresses = []
+    if os.environ.get("COLLECTION_BROWSER_URL"):
+        from urllib.parse import urlsplit
+
+        endpoint = urlsplit(os.environ["COLLECTION_BROWSER_URL"])
+        if (
+            endpoint.scheme != "http"
+            or endpoint.hostname != "collection-browser"
+            or endpoint.port != 8002
+            or endpoint.path not in {"", "/"}
+            or endpoint.username
+            or endpoint.password
+            or endpoint.query
+            or endpoint.fragment
+        ):
+            raise ValueError("Container browser endpoint must be http://collection-browser:8002")
+        browser_addresses = sorted(
+            {
+                r[4][0]
+                for r in socket.getaddrinfo("collection-browser", 8002, type=socket.SOCK_STREAM)
+            }
+        )
     rules = build_rules(
-        database_addresses, resolver_addresses, os.environ.get("EGRESS_BLOCKED_CIDRS", "")
+        database_addresses,
+        resolver_addresses,
+        os.environ.get("EGRESS_BLOCKED_CIDRS", ""),
+        browser_addresses,
     )
     # Replace only our table, atomically, on restarts. Leave Docker's DNS/NAT rules intact.
     existing = subprocess.run(

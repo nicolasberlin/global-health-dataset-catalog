@@ -102,6 +102,10 @@ class DiscoveredPage:
     modality_of_data: tuple[str, ...] = ()
     distributions: tuple[DistributionCandidate, ...] = ()
     discovery_metadata: dict[str, object] = field(default_factory=dict)
+    doi: str = ""
+    hosting_platform: str = ""
+    record_identity: dict[str, str] = field(default_factory=dict)
+    metadata_source_url: str = ""
 
 
 class DiscoveryAdapter(Protocol):
@@ -121,8 +125,10 @@ def fetch_json_url(
     timeout: float = DEFAULT_CONFIG.request_timeout_seconds,
     max_bytes: int = 5_000_000,
     user_agent: str = DEFAULT_CONFIG.user_agent,
-) -> dict[str, object]:
-    """Fetch a bounded public URL and require a JSON object response."""
+    *,
+    allow_list: bool = False,
+) -> dict[str, object] | list:
+    """Fetch bounded public JSON; collection may explicitly allow file-metadata lists."""
 
     request = Request(
         url,
@@ -151,7 +157,7 @@ def fetch_json_url(
     except json.JSONDecodeError as exception:
         raise ValueError("JSON URL did not return valid JSON.") from exception
 
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) and not (allow_list and isinstance(data, list)):
         raise ValueError("JSON URL did not return an object.")
 
     return data

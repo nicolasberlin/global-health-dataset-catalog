@@ -820,21 +820,23 @@ def test_collect_repository_candidate_analyzes_only_the_candidate_page():
 
     assert len(result.datasets) == 1
     assert result.datasets[0].dataset_url == candidate_url
-    assert result.datasets[0].discovery_method == "repository_search"
+    assert result.datasets[0].discovery_method == "html"
     assert result.report.discovered_count == 1
-    assert result.report.discovery_methods == ("repository_search",)
+    assert result.report.discovery_methods == ("html",)
 
 
-def test_collect_repository_candidate_propagates_page_fetch_errors():
+def test_collect_repository_candidate_records_page_fetch_errors():
     def fake_fetch_html(url):
         raise PageFetchError(f"Could not fetch URL: {url}")
 
-    with pytest.raises(PageFetchError, match="Could not fetch URL"):
-        collect_repository_candidate_with_report(
-            "https://example.org/datasets/unavailable",
-            fetch_html=fake_fetch_html,
-            classifier=AcceptingPageClassifier(),
-        )
+    result = collect_repository_candidate_with_report(
+        "https://example.org/datasets/unavailable", fetch_html=fake_fetch_html,
+        classifier=AcceptingPageClassifier(),
+    )
+    assert not result.datasets
+    assert not result.report.verification_complete
+    assert result.report.errors[0].code == "repository_unavailable"
+    assert result.report.method_attempts[0]["status"] == "failed"
 
 
 def test_collect_source_with_report_summarizes_discovery_analysis_and_validation():

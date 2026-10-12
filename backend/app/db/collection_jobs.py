@@ -60,7 +60,9 @@ async def reserve_repository_candidate_collection_job(
         await _require_current_schema(connection)
         async with connection.transaction():
             return await _reserve_repository_candidate_collection_job(
-                connection, candidate_id, owner_id,
+                connection,
+                candidate_id,
+                owner_id,
             )
 
 
@@ -136,7 +138,7 @@ async def _reserve_repository_candidate_collection_job(
                    invalid_distribution_count, discovery_methods, classification_progress,
                    message,
                    error, errors, outcome, created_at, updated_at, finished_at,
-                   collection_deadline_at
+                   collection_deadline_at, collection_coverage, collection_method_summary
             FROM collection_jobs
             WHERE (
                 repository_candidate_id = %s
@@ -229,7 +231,10 @@ async def _job_dataset_ids(connection, job_id: int) -> list[int]:
 
 
 async def retry_collection_job_for_owner(
-    job_id: int, owner_id: str, *, admission: WorkAdmission | None = None,
+    job_id: int,
+    owner_id: str,
+    *,
+    admission: WorkAdmission | None = None,
     idempotency_key: str | None = None,
 ) -> dict | None:
     """Requeue an owned failed job, keeping its validated votes and associations."""
@@ -238,10 +243,13 @@ async def retry_collection_job_for_owner(
         async with connection.transaction():
             receipt = None
             if idempotency_key is not None:
-                receipt = await read_command(connection, owner_id, idempotency_key,
-                                             "collection_retry", payload)
+                receipt = await read_command(
+                    connection, owner_id, idempotency_key, "collection_retry", payload
+                )
             await lock_work_admission(connection, admission)
-            job = await _fetchone(connection, """
+            job = await _fetchone(
+                connection,
+                """
                 SELECT job.* FROM collection_jobs AS job
                 WHERE job.id = %s AND EXISTS (
                     SELECT 1 FROM collection_job_candidates AS association
@@ -250,7 +258,9 @@ async def retry_collection_job_for_owner(
                     JOIN search_sessions AS session ON session.id = candidate.search_session_id
                     WHERE association.job_id = job.id AND session.owner_id = %s
                 )
-            """, (job_id, _normalized_owner_id(owner_id)))
+            """,
+                (job_id, _normalized_owner_id(owner_id)),
+            )
             if job is None:
                 return None
             if receipt is not None:
@@ -258,42 +268,65 @@ async def retry_collection_job_for_owner(
                 result["dataset_ids"] = await _job_dataset_ids(connection, job_id)
                 return result
             await connection.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (job["source_url"],),
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (job["source_url"],),
             )
-            job = await _fetchone(connection,
-                "SELECT * FROM collection_jobs WHERE id = %s FOR UPDATE", (job_id,))
+            job = await _fetchone(
+                connection, "SELECT * FROM collection_jobs WHERE id = %s FOR UPDATE", (job_id,)
+            )
             if job["status"] in {"pending", "running"}:
                 if idempotency_key is not None:
-                    await record_command(connection, owner_id, idempotency_key, "collection_retry",
-                                         payload, {"job_id": job_id})
+                    await record_command(
+                        connection,
+                        owner_id,
+                        idempotency_key,
+                        "collection_retry",
+                        payload,
+                        {"job_id": job_id},
+                    )
                 return _collection_job_to_dict(job)
             if job["status"] != "error" and not (
-                job["status"] == "done" and job["outcome"] == "incomplete"
+                job["status"] == "done" and job["outcome"] in {"incomplete", "empty"}
             ):
-                raise ValueError("Only a failed or incomplete collection can be retried.")
+                raise ValueError("Only a failed, incomplete or empty collection can be retried.")
             errors = job.get("errors", [])
             if errors and all(item.get("recovery") == "none" for item in errors):
                 raise ValueError("This collection has no supported recovery action.")
             enforce_retry_date(errors)
-            active = await _fetchone(connection, """
+            active = await _fetchone(
+                connection,
+                """
                 SELECT id FROM collection_jobs WHERE source_url = %s
                 AND status IN ('pending', 'running') AND id <> %s
-            """, (job["source_url"], job_id))
+            """,
+                (job["source_url"], job_id),
+            )
             if active:
                 raise ValueError("Another collection is already running for this page.")
             await reserve_work(connection, admission, amount=1)
-            row = await _fetchone(connection, """
+            row = await _fetchone(
+                connection,
+                """
                 UPDATE collection_jobs SET status = 'pending', error = '',
                     errors = '[]'::jsonb, outcome = NULL,
+                    collection_coverage = '{}'::jsonb, collection_method_summary = '[]'::jsonb,
                     retry_cycle = gen_random_uuid(), retry_round = 0, retry_started_at = NULL,
                     next_retry_at = NULL, collection_deadline_at = NULL,
                     message = 'Collection pending.',
                     finished_at = NULL, updated_at = NOW()
                 WHERE id = %s RETURNING *
-            """, (job_id,))
+            """,
+                (job_id,),
+            )
             if idempotency_key is not None:
-                await record_command(connection, owner_id, idempotency_key, "collection_retry",
-                                     payload, {"job_id": job_id})
+                await record_command(
+                    connection,
+                    owner_id,
+                    idempotency_key,
+                    "collection_retry",
+                    payload,
+                    {"job_id": job_id},
+                )
             return _collection_job_to_dict(row)
 
 
@@ -336,11 +369,22 @@ async def mark_interrupted_collection_jobs_error() -> int:
             (_jsonb([Diagnostic("processing_interrupted", "collection").to_dict()]),),
         )
 
+        if rows:
+            await connection.execute(
+                """
+                UPDATE collection_method_attempts SET observation = observation ||
+                    '{"status":"failed","code":"processing_interrupted"}'::jsonb
+                WHERE job_id = ANY(%s) AND observation->>'status' = 'running'
+            """,
+                ([r["id"] for r in rows],),
+            )
+
     return len(rows)
 
 
 async def claim_pending_collection_job(
-    *, claim_token: UUID | None = None,
+    *,
+    claim_token: UUID | None = None,
 ) -> dict[str, object] | None:
     """Acquire or recover the same job after an ambiguous database commit."""
 
@@ -378,13 +422,18 @@ async def claim_pending_collection_job(
             )
             if row is not None:
                 await record_worker_claim(
-                    connection, claim_token, "collection", row["id"], row["updated_at"],
+                    connection,
+                    claim_token,
+                    "collection",
+                    row["id"],
+                    row["updated_at"],
                 )
     return _collection_job_to_dict(row) if row else None
 
 
 async def get_candidate_collection(
-    candidate_id: UUID, owner_id: str,
+    candidate_id: UUID,
+    owner_id: str,
 ) -> CollectionJobReservation | None:
     """Read existing follow-up without reserving, associating, or retrying a job.
 
@@ -436,7 +485,9 @@ async def _insert_collection_job(
     kind: str = "source",
     repository_candidate_id: UUID | None = None,
 ) -> Row | None:
-    previous = await _fetchone(connection, """
+    previous = await _fetchone(
+        connection,
+        """
         SELECT job.status, COALESCE(job.classification_root_id, job.id) AS root_id
         FROM collection_jobs AS job
         WHERE job.source_url = %s AND job.kind = %s AND (
@@ -445,7 +496,9 @@ async def _insert_collection_job(
                 WHERE association.job_id = job.id AND association.candidate_id = %s
             )
         ) ORDER BY job.id DESC LIMIT 1
-    """, (source_url, kind, repository_candidate_id, repository_candidate_id))
+    """,
+        (source_url, kind, repository_candidate_id, repository_candidate_id),
+    )
     root_id = previous["root_id"] if previous and previous["status"] == "error" else None
     return await _fetchone(
         connection,
@@ -460,7 +513,7 @@ async def _insert_collection_job(
                   invalid_distribution_count, discovery_methods, classification_progress,
                   message,
                   error, errors, outcome, created_at, updated_at, finished_at,
-                  collection_deadline_at
+                  collection_deadline_at, collection_coverage, collection_method_summary
         """,
         (source_url, kind, repository_candidate_id, root_id),
     )
@@ -494,6 +547,7 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
                 discovery_methods = '[]'::jsonb,
                 message = 'Collection in progress.',
                 error = '', errors = '[]'::jsonb, outcome = NULL,
+                    collection_coverage = '{}'::jsonb, collection_method_summary = '[]'::jsonb,
                 updated_at = NOW(),
                 finished_at = NULL
             WHERE id = %s AND status = 'pending'
@@ -503,7 +557,7 @@ async def mark_collection_job_running(job_id: int) -> dict[str, object] | None:
                       invalid_distribution_count, discovery_methods, classification_progress,
                       message,
                       error, errors, outcome, created_at, updated_at, finished_at,
-                      collection_deadline_at
+                      collection_deadline_at, collection_coverage, collection_method_summary
             """,
             (configured_collection_budget_seconds(), job_id),
         )
@@ -528,6 +582,8 @@ async def _mark_collection_job_done(
     saved_count: int,
     report: CollectionReport,
 ) -> dict[str, object] | None:
+    from .collection_traces import safe_observation
+
     row = await _fetchone(
         connection,
         """
@@ -542,6 +598,7 @@ async def _mark_collection_job_done(
             discovery_methods = %s,
             validation_failures = %s,
             errors = %s, outcome = %s,
+            collection_coverage = %s, collection_method_summary = %s,
             message = %s,
             error = '',
             updated_at = NOW(),
@@ -553,7 +610,7 @@ async def _mark_collection_job_done(
                   invalid_distribution_count, discovery_methods, classification_progress,
                   message,
                   error, errors, outcome, created_at, updated_at, finished_at,
-                  collection_deadline_at
+                  collection_deadline_at, collection_coverage, collection_method_summary
         """,
         (
             saved_count,
@@ -565,8 +622,13 @@ async def _mark_collection_job_done(
             _serialize_discovery_methods(report.discovery_methods),
             _jsonb([asdict(result) for result in report.validation_failures]),
             _jsonb([item.to_dict() for item in report.errors]),
-            "incomplete" if report.errors or report.verification_complete is not True
-            else "results" if saved_count else "empty",
+            "incomplete"
+            if report.errors or report.verification_complete is not True
+            else "results"
+            if saved_count
+            else "empty",
+            _jsonb(report.coverage),
+            _jsonb([safe_observation(step) for step in report.method_attempts]),
             _collection_job_done_message(saved_count, report),
             job_id,
         ),
@@ -577,7 +639,9 @@ async def _mark_collection_job_done(
 async def mark_collection_job_error(
     job_id: int,
     error: str,
-    *, errors: list[dict] | None = None, expected_updated_at: datetime | None = None,
+    *,
+    errors: list[dict] | None = None,
+    expected_updated_at: datetime | None = None,
 ) -> dict[str, object] | None:
     async with _require_database_pool().connection() as connection:
         await _require_current_schema(connection)
@@ -598,10 +662,15 @@ async def mark_collection_job_error(
                       invalid_distribution_count, discovery_methods, classification_progress,
                       message,
                       error, errors, outcome, created_at, updated_at, finished_at,
-                      collection_deadline_at
+                      collection_deadline_at, collection_coverage, collection_method_summary
             """,
-            (error, _jsonb(errors or [Diagnostic("processing_failed", "collection").to_dict()]),
-             job_id, expected_updated_at, expected_updated_at),
+            (
+                error,
+                _jsonb(errors or [Diagnostic("processing_failed", "collection").to_dict()]),
+                job_id,
+                expected_updated_at,
+                expected_updated_at,
+            ),
         )
 
     return _collection_job_to_dict(row) if row else None
@@ -615,7 +684,7 @@ async def _get_collection_job_row(connection, job_id: int) -> Row | None:
                status, saved_count, discovered_count,
                analyzed_count, accepted_count, rejected_count,
                invalid_distribution_count, discovery_methods, classification_progress,
-               message, error, errors, outcome,
+               message, error, errors, outcome, collection_coverage, collection_method_summary,
                created_at, updated_at, finished_at, collection_deadline_at
         FROM collection_jobs
         WHERE id = %s
@@ -651,6 +720,8 @@ def _collection_job_to_dict(row: Row) -> dict[str, object]:
             else None
         ),
         "status": str(row["status"]),
+        "coverage": row.get("collection_coverage", {}),
+        "method_attempts": row.get("collection_method_summary", []),
         "classification_progress": row.get("classification_progress", {}),
         "saved_count": int(row["saved_count"]),
         "discovered_count": int(row["discovered_count"]),
@@ -668,7 +739,8 @@ def _collection_job_to_dict(row: Row) -> dict[str, object]:
         "finished_at": _format_optional_timestamp(row["finished_at"]),
         "collection_deadline_at": (
             _format_timestamp(row["collection_deadline_at"])
-            if row.get("collection_deadline_at") is not None else None
+            if row.get("collection_deadline_at") is not None
+            else None
         ),
     }
 

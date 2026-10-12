@@ -91,6 +91,14 @@ async def test_retry_only_failed_model_preserves_negative_votes(
     with pytest.raises(PageClassificationError, match="At least 3 classifier votes"):
         await asyncio.to_thread(classify, kind, scope, loop)
     saved = await rows("SELECT * FROM classification_votes ORDER BY voter_id")
+    failed_history = (await rows(
+        "SELECT * FROM classification_vote_attempts WHERE status = 'error'"
+    ))[0]
+    assert failed_history["voter_id"] == "epfl_rcp_apertus_meditron"
+    assert failed_history["model"] == MODELS[2]
+    assert failed_history["attempt"] == 1
+    assert failed_history["started_at"] <= failed_history["finished_at"]
+    assert failed_history["error"]
     assert Counter(v["status"] for v in saved) == {"succeeded": 2, "error": 1}
     assert next(v for v in saved if v["status"] == "error")["response"] is None
     table = "repository_candidates" if kind == "repository" else "collection_jobs"
@@ -108,6 +116,16 @@ async def test_retry_only_failed_model_preserves_negative_votes(
     snapshot = json.dumps((await rows("SELECT snapshot FROM classification_runs"))[0]["snapshot"])
     assert all(key not in snapshot for key in KEYS)
     assert all(model in snapshot for model in MODELS)
+    history = await rows("SELECT * FROM classification_vote_attempts ORDER BY attempt")
+    assert len(history) == 4
+    assert next(h for h in history if h["status"] == "error") == failed_history
+    assert next(h for h in history if h["attempt"] == 2)["status"] == "succeeded"
+    assert all(key not in json.dumps(history, default=str) for key in KEYS)
+    if kind == "repository":
+        exported = await votes.read_candidate_vote_history(scope["candidate_id"], "alice")
+        assert len(exported["attempts"]) == 4
+        assert next(a for a in exported["attempts"] if a["status"] == "error")["error"]
+        assert await votes.read_candidate_vote_history(scope["candidate_id"], "bob") is None
 
 
 async def test_fast_votes_are_saved_before_slowest_model_finishes(database, transport):
@@ -155,6 +173,9 @@ async def test_restart_and_attempt_tokens_preserve_successes(database):
     with pytest.raises(PersistenceFailure, match="already running"):
         await votes.claim_vote(run, "b", **scope)
     await votes.mark_interrupted_votes_error()
+    history = await rows("SELECT * FROM classification_vote_attempts WHERE voter_id = 'b'")
+    assert history[0]["status"] == "interrupted"
+    assert history[0]["error"] == "Vote interrupted by application restart."
     await database.mark_interrupted_collection_jobs_error()
     with pytest.raises(PersistenceFailure, match="no longer running"):
         await votes.claim_vote(run, "a", **scope)
@@ -167,7 +188,37 @@ async def test_restart_and_attempt_tokens_preserve_successes(database):
             run, "b", old["attempt_token"], response={"accepted": True}, **scope
         )
     await votes.finish_vote(run, "b", new["attempt_token"], response={"accepted": True}, **scope)
+    await votes.finish_vote(run, "b", new["attempt_token"], response={"accepted": True}, **scope)
+    history = await rows(
+        "SELECT * FROM classification_vote_attempts WHERE voter_id = 'b' ORDER BY attempt"
+    )
+    assert [h["status"] for h in history] == ["interrupted", "succeeded"]
     assert new["attempts"] == 2
+
+
+async def test_schema_thirteen_preserves_latest_legacy_error_without_inventing_attempts(database):
+    await database.init_database()
+    scope = await scope_for(database, "page")
+    run = await votes.prepare_vote_run(
+        {"configuration": [{"voter_id": "a", "body": {"model": "test-model"}}]}, **scope
+    )
+    vote = await votes.claim_vote(run, "a", **scope)
+    await votes.finish_vote(
+        run, "a", vote["attempt_token"], error="Invalid dataset_signals keys.", **scope
+    )
+    async with _require_database_pool().connection() as connection:
+        await connection.execute("DROP TABLE classification_vote_attempts")
+        await connection.execute("ALTER TABLE collected_datasets DROP COLUMN record_identity")
+        await connection.execute("DELETE FROM schema_migrations WHERE version >= 13")
+    await database.init_database()
+    await database.init_database()
+    history = await rows("SELECT * FROM classification_vote_attempts")
+    assert len(history) == 1
+    assert history[0]["error"] == "Invalid dataset_signals keys."
+    assert history[0]["model"] == "test-model"
+    assert history[0]["evidence"] == "legacy_snapshot"
+    assert history[0]["started_at"] is None
+    assert history[0]["status"] == "error"
 
 
 @pytest.mark.parametrize("change", ["input", "model", "prompt"])
@@ -268,7 +319,7 @@ async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
             raise TimeoutError()
         return _response("page", True)
 
-    def collect(url, *, classifier):
+    def collect(url, *, classifier, **options):
         assert classifier.classify(PAGE, []).accepted
         return CollectionResult(report=CollectionReport(verification_complete=True))
 
@@ -289,8 +340,9 @@ async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
         )
     assert calls == {MODELS[0]: 1, MODELS[1]: 1, MODELS[2]: 2}
     assert (await database.get_collection_job(job_id))["status"] == "done"
-    with pytest.raises(ValueError, match="Only a failed"):
-        await retry_collection_job_for_owner(job_id, "alice")
+    # An empty terminal collection now supports an explicit retry after adapting
+    # its resolver; successful page votes remain reusable.
+    assert (await retry_collection_job_for_owner(job_id, "alice"))["status"] == "pending"
 
 
 async def test_collection_retry_route_enforces_owner_and_quota(database, monkeypatch):

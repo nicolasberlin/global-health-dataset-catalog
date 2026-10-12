@@ -190,6 +190,23 @@ export default function App() {
         }
     }
 
+    async function exportDiagnosticTrace() {
+        const requestSession = session;
+        const id = repositorySearchIdRef.current;
+        if (!id || !requestSession.isCurrent()) return;
+        try {
+            const data = await requestJson(`/collector/searches/${id}/diagnostics`, { session: requestSession });
+            if (!requestSession.isCurrent() || repositorySearchIdRef.current !== id) return;
+            const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+            const link = document.createElement('a');
+            link.href = url; link.download = `trace-recherche-${id}.json`;
+            document.body.append(link); link.click(); link.remove();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            if (requestSession.isCurrent() && !isAbortError(error)) setCommandError(`Unable to export diagnostics: ${error.message}`);
+        }
+    }
+
     async function retrySearch() {
         if (!searchSnapshot || repositorySearching) return;
         const requestSession = session;
@@ -298,6 +315,8 @@ export default function App() {
             )}
             <RepositorySearchSection
                 accessReady={sessionStatus === 'ready'}
+                session={session}
+                exportTrace={exportDiagnosticTrace}
                 analyzeCandidate={analyzeCandidate}
                 retryCollection={candidate => retryCollection(candidate.item, session)}
                 restoreAnalysis={() => restoreAnalysis(true)}

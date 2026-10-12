@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Annotated, Optional, Union
 from uuid import UUID
 
@@ -24,7 +25,9 @@ from app.database import (
     list_collected_datasets,
     search_collected_datasets,
 )
+from app.db.classification_votes import read_candidate_vote_history
 from app.db.collection_jobs import retry_collection_job_for_owner
+from app.db.collection_traces import read_collection_trace
 from app.db.commands import CommandConflict
 from app.db.search_jobs import admit_search
 from app.db.search_progress import read_search_progress
@@ -87,13 +90,32 @@ async def read_collection_job(
     return CollectorCollectionJobResponse(job=public_collection_job(job))
 
 
+@router.get("/collection-jobs/{job_id}/diagnostics")
+async def collection_diagnostics(
+    job_id: int,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    response: Response,
+):
+    trace = await read_collection_trace(job_id, principal.owner_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="Collection job not found")
+    response.headers["Cache-Control"] = "no-store"
+    return trace
+
+
 @router.post("/collection-jobs/{job_id}/retry", status_code=202)
 async def retry_collection_job(
     job_id: int,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
-    idempotency_key: Annotated[Optional[str], Header(  # noqa: UP045
-        alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$",
-    )] = None,
+    idempotency_key: Annotated[
+        Optional[str],  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+        Header(
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+        ),
+    ] = None,
 ) -> CollectorCollectionJobResponse:
     job = await get_collection_job_for_owner(job_id, principal.owner_id)
     if job is None:
@@ -101,7 +123,9 @@ async def retry_collection_job(
     try:
         with quota_http_errors():
             job = await retry_collection_job_for_owner(
-                job_id, principal.owner_id, admission=work_admission(principal),
+                job_id,
+                principal.owner_id,
+                admission=work_admission(principal),
                 **({"idempotency_key": idempotency_key} if idempotency_key is not None else {}),
             )
     except ValueError as exception:
@@ -120,7 +144,11 @@ async def list_collected(
     format: Annotated[str, Query(max_length=100)] = "",
 ) -> CollectorCollectionResponse:
     datasets = await list_collected_datasets(
-        limit=limit + 1, before_id=cursor, query=query, country=country, format=format,
+        limit=limit + 1,
+        before_id=cursor,
+        query=query,
+        country=country,
+        format=format,
     )
     items = datasets[:limit]
     return CollectorCollectionResponse(
@@ -131,13 +159,18 @@ async def list_collected(
 
 @router.get("/collected-datasets/by-id")
 async def read_collected_by_id(
-    ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(
-        min_length=1, max_length=100,
-    )],
+    ids: Annotated[
+        list[Annotated[int, Query(ge=1, le=2147483647)]],
+        Query(
+            min_length=1,
+            max_length=100,
+        ),
+    ],
 ) -> CollectorCollectionResponse:
     return CollectorCollectionResponse(
-        items=[_collector_collected_dataset(dataset)
-               for dataset in await get_collected_datasets(ids)],
+        items=[
+            _collector_collected_dataset(dataset) for dataset in await get_collected_datasets(ids)
+        ],
     )
 
 
@@ -219,9 +252,16 @@ async def search_datasets(
         online_response = await _search_online_repositories(original_query)
     except HTTPException as exception:
         await _fail_search_session(
-            search_id, principal.owner_id, origin="online", error=str(exception.detail),
-            errors=[Diagnostic("api_quota_exceeded" if exception.status_code == 429
-                               else "processing_failed", "search").to_dict()],
+            search_id,
+            principal.owner_id,
+            origin="online",
+            error=str(exception.detail),
+            errors=[
+                Diagnostic(
+                    "api_quota_exceeded" if exception.status_code == 429 else "processing_failed",
+                    "search",
+                ).to_dict()
+            ],
         )
         raise
     except Exception as exception:  # noqa: BLE001 - provider failures are persisted.
@@ -237,8 +277,9 @@ async def search_datasets(
 
     try:
         admission = work_admission(principal)
-        prepared = prepare_online(online_response, original_query, admission,
-                                  bound=_bounded_repository_result)
+        prepared = prepare_online(
+            online_response, original_query, admission, bound=_bounded_repository_result
+        )
         warnings = prepared.warnings
         with quota_http_errors():
             persisted_candidates = await complete_search_session_with_repository_candidates(
@@ -253,9 +294,16 @@ async def search_datasets(
             )
     except HTTPException as exception:
         await _fail_search_session(
-            search_id, principal.owner_id, origin="online", error=str(exception.detail),
-            errors=[Diagnostic("api_quota_exceeded" if exception.status_code == 429
-                               else "processing_failed", "search").to_dict()],
+            search_id,
+            principal.owner_id,
+            origin="online",
+            error=str(exception.detail),
+            errors=[
+                Diagnostic(
+                    "api_quota_exceeded" if exception.status_code == 429 else "processing_failed",
+                    "search",
+                ).to_dict()
+            ],
         )
         raise
     except Exception as exception:  # noqa: BLE001 - candidates must be durable.
@@ -273,9 +321,7 @@ async def search_datasets(
         search_id=search_id,
         query=original_query,
         items=[_collector_repository_candidate(item) for item in persisted_candidates],
-        warnings=[
-            _collector_repository_search_warning(warning) for warning in warnings
-        ],
+        warnings=[_collector_repository_search_warning(warning) for warning in warnings],
     )
 
 
@@ -287,13 +333,20 @@ async def _search_online_repositories(
     return await asyncio.to_thread(search_repository_metadata, query)
 
 
-CommandKey = Annotated[str, Header(
-    alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$",
-)]
+CommandKey = Annotated[
+    str,
+    Header(
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
+]
 
 
 @router.post(
-    "/searches", status_code=202,
+    "/searches",
+    status_code=202,
     responses={200: {"model": CollectorSearchCommandResponse, "description": "Command replay"}},
 )
 async def create_search(
@@ -307,8 +360,11 @@ async def create_search(
     try:
         with quota_http_errors():
             row, replayed = await admit_search(
-                principal.owner_id, idempotency_key, query=payload.query,
-                access_mode=api_auth_mode(), client_key=principal.client_key,
+                principal.owner_id,
+                idempotency_key,
+                query=payload.query,
+                access_mode=api_auth_mode(),
+                client_key=principal.client_key,
             )
     except CommandConflict as exception:
         raise HTTPException(status_code=409, detail=str(exception)) from exception
@@ -316,7 +372,8 @@ async def create_search(
 
 
 @router.post(
-    "/searches/{search_id}/retry", status_code=202,
+    "/searches/{search_id}/retry",
+    status_code=202,
     responses={200: {"model": CollectorSearchCommandResponse, "description": "Command replay"}},
 )
 async def retry_search(
@@ -333,8 +390,11 @@ async def retry_search(
     try:
         with quota_http_errors():
             row, replayed = await admit_search(
-                principal.owner_id, idempotency_key, retry_search_id=search_id,
-                access_mode=api_auth_mode(), client_key=principal.client_key,
+                principal.owner_id,
+                idempotency_key,
+                retry_search_id=search_id,
+                access_mode=api_auth_mode(),
+                client_key=principal.client_key,
             )
     except CommandConflict as exception:
         raise HTTPException(status_code=409, detail=str(exception)) from exception
@@ -349,14 +409,17 @@ async def _search_command_response(row, replayed, principal, response):
     progress_url = f"/collector/searches/{row['id']}/progress"
     response.headers["Location"] = progress_url
     return CollectorSearchCommandResponse(
-        search_id=row["id"], execution_status=progress.execution_status,
-        attempt=progress.attempt, progress_url=progress_url,
+        search_id=row["id"],
+        execution_status=progress.execution_status,
+        attempt=progress.attempt,
+        progress_url=progress_url,
     )
 
 
 @router.get("/searches/latest")
 async def latest_search(
-    principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    response: Response,
 ) -> CollectorSearchProgressResponse:
     search_id = await latest_search_id(principal.owner_id)
     if search_id is None:
@@ -379,26 +442,86 @@ async def search_progress(
             candidate,
             automatic_collection=(
                 _automatic_collection(collections.get(candidate["id"]))
-                if candidate["classification_status"] == "accepted" else None
+                if candidate["classification_status"] == "accepted"
+                else None
             ),
-        ) for candidate in candidates
+        )
+        for candidate in candidates
     ]
     summary = summarize_search(search, [item.model_dump() for item in items])
     summary["errors"] = public_diagnostics(summary["errors"])
     response.headers["Cache-Control"] = "no-store"
-    ids = list(dict.fromkeys([
-        *search.get("local_dataset_ids", []),
-        *(dataset_id for item in items if item.automatic_collection is not None
-          for dataset_id in item.automatic_collection.dataset_ids),
-    ]))
+    ids = list(
+        dict.fromkeys(
+            [
+                *search.get("local_dataset_ids", []),
+                *(
+                    dataset_id
+                    for item in items
+                    if item.automatic_collection is not None
+                    for dataset_id in item.automatic_collection.dataset_ids
+                ),
+            ]
+        )
+    )
     return CollectorSearchProgressResponse(
-        search_id=search_id, items=items, query=search.get("query", ""),
+        search_id=search_id,
+        items=items,
+        query=search.get("query", ""),
         origin=search["origin"] if search["status"] not in {"queued", "running"} else None,
-        local_dataset_ids=search.get("local_dataset_ids", []), dataset_ids=ids,
-        warnings=search.get("warnings", []), attempt=search.get("attempt_number", 1),
-        created_at=str(search.get("created_at", "")), updated_at=str(search.get("updated_at", "")),
+        local_dataset_ids=search.get("local_dataset_ids", []),
+        dataset_ids=ids,
+        warnings=search.get("warnings", []),
+        attempt=search.get("attempt_number", 1),
+        created_at=str(search.get("created_at", "")),
+        updated_at=str(search.get("updated_at", "")),
         **summary,
     )
+
+
+@router.get("/searches/{search_id}/diagnostics")
+async def search_diagnostics(
+    search_id: UUID,
+    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
+    response: Response,
+):
+    progress = await search_progress(search_id, principal, response)
+    job_ids = {
+        item.automatic_collection.job.id
+        for item in progress.items
+        if item.automatic_collection and item.automatic_collection.job
+    }
+    traces = [await read_collection_trace(job_id, principal.owner_id) for job_id in sorted(job_ids)]
+    return {
+        "schema_version": "1.0",
+        "document_type": "search_diagnostic_trace",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "is_template": False,
+        "context": {
+            "search_id": str(search_id),
+            "query": progress.query,
+            "attempt": progress.attempt,
+        },
+        "summary": progress.model_dump(mode="json"),
+        "collections": traces,
+        "repository_classifications": [
+            {"candidate_id": str(item.candidate_id),
+             "classification_history": await read_candidate_vote_history(
+                 item.candidate_id, principal.owner_id
+             )}
+            for item in progress.items
+        ],
+        "export": {
+            "method": "persisted_api",
+            "coverage": "partial",
+            "missing_evidence": [
+                "Historical records before schema 12 have no method trace.",
+                "Before schema 13 only the latest model vote can be recovered; "
+                "legacy snapshots have no known start time and cannot reconstruct earlier errors.",
+                "Raw pages, invalid model bodies and cookies are not exported.",
+            ],
+        },
+    }
 
 
 @router.get("/repository-analyses/latest")
@@ -447,9 +570,15 @@ async def classify_repository_result(
         Body(),
     ] = None,
     retry: bool = False,
-    idempotency_key: Annotated[Optional[str], Header(  # noqa: UP045
-        alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$",
-    )] = None,
+    idempotency_key: Annotated[
+        Optional[str],  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+        Header(
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+        ),
+    ] = None,
 ) -> CollectorRepositorySearchItem:
     """Persist a request before acknowledging it; never run an LLM in this route."""
 
@@ -461,8 +590,11 @@ async def classify_repository_result(
         try:
             with quota_http_errors():
                 candidate = await enqueue_candidate_classification(
-                    candidate_id, principal.owner_id, retry=retry,
-                    admission=work_admission(principal), idempotency_key=idempotency_key,
+                    candidate_id,
+                    principal.owner_id,
+                    retry=retry,
+                    admission=work_admission(principal),
+                    idempotency_key=idempotency_key,
                 )
         except CommandConflict as exception:
             raise HTTPException(status_code=409, detail=str(exception)) from exception
@@ -479,7 +611,10 @@ async def classify_repository_result(
     if status == "pending" or (status == "error" and retry):
         with quota_http_errors():
             await enqueue_candidate_classification(
-                candidate_id, principal.owner_id, retry=retry, admission=work_admission(principal),
+                candidate_id,
+                principal.owner_id,
+                retry=retry,
+                admission=work_admission(principal),
             )
         candidate = await get_repository_candidate(candidate_id, principal.owner_id)
         if candidate is None:
@@ -505,14 +640,18 @@ def _automatic_collection(
 
     if collection is not None and collection.already_collected:
         return CollectorAutomaticCollection(
-            state="saved", dataset_ids=list(collection.dataset_ids),
-            execution_status="finished", outcome="results",
+            state="saved",
+            dataset_ids=list(collection.dataset_ids),
+            execution_status="finished",
+            outcome="results",
         )
     if collection is None or collection.job is None:
         # Legacy acceptances without follow-up are visible; reading cannot repair
         # them by silently creating new work.
         return CollectorAutomaticCollection(
-            state="error", execution_status="failed", outcome="incomplete",
+            state="error",
+            execution_status="failed",
+            outcome="incomplete",
             errors=[Diagnostic("collection_not_scheduled", "collection").to_dict()],
             error="No collection is associated with this candidate.",
             error_code="collection_not_scheduled",
@@ -520,8 +659,12 @@ def _automatic_collection(
     job = public_collection_job(collection.job)
     state = ("saved" if job.saved_count else "empty") if job.status == "done" else job.status
     return CollectorAutomaticCollection(
-        state=state, job=job, dataset_ids=job.dataset_ids,
-        execution_status=job.execution_status, outcome=job.outcome, errors=job.errors,
+        state=state,
+        job=job,
+        dataset_ids=job.dataset_ids,
+        execution_status=job.execution_status,
+        outcome=job.outcome,
+        errors=job.errors,
     )
 
 
@@ -536,8 +679,6 @@ def _collector_distribution(distribution: DistributionCandidate) -> CollectorDis
         last_seen_at=distribution.last_seen_at,
         last_checked_at=distribution.last_checked_at,
     )
-
-
 
 
 def _collector_repository_candidate(
@@ -560,10 +701,14 @@ def _collector_repository_candidate(
         classification_status=candidate["classification_status"],
         classification_progress=candidate.get("classification_progress", {}),
         classification=public_repository_classification(candidate["classification"]),
-        errors=public_diagnostics(candidate.get("errors") or (
-            [Diagnostic("legacy_unknown", "classification").to_dict()]
-            if candidate["classification_status"] == "error" else []
-        )),
+        errors=public_diagnostics(
+            candidate.get("errors")
+            or (
+                [Diagnostic("legacy_unknown", "classification").to_dict()]
+                if candidate["classification_status"] == "error"
+                else []
+            )
+        ),
         classification_error=(
             "Candidate classification failed."
             if candidate["classification_status"] == "error"
@@ -576,8 +721,6 @@ def _collector_repository_candidate(
         created_at=candidate["created_at"],
         updated_at=candidate["updated_at"],
     )
-
-
 
 
 async def _fail_search_session(
@@ -643,6 +786,7 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
         sharing_license=dataset.sharing_license,
         doi=dataset.doi,
         metadata_provenance=dataset.metadata_provenance,
+        record_identity=dataset.record_identity,
         discovery_method=dataset.discovery_method,
         dataset_signals=public_dataset_signals(dataset.dataset_signals),
         distributions=[

@@ -187,9 +187,11 @@ class ValidationResult:
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "ok", status == "available")
         if not self.reason:
-            object.__setattr__(self, "reason", (
-                "Data response confirmed." if self.ok else "Resource validation failed."
-            ))
+            object.__setattr__(
+                self,
+                "reason",
+                ("Data response confirmed." if self.ok else "Resource validation failed."),
+            )
 
 
 @dataclass(frozen=True)
@@ -223,6 +225,8 @@ class CollectedDataset:
     last_seen_at: str = ""
     updated_at: str = ""
 
+    record_identity: dict[str, str] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
         object.__setattr__(self, "dataset_url", require_http_url(self.dataset_url))
 
@@ -245,6 +249,8 @@ class CollectionReport:
     validation_failures: list[ValidationResult] = field(default_factory=list)
     errors: list[Diagnostic] = field(default_factory=list)
     verification_complete: bool | None = None
+    method_attempts: list[dict] = field(default_factory=list)
+    coverage: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

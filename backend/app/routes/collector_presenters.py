@@ -55,6 +55,8 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
         rejected_count=job.get("rejected_count", 0),
         invalid_distribution_count=job.get("invalid_distribution_count", 0),
         discovery_methods=job.get("discovery_methods", []),
+        method_attempts=job.get("method_attempts", []),
+        coverage=job.get("coverage", {}),
         message=messages[status],
         error="Collection failed." if status == "error" else "",
         error_code="collection_failed" if status == "error" else "",

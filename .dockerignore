@@ -11,3 +11,6 @@
 backend/*.db
 frontend/dist
 frontend/node_modules
+browser/node_modules
+artifacts
+Host ai-commons

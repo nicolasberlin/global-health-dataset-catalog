@@ -14,6 +14,8 @@ class CollectorConfig:
     max_distribution_attempts: int = 3
     max_distributions_saved: int = 1
     collection_max_duration_seconds: float = 180.0
+    dataverse_hosts: tuple[str, ...] = ("dataverse.harvard.edu",)
+    zenodo_hosts: tuple[str, ...] = ("zenodo.org",)
 
     def __post_init__(self):
         validate_collection_budget_seconds(self.collection_max_duration_seconds)

@@ -6,9 +6,11 @@ import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
+from dataclasses import replace
 from datetime import datetime
 from functools import partial
 
+from app.collection_trace_store import PostgresCollectionTrace
 from app.database import (
     claim_pending_collection_job,
     complete_collection_job,
@@ -20,10 +22,29 @@ from app.vote_store import PostgresVoteStore
 from app.workers import persist_with_retry, persisted_workers
 from collector.budget import collection_budget
 from collector.classification.factory import build_default_page_classifier
-from collector.config import configured_collection_budget_seconds
+from collector.collection.browser import configured_browser
+from collector.config import DEFAULT_CONFIG, configured_collection_budget_seconds
 from collector.diagnostics import Diagnostic, exception_diagnostics
 from collector.main import collect_repository_candidate_with_report, collect_source_with_report
 from collector.observability import emit_event, measure_operation, operation_context
+
+
+def _collect_record_job(url, *, classifier, observe):
+    hosts = tuple(
+        x.strip()
+        for x in os.getenv("COLLECTION_DATAVERSE_HOSTS", "dataverse.harvard.edu").split(",")
+        if x.strip()
+    )
+    zenodo_hosts = tuple(
+        x.strip()
+        for x in os.getenv("COLLECTION_ZENODO_HOSTS", "zenodo.org").split(",")
+        if x.strip()
+    )
+    config = replace(DEFAULT_CONFIG, dataverse_hosts=hosts, zenodo_hosts=zenodo_hosts)
+    with configured_browser(config, source_url=url) as browser:
+        return collect_repository_candidate_with_report(
+            url, config=config, classifier=classifier, observe=observe, browser=browser
+        )
 
 
 async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecutor) -> None:
@@ -36,7 +57,7 @@ async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecut
         saving = False
         try:
             collect = (
-                collect_repository_candidate_with_report
+                _collect_record_job
                 if job["kind"] == "repository_candidate"
                 else collect_source_with_report
             )
@@ -49,6 +70,15 @@ async def _run_collection_job(job: dict[str, object], executor: ThreadPoolExecut
                     copy_context().run,
                     partial(
                         collect,
+                        **(
+                            {
+                                "observe": PostgresCollectionTrace(
+                                    asyncio.get_running_loop(), job_id, version
+                                )
+                            }
+                            if job["kind"] == "repository_candidate"
+                            else {}
+                        ),
                         classifier=build_default_page_classifier(
                             vote_store=PostgresVoteStore(
                                 asyncio.get_running_loop(),

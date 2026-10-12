@@ -193,6 +193,8 @@ class CollectorCollectionJob(BaseModel):
     rejected_count: int = 0
     invalid_distribution_count: int = 0
     discovery_methods: list[str] = Field(default_factory=list)
+    method_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    coverage: dict[str, Any] = Field(default_factory=dict)
     message: str = ""
     error: str = ""
     error_code: Literal["", "collection_failed"] = ""
@@ -310,6 +312,7 @@ class CollectorCollectedDataset(BaseModel):
     sharing_license: str = ""
     doi: str = ""
     metadata_provenance: dict[str, Any] = Field(default_factory=dict)
+    record_identity: dict[str, str] = Field(default_factory=dict)
     discovery_method: str
     dataset_signals: dict[str, Any]
     distributions: list[CollectorDistribution]

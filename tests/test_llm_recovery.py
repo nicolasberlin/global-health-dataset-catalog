@@ -138,7 +138,7 @@ async def next_attempt(database, kind, item_id):
 
 
 def install_collection(monkeypatch):
-    def collect(url, *, classifier):
+    def collect(url, *, classifier, **options):
         classifier.classify(PAGE, [])
         return CollectionResult(report=CollectionReport(verification_complete=True))
 

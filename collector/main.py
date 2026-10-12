@@ -18,7 +18,7 @@ from collector.discovery.manager import discover_source
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
 from collector.fetch import FetchedPage, PageFetchError, fetch_public_html
-from collector.storage.metadata import metadata_evidence
+from collector.storage.metadata import metadata_evidence, normalize_doi
 from collector.storage.models import (
     CollectedDataset,
     CollectionReport,
@@ -42,6 +42,9 @@ def analyze_html_page(
     classifier: PageClassifier | None = None,
     *,
     discovered_page: DiscoveredPage | None = None,
+    distribution_candidates: list[DistributionCandidate] | None = None,
+    record_url: str | None = None,
+    record_identity: dict[str, str] | None = None,
 ) -> CollectedDataset | None:
     """Extract and classify one HTML page before distribution validation.
 
@@ -51,16 +54,27 @@ def analyze_html_page(
     """
 
     page = extract_page(url, html)
+    if record_url is not None:
+        page = replace(page, dataset_url=record_url, canonical_url=record_url)
+    if record_identity and record_identity.get("kind") == "file":
+        # File pages can expose the parent's citation DOI in their HTML metadata.
+        page = replace(page, doi=normalize_doi(record_identity.get("persistent_id")))
     evidence = metadata_evidence(page, kind="page", source_url=page.url)
     if discovered_page is not None:
         page = _merge_discovery_metadata(page, discovered_page)
-        for field in ("date_of_publication", "sharing_license"):
+        for field in ("date_of_publication", "sharing_license", "doi"):
             value = getattr(discovered_page, field)
             if value:
-                evidence.setdefault(field, []).append({
-                    "value": value, "kind": "adapter", "source_url": discovered_page.url,
-                })
-    distributions = [item for item in extract_distributions(page) if _usable_distribution(item)]
+                evidence.setdefault(field, []).append(
+                    {
+                        "value": value,
+                        "kind": "adapter",
+                        "source_url": discovered_page.metadata_source_url or discovered_page.url,
+                    }
+                )
+    candidates = (extract_distributions(page) if distribution_candidates is None
+                  else distribution_candidates)
+    distributions = [item for item in candidates if _usable_distribution(item)]
     if not distributions:
         barrier = page_access_diagnostic(html)
         if barrier is not None:
@@ -85,6 +99,8 @@ def analyze_html_page(
         sharing_license=page.sharing_license,
         doi=page.doi,
         metadata_provenance=evidence,
+        record_identity=(record_identity if record_identity is not None
+                         else discovered_page.record_identity if discovered_page else {}),
         dataset_signals=classification.dataset_signals,
         distributions=distributions,
     )
@@ -116,8 +132,9 @@ def collect_source_with_report(
     """
 
     with collection_budget(seconds=config.collection_max_duration_seconds):
-        return _collect_source_within_budget(source_url, config, discover, fetch_html, validate,
-                                             classifier)
+        return _collect_source_within_budget(
+            source_url, config, discover, fetch_html, validate, classifier
+        )
 
 
 def _collect_source_within_budget(source_url, config, discover, fetch_html, validate, classifier):
@@ -175,14 +192,22 @@ def _collect_source_within_budget(source_url, config, discover, fetch_html, vali
                 collected_datasets.append(dataset)
             else:
                 # An alternative failed link does not invalidate a retained dataset.
-                inconclusive = [failure for failure in validation_failures[failure_start:]
-                                if failure.status in {"unconfirmed", "restricted"}]
+                inconclusive = [
+                    failure
+                    for failure in validation_failures[failure_start:]
+                    if failure.status in {"unconfirmed", "restricted"}
+                ]
                 if inconclusive:
-                    errors.extend(Diagnostic(
-                        "access_restricted" if failure.status == "restricted"
-                        else "verification_unconfirmed", "validation",
-                        recovery="none" if failure.status == "restricted" else "manual",
-                    ) for failure in inconclusive)
+                    errors.extend(
+                        Diagnostic(
+                            "access_restricted"
+                            if failure.status == "restricted"
+                            else "verification_unconfirmed",
+                            "validation",
+                            recovery="none" if failure.status == "restricted" else "manual",
+                        )
+                        for failure in inconclusive
+                    )
                 else:
                     rejected_count += 1
 
@@ -203,11 +228,7 @@ def _collect_source_within_budget(source_url, config, discover, fetch_html, vali
             verification_complete=not errors,
             discovery_methods=tuple(
                 sorted(
-                    {
-                        page.discovery_method
-                        for page in discovered_pages
-                        if page.discovery_method
-                    }
+                    {page.discovery_method for page in discovered_pages if page.discovery_method}
                 )
             ),
         ),
@@ -220,34 +241,28 @@ def collect_repository_candidate_with_report(
     fetch_html: FetchHTMLFunction | None = None,
     validate: ValidateDistributionFunction | None = None,
     classifier: PageClassifier | None = None,
+    *,
+    fetch_json=None,
+    browser=None,
+    observe=None,
+    registry=None,
 ) -> CollectionResult:
-    """Collect one repository landing page through the normal validation gates.
-
-    Repository candidates are individual records, so this wrapper prevents the
-    generic discovery adapter from replacing that URL with an entire site
-    sitemap. Provider metadata is deliberately not passed into collection.
-    """
+    """Resolve one accepted record with shared validation, never a whole-site crawl."""
+    from collector.collection.orchestrator import collect_record
 
     normalized_url = normalize_http_url(candidate_url)
     if normalized_url is None:
         raise ValueError("Repository candidate URL must be a valid HTTP(S) URL.")
-
-    def discover_candidate(_: str) -> list[DiscoveredPage]:
-        return [
-            DiscoveredPage(
-                url=normalized_url,
-                discovery_method="repository_search",
-                priority=1.0,
-            )
-        ]
-
-    return collect_source_with_report(
+    return collect_record(
         normalized_url,
-        config=config,
-        discover=discover_candidate,
+        config,
         fetch_html=fetch_html,
+        fetch_json=fetch_json,
         validate=validate,
         classifier=classifier,
+        browser=browser,
+        observe=observe,
+        registry=registry,
     )
 
 
@@ -275,8 +290,9 @@ def _collect_discovered_page_with_report(
         fetched_page = fetch_html(discovered_page.url)
         mime_type = fetched_page.content_type.split(";", 1)[0].strip().lower()
         if mime_type and mime_type not in {"text/html", "application/xhtml+xml"}:
-            raise PageFetchError("Landing page did not return HTML.",
-                                 code="verification_unconfirmed")
+            raise PageFetchError(
+                "Landing page did not return HTML.", code="verification_unconfirmed"
+            )
         dataset = analyze_html_page(
             fetched_page.final_url,
             fetched_page.html,
@@ -314,6 +330,8 @@ def analyze_discovered_page(
     page = PageSnapshot(
         url=dataset_url,
         canonical_url=dataset_url,
+        doi=discovered_page.doi,
+        hosting_platform=discovered_page.hosting_platform,
         title=discovered_page.title,
         h1=discovered_page.title,
         meta_description=discovered_page.description,
@@ -351,16 +369,19 @@ def analyze_discovered_page(
         title=page.title or page.canonical_url,
         description=page.meta_description,
         publisher=page.publisher,
-        hosting_platform="",
+        hosting_platform=page.hosting_platform,
         uploader="",
         geography=page.geography,
         date_of_publication=page.date_of_publication,
         sharing_license=page.sharing_license,
         doi=page.doi,
         metadata_provenance=metadata_evidence(
-            page, kind="adapter", source_url=page.url,
+            page,
+            kind="adapter",
+            source_url=discovered_page.metadata_source_url or page.url,
         ),
         dataset_signals=classification.dataset_signals,
+        record_identity=discovered_page.record_identity,
         distributions=distributions,
         discovery_method=discovered_page.discovery_method,
     )
@@ -384,8 +405,17 @@ def _usable_distribution(distribution: DistributionCandidate) -> bool:
 def _merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot:
     """Fill missing page fields before classification, retaining the extracted links."""
     fields = (
-        "title", "publisher", "geography", "date_of_publication", "diseases",
-        "size_of_dataset", "demographic_information", "sharing_license", "modality_of_data",
+        "title",
+        "doi",
+        "hosting_platform",
+        "publisher",
+        "geography",
+        "date_of_publication",
+        "diseases",
+        "size_of_dataset",
+        "demographic_information",
+        "sharing_license",
+        "modality_of_data",
     )
     return replace(
         page,
@@ -410,11 +440,15 @@ def _with_valid_distributions_and_report(
     invalid_count = 0
 
     ranked_distributions = sorted(
-        dataset.distributions, key=lambda item: item.probability, reverse=True,
+        dataset.distributions,
+        key=lambda item: item.probability,
+        reverse=True,
     )
     for distribution in ranked_distributions:
-        if (len(attempted_urls) >= config.max_distribution_attempts
-                or len(valid_distributions) >= config.max_distributions_saved):
+        if (
+            len(attempted_urls) >= config.max_distribution_attempts
+            or len(valid_distributions) >= config.max_distributions_saved
+        ):
             break
         url = normalize_http_url(distribution.url)
         if url is None or url in attempted_urls:

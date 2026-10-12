@@ -9,6 +9,7 @@ from collector.url_utils import canonicalize_url
 FORMAT_BY_EXTENSION = {
     ".csv": "CSV",
     ".tsv": "TSV",
+    ".tab": "TSV",
     ".xls": "XLS",
     ".xlsx": "XLSX",
     ".json": "JSON",

@@ -85,3 +85,10 @@ it('shows partial votes and offers an explicit collection retry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry collection' }));
     expect(retry).toHaveBeenCalledTimes(1);
 });
+
+it('allows an explicit retry of an older empty collection', () => {
+    const retry = vi.fn();
+    render(<RepositoryAcceptedCard candidate={acceptedCandidate('empty')} onRetryCollection={retry} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry collection' }));
+    expect(retry).toHaveBeenCalledTimes(1);
+});

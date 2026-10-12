@@ -1,0 +1,7 @@
+{
+  "name": "ghdc-browser-service",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": { "playwright": "1.63.0" },
+  "scripts": { "start": "node service.cjs", "test": "node --test tests/*.test.cjs" }
+}

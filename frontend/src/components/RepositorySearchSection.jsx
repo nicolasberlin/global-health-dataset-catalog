@@ -9,6 +9,8 @@ import RepositoryProgressCard from './RepositoryProgressCard.jsx';
 
 export default function RepositorySearchSection({
     accessReady = true,
+    session,
+    exportTrace,
     analyzeCandidate,
     retryCollection,
     restoreAnalysis,
@@ -178,6 +180,8 @@ export default function RepositorySearchSection({
                 </div>
             ) : null}
 
+            {searchSnapshot && exportTrace && <button type="button" onClick={exportTrace} disabled={!accessReady}>Export diagnostic trace</button>}
+
             {searchSnapshot && <div className="repository-message" role="status">
                 <strong>{trackingStopped ? 'Last known search status (tracking stopped)' :
                     searchSnapshot.execution_status === 'waiting_retry' ? 'Waiting for an automatic retry' :
@@ -217,7 +221,7 @@ export default function RepositorySearchSection({
             {repositoryOrigin === 'online' ? (
                 <div className="repository-message repository-message--online" role="status">
                     <strong>No local results</strong>
-                    <span>Searching external repositories and running AI validation.</span>
+                    <span>{searchSnapshot?.polling_required ? 'Searching external repositories and running AI validation.' : 'Results from external repositories.'}</span>
                 </div>
             ) : null}
 
@@ -256,7 +260,7 @@ export default function RepositorySearchSection({
                 visibleCandidates.length > 0) ? (
                 <div className="repository-result-grid" aria-live="polite">
                     {visibleCandidates.map((candidate) => (
-                        <RepositoryAcceptedCard key={candidate.id} candidate={candidate} onRetryCollection={() => retryCollection(candidate)} />
+                        <RepositoryAcceptedCard session={session} key={candidate.id} candidate={candidate} onRetryCollection={() => retryCollection(candidate)} />
                     ))}
                     {inProgressRepositoryCandidates.map((candidate) => (
                         <RepositoryProgressCard key={candidate.id} candidate={candidate} onAnalyze={() => analyzeCandidate(candidate)} />

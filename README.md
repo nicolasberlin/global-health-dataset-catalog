@@ -17,6 +17,11 @@ The current application can:
 - validate candidate download and API links;
 - persist accepted datasets and their distributions.
 
+Record collection uses a shared connector registry for Dataverse and Zenodo,
+with common classification/validation and HTML/browser recovery. See
+[Collection connectors](docs/collection-connectors.md) for the implementation,
+configuration and long-term architecture stages.
+
 The application does not yet guarantee that every collected dataset comes from an official publisher.
 
 ## Architecture
@@ -279,6 +284,7 @@ Detailed documentation:
 
 - [Collector Pipeline](docs/collector-pipeline-diagram.md)
 - [Search Diagnostics — trace and report templates (French)](docs/diagnostic-recherche.md)
+- [Multi-method Record Collection — API, HTML, isolated browser and diagnostics](docs/multimethod-collection.md)
 - [Classification Architecture](docs/classification-architecture.md)
 - [Database Schema](docs/database-schema-diagram.md)
 - [Secure Deployment](docs/DEPLOYMENT.md)

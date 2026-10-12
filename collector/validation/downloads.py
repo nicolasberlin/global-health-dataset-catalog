@@ -297,7 +297,9 @@ def _access_barrier(text: str) -> tuple[ValidationStatus, str] | None:
         return "restricted", "The response explicitly requires authentication or access permission."
     if re.search(
         r"\bcaptcha\b|\brecaptcha\b|\bhcaptcha\b|\bverify (?:that )?you are (?:a )?human\b"
-        r"|\bchecking your browser\b|\b(?:anti bot|bot) (?:challenge|verification)\b", text,
+        r"|\bchecking your browser\b|\b(?:anti bot|bot) (?:challenge|verification)\b"
+        r"|\bverify that you[’\']re not a robot\b"
+        r"|\bverify (?:that )?you are not a robot\b", text,
     ):
         return "unconfirmed", "An anti-bot challenge prevented verification of data access."
     return None

@@ -4,10 +4,31 @@ Ce document définit une fiche de traçabilité pour analyser une recherche de b
 en bout, identifier les blocages et rédiger un feedback vérifiable. Il s’applique
 à n’importe quelle requête, indépendamment du domaine médical recherché.
 
-Les fichiers fournis sont **des modèles à remplir manuellement**. Ils ne créent
-ni endpoint d’export, ni instrumentation, ni journal automatique. Une partie des
-informations proposées n’est pas encore conservée par l’application : dans ce
-cas, inscrire `null` / `unknown` et décrire la preuve manquante, sans l’inventer.
+Les fichiers fournis sont **des modèles à compléter**. L’interface propose aussi
+**Export diagnostic trace**, qui télécharge les états persistés de la recherche
+et les tentatives de collecte enregistrées depuis la migration 12. Cet export
+partiel ne remplit pas toutes les rubriques des modèles. Pour les informations
+manquantes, inscrire `null` / `unknown` et décrire la preuve absente, sans l’inventer.
+
+Depuis la migration 13, chaque appel de classification conserve une entrée dans
+`classification_vote_attempts` : identifiant du run, modèle et votant, numéro
+d’appel, cycle de relance, dates de début et de fin, statut, message d’erreur
+technique et diagnostics. Une réussite ultérieure ne supprime pas l’échec
+précédent. Les interruptions détectées au redémarrage sont aussi enregistrées.
+
+« Collection details » affiche cet historique sous « Model classification
+history ». L’endpoint du job l’expose dans `classification_history.attempts`.
+L’export de recherche contient également `repository_classifications` pour les
+appels de classification des candidats. Les accès restent limités au propriétaire
+et chaque historique exporté contient au plus les 1 000 appels les plus récents,
+avec `history_truncated` si nécessaire. Les dates API sont en ISO 8601 ;
+l’interface affiche le début d’appel dans le fuseau du navigateur.
+
+Pour les votes antérieurs à cette migration, seule la dernière information encore
+présente est copiée, avec `evidence: legacy_snapshot` et `started_at: null`.
+Ce snapshot ne reconstitue pas les erreurs déjà écrasées. Les nouvelles entrées
+portent `evidence: live`. Les réponses brutes invalides et les clés API ne sont
+pas incluses : le message du validateur indique le champ ou la structure rejetés.
 
 ## Documents à utiliser
 
@@ -29,6 +50,8 @@ une hypothèse comme une cause établie.
 | Source | Informations disponibles | Limites |
 |---|---|---|
 | `GET /collector/searches/{id}/progress` | Statut global, candidats, décisions, diagnostics, jobs, compteurs, IDs enregistrés | Snapshot courant, pas historique de chaque événement |
+| `GET /collector/searches/{id}/diagnostics` | Export de la recherche, des traces de collecte et des appels de classification accessibles au propriétaire | Export partiel, pas de pages brutes ni de cookies |
+| `GET /collector/collection-jobs/{id}/diagnostics` | Méthodes, vérifications de ressources, couverture et historique des modèles | Anciennes preuves partielles ; au plus 1 000 méthodes et 1 000 appels de modèles récents |
 | `GET /collector/searches/latest` | Dernière recherche accessible au propriétaire | Peut changer après une nouvelle recherche ; garder le `search_id` |
 | Logs opérationnels serveur | Événements disponibles, durées et corrélations | Dépendent de la rétention ; ne reconstituent pas tous les liens écartés |
 | Lecture autorisée de la base | États persistés, votes et jobs selon les tables | Les raisons détaillées non enregistrées restent inconnues |

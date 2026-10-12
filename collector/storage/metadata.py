@@ -43,6 +43,11 @@ def enrich_from_repository(
         "sharing_license": str(metadata.get("Sharing license") or ""),
         "doi": normalize_doi(candidate.get("doi")),
     }
+    if dataset.record_identity.get("kind") == "file":
+        # Zenodo files have a parent record DOI, not a DOI of their own.
+        persistent = normalize_doi(dataset.record_identity.get("persistent_id"))
+        if not persistent or values["doi"] != persistent:
+            values["doi"] = ""
     values = {field: value.strip() if value.strip() != MISSING_DATASET_METADATA_VALUE else ""
               for field, value in values.items()}
     evidence = {key: list(value) for key, value in dataset.metadata_provenance.items()}

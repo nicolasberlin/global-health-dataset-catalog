@@ -78,6 +78,12 @@ async def claim_vote(
                     raise PersistenceFailure("This model vote is already running.")
                 # An explicit new cycle can reclaim a vote whose terminal save failed.
                 # The parent version and replacement token fence the former worker.
+                await connection.execute(
+                    "UPDATE classification_vote_attempts SET status = 'interrupted', "
+                    "finished_at = NOW(), error = 'Vote replaced by a new retry cycle.' "
+                    "WHERE run_id = %s AND voter_id = %s AND attempt = %s AND status = 'running'",
+                    (run_id, voter_id, vote["attempts"]),
+                )
             if expected_updated_at is not None:
                 _check_vote_retry(scope, vote)
             vote = await _fetchone(
@@ -89,6 +95,20 @@ async def claim_vote(
                     updated_at = NOW() WHERE run_id = %s AND voter_id = %s RETURNING *
             """,
                 (scope["retry_cycle"], scope["retry_cycle"], token, run_id, voter_id),
+            )
+            await connection.execute(
+                """
+                INSERT INTO classification_vote_attempts
+                    (run_id, voter_id, attempt, retry_cycle, model, status, started_at, evidence)
+                SELECT %s, %s, %s, %s,
+                    COALESCE((SELECT cfg->'body'->>'model'
+                        FROM jsonb_array_elements(snapshot->'configuration') cfg
+                        WHERE cfg->>'voter_id' = %s LIMIT 1), ''),
+                    'running', %s, 'live'
+                FROM classification_runs WHERE id = %s
+                """,
+                (run_id, voter_id, vote["attempts"], scope["retry_cycle"], voter_id,
+                 vote["updated_at"], run_id),
             )
             await _publish_progress(connection, run_id, candidate_id, job_id)
     return vote
@@ -193,6 +213,12 @@ async def finish_vote(
             )
             if row is None:
                 raise PersistenceFailure("Model vote attempt is no longer current.")
+            await connection.execute(
+                "UPDATE classification_vote_attempts SET status = %s, error = %s, errors = %s, "
+                "finished_at = NOW() WHERE run_id = %s AND voter_id = %s "
+                "AND attempt = %s AND status = 'running'",
+                (status, error[:2000], _jsonb(diagnostics), run_id, voter_id, vote["attempts"]),
+            )
             await _publish_progress(connection, run_id, candidate_id, job_id)
 
 
@@ -225,6 +251,63 @@ async def _lock_run(connection, run_id):
         "SELECT id FROM classification_runs WHERE id = %s FOR UPDATE",
         (run_id,),
     )
+
+
+async def read_candidate_vote_history(candidate_id, owner_id):
+    from .search_sessions import _normalized_owner_id
+
+    async with _require_database_pool().connection() as connection:
+        candidate = await _fetchone(
+            connection,
+            "SELECT c.id FROM repository_candidates c JOIN search_sessions s "
+            "ON s.id = c.search_session_id WHERE c.id = %s AND s.owner_id = %s",
+            (candidate_id, _normalized_owner_id(owner_id)),
+        )
+    if candidate is None:
+        return None
+    return await _read_vote_history("repository_candidate_id", candidate_id)
+
+
+async def read_collection_vote_history(job_id, owner_id):
+    from .collection_jobs import get_collection_job_for_owner
+
+    job = await get_collection_job_for_owner(job_id, owner_id)
+    if job is None:
+        return None
+    async with _require_database_pool().connection() as connection:
+        root = await _fetchone(
+            connection,
+            "SELECT COALESCE(classification_root_id, id) AS id FROM collection_jobs WHERE id = %s",
+            (job_id,),
+        )
+    if root is None:
+        return None
+    return await _read_vote_history("collection_job_id", root["id"])
+
+
+async def _read_vote_history(column, scope_id):
+    async with _require_database_pool().connection() as connection:
+        rows = await _fetchall(
+            connection,
+            f"SELECT a.* FROM classification_vote_attempts a JOIN classification_runs r "
+            f"ON r.id = a.run_id WHERE r.{column} = %s "
+            "ORDER BY COALESCE(a.started_at, a.finished_at) DESC NULLS LAST, "
+            "a.run_id, a.voter_id, a.attempt DESC LIMIT 1001",
+            (scope_id,),
+        )
+    return {
+        "attempts": [
+            {
+                **row,
+                "run_id": str(row["run_id"]),
+                "retry_cycle": str(row["retry_cycle"]) if row["retry_cycle"] else None,
+                "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+                "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+            }
+            for row in reversed(rows[:1000])
+        ],
+        "history_truncated": len(rows) > 1000,
+    }
 
 
 async def _publish_progress(connection, run_id, candidate_id, job_id):
@@ -266,6 +349,12 @@ async def mark_interrupted_votes_error():
                 "error = 'Vote interrupted by application restart.', "
                 "errors = %s, updated_at = NOW() "
                 "WHERE status = 'running'",
+                (_jsonb([Diagnostic("processing_interrupted", "classification").to_dict()]),),
+            )
+            await connection.execute(
+                "UPDATE classification_vote_attempts SET status = 'interrupted', "
+                "finished_at = NOW(), error = 'Vote interrupted by application restart.', "
+                "errors = %s WHERE status = 'running'",
                 (_jsonb([Diagnostic("processing_interrupted", "classification").to_dict()]),),
             )
             for run in runs:

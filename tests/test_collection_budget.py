@@ -225,7 +225,7 @@ async def test_worker_keeps_slot_and_persists_partial_result_after_expiration(
             clock[0] += 1000
         return available(distribution)
 
-    def collect_owned(_url, *, classifier):
+    def collect_owned(_url, *, classifier, **options):
         return collect([page("one"), page("two")], validate=validate)
 
     monkeypatch.setattr(

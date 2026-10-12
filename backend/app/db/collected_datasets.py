@@ -194,7 +194,7 @@ async def search_collected_datasets(
             SELECT dataset.id, dataset.source_url, dataset.dataset_url,
                    dataset.title, dataset.description, dataset.publisher,
                    dataset.date_of_publication, dataset.sharing_license, dataset.doi,
-                   dataset.metadata_provenance,
+                   dataset.metadata_provenance, dataset.record_identity,
                    dataset.hosting_platform, dataset.uploader, dataset.geography,
                    dataset.discovery_method, dataset.dataset_signals,
                    dataset.first_seen_at, dataset.last_seen_at, dataset.updated_at,
@@ -319,14 +319,20 @@ async def _upsert_collected_dataset(
             source_url, dataset_url, title, description, publisher,
             hosting_platform, uploader, geography, discovery_method,
             dataset_signals, date_of_publication, sharing_license, doi, metadata_provenance,
+            record_identity,
             first_seen_at, last_seen_at
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
         )
         ON CONFLICT(dataset_url) DO UPDATE SET
             {metadata_updates},
             metadata_provenance = jsonb_build_object({provenance_values}),
+            record_identity = collected_datasets.record_identity || (
+                SELECT COALESCE(jsonb_object_agg(key, value), '{{}}'::jsonb)
+                FROM jsonb_each(excluded.record_identity)
+                WHERE value <> '\"\"'::jsonb
+            ),
             source_url = excluded.source_url,
             title = COALESCE(NULLIF(excluded.title, ''), collected_datasets.title),
             description = COALESCE(
@@ -360,6 +366,7 @@ async def _upsert_collected_dataset(
         RETURNING id, source_url, dataset_url, title, description, publisher,
                   hosting_platform, uploader, geography, discovery_method,
                   dataset_signals, date_of_publication, sharing_license, doi, metadata_provenance,
+                  record_identity,
                   first_seen_at, last_seen_at, updated_at
         """,
         (
@@ -375,6 +382,7 @@ async def _upsert_collected_dataset(
             _serialize_signals(dataset.dataset_signals),
             dataset.date_of_publication, dataset.sharing_license, dataset.doi,
             _serialize_signals(dataset.metadata_provenance),
+            _serialize_signals(dataset.record_identity),
         ),
     )
     if row is None:
@@ -706,6 +714,9 @@ def _collected_dataset_from_rows(
         doi=str(dataset_row["doi"]),
         metadata_provenance=_deserialize_signals(
             dataset_row["metadata_provenance"], "collected_datasets.metadata_provenance",
+        ),
+        record_identity=_deserialize_signals(
+            dataset_row["record_identity"], "collected_datasets.record_identity",
         ),
         title=str(dataset_row["title"]),
         description=str(dataset_row["description"]),

@@ -72,6 +72,12 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      - name: Browser service contract tests
+        working-directory: browser
+        run: |
+          npm ci
+          npm test
+
   browser-sessions:
     name: HTTP frontend and HTTPS sessions (Chromium, Firefox, WebKit)
     runs-on: ubuntu-latest

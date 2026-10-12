@@ -13,7 +13,7 @@ from .connection import (
 
 # Historical pre-baseline schemas are unsupported. Explicit versioned migrations
 # preserve data for supported baselines, including the job associations in v2.
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 14
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",
     "health_probability",
@@ -355,8 +355,12 @@ REPOSITORY_PERSISTENCE_COLUMNS = {
     },
     "collection_jobs": {
         "kind", "repository_candidate_id", "errors", "outcome", "collection_deadline_at",
+        "collection_coverage", "collection_method_summary",
     },
     "classification_votes": {"errors"},
+    "classification_vote_attempts": {"run_id", "voter_id", "attempt", "model", "error", "evidence"},
+    "collection_method_attempts": {"job_id", "claim_version", "sequence", "observation"},
+    "collection_resource_checks": {"method_id", "resource_key", "observation"},
     "api_commands": {"owner_id", "command_key", "fingerprint", "result"},
     "worker_claims": {"token", "queue", "resource_id", "claim_version"},
     "search_local_results": {"search_id", "dataset_id", "position"},
@@ -369,6 +373,7 @@ for _table in ("repository_candidates", "collection_jobs"):
 REPOSITORY_PERSISTENCE_COLUMNS["classification_votes"].update({
     "retry_cycle", "cycle_attempts", "last_attempt_token",
 })
+REPOSITORY_PERSISTENCE_COLUMNS["collected_datasets"] = {"record_identity"}
 
 REPOSITORY_PERSISTENCE_INDEXES = {
     "candidate_retry_due_idx", "collection_retry_due_idx",
@@ -404,9 +409,12 @@ MANAGED_TABLES = (
     "collection_job_candidates",
     "classification_runs",
     "classification_votes",
+    "classification_vote_attempts",
     "api_commands",
     "worker_claims",
     "search_local_results",
+    "collection_method_attempts",
+    "collection_resource_checks",
 )
 
 
@@ -475,6 +483,12 @@ def _migration_for_version(version: int):
         return _migrate_9_to_10
     if version == 10:
         return _migrate_10_to_11
+    if version == 11:
+        return _migrate_11_to_12
+    if version == 12:
+        return _migrate_12_to_13
+    if version == 13:
+        return _migrate_13_to_14
 
     raise RuntimeError(f"No migration registered for schema version {version}.")
 
@@ -905,4 +919,69 @@ async def _migrate_3_to_4(connection: AsyncConnection[DictRow]) -> None:
         ADD COLUMN doi TEXT NOT NULL DEFAULT '',
         ADD COLUMN metadata_provenance JSONB NOT NULL DEFAULT '{}'::jsonb
             CHECK(jsonb_typeof(metadata_provenance) = 'object')
+    """)
+
+
+async def _migrate_11_to_12(connection):
+    await connection.execute("""
+        ALTER TABLE collection_jobs
+            ADD COLUMN collection_coverage JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ADD COLUMN collection_method_summary JSONB NOT NULL DEFAULT '[]'::jsonb;
+        CREATE TABLE collection_method_attempts (
+            id UUID PRIMARY KEY,
+            job_id INTEGER NOT NULL REFERENCES collection_jobs(id) ON DELETE CASCADE,
+            claim_version TIMESTAMPTZ NOT NULL,
+            retry_cycle UUID NOT NULL,
+            sequence INTEGER NOT NULL CHECK(sequence >= 0),
+            observation JSONB NOT NULL CHECK(jsonb_typeof(observation) = 'object'),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(job_id, claim_version, sequence)
+        );
+        CREATE TABLE collection_resource_checks (
+            method_id UUID NOT NULL REFERENCES collection_method_attempts(id) ON DELETE CASCADE,
+            resource_key TEXT NOT NULL,
+            observation JSONB NOT NULL CHECK(jsonb_typeof(observation) = 'object'),
+            PRIMARY KEY(method_id, resource_key)
+        );
+        CREATE INDEX collection_method_job_idx ON collection_method_attempts(job_id, created_at);
+    """)
+
+
+async def _migrate_12_to_13(connection):
+    await connection.execute("""
+        CREATE TABLE classification_vote_attempts (
+            run_id UUID NOT NULL,
+            voter_id TEXT NOT NULL,
+            attempt INTEGER NOT NULL CHECK(attempt > 0),
+            retry_cycle UUID,
+            model TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL CHECK(status IN ('running', 'succeeded', 'error', 'interrupted')),
+            started_at TIMESTAMPTZ,
+            finished_at TIMESTAMPTZ,
+            error TEXT NOT NULL DEFAULT '',
+            errors JSONB NOT NULL DEFAULT '[]'::jsonb CHECK(jsonb_typeof(errors) = 'array'),
+            evidence TEXT NOT NULL CHECK(evidence IN ('live', 'legacy_snapshot')),
+            PRIMARY KEY(run_id, voter_id, attempt),
+            FOREIGN KEY(run_id, voter_id) REFERENCES classification_votes(run_id, voter_id)
+                ON DELETE CASCADE
+        );
+        INSERT INTO classification_vote_attempts
+            (run_id, voter_id, attempt, retry_cycle, model, status,
+             finished_at, error, errors, evidence)
+        SELECT v.run_id, v.voter_id, v.attempts, v.retry_cycle,
+            COALESCE((SELECT cfg->'body'->>'model'
+                FROM jsonb_array_elements(r.snapshot->'configuration') cfg
+                WHERE cfg->>'voter_id' = v.voter_id LIMIT 1), ''),
+            v.status, CASE WHEN v.status <> 'running' THEN v.updated_at END,
+            v.error, v.errors, 'legacy_snapshot'
+        FROM classification_votes v JOIN classification_runs r ON r.id = v.run_id
+        WHERE v.attempts > 0;
+    """)
+
+
+async def _migrate_13_to_14(connection):
+    await connection.execute("""
+        ALTER TABLE collected_datasets
+            ADD COLUMN record_identity JSONB NOT NULL DEFAULT '{}'::jsonb
+                CHECK(jsonb_typeof(record_identity) = 'object');
     """)

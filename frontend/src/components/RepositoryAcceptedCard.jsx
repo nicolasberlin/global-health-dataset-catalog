@@ -1,5 +1,6 @@
 import RecoveryDetails, { RetryAction } from './RecoveryDetails.jsx';
 import ClassificationProgress from './ClassificationProgress.jsx';
+import CollectionDiagnostics from './CollectionDiagnostics.jsx';
 import DatasetAccessDetails from './DatasetAccessDetails.jsx';
 
 function getHostname(url) {
@@ -134,7 +135,7 @@ function automaticCollectionStatus(automaticCollection) {
 
 function jobErrors(item) { return item.automatic_collection?.job?.errors ?? []; }
 
-export default function RepositoryAcceptedCard({ candidate, onRetryCollection }) {
+export default function RepositoryAcceptedCard({ candidate, onRetryCollection, session }) {
     const { item } = candidate;
     const classification = item.classification;
     const ensemble = getEnsembleSummary(classification);
@@ -197,13 +198,15 @@ export default function RepositoryAcceptedCard({ candidate, onRetryCollection })
                     <strong>{collectionStatus.title}</strong>
                     <ClassificationProgress progress={item.automatic_collection?.job?.classification_progress} />
                     <RecoveryDetails errors={item.automatic_collection?.errors ?? jobErrors(item)} />
-                    {(item.automatic_collection?.state === 'error' || item.automatic_collection?.outcome === 'incomplete' || item.automatic_collection?.job?.outcome === 'incomplete') && item.automatic_collection.job &&
+                    {(item.automatic_collection?.state === 'error' || item.automatic_collection?.state === 'empty' || item.automatic_collection?.outcome === 'incomplete' || item.automatic_collection?.job?.outcome === 'incomplete') && item.automatic_collection.job &&
                         <RetryAction errors={item.automatic_collection.errors ?? jobErrors(item)}
                             busy={item.automatic_collection.retrying} retryAt={item.automatic_collection.trackingRetryAt} onRetry={onRetryCollection} label="Retry collection" />}
                     {item.automatic_collection?.trackingError && <span>{item.automatic_collection.trackingError}</span>}
                     {collectionStatus.detail ? <span>{collectionStatus.detail}</span> : null}
                 </div>
             ) : null}
+
+            {item.automatic_collection?.job && <CollectionDiagnostics job={item.automatic_collection.job} session={session} />}
 
             {item.collected_datasets?.length ? item.collected_datasets.map(dataset => (
                 <section key={dataset.id} aria-label={`Saved dataset: ${dataset.title}`}>

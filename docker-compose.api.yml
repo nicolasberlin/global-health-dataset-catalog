@@ -20,6 +20,11 @@ services:
       SEARCH_MAX_ACTIVE: ${SEARCH_MAX_ACTIVE:-100}
       CLASSIFICATION_MAX_CONCURRENCY: ${CLASSIFICATION_MAX_CONCURRENCY:-2}
       COLLECTION_MAX_CONCURRENCY: ${COLLECTION_MAX_CONCURRENCY:-2}
+      COLLECTION_BROWSER_URL: ${COLLECTION_BROWSER_URL:-}
+      COLLECTION_BROWSER_TOKEN: ${COLLECTION_BROWSER_TOKEN:-}
+      COLLECTION_DATAVERSE_HOSTS: ${COLLECTION_DATAVERSE_HOSTS:-dataverse.harvard.edu}
+      COLLECTION_ZENODO_HOSTS: ${COLLECTION_ZENODO_HOSTS:-zenodo.org}
+      COLLECTION_BROWSER_HOSTS: ${COLLECTION_BROWSER_HOSTS:-dataverse.harvard.edu}
       COLLECTION_MAX_DURATION_SECONDS: ${COLLECTION_MAX_DURATION_SECONDS:-180}
       LLM_MAX_ATTEMPTS: ${LLM_MAX_ATTEMPTS:-3}
       LLM_INVALID_MAX_ATTEMPTS: ${LLM_INVALID_MAX_ATTEMPTS:-2}
@@ -27,6 +32,7 @@ services:
       API_SEARCH_REQUESTS_PER_MINUTE: ${API_SEARCH_REQUESTS_PER_MINUTE:-10}
       API_CLASSIFICATION_REQUESTS_PER_MINUTE: ${API_CLASSIFICATION_REQUESTS_PER_MINUTE:-20}
       EGRESS_BLOCKED_CIDRS: ${EGRESS_BLOCKED_CIDRS:-}
+    networks: [default, browser-control]
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8001}:8001"
     cap_drop: [ALL]
@@ -36,6 +42,31 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
+  collection-browser:
+    profiles: [browser]
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    environment:
+      COLLECTION_BROWSER_TOKEN: ${COLLECTION_BROWSER_TOKEN:-}
+      COLLECTION_BROWSER_HOSTS: ${COLLECTION_BROWSER_HOSTS:-dataverse.harvard.edu}
+      EGRESS_BLOCKED_CIDRS: ${EGRESS_BLOCKED_CIDRS:-}
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./browser/seccomp_profile.json
+    networks: [browser-control, browser-egress]
+    mem_limit: 1g
+    pids_limit: 256
+    shm_size: 256m
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    labels:
+      - traefik.enable=false
+
   postgres:
     image: postgres:16
     environment:
@@ -52,3 +83,8 @@ services:
     restart: unless-stopped
 volumes:
   api-postgres-data:
+
+networks:
+  browser-control:
+    internal: true
+  browser-egress: {}
