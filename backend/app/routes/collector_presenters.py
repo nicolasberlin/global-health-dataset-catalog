@@ -4,11 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.database import CollectionJobReservation
+from app.db.collection_traces import safe_coverage, safe_observation
 from app.routes.collector_schemas import (
+    CollectorAutomaticCollection,
+    CollectorCollectedDataset,
     CollectorCollectionJob,
+    CollectorDistribution,
     CollectorRepositoryClassification,
+    CollectorRepositorySearchItem,
+    CollectorSearchProgressResponse,
+    CollectorValidation,
 )
+from app.search_outcomes import summarize_search
 from collector.diagnostics import Diagnostic, public_diagnostics
+from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 
 def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
@@ -55,8 +65,15 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
         rejected_count=job.get("rejected_count", 0),
         invalid_distribution_count=job.get("invalid_distribution_count", 0),
         discovery_methods=job.get("discovery_methods", []),
-        method_attempts=job.get("method_attempts", []),
-        coverage=job.get("coverage", {}),
+        method_attempts=[
+            safe_observation(item)
+            for item in (
+                job.get("method_attempts", [])[:100]
+                if isinstance(job.get("method_attempts"), list)
+                else []
+            )
+        ],
+        coverage=safe_coverage(job.get("coverage", {})),
         message=messages[status],
         error="Collection failed." if status == "error" else "",
         error_code="collection_failed" if status == "error" else "",
@@ -106,3 +123,187 @@ def public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]:
     if "ensemble" not in signals:
         return dict(signals)
     return {**signals, "ensemble": _public_ensemble(signals["ensemble"])}
+
+
+def _automatic_collection(
+    collection: CollectionJobReservation | None,
+) -> CollectorAutomaticCollection:
+    """Present existing follow-up; this function never reserves or schedules work."""
+
+    if collection is not None and collection.already_collected:
+        return CollectorAutomaticCollection(
+            state="saved",
+            dataset_ids=list(collection.dataset_ids),
+            execution_status="finished",
+            outcome="results",
+        )
+    if collection is None or collection.job is None:
+        # Legacy acceptances without follow-up are visible; reading cannot repair
+        # them by silently creating new work.
+        return CollectorAutomaticCollection(
+            state="error",
+            execution_status="failed",
+            outcome="incomplete",
+            errors=[Diagnostic("collection_not_scheduled", "collection").to_dict()],
+            error="No collection is associated with this candidate.",
+            error_code="collection_not_scheduled",
+        )
+    job = public_collection_job(collection.job)
+    state = ("saved" if job.saved_count else "empty") if job.status == "done" else job.status
+    return CollectorAutomaticCollection(
+        state=state,
+        job=job,
+        dataset_ids=job.dataset_ids,
+        execution_status=job.execution_status,
+        outcome=job.outcome,
+        errors=job.errors,
+    )
+
+
+def _collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution:
+    return CollectorDistribution(
+        url=distribution.url,
+        format=distribution.format,
+        probability=distribution.probability,
+        anchor=distribution.anchor,
+        mime_type=distribution.mime_type,
+        first_seen_at=distribution.first_seen_at,
+        last_seen_at=distribution.last_seen_at,
+        last_checked_at=distribution.last_checked_at,
+    )
+
+
+def _collector_repository_candidate(
+    candidate: dict[str, object],
+    *,
+    automatic_collection: CollectorAutomaticCollection | None = None,
+) -> CollectorRepositorySearchItem:
+    return CollectorRepositorySearchItem(
+        candidate_id=candidate["id"],
+        search_id=candidate["search_session_id"],
+        title=candidate["title"],
+        description=candidate["description"],
+        url=candidate["url"],
+        source=candidate["source"],
+        publisher=candidate["publisher"],
+        date=candidate["publication_date"],
+        doi=candidate["doi"],
+        keywords=candidate["keywords"],
+        metadata=candidate["metadata"],
+        classification_status=candidate["classification_status"],
+        classification_progress=candidate.get("classification_progress", {}),
+        classification=public_repository_classification(candidate["classification"]),
+        errors=public_diagnostics(
+            candidate.get("errors")
+            or (
+                [Diagnostic("legacy_unknown", "classification").to_dict()]
+                if candidate["classification_status"] == "error"
+                else []
+            )
+        ),
+        classification_error=(
+            "Candidate classification failed."
+            if candidate["classification_status"] == "error"
+            else ""
+        ),
+        classification_error_code=(
+            "classification_failed" if candidate["classification_status"] == "error" else ""
+        ),
+        automatic_collection=automatic_collection,
+        created_at=candidate["created_at"],
+        updated_at=candidate["updated_at"],
+    )
+
+
+def _collector_validation(validation: ValidationResult) -> CollectorValidation:
+    return CollectorValidation(
+        url=validation.url,
+        final_url=validation.final_url,
+        format=validation.format,
+        ok=validation.ok,
+        status=validation.status,
+        reason=validation.reason,
+        http_status=validation.http_status,
+        mime_type=validation.mime_type,
+        size_bytes=validation.size_bytes,
+        etag=validation.etag,
+        last_modified=validation.last_modified,
+        content_disposition=validation.content_disposition,
+        error="Resource validation failed." if not validation.ok else "",
+        error_code="validation_failed" if not validation.ok else "",
+    )
+
+
+def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset:
+    return CollectorCollectedDataset(
+        id=dataset.database_id,
+        source_url=dataset.source_url,
+        dataset_url=dataset.dataset_url,
+        title=dataset.title,
+        description=dataset.description,
+        publisher=dataset.publisher,
+        hosting_platform=dataset.hosting_platform,
+        uploader=dataset.uploader,
+        geography=list(dataset.geography),
+        date_of_publication=dataset.date_of_publication,
+        sharing_license=dataset.sharing_license,
+        doi=dataset.doi,
+        metadata_provenance=dataset.metadata_provenance,
+        record_identity=dataset.record_identity,
+        discovery_method=dataset.discovery_method,
+        dataset_signals=public_dataset_signals(dataset.dataset_signals),
+        distributions=[
+            _collector_distribution(distribution) for distribution in dataset.distributions
+        ],
+        validation_results=[
+            _collector_validation(validation) for validation in dataset.validation_results
+        ],
+        first_seen_at=dataset.first_seen_at,
+        last_seen_at=dataset.last_seen_at,
+        updated_at=dataset.updated_at,
+    )
+
+
+def public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse:
+    """Present one consistent store snapshot without scheduling or fetching work."""
+
+    search, candidates, collections = snapshot
+    items = [
+        _collector_repository_candidate(
+            candidate,
+            automatic_collection=(
+                _automatic_collection(collections.get(candidate["id"]))
+                if candidate["classification_status"] == "accepted"
+                else None
+            ),
+        )
+        for candidate in candidates
+    ]
+    summary = summarize_search(search, [item.model_dump() for item in items])
+    summary["errors"] = public_diagnostics(summary["errors"])
+    ids = list(
+        dict.fromkeys(
+            [
+                *search.get("local_dataset_ids", []),
+                *(
+                    dataset_id
+                    for item in items
+                    if item.automatic_collection is not None
+                    for dataset_id in item.automatic_collection.dataset_ids
+                ),
+            ]
+        )
+    )
+    return CollectorSearchProgressResponse(
+        search_id=search_id,
+        items=items,
+        query=search.get("query", ""),
+        origin=search["origin"] if search["status"] not in {"queued", "running"} else None,
+        local_dataset_ids=search.get("local_dataset_ids", []),
+        dataset_ids=ids,
+        warnings=search.get("warnings", []),
+        attempt=search.get("attempt_number", 1),
+        created_at=str(search.get("created_at", "")),
+        updated_at=str(search.get("updated_at", "")),
+        **summary,
+    )

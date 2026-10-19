@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 from collector.classification.llm_client import LLMPageClassificationClient
 from collector.classification.page import PageClassification, PageClassificationError
 from collector.diagnostics import PipelineFailure
@@ -134,21 +132,15 @@ def _required_bool(raw: dict[str, object], field_name: str) -> bool:
     return value
 
 
-def _required_json_object(raw: dict[str, object], field_name: str) -> dict[str, object]:
+def _required_signal_object(
+    raw: dict[str, object],
+    field_name: str,
+) -> dict[str, object]:
     value = raw.get(field_name)
     if not isinstance(value, dict):
         raise PageClassificationError(
             f"LLM classification field {field_name} must be an object.", code="llm_invalid_response"
         )
-
-    return _json_safe_object(value, field_name)
-
-
-def _required_signal_object(
-    raw: dict[str, object],
-    field_name: str,
-) -> dict[str, object]:
-    value = _required_json_object(raw, field_name)
     expected_fields = {"reason", "evidence"}
     if set(value) != expected_fields:
         raise PageClassificationError(
@@ -162,42 +154,3 @@ def _required_signal_object(
                 code="llm_invalid_response",
             )
     return value
-
-
-def _json_safe_object(value: dict[object, object], field_name: str) -> dict[str, object]:
-    try:
-        safe_value = _json_safe_value(value)
-    except (TypeError, ValueError) as exception:
-        raise PageClassificationError(
-            f"LLM classification field {field_name} must be JSON-safe.", code="llm_invalid_response"
-        ) from exception
-
-    if not isinstance(safe_value, dict):
-        raise PageClassificationError(
-            f"LLM classification field {field_name} must be an object.", code="llm_invalid_response"
-        )
-
-    return safe_value
-
-
-def _json_safe_value(value: object) -> object:
-    if value is None or isinstance(value, (str, bool)):
-        return value
-
-    if isinstance(value, (int, float)):
-        if isinstance(value, bool) or not math.isfinite(float(value)):
-            raise ValueError("Invalid JSON number.")
-        return value
-
-    if isinstance(value, list):
-        return [_json_safe_value(item) for item in value]
-
-    if isinstance(value, dict):
-        safe_dict: dict[str, object] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError("JSON object keys must be strings.")
-            safe_dict[key] = _json_safe_value(item)
-        return safe_dict
-
-    raise TypeError("Unsupported JSON value.")

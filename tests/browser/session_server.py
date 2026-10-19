@@ -10,8 +10,12 @@ from typing import Annotated
 from unittest.mock import AsyncMock, patch
 
 import uvicorn
+from app.auth.security import (
+    APIPrincipal,
+    require_api_principal,
+    validate_api_security_configuration,
+)
 from app.routes.sessions import router
-from app.security import APIPrincipal, require_api_principal, validate_api_security_configuration
 from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse
 
@@ -46,6 +50,6 @@ if __name__ == "__main__":
         ], check=True, capture_output=True)
         # Only quota persistence is replaced. PostgreSQL quota tests cover that layer.
         # Cookie issuance, signing, Origin enforcement and authentication are production code.
-        with patch("app.security.consume_quota_limits", new=AsyncMock()):
+        with patch("app.auth.security.consume_quota_limits", new=AsyncMock()):
             uvicorn.run(app, host="127.0.0.1", port=9443, ssl_certfile=cert,
                         ssl_keyfile=key, log_level="warning")

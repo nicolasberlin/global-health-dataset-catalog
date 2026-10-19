@@ -12,15 +12,24 @@ from collector.storage.models import CollectedDataset
 pytestmark = pytest.mark.anyio
 
 IDENTITY = {
-    "platform": "zenodo", "repository_origin": "https://zenodo.org", "kind": "dataset",
-    "native_id": "123", "persistent_id": "10.5281/zenodo.123", "version": "1.2",
+    "platform": "zenodo",
+    "repository_origin": "https://zenodo.org",
+    "kind": "dataset",
+    "native_id": "123",
+    "persistent_id": "10.5281/zenodo.123",
+    "version": "1.2",
 }
 
 
 def record(url="https://zenodo.org/records/123", identity=None):
     return CollectedDataset(
-        dataset_url=url, title="Health survey", description="Health survey data",
-        publisher="", hosting_platform="zenodo", uploader="", dataset_signals={},
+        dataset_url=url,
+        title="Health survey",
+        description="Health survey data",
+        publisher="",
+        hosting_platform="zenodo",
+        uploader="",
+        dataset_signals={},
         record_identity=IDENTITY if identity is None else identity,
     )
 
@@ -52,10 +61,16 @@ async def test_reference_only_fallback_preserves_identity_fields_observed_by_api
 
 async def test_file_and_parent_record_remain_distinct(database):
     await database.init_database()
-    file = record("https://zenodo.org/records/123/files/survey.csv", {
-        **IDENTITY, "kind": "file", "native_id": "123/files/survey.csv",
-        "persistent_id": "", "parent_persistent_id": IDENTITY["persistent_id"],
-    })
+    file = record(
+        "https://zenodo.org/records/123/files/survey.csv",
+        {
+            **IDENTITY,
+            "kind": "file",
+            "native_id": "123/files/survey.csv",
+            "persistent_id": "",
+            "parent_persistent_id": IDENTITY["persistent_id"],
+        },
+    )
     await database.save_collected_datasets("https://zenodo.org", [record(), file])
     saved = await database.list_collected_datasets()
     assert len(saved) == 2
@@ -65,24 +80,25 @@ async def test_file_and_parent_record_remain_distinct(database):
 async def test_explicit_version_urls_remain_distinct(database):
     await database.init_database()
     first = record("https://dataverse.example.org/dataset.xhtml?persistentId=doi:X&version=1.0")
-    second = replace(first, dataset_url=first.dataset_url.replace("version=1.0", "version=2.0"),
-                     record_identity={**IDENTITY, "version": "2.0"})
+    second = replace(
+        first,
+        dataset_url=first.dataset_url.replace("version=1.0", "version=2.0"),
+        record_identity={**IDENTITY, "version": "2.0"},
+    )
     await database.save_collected_datasets("https://dataverse.example.org", [first, second])
     assert len(await database.list_collected_datasets()) == 2
 
 
-async def test_migration_from_thirteen_preserves_existing_datasets(database):
+async def test_reinitialization_preserves_datasets_and_record_identity(database):
     await database.init_database()
     await database.save_collected_datasets("https://zenodo.org", [record()])
-    async with _require_database_pool().connection() as connection:
-        await connection.execute("ALTER TABLE collected_datasets DROP COLUMN record_identity")
-        await connection.execute("DELETE FROM schema_migrations WHERE version >= 14")
+    await database.close_database_pool()
+    await database.open_database_pool()
     await database.init_database()
     await database.init_database()
     stored = (await database.list_collected_datasets())[0]
     assert stored.title == "Health survey"
-    assert stored.record_identity == {}  # Historical identities are not invented.
+    assert stored.record_identity == IDENTITY
     async with _require_database_pool().connection() as connection:
         row = await _fetchone(connection, "SELECT MAX(version) AS version FROM schema_migrations")
     assert row["version"] == CURRENT_SCHEMA_VERSION
-

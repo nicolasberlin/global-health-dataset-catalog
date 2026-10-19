@@ -4,23 +4,13 @@ from uuid import uuid4
 import pytest
 from app.db import search_progress as store
 from app.db.connection import _fetchall, _require_database_pool
-from app.routes.collector import search_progress
-from app.security import APIPrincipal
-from fastapi import HTTPException, Response
+from fastapi import HTTPException
+from helpers.workflows import candidate_for, decision, headers, read
 from httpx import ASGITransport, AsyncClient
-from test_classification_workflow import api, headers  # noqa: F401
-from test_collection_workflow import candidate_for, decision
 
 from collector.repository_search import RepositorySearchResult
 
 pytestmark = pytest.mark.anyio
-
-
-async def read(search_id, owner="alice"):
-    response = Response()
-    result = await search_progress(search_id, APIPrincipal(owner_id=owner), response)
-    assert response.headers["cache-control"] == "no-store"
-    return result
 
 
 async def test_empty_and_missing_search_are_distinct(database):
@@ -36,7 +26,7 @@ async def test_empty_and_missing_search_are_distinct(database):
         assert error.value.status_code == 404
 
 
-async def test_auth_and_shared_job_do_not_grant_access_to_another_search(database, api):  # noqa: F811
+async def test_auth_and_shared_job_do_not_grant_access_to_another_search(database, api):
     await database.init_database()
     alice = await candidate_for(database)
     bob = await candidate_for(database, "bob")
@@ -176,3 +166,38 @@ async def test_associated_job_and_dataset_ids_win_over_other_work_at_same_url(da
     assert collection.job.id == job_id
     assert collection.state == "error"
     assert collection.dataset_ids == collection.job.dataset_ids == [dataset_id]
+
+
+@pytest.mark.parametrize("match", ["direct", "observation", "both", "none"])
+async def test_unassociated_dataset_lookup_preserves_matches_order_and_ownership(database, match):
+    from app.db.repository_candidates import _complete_candidate_classification
+
+    await database.init_database()
+    candidate = await candidate_for(database)
+    async with _require_database_pool().connection() as connection:
+        await _complete_candidate_classification(connection, candidate["id"], "alice", decision())
+        ids = []
+        for index in range(3):
+            url = (candidate["url"] if index == 0 and match in ("direct", "both")
+                   else f"https://example.org/other/{index}")
+            row = await connection.execute(
+                "INSERT INTO collected_datasets (dataset_url, title) VALUES (%s, 'Data') "
+                "RETURNING id", (url,))
+            ids.append((await row.fetchone())["id"])
+        if match in ("observation", "both"):
+            for dataset_id in reversed(ids):
+                for _ in range(2):
+                    await connection.execute(
+                        "INSERT INTO dataset_discovery_observations (dataset_id, source_url) "
+                        "VALUES (%s, %s)", (dataset_id, candidate["url"]))
+    expected = ids if match in ("observation", "both") else ids[:1] if match == "direct" else []
+    individual = await database.get_candidate_collection(candidate["id"], "alice")
+    _, _, collections = await store.read_search_progress(candidate["search_session_id"], "alice")
+    assert individual.dataset_ids == collections[candidate["id"]].dataset_ids == tuple(expected)
+    assert individual.already_collected == bool(expected)
+    assert await database.get_candidate_collection(candidate["id"], "bob") is None
+    assert await store.read_search_progress(candidate["search_session_id"], "bob") is None
+    reserved = await database.reserve_repository_candidate_collection_job(candidate["id"], "alice")
+    assert reserved.already_collected == bool(expected)
+    assert reserved.dataset_ids == tuple(expected)
+    assert reserved.created == (not expected)

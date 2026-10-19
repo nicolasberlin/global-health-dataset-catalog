@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { isAbortError, requestJson } from '../api/client.js';
+import { useState } from 'react';
+import useCollectionHistory from '../hooks/useCollectionHistory.js';
 
-const names = { dataverse_api: 'Dataverse API', html: 'HTML', browser: 'Browser with JavaScript' };
+const names = { dataverse_api: 'Dataverse API', zenodo_api: 'Zenodo API', figshare_api: 'Figshare API', dryad_api: 'Dryad API', inveniordm_api: 'InvenioRDM API', dspace_api: 'DSpace API', html: 'HTML', browser: 'Browser with JavaScript' };
 const reasons = {
     no_download_links: 'No downloadable links detected',
     verification_unconfirmed: 'Access could not be confirmed',
@@ -38,22 +38,7 @@ const phases = {
 };
 export default function CollectionDiagnostics({ job, session }) {
     const [open, setOpen] = useState(false);
-    const [trace, setTrace] = useState(null);
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
-    useEffect(() => {
-        if (!open || !session?.isCurrent()) return;
-        const controller = new AbortController();
-        setTrace(null); setError(''); setLoading(true);
-        requestJson(`/collector/collection-jobs/${job.id}/diagnostics`, { session, signal: controller.signal })
-            .then(data => {
-                if (data.job_id !== job.id || !Array.isArray(data.method_attempts)) throw new Error('Invalid collection diagnostic response.');
-                if (!controller.signal.aborted) setTrace(data);
-            })
-            .catch(error => { if (!controller.signal.aborted && !isAbortError(error)) setError(error.message); })
-            .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-        return () => controller.abort();
-    }, [open, job.id, job.updated_at, session]);
+    const { trace, error, loading, paging, loadEarlier } = useCollectionHistory(job, session, open);
     const coverage = trace?.coverage ?? job.coverage ?? {};
     const steps = trace?.method_attempts ?? job.method_attempts ?? [];
     return <details onToggle={event => setOpen(event.currentTarget.open)}>
@@ -62,11 +47,15 @@ export default function CollectionDiagnostics({ job, session }) {
             {coverage.limited ? ' Coverage limited by the configured resource policy.' : ' Exhaustive coverage is not guaranteed.'}</p>}
         {loading && <p role="status">Loading collection history…</p>}
         {error && <p role="alert">Unable to read collection history: {error}</p>}
-        {trace?.history_truncated && <p>Only the most recent 1,000 method attempts are shown.</p>}
+        {trace?.history_truncated && <p>Earlier collection steps are available.</p>}
+        {trace?.next_offset != null && <button type="button" disabled={paging}
+            onClick={() => loadEarlier('methods')}>Load earlier collection steps</button>}
+        {trace?.checks_truncated && <p>Some resource checks are omitted from this history page.</p>}
         {!loading && !error && !steps.length && <p>No method history was recorded for this collection.</p>}
         {!!steps.length && <ol>{steps.map((step, index) => <li key={step.id ?? index}>
             <strong>{names[step.method] ?? step.method}</strong>: {step.status}
             {step.http_status != null && ` · HTTP ${step.http_status}`}
+            {step.request_attempts != null && ` · ${step.request_attempts} metadata request attempt(s)`}
             {step.code && ` · ${reasons[step.code] ?? 'This step could not finish'}`}
             {phases[step.failure_phase] && ` · Failed during ${phases[step.failure_phase]}`}
             {step.service_http_status != null && ` · Browser service HTTP ${step.service_http_status}`}
@@ -81,11 +70,15 @@ export default function CollectionDiagnostics({ job, session }) {
         </li>)}</ol>}
         {trace?.classification_history?.attempts?.length > 0 && <>
             <h4>Model classification history</h4>
-            {trace.classification_history.history_truncated && <p>Only the most recent 1,000 model attempts are shown.</p>}
+            {trace.classification_history.history_truncated && <p>Earlier model attempts are available.</p>}
+            {trace.classification_history.next_offset != null && <button type="button" disabled={paging}
+                onClick={() => loadEarlier('votes')}>Load earlier model attempts</button>}
             <ul>{trace.classification_history.attempts.map(attempt => <li key={`${attempt.run_id}:${attempt.voter_id}:${attempt.attempt}`}>
                 <strong>{attempt.model || attempt.voter_id}</strong>: attempt {attempt.attempt} · {attempt.status}
                 {attempt.started_at && ` · ${new Date(attempt.started_at).toLocaleString()}`}
-                {attempt.error && <p>{attempt.error}</p>}
+                {attempt.errors?.map((diagnostic, index) => <p key={`${diagnostic.code}:${index}`}>
+                    {diagnostic.message}
+                </p>)}
                 {attempt.evidence === 'legacy_snapshot' && <p>Historical snapshot: earlier attempts and start time are unavailable.</p>}
             </li>)}</ul>
         </>}

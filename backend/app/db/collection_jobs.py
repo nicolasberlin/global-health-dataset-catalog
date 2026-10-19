@@ -105,12 +105,9 @@ async def _reserve_repository_candidate_collection_job(
                 SELECT 1
                 FROM collected_datasets AS dataset
                 WHERE dataset.dataset_url = %s
-                   OR EXISTS (
-                       SELECT 1
-                       FROM dataset_discovery_observations AS observation
-                       WHERE observation.dataset_id = dataset.id
-                         AND observation.source_url = %s
-                   )
+            ) OR EXISTS (
+                SELECT 1 FROM dataset_discovery_observations AS observation
+                WHERE observation.source_url = %s
             ) AS already_collected,
             active_job.id,
             active_job.source_url,
@@ -129,7 +126,8 @@ async def _reserve_repository_candidate_collection_job(
             active_job.error, active_job.errors, active_job.outcome,
             active_job.created_at,
             active_job.updated_at,
-            active_job.finished_at, active_job.collection_deadline_at
+            active_job.finished_at, active_job.collection_deadline_at,
+            active_job.collection_coverage, active_job.collection_method_summary
         FROM (VALUES (1)) AS singleton(value)
         LEFT JOIN LATERAL (
             SELECT id, source_url, kind, repository_candidate_id,
@@ -333,11 +331,11 @@ async def retry_collection_job_for_owner(
 async def _existing_dataset_ids(connection, source_url: str) -> list[int]:
     rows = await _fetchall(
         connection,
-        """SELECT dataset.id FROM collected_datasets AS dataset
-           WHERE dataset.dataset_url = %s OR EXISTS (
-               SELECT 1 FROM dataset_discovery_observations AS observation
-               WHERE observation.dataset_id = dataset.id AND observation.source_url = %s
-           ) ORDER BY dataset.id""",
+        """SELECT id FROM collected_datasets WHERE dataset_url = %s
+           UNION
+           SELECT dataset_id AS id FROM dataset_discovery_observations
+           WHERE source_url = %s
+           ORDER BY id""",
         (source_url, source_url),
     )
     return [int(row["id"]) for row in rows]
@@ -446,14 +444,7 @@ async def get_candidate_collection(
         row = await _fetchone(
             connection,
             """
-            SELECT existing_job.*, candidate.url AS candidate_url, EXISTS (
-                SELECT 1 FROM collected_datasets AS dataset
-                WHERE dataset.dataset_url = candidate.url OR EXISTS (
-                    SELECT 1 FROM dataset_discovery_observations AS observation
-                    WHERE observation.dataset_id = dataset.id
-                      AND observation.source_url = candidate.url
-                )
-            ) AS already_collected
+            SELECT existing_job.*, candidate.url AS candidate_url
             FROM repository_candidates AS candidate
             JOIN search_sessions AS session ON session.id = candidate.search_session_id
             LEFT JOIN LATERAL (

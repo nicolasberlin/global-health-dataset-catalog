@@ -10,9 +10,17 @@ from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import pytest
-from app import classification_worker, collection_worker, workers
+from app.workers import classification as classification_worker
+from app.workers import collection as collection_worker
+from app.workers import runtime as workers
 from psycopg import InterfaceError, OperationalError
-from psycopg.errors import DeadlockDetected, DiskFull, SerializationFailure
+from psycopg.errors import (
+    DeadlockDetected,
+    DiskFull,
+    LockNotAvailable,
+    QueryCanceled,
+    SerializationFailure,
+)
 from psycopg_pool import PoolTimeout
 
 from collector import observability
@@ -23,19 +31,28 @@ VERSION = datetime(2026, 9, 25, tzinfo=timezone.utc)
 
 
 @pytest.mark.parametrize("failure", [OperationalError, InterfaceError, PoolTimeout,
-                                    SerializationFailure, DeadlockDetected])
+                                    SerializationFailure, DeadlockDetected, LockNotAvailable])
 async def test_transient_persistence_retries_until_success(failure):
     operation = AsyncMock(side_effect=[failure("outage"), failure("outage"), "saved"])
     assert await workers.persist_with_retry(operation, initial_delay=0) == "saved"
     assert operation.await_count == 3
 
 
-@pytest.mark.parametrize("failure", [RuntimeError, ValueError, DiskFull])
+@pytest.mark.parametrize("failure", [RuntimeError, ValueError, DiskFull, QueryCanceled])
 async def test_permanent_errors_do_not_loop(failure):
     operation = AsyncMock(side_effect=failure("permanent"))
     with pytest.raises(failure):
         await workers.persist_with_retry(operation, initial_delay=0)
     assert operation.await_count == 1
+
+
+async def test_ownership_loss_is_never_retried_even_for_terminal_persistence():
+    from app.db.application_lock import ApplicationLockLost
+
+    operation = AsyncMock(side_effect=ApplicationLockLost("Superseded runtime."))
+    with pytest.raises(ApplicationLockLost):
+        await workers.persist_with_retry(operation, initial_delay=0, retry_unexpected=True)
+    operation.assert_awaited_once()
 
 
 async def test_persistence_backoff_is_capped(monkeypatch):

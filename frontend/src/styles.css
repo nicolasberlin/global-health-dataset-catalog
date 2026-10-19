@@ -240,107 +240,6 @@ p {
     font-size: 1rem;
 }
 
-.api-status {
-    display: flex;
-    min-height: 210px;
-    flex-direction: column;
-    justify-content: space-between;
-    border: 1px solid #dbe4de;
-    border-radius: 8px;
-    padding: 22px;
-    background: #15231f;
-    color: #fff;
-}
-
-.api-status span,
-.api-status small {
-    color: rgba(255, 255, 255, 0.74);
-}
-
-.api-status span {
-    font-size: 0.8rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-
-.api-status strong {
-    display: block;
-    margin: 12px 0 8px;
-    font-size: 1.7rem;
-    line-height: 1.15;
-}
-
-.api-status small {
-    overflow-wrap: anywhere;
-}
-
-.api-status button {
-    width: 100%;
-    margin-top: 18px;
-    border-color: #d7e8dd;
-    background: #eef6f1;
-    color: #1f5f4a;
-}
-
-.api-status button:hover:not(:disabled) {
-    background: #d9eadf;
-}
-
-.api-status--error {
-    background: #40201e;
-}
-
-.api-status--loading {
-    background: #24313c;
-}
-
-.summary-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-bottom: 18px;
-}
-
-.metric-card {
-    min-height: 116px;
-    border: 1px solid #dbe4de;
-    border-radius: 8px;
-    padding: 18px;
-    background: #fff;
-}
-
-.metric-card span,
-.metric-card small {
-    display: block;
-    color: #68766f;
-}
-
-.metric-card span {
-    margin-bottom: 8px;
-    font-size: 0.78rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-
-.metric-card strong {
-    display: block;
-    margin-bottom: 4px;
-    color: #14231e;
-    font-size: 1.9rem;
-    line-height: 1;
-}
-
-.metric-card--accent {
-    border-color: #d9c6ad;
-    background: #fbf7f1;
-}
-
-.metric-card--muted {
-    background: #f8faf9;
-}
-
 .repository-section {
     margin-bottom: 18px;
     border: 1px solid #dbe4de;
@@ -445,34 +344,6 @@ p {
 .agreement-filter__button--active:hover:not(:disabled) {
     background: #1f5f4a;
     color: #fff;
-}
-
-.repository-counters {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 6px;
-}
-
-.repository-counters span {
-    display: grid;
-    min-height: 54px;
-    align-content: center;
-    border: 1px solid #e1e8e3;
-    border-radius: 8px;
-    padding: 7px 9px;
-    background: #fff;
-    color: #68766f;
-    font-size: 0.7rem;
-    font-weight: 800;
-    line-height: 1.2;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.repository-counters strong {
-    color: #14231e;
-    font-size: 1.05rem;
-    line-height: 1.2;
 }
 
 .repository-message {
@@ -702,7 +573,6 @@ p {
     white-space: nowrap;
 }
 
-.repository-score-row,
 .repository-decision-row {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -710,11 +580,6 @@ p {
     margin-bottom: 13px;
 }
 
-.repository-score-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.repository-score-row span,
 .repository-decision-row span {
     display: grid;
     gap: 3px;
@@ -730,7 +595,6 @@ p {
     letter-spacing: 0.05em;
 }
 
-.repository-score-row strong,
 .repository-decision-row strong {
     overflow: hidden;
     color: #14231e;
@@ -881,13 +745,6 @@ p {
     color: #8d3028;
 }
 
-.catalog-section {
-    border: 1px solid #dbe4de;
-    border-radius: 8px;
-    padding: 22px;
-    background: #fff;
-}
-
 .section-heading {
     display: flex;
     gap: 16px;
@@ -898,49 +755,6 @@ p {
 
 .section-heading p {
     margin-bottom: 0;
-}
-
-.catalog-toolbar {
-    display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) auto;
-    gap: 12px;
-    align-items: end;
-    margin-bottom: 18px;
-    border: 1px solid #e1e8e3;
-    border-radius: 8px;
-    padding: 14px;
-    background: #f8faf9;
-}
-
-.search-field,
-.filter-row {
-    display: grid;
-    gap: 6px;
-}
-
-.search-field label,
-.filter-row label {
-    color: #4d5d55;
-    font-size: 0.82rem;
-    font-weight: 800;
-}
-
-.search-field input,
-.filter-row select {
-    width: 100%;
-}
-
-.results-count {
-    display: inline-flex;
-    min-width: 80px;
-    min-height: 42px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid #dbe4de;
-    border-radius: 8px;
-    background: #fff;
-    color: #40514a;
-    font-weight: 800;
 }
 
 .empty-card {
@@ -979,153 +793,6 @@ p {
     background: #fff;
 }
 
-.dataset-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-}
-
-.dataset-card {
-    display: flex;
-    min-height: 300px;
-    flex-direction: column;
-    border: 1px solid #dbe4de;
-    border-radius: 8px;
-    padding: 18px;
-    background: #fff;
-}
-
-.dataset-card__meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 14px;
-}
-
-.dataset-card p {
-    flex: 1;
-    margin-bottom: 14px;
-}
-
-.dataset-score-row {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 14px;
-}
-
-.dataset-score-row span {
-    display: grid;
-    gap: 4px;
-    min-height: 72px;
-    align-content: center;
-    border: 1px solid #edf2ef;
-    border-radius: 8px;
-    padding: 10px;
-    background: #f8faf9;
-    color: #68766f;
-    font-size: 0.74rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-
-.dataset-score-row strong {
-    color: #14231e;
-    font-size: 1.22rem;
-    line-height: 1;
-}
-
-.dataset-card__source {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    justify-content: space-between;
-    border-top: 1px solid #edf2ef;
-    padding-top: 12px;
-}
-
-.dataset-card__source-text {
-    display: grid;
-    min-width: 0;
-    gap: 2px;
-}
-
-.dataset-card__source span,
-.dataset-card__source small {
-    min-width: 0;
-    overflow: hidden;
-    color: #68766f;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.dataset-card__source span {
-    font-size: 0.86rem;
-}
-
-.dataset-card__source small {
-    font-size: 0.76rem;
-}
-
-.dataset-card__source a {
-    display: inline-flex;
-    min-height: 34px;
-    align-items: center;
-    border: 1px solid #b8d1c4;
-    border-radius: 8px;
-    padding: 0 10px;
-    color: #1f5f4a;
-    font-size: 0.88rem;
-    font-weight: 800;
-    text-decoration: none;
-    white-space: nowrap;
-}
-
-.dataset-card__source a:hover {
-    border-color: #1f5f4a;
-    background: #eef6f1;
-}
-
-.distribution-list {
-    display: grid;
-    gap: 8px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.distribution-list li {
-    display: grid;
-    gap: 4px;
-    border: 1px solid #edf2ef;
-    border-radius: 8px;
-    padding: 10px;
-    background: #f8faf9;
-}
-
-.distribution-list strong {
-    color: #1f5f4a;
-}
-
-.distribution-list span {
-    overflow-wrap: anywhere;
-    color: #596860;
-    font-size: 0.88rem;
-}
-
-.distribution-list small {
-    color: #68766f;
-    font-size: 0.78rem;
-    font-weight: 700;
-}
-
-.distribution-list--compact {
-    margin-top: 14px;
-}
-
 @media (max-width: 900px) {
     .app-shell {
         width: min(100% - 28px, 720px);
@@ -1133,20 +800,12 @@ p {
     }
 
     .app-header,
-    .summary-grid,
-    .catalog-toolbar,
     .repository-controls,
-    .repository-result-grid,
-    .dataset-grid {
+    .repository-result-grid {
         grid-template-columns: 1fr;
     }
 
-    .title-block,
-    .api-status {
-        min-height: auto;
-    }
-
-    .dataset-card {
+    .title-block {
         min-height: auto;
     }
 }
@@ -1157,11 +816,8 @@ p {
     }
 
     .title-block,
-    .api-status,
     .repository-section,
-    .catalog-section,
     .collected-section,
-    .dataset-card,
     .empty-card {
         padding: 16px;
     }
@@ -1177,17 +833,12 @@ p {
 
     .repository-search-form,
     .repository-facts,
-    .repository-score-row,
     .repository-decision-row {
         grid-template-columns: 1fr;
     }
 
     .repository-search-form button {
         width: 100%;
-    }
-
-    .repository-counters {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .repository-card__link-row {
@@ -1201,18 +852,5 @@ p {
 
     h2 {
         font-size: 1.18rem;
-    }
-
-    .dataset-card__source {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .dataset-card__source a {
-        justify-content: center;
-    }
-
-    .dataset-score-row {
-        grid-template-columns: 1fr;
     }
 }

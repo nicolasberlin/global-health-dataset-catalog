@@ -13,6 +13,7 @@ from collector.classification.page import PageClassificationError
 from collector.diagnostics import Diagnostic, PersistenceFailure
 
 from .connection import _fetchall, _fetchone, _require_database_pool
+from .public_history import HistoryPage, PublicVoteAttempt
 from .serialization import _jsonb
 
 
@@ -107,8 +108,15 @@ async def claim_vote(
                     'running', %s, 'live'
                 FROM classification_runs WHERE id = %s
                 """,
-                (run_id, voter_id, vote["attempts"], scope["retry_cycle"], voter_id,
-                 vote["updated_at"], run_id),
+                (
+                    run_id,
+                    voter_id,
+                    vote["attempts"],
+                    scope["retry_cycle"],
+                    voter_id,
+                    vote["updated_at"],
+                    run_id,
+                ),
             )
             await _publish_progress(connection, run_id, candidate_id, job_id)
     return vote
@@ -253,7 +261,7 @@ async def _lock_run(connection, run_id):
     )
 
 
-async def read_candidate_vote_history(candidate_id, owner_id):
+async def read_candidate_vote_history(candidate_id, owner_id, *, limit=100, offset=0):
     from .search_sessions import _normalized_owner_id
 
     async with _require_database_pool().connection() as connection:
@@ -265,10 +273,12 @@ async def read_candidate_vote_history(candidate_id, owner_id):
         )
     if candidate is None:
         return None
-    return await _read_vote_history("repository_candidate_id", candidate_id)
+    return await _read_vote_history(
+        "repository_candidate_id", candidate_id, limit=limit, offset=offset
+    )
 
 
-async def read_collection_vote_history(job_id, owner_id):
+async def read_collection_vote_history(job_id, owner_id, *, limit=100, offset=0):
     from .collection_jobs import get_collection_job_for_owner
 
     job = await get_collection_job_for_owner(job_id, owner_id)
@@ -282,31 +292,29 @@ async def read_collection_vote_history(job_id, owner_id):
         )
     if root is None:
         return None
-    return await _read_vote_history("collection_job_id", root["id"])
+    return await _read_vote_history("collection_job_id", root["id"], limit=limit, offset=offset)
 
 
-async def _read_vote_history(column, scope_id):
+async def _read_vote_history(column, scope_id, *, limit=100, offset=0):
+    page = HistoryPage(limit, offset)
+    if column not in {"repository_candidate_id", "collection_job_id"}:
+        raise ValueError("Unsupported vote history scope.")
     async with _require_database_pool().connection() as connection:
         rows = await _fetchall(
             connection,
-            f"SELECT a.* FROM classification_vote_attempts a JOIN classification_runs r "
+            "SELECT a.run_id, a.voter_id, a.attempt, a.retry_cycle, a.model, a.status, "
+            "a.started_at, a.finished_at, a.errors, a.evidence "
+            "FROM classification_vote_attempts a JOIN classification_runs r "
             f"ON r.id = a.run_id WHERE r.{column} = %s "
             "ORDER BY COALESCE(a.started_at, a.finished_at) DESC NULLS LAST, "
-            "a.run_id, a.voter_id, a.attempt DESC LIMIT 1001",
-            (scope_id,),
+            "a.run_id, a.voter_id, a.attempt DESC LIMIT %s OFFSET %s",
+            (scope_id, page.limit + 1, page.offset),
         )
     return {
         "attempts": [
-            {
-                **row,
-                "run_id": str(row["run_id"]),
-                "retry_cycle": str(row["retry_cycle"]) if row["retry_cycle"] else None,
-                "started_at": row["started_at"].isoformat() if row["started_at"] else None,
-                "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
-            }
-            for row in reversed(rows[:1000])
+            PublicVoteAttempt.from_row(row).to_dict() for row in reversed(rows[: page.limit])
         ],
-        "history_truncated": len(rows) > 1000,
+        **page.metadata(len(rows) > page.limit),
     }
 
 

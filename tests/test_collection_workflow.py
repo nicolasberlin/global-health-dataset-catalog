@@ -6,81 +6,18 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from app import collection_worker
+from app.auth.security import APIPrincipal
 from app.db import collection_jobs as job_store
-from app.db.connection import _fetchall, _require_database_pool
+from app.db.connection import _require_database_pool
 from app.db.repository_candidates import _complete_candidate_classification
 from app.routes.collector import classify_repository_result
-from app.security import APIPrincipal
+from app.workers import collection as collection_worker
 from fastapi import Response
+from helpers.workflows import SOURCE_URL, candidate_for, decision, rows, wait_until
 
-from collector.classification.repository import RepositoryClassification
-from collector.repository_search import RepositorySearchResult
 from collector.storage.models import CollectionResult
 
 pytestmark = pytest.mark.anyio
-SOURCE_URL = "https://repository.example.org/mortality"
-
-
-def decision(accepted=True):
-    label = "relevant" if accepted else "not_relevant"
-    return RepositoryClassification(
-        relevance_label=label,
-        reason="Test decision.",
-        ensemble={
-            "votes_required": 2,
-            "minimum_successful_votes": 3,
-            "successful_votes": 3,
-            "failed_votes": 0,
-            "accepted_votes": 3 if accepted else 0,
-            "decision": "accepted" if accepted else "rejected",
-            "decision_reason": "enough_accept_votes" if accepted else "rejected_by_majority",
-            "decision_voter_ids": ["a", "b", "c"],
-            "failures": [],
-            "voters": [
-                {
-                    "voter_id": voter,
-                    "accepted": accepted,
-                    "relevance_label": label,
-                    "reason": "Test decision.",
-                    "missing_information": [],
-                }
-                for voter in ("a", "b", "c")
-            ],
-        },
-    )
-
-
-async def _start_candidate(database, candidate_id, owner_id, *, retry=False):
-    queued = await database.enqueue_candidate_classification(candidate_id, owner_id, retry=retry)
-    if queued is None:
-        return None
-    return await database.claim_candidate_classification()
-
-
-async def candidate_for(database, owner="alice", url=SOURCE_URL):
-    session = await database.create_search_session("mortality", owner)
-    candidates = await database.save_repository_candidates(
-        session["id"],
-        owner,
-        [RepositorySearchResult(title="Mortality", url=url, source="DataCite")],
-    )
-    candidate = candidates[0]
-    await _start_candidate(database, candidate["id"], owner)
-    return candidate
-
-
-async def rows(query):
-    async with _require_database_pool().connection() as connection:
-        return await _fetchall(connection, query)
-
-
-async def wait_until(check):
-    async def poll():
-        while not await check():
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(poll(), timeout=5)
 
 
 async def test_acceptance_and_shared_followup_commit_together(database):
@@ -183,7 +120,6 @@ async def test_repeated_accepted_classification_only_reads_its_job(database, mon
     def forbidden(*args, **kwargs):
         raise AssertionError("A repeated classification must not perform new work")
 
-    monkeypatch.setattr("app.routes.collector.enforce_api_quota", forbidden)
     monkeypatch.setattr(job_store, "_reserve_repository_candidate_collection_job", forbidden)
     for retry in (False, True):
         response = await classify_repository_result(

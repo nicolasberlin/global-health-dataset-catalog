@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
 
 import pytest
+from helpers.classification import distribution as _distribution
+from helpers.classification import page as _page
 
 from collector.classification.ensemble import (
     EnsemblePageClassifier,
@@ -228,25 +231,14 @@ def test_llm_page_classifier_wraps_client_failures():
 
 def test_http_json_llm_client_uses_provider_config():
     captured = {}
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
-        def read(self, size=-1):
-            return json.dumps(
-                {
-                    "output_text": json.dumps(_valid_llm_response()),
-                }
-            ).encode("utf-8")
+    response = io.BytesIO(json.dumps({
+        "output_text": json.dumps(_valid_llm_response()),
+    }).encode("utf-8"))
 
     def fake_request(request, timeout):
         captured["request"] = request
         captured["timeout"] = timeout
-        return FakeResponse()
+        return response
 
     provider = LLMProviderConfig(
         name="FakeProvider",
@@ -270,12 +262,14 @@ def test_http_json_llm_client_uses_provider_config():
 
     body = json.loads(captured["request"].data.decode("utf-8"))
     assert result["accepted"] is True
-    assert captured["timeout"] == 12.0
+    assert 0 < captured["timeout"] <= 12.0
+    assert captured["timeout"] == pytest.approx(12.0, abs=0.5)
     assert captured["request"].get_header("Authorization") == "Bearer test-key"
     assert captured["request"].get_header("X-provider-version") == "2026-01-01"
     assert captured["request"].full_url == "https://llm.example.org/classify"
     assert body["model"] == "test-model"
     assert body["classification_payload"] == {"page": {"title": "Mortality dataset"}}
+    assert response.closed
 
 
 def test_epfl_rcp_provider_config_builds_chat_completions_request():
@@ -463,8 +457,6 @@ def test_epfl_rcp_repository_provider_uses_relevance_prompt_and_schema():
 
 @pytest.mark.parametrize("extra_bytes", [0, 1, 100_000])
 def test_http_json_llm_client_bounds_response_before_parsing(extra_bytes):
-    import io
-
     from collector.classification.llm_client import MAX_LLM_RESPONSE_BYTES
 
     body = json.dumps({"output_text": json.dumps(_valid_llm_response())}).encode()
@@ -472,9 +464,10 @@ def test_http_json_llm_client_bounds_response_before_parsing(extra_bytes):
     reads = []
 
     class Response(io.BytesIO):
-        def read(self, size=-1):
-            reads.append(size)
-            return super().read(size)
+        def read1(self, size=-1):
+            chunk = super().read1(size)
+            reads.append((size, len(chunk)))
+            return chunk
 
     response = Response(body)
     client = HTTPJSONLLMClient(
@@ -487,11 +480,16 @@ def test_http_json_llm_client_bounds_response_before_parsing(extra_bytes):
         api_key="test", request=lambda *args, **kwargs: response,
     )
     if extra_bytes:
-        with pytest.raises(PageClassificationError, match="Provider response is too large"):
+        with pytest.raises(
+            PageClassificationError, match="Provider response is too large",
+        ) as caught:
             client.classify_page({})
+        assert caught.value.diagnostics[0].code == "llm_response_too_large"
     else:
         assert client.classify_page({}) == _valid_llm_response()
-    assert reads == [MAX_LLM_RESPONSE_BYTES + 1]
+    assert reads and all(0 < requested <= MAX_LLM_RESPONSE_BYTES + 1 for requested, _ in reads)
+    assert sum(requested for requested, _ in reads) <= MAX_LLM_RESPONSE_BYTES + 1
+    assert sum(received for _, received in reads) == min(len(body), MAX_LLM_RESPONSE_BYTES + 1)
     assert response.closed
 
 
@@ -514,27 +512,6 @@ def test_http_json_llm_client_requires_configured_api_key(monkeypatch):
         client.classify_page({"page": {"title": "Mortality dataset"}})
 
 
-def _page() -> PageSnapshot:
-    return PageSnapshot(
-        url="https://example.org/datasets/mortality",
-        canonical_url="https://example.org/datasets/mortality",
-        title="Mortality health dataset",
-        h1="Mortality health dataset",
-        meta_description="Official mortality and epidemiology data.",
-        publisher="National Health Agency",
-        text="Download CSV data for mortality indicators.",
-        geography=("France",),
-        date_of_publication="2025",
-        dataset_url="https://example.org/datasets/mortality",
-        diseases=("malaria",),
-        size_of_dataset="12,000 records",
-        demographic_information=("age", "sex"),
-        sharing_license="CC-BY-4.0",
-        modality_of_data=("tabular",),
-        description_of_dataset="Official mortality and epidemiology data.",
-    )
-
-
 def _repository_page() -> PageSnapshot:
     return PageSnapshot(
         url="https://example.org/datasets/mortality",
@@ -553,16 +530,6 @@ def _repository_page() -> PageSnapshot:
         sharing_license="CC-BY-4.0",
         modality_of_data=("tabular",),
         description_of_dataset="Official mortality and epidemiology data.",
-    )
-
-
-def _distribution() -> DistributionCandidate:
-    return DistributionCandidate(
-        url="https://example.org/files/mortality.csv",
-        format="CSV",
-        probability=0.95,
-        anchor="Download CSV",
-        mime_type="text/csv",
     )
 
 

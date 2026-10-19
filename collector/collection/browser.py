@@ -11,14 +11,22 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
-from collector.budget import remaining_timeout
+from collector.budget import (
+    active_collection_budget,
+    check_collection_budget,
+    cleanup_request_budget,
+    read_with_budget,
+    remaining_timeout,
+    request_budget,
+)
 from collector.collection.compatibility import to_strategy_result
 from collector.collection.contracts import StrategyResult
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.registry import default_registry
 from collector.discovery.adapters.shared import DiscoveredPage
-from collector.fetch import PageFetchError
+from collector.fetch import PageFetchError, decode_json_body, is_timeout_error
 from collector.storage.models import HTTPProbe
+from collector.transport import DeadlineHTTPHandler, DeadlineHTTPSHandler, RejectHTTPRedirects
 from collector.validation.downloads import validate_distribution
 
 
@@ -29,13 +37,21 @@ class BrowserSession:
         self.registry = default_registry(config) if registry is None else registry
 
     def request(self, action, payload, *, closing=False):
+        budget = cleanup_request_budget(seconds=3) if closing else request_budget(seconds=31)
+        with budget:
+            return self._request(action, payload, closing=closing)
+
+    def _request(self, action, payload, *, closing=False):
         service_status = None
         try:
             queue_deadline = time.monotonic() + (3 if closing else remaining_timeout(30))
             while True:
                 timeout = 3 if closing else remaining_timeout(31)
                 if action == "/render":
-                    payload["budget_ms"] = int(remaining_timeout(180) * 1000)
+                    collection = active_collection_budget()
+                    payload["budget_ms"] = int(
+                        (min(300, collection.remaining()) if collection else 300) * 1000
+                    )
                 request = Request(
                     self.endpoint + action,
                     method="POST",
@@ -46,9 +62,12 @@ class BrowserSession:
                     },
                 )
                 try:
-                    with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
+                    with build_opener(
+                        ProxyHandler({}), DeadlineHTTPHandler(), DeadlineHTTPSHandler(),
+                        RejectHTTPRedirects(),
+                    ).open(request, timeout=timeout) as response:
                         service_status = response.status
-                        data = response.read(2000001)
+                        data = read_with_budget(response, 2000001)
                     break
                 except HTTPError as exc:
                     # A 429 explicitly means no session was created. Other POST failures
@@ -66,14 +85,14 @@ class BrowserSession:
                 raise CollectionResponseError(
                     "browser_invalid_response", "decode", service_http_status=service_status,
                 )
-            decoded = json.loads(data)
+            decoded = decode_json_body(data)
             if not isinstance(decoded, dict):
                 raise ValueError("Invalid renderer response")
             return decoded
         except HTTPError as exc:
             code, phase = "browser_unavailable", "fetch"
             try:
-                body = json.loads(exc.read(4096))
+                body = decode_json_body(read_with_budget(exc, 4096)) if exc.fp else None
                 allowed = {
                     "browser_timeout", "browser_render_failed", "browser_navigation_failed",
                     "browser_worker_exited", "browser_invalid_response",
@@ -81,7 +100,7 @@ class BrowserSession:
                 if isinstance(body, dict) and body.get("error") in allowed:
                     code, phase = body["error"], "render"
             except (ValueError, OSError):
-                pass
+                check_collection_budget()
             finally:
                 if exc.fp is not None:
                     exc.fp.close()
@@ -89,10 +108,8 @@ class BrowserSession:
                 code, phase, service_http_status=exc.code,
             ) from exc
         except (TimeoutError, URLError, OSError) as exc:
-            code = "browser_timeout" if (
-                isinstance(exc, TimeoutError)
-                or isinstance(getattr(exc, "reason", None), TimeoutError)
-            ) else "browser_unavailable"
+            check_collection_budget()
+            code = "browser_timeout" if is_timeout_error(exc) else "browser_unavailable"
             raise CollectionTransportError(code, "fetch") from exc
         except (ValueError, UnicodeDecodeError) as exc:
             raise CollectionResponseError(
@@ -105,7 +122,7 @@ class BrowserSession:
             {
                 "url": url,
                 "metadata_url": metadata_url,
-                "budget_ms": int(remaining_timeout(180) * 1000),
+                "budget_ms": int(remaining_timeout(300) * 1000),
             },
         )
         if not isinstance(data.get("session_id"), str) or not data["session_id"]:

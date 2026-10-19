@@ -16,10 +16,27 @@ from collector.discovery.adapters.shared import (
     _modalities_from_distributions,
     _publication_date_from_mapping,
     _text,
+    document_url,
     fetch_json_url,
 )
 from collector.storage.models import DistributionCandidate
 from collector.url_utils import canonicalize_url
+
+SOCRATA_PAGE_SIZE = 1_000
+
+
+def _socrata_pagination() -> dict[str, object]:
+    return {
+        "kind": "offset",
+        "limit_parameter": "$limit",
+        "offset_parameter": "$offset",
+        "page_size": SOCRATA_PAGE_SIZE,
+        "initial_offset": 0,
+        "next_offset_increment": SOCRATA_PAGE_SIZE,
+        "order_parameter": "$order",
+        "order": ":id",
+        "completion": "empty_page",
+    }
 
 
 @dataclass(frozen=True)
@@ -56,9 +73,11 @@ class SocrataAdapter:
         return bool(_socrata_results(data, source_url))
 
     def discover(self, source_url: str) -> list[DiscoveredPage]:
-        data = self._fetch_json(
-            _socrata_catalog_url(source_url, rows=self._rows, include_source_query=True)
+        requested_url = _socrata_catalog_url(
+            source_url, rows=self._rows, include_source_query=True
         )
+        data = self._fetch_json(requested_url)
+        metadata_source_url = document_url(data, requested_url)
 
         discovered_pages: list[DiscoveredPage] = []
         for result in _socrata_results(data, source_url):
@@ -121,10 +140,12 @@ class SocrataAdapter:
                     ),
                     modality_of_data=_modalities_from_distributions(distributions),
                     distributions=distributions,
+                    metadata_source_url=metadata_source_url,
                     discovery_metadata={
                         "socrata_id": socrata_id,
                         "socrata_type": _text(resource.get("type")),
                         "socrata_domain": _socrata_domain(source_url),
+                        "socrata_pagination": _socrata_pagination(),
                     },
                 )
             )
@@ -224,44 +245,31 @@ def _socrata_distribution_candidates(
     socrata_id: str,
 ) -> list[DistributionCandidate]:
     site_root = _socrata_site_root(source_url)
-    csv_url = canonicalize_url(f"resource/{socrata_id}.csv", site_root)
-    json_url = canonicalize_url(f"resource/{socrata_id}.json", site_root)
-    api_url = canonicalize_url(
-        f"resource/{socrata_id}.json?{urlencode({'$limit': '1'})}",
-        site_root,
+    query = urlencode(
+        {"$limit": SOCRATA_PAGE_SIZE, "$offset": 0, "$order": ":id"}
     )
-
+    # Stable row order allows clients to advance beyond the first response page.
     return [
         DistributionCandidate(
-            url=csv_url,
-            format="CSV",
-            probability=0.95,
-            anchor="Socrata CSV export",
-            extension=".csv",
-            mime_type="text/csv",
+            url=canonicalize_url(f"resource/{socrata_id}.{extension}?{query}", site_root),
+            format=format_name,
+            probability=probability,
+            anchor=f"Socrata paginated {format_name} API",
+            extension=f".{extension}",
+            mime_type=mime_type,
             same_domain=True,
-            signals={"socrata_resource": True},
-        ),
-        DistributionCandidate(
-            url=json_url,
-            format="JSON",
-            probability=0.9,
-            anchor="Socrata JSON export",
-            extension=".json",
-            mime_type="application/json",
-            same_domain=True,
-            signals={"socrata_resource": True},
-        ),
-        DistributionCandidate(
-            url=api_url,
-            format="API",
-            probability=0.85,
-            anchor="Socrata SODA API",
-            extension=".json",
-            mime_type="application/json",
-            same_domain=True,
-            signals={"socrata_resource": True, "api_endpoint": True},
-        ),
+            signals={
+                "socrata_resource": True,
+                "api_endpoint": True,
+                "paginated": True,
+                "complete_export": False,
+                "pagination": _socrata_pagination(),
+            },
+        )
+        for format_name, extension, mime_type, probability in (
+            ("CSV", "csv", "text/csv", 0.95),
+            ("JSON", "json", "application/json", 0.9),
+        )
     ]
 
 

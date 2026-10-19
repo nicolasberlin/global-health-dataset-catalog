@@ -12,11 +12,20 @@ logger = logging.getLogger("collector.operations")
 _context: ContextVar[dict | None] = ContextVar("operation_context", default=None)
 
 
+class OperationalStreamHandler(logging.StreamHandler):
+    """Never let logging's fallback traceback disclose the current domain exception."""
+
+    def handleError(self, record) -> None:  # noqa: N802 - standard logging handler hook.
+        # StreamHandler.emit() swallows write errors and calls this method; the
+        # default implementation prints traceback chains outside emit_event's try.
+        pass
+
+
 def configure_operational_logging() -> None:
     """Enable JSON lines on stderr without changing other application loggers."""
     try:
         if not logger.handlers:
-            logger.addHandler(logging.StreamHandler())
+            logger.addHandler(OperationalStreamHandler())
         logger.setLevel(logging.INFO)
         logger.propagate = False
     except Exception:
@@ -26,6 +35,7 @@ def configure_operational_logging() -> None:
 def emit_event(
     event: str, *, outcome: str, duration_seconds: float | None = None,
     retry_count: int | None = None, delay_seconds: float | None = None,
+    error_category: str | None = None,
 ) -> None:
     """Only accept bounded measurements, categories and internal correlation IDs.
 
@@ -34,6 +44,8 @@ def emit_event(
     """
     try:
         record = {"event": event, "outcome": outcome, **(_context.get() or {})}
+        if error_category in {"storage", "database_transient", "execution", "persistence"}:
+            record["error_category"] = error_category
         for name, value in (
             ("duration_seconds", duration_seconds), ("retry_count", retry_count),
             ("delay_seconds", delay_seconds),
@@ -46,10 +58,12 @@ def emit_event(
 
 
 @contextmanager
-def operation_context(*, job_id=None, candidate_id=None):
+def operation_context(*, job_id=None, candidate_id=None, search_id=None, queue=None):
     values = {key: value for key, value in (
         ("job_id", job_id),
         ("candidate_id", str(candidate_id) if candidate_id is not None else None),
+        ("search_id", str(search_id) if search_id is not None else None),
+        ("queue", queue if queue in {"search", "classification", "collection"} else None),
     ) if value is not None}
     token = _context.set({**(_context.get() or {}), **values})
     try:

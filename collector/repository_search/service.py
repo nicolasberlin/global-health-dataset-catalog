@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterable
 from dataclasses import replace
 
 from collector.classification.repository import RepositoryResultClassifier
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
+from collector.observability import emit_event
 from collector.repository_search.filtering import filter_repository_results
 from collector.repository_search.models import (
     INVALID_METADATA_MESSAGE,
@@ -20,8 +20,6 @@ from collector.repository_search.models import (
 )
 from collector.repository_search.providers.datacite import DataCiteRepositorySearchProvider
 from collector.storage.models import PageSnapshot
-
-logger = logging.getLogger(__name__)
 
 
 class RepositorySearchFailure(PipelineFailure, ValueError):
@@ -54,18 +52,18 @@ def search_repository_metadata(
 
     for provider in active_providers:
         try:
-            provider_results = provider.search(normalized_query)
-        except ValueError as exception:
-            error = f"{provider.name}: {exception}"
-            errors.append(error)
-            logger.warning("Repository search provider failed: %s", error)
+            provider_response = provider.search(normalized_query)
+        except ValueError:
+            errors.append(provider.name)
+            emit_event("repository_search_provider", outcome="failed")
             warnings.append(RepositorySearchWarning(provider=provider.name))
             continue
 
         successful_provider_count += 1
+        warnings.extend(provider_response.warnings)
         results.extend(
             replace(result, search_query=normalized_query)
-            for result in provider_results
+            for result in provider_response.results
         )
 
     if successful_provider_count == 0 and errors:

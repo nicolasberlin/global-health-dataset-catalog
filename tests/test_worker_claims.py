@@ -9,10 +9,11 @@ from functools import partial
 from uuid import uuid4
 
 import pytest
-from app import workers
+from app.db import application_lock as locking
 from app.db import collection_jobs, repository_candidates, search_jobs
 from app.db.connection import _require_database_pool
 from app.db.task_retries import schedule_llm_retry
+from app.workers import runtime as workers
 from psycopg import OperationalError
 
 from collector.classification.repository import RepositoryClassification
@@ -104,6 +105,101 @@ async def enqueue(database, queue):
         RepositoryClassification("relevant", "Health dataset."),
     )
     return result.collection.job
+
+
+@pytest.mark.parametrize("queue", QUEUES)
+@pytest.mark.parametrize("replay", [False, True])
+async def test_replacement_generation_rejects_old_claims_before_monitor_detects_loss(
+    database, queue, replay,
+):
+    await database.init_database()
+    item = await enqueue(database, queue)
+    token = uuid4()
+    release = asyncio.Event()
+    async with locking.application_lock(probe_interval=60) as old:
+        await old.activate()
+        if replay:
+            assert (await claim_for(queue)(claim_token=token))["id"] == item["id"]
+
+        async def stale_claim():
+            await release.wait()
+            return await claim_for(queue)(claim_token=token)
+
+        stale = asyncio.create_task(stale_claim())
+        try:
+            await sql("SELECT pg_terminate_backend(%s)", (old.connection.info.backend_pid,))
+            assert not old.lost.is_set()  # The pool remains live before the next monitor tick.
+            async with locking.application_lock() as replacement:
+                await replacement.activate()
+                assert replacement.generation != old.generation
+                await database.mark_interrupted_search_sessions_error()
+                await database.mark_interrupted_candidate_classifications_error()
+                await database.mark_interrupted_collection_jobs_error()
+                release.set()
+                with pytest.raises(locking.ApplicationLockLost):
+                    await stale
+                assert (await persisted(queue, item))[STATUS_COLUMNS[queue]] == (
+                    "error" if replay else QUEUED[queue]
+                )
+                assert len(await receipts(queue)) == int(replay)
+        finally:
+            release.set()
+            stale.cancel()
+            await asyncio.gather(stale, return_exceptions=True)
+
+
+async def test_replacement_waits_for_inflight_claim_commit_before_recovery(database, monkeypatch):
+    await database.init_database()
+    item = await enqueue(database, "search")
+    entered, release, activating, active = (asyncio.Event() for _ in range(4))
+    actual_record = search_jobs.record_worker_claim
+    replacement_pid = []
+
+    async def paused_record(*args):
+        await actual_record(*args)
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(search_jobs, "record_worker_claim", paused_record)
+    async with locking.application_lock(probe_interval=60) as old:
+        await old.activate()
+        claim = asyncio.create_task(search_jobs.claim_search())
+        await asyncio.wait_for(entered.wait(), 2)
+        await sql("SELECT pg_terminate_backend(%s)", (old.connection.info.backend_pid,))
+
+        async def replace():
+            async with locking.application_lock() as replacement:
+                replacement_pid.append(replacement.connection.info.backend_pid)
+                activating.set()
+                await replacement.activate()
+                active.set()
+                await database.mark_interrupted_search_sessions_error()
+
+        replacement = asyncio.create_task(replace())
+        try:
+            await asyncio.wait_for(activating.wait(), 2)
+
+            async def wait_for_generation_lock():
+                while True:
+                    rows = await sql(
+                        "SELECT wait_event_type FROM pg_stat_activity WHERE pid = %s",
+                        (replacement_pid[0],),
+                    )
+                    if rows and rows[0]["wait_event_type"] == "Lock":
+                        return
+                    await asyncio.sleep(.01)
+
+            await asyncio.wait_for(wait_for_generation_lock(), 2)
+            assert not active.is_set()
+            release.set()
+            assert (await claim)["id"] == item["id"]
+            await asyncio.wait_for(replacement, 2)
+            assert (await persisted("search", item))["status"] == "error"
+        finally:
+            release.set()
+            for task in (claim, replacement):
+                task.cancel()
+            await asyncio.gather(claim, replacement, return_exceptions=True)
 
 
 async def fail(database, queue, item):
@@ -293,20 +389,21 @@ async def test_receipt_from_different_queue_is_rejected(database, queue):
     assert await receipts(other_queue) == previous
 
 
-async def test_schema_ten_migration_preserves_existing_queued_work(database):
+async def test_reinitialization_preserves_existing_queued_work(database):
     from app.db.schema import CURRENT_SCHEMA_VERSION
-    from schema_helpers import restore_schema_ten
 
     await database.init_database()
     # Build collections first so its setup cannot consume the classification under test.
     items = {queue: await enqueue(database, queue) for queue in reversed(QUEUES)}
     snapshots = {queue: await persisted(queue, item) for queue, item in items.items()}
-    await restore_schema_ten()
+    original_receipts = await sql("SELECT * FROM worker_claims ORDER BY token")
+    await database.close_database_pool()
+    await database.open_database_pool()
     await database.init_database()
     assert (await sql("SELECT MAX(version) AS value FROM schema_migrations"))[0]["value"] == (
         CURRENT_SCHEMA_VERSION
     )
-    assert await sql("SELECT * FROM worker_claims") == []
+    assert await sql("SELECT * FROM worker_claims ORDER BY token") == original_receipts
     for queue, item in items.items():
         assert await persisted(queue, item) == snapshots[queue]
         assert (await claim_for(queue)(claim_token=uuid4()))["id"] == item["id"]

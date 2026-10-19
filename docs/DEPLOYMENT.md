@@ -1,12 +1,24 @@
-# Deployment on the internal EPFL network
+# Deployment and operations
+
+For a first local run, start with the [README](../README.md). This guide covers
+proxy deployment, worker lifecycle, monitoring, migrations and maintenance.
+Use HTTPS for deployments outside the internal EPFL environment described below.
+Module responsibilities are explained in the
+[architecture guide](technical-design-document.md).
+
+## Internal EPFL deployment
 
 The main `docker-compose.yml` targets an existing Traefik on the external
-`traefik` network. The gpu217 deployment uses HTTP on external port 1312,
+`traefik` network. The reference internal deployment uses HTTP on external port 1312,
 without TLS or HTTPS redirection. It does not publish database or API ports.
 HTTP is the intended mode for this EPFL-internal deployment; no migration to
 HTTPS is planned. HTTPS support remains available for other hosting environments.
 For a Python backend running on your laptop, use `docker-compose.local.yml`
 instead; its database port is bound only to `127.0.0.1`.
+
+Invalid request-body, migration, shutdown or collection-duration settings stop
+startup. Recreate affected containers after changing environment settings or
+proxy labels; editing an environment file does not change a running process.
 
 ## Use the existing external Traefik
 
@@ -18,7 +30,7 @@ Traefik successfully. The application Compose file does not start or reconfigure
 that external Traefik.
 
 Do not modify the shared Traefik configuration or attach the application to
-`root_mmore-prod`. The application uses labels and the external `traefik`
+unrelated production networks. The application uses labels and the external `traefik`
 network specified by the infrastructure administrator. Declaring a network
 external does not attach Traefik to it: verify both sides are already connected.
 If they are not, ask the administrator to confirm the intended network.
@@ -26,11 +38,12 @@ No certificate resolver or port 443 is required for this internal HTTP deploymen
 
 ### Anonymous search on internal HTTP
 
-Configure the [internal EPFL HTTP session option](anonymous-visitor-sessions.md#internal-epfl-http-access)
+Configure the [internal EPFL HTTP session option](reference/anonymous-visitor-sessions.md#internal-epfl-http-access)
 before rebuilding the app. It is disabled by default. The API base path is
-`/ai-commons/api`; the configured origin is `http://gpu217.rcp.epfl.ch:1312`,
-without a path. Public mode does not require `API_ACCESS_TOKENS`; token mode
-still validates them at backend startup.
+`/ai-commons/api`; configure the exact external origin, for example
+`http://catalog.example.org:1312`, without a path. Replace the example hostname
+with your deployment's hostname. Public mode does not require `API_ACCESS_TOKENS`;
+token mode still validates them at backend startup.
 
 Before deployment, inspect only the network information (no credentials):
 
@@ -47,24 +60,35 @@ cannot be inferred from the repository or certified by local browser tests.
 Uvicorn handles the trusted forwarding headers; application code never trusts
 an arbitrary `X-Forwarded-For` header directly.
 
-The network inspection supplied for gpu217 on 2026-09-24 shows
-`root-traefik-1` at `172.18.0.5`, with the frontend at `172.18.0.4` and the API
-at `172.18.0.3`, all on `traefik`. For that deployment, add to the server's `.env`:
+After verifying the current proxy address, add it to the server's private `.env`:
 
 ```dotenv
-FORWARDED_ALLOW_IPS=172.18.0.5
+FORWARDED_ALLOW_IPS=<verified-proxy-address>
 ```
 
 Use the single address, not the `/16` network: other containers also share this
-network. This records the observed topology, not a permanent IP assignment or
-an end-to-end forwarding test. Verify that Uvicorn receives the expected client
-address after deployment. The repository keeps its conservative loopback default;
+network. A container address can change when it is recreated. Verify that Uvicorn
+receives the expected client address after deployment. The repository keeps its conservative loopback default;
 the server environment must supply the deployment-specific value.
 
-Set the deployment environment (in addition to the secrets in the README):
+The commands below use the main `docker-compose.yml`, which automatically reads
+`.env` in the repository root. Create a private **server-specific `.env`** with
+`POSTGRES_PASSWORD` and all three `RCP_*_API_KEY` credentials. Keep the password
+compatible with any existing database volume. Local `.env.api` and `.env.local`
+are not automatically loaded by these commands; keep server credentials and data
+separate from local tests.
+
+Choose authentication explicitly in that server file. For browser visitor access,
+set `API_AUTH_MODE=public`, `API_SESSION_SECRET` and `API_PUBLIC_ORIGIN`, plus the
+[internal HTTP opt-in](reference/anonymous-visitor-sessions.md#internal-epfl-http-access)
+for this deployment. For token integrations, use `API_AUTH_MODE=token` with a
+private `API_ACCESS_TOKENS` mapping, as defined by
+[API authentication](api-integration.md#authentication-and-client-origins).
+
+Set the deployment-specific hostname and optional network exclusions:
 
 ```bash
-export PUBLIC_HOST="gpu217.rcp.epfl.ch"  # hostname only, without scheme/port/path
+export PUBLIC_HOST="catalog.example.org"  # replace with your hostname, without scheme/port/path
 # Optional: public CIDRs routed to internal/admin services in your infrastructure.
 # Comma-separated, strict IPv4/IPv6 CIDRs; DNS and PostgreSQL exceptions take precedence.
 export EGRESS_BLOCKED_CIDRS=""
@@ -72,22 +96,53 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-Open `http://gpu217.rcp.epfl.ch:1312/ai-commons/`.
+Open `http://<your-hostname>:1312/ai-commons/`.
 Both application routers use `web` and the configured `Host` rule. The API
 router keeps its higher priority so `/ai-commons/api` reaches port 8001.
 There is no TLS, HSTS, or HTTPS redirect middleware in this deployment.
 
+### API prefix behind Traefik
+
+The main Compose file starts `ai-commons-api` with
+`--root-path /ai-commons/api`, matching the prefix removed by Traefik. Keep both
+values aligned when changing the public API path. This makes `Location`,
+`progress_url`, Swagger and OpenAPI URLs include the external prefix; a client
+can follow a returned URL without adding the prefix again. The frontend build
+argument `VITE_API_BASE_URL` must use that same external path.
+
+The standalone API at `http://127.0.0.1:8001` keeps an empty root path by default.
+For a different proxy deployment, follow the explicit
+[root-path configuration](api-integration.md#reverse-proxy-with-a-url-prefix).
+Client-supplied `X-Forwarded-Prefix` does not configure this value.
+
 ## Collection execution
 
-See the [2026-09-28 reliability verification record](reliability-verification-2026-09-28.md)
-for tested revisions, local results and CI status. A successful baseline CI run
-does not certify later corrections or establish which revision is deployed.
+Verify CI results for the exact revision being deployed. Repository tests do not
+establish which revision is running or verify the external proxy configuration.
 
 Run exactly one API process and one API instance against the database. The image
 explicitly starts Uvicorn with `--workers 1`. Do not scale replicas or overlap old
-and new API instances during a deployment: startup recovery would mark the other
-instance's running jobs as interrupted. Stop the old instance before starting
-its replacement. Worker leases and multi-instance recovery are not implemented.
+and new API instances during a deployment. An exclusive PostgreSQL session lock,
+scoped to the database/schema, is acquired on a dedicated connection before the
+pool opens, migrations run or interrupted tasks are recovered. A second instance
+fails startup before it can invalidate the owner's jobs. Stop the old instance
+before starting its replacement. Worker leases and multi-instance recovery are
+not implemented.
+
+The lock connection has a bounded heartbeat. Ownership loss marks the API
+unavailable, stops consumers and fences further worker persistence. New mutating
+HTTP requests return 503 with `Retry-After: 5`. The process does not automatically
+reacquire ownership: repair the cause, stop the old process and start one instance.
+Normal shutdown closes the pool before releasing the ownership connection.
+Read endpoints can remain available while their underlying storage permits it.
+
+After schema validation, the lock holder activates a new UUID in the schema's
+singleton `application_ownership` row. Every queue claim, including receipt
+replay, holds a shared lock on that generation until its transaction ends. A
+replacement waits for earlier claims, changes the generation, recovers parent
+attempts, then closes interrupted votes. An old process cannot claim work after
+that handoff even if its heartbeat has not yet noticed a lost connection. Running
+the migration command alone does not rotate the active generation.
 
 `collection_jobs` is the persistent collection queue; no additional broker is
 required. After startup recovery, backend consumers poll committed `pending`
@@ -99,62 +154,111 @@ If PostgreSQL becomes unavailable during finalization, the consumer retains its
 slot and the computed result (or execution error) in memory until its terminal
 write can finish. It retries only persistence, with exponential backoff and jitter
 up to 30 seconds; it does not repeat HTTP collection or LLM execution. Temporary
-connection, pool, serialization, and deadlock failures are retryable; other SQL
-errors are not blindly retried. Finalization is guarded by the claim's exact
+connection, pool, serialization, and deadlock failures are retryable. Repairable
+storage failures, including PostgreSQL `DiskFull`, retain the result and retry
+after backoff until repaired. If a terminal error cannot be persisted, its slot
+also remains occupied instead of abandoning the attempt and claiming another
+job. Storage-blocked or failed consumers make readiness and new admission return
+503. Repair storage before restarting if the computed in-memory result must be
+preserved. Finalization is guarded by the claim's exact
 `updated_at`, which progress writes leave unchanged. A lost commit acknowledgement
 cannot duplicate finalization or overwrite a newer explicitly retried attempt.
-This finalization guard uses existing columns without an API contract change.
 
 Acquisition also retries transient SQL failures, using one internal UUID per
-consumer acquisition. Schema migration 10 → 11 adds `worker_claims`: the task
-transition and its receipt commit together. After a lost commit acknowledgement,
+consumer acquisition. An acquisition error outside those transient retries makes
+readiness and new admission return 503 while polling continues. A successful
+poll, including an empty one, clears that acquisition failure; other readiness
+checks must also pass before the application becomes available again.
+The task transition and its `worker_claims` receipt commit
+together. After a lost commit acknowledgement,
 the same token retrieves the same running attempt without changing its deadline
 or spending another admission. An obsolete receipt cannot acquire another task.
 This applies to discovery, repository classification and collection. Empty polls
 do not create receipts; one small row is retained per acquired attempt. These
-receipts have no expiry yet, like API command receipts. They are internal and
+receipts have no automatic expiry by default, like API command receipts. Explicit
+[retention maintenance](#explicit-retention-maintenance) can prune eligible old
+receipts under an operator-selected policy. They are internal and
 do not replace the single-process recovery policy or guarantee exactly-once
 external calls after a process crash.
 
 - Pending jobs survive restart and are picked up automatically.
-- Jobs left running by an interrupted process become errors at the next startup;
-  they are not automatically retried.
-- Normal application shutdown stops taking new work and waits for current
-  collections to finish. The container's stop grace period can force termination
-  before that finishes; allow enough time if draining is required. A continuing
-  database outage also delays draining. Forced termination loses in-memory
-  outcomes; the existing startup recovery then marks active work as interrupted.
+- Jobs left running by an interrupted process become errors with
+  `processing_interrupted` at the next startup; they need an explicit retry.
+- Normal application shutdown stops taking new work in all three queues and
+  shares one `WORKER_SHUTDOWN_TIMEOUT_SECONDS` drain deadline (default 10 seconds;
+  positive finite values up to 300). Both backend Compose deployments set
+  `stop_grace_period: 20s`. Keep the container allowance above the drain budget
+  plus process cleanup. At expiry, persistence bridges are fenced and remaining
+  attempts are left for restart recovery. A synchronous call already running
+  cannot be killed, but its daemon thread does not hold process exit indefinitely.
+  Deadline expiry or forced termination loses in-memory outcomes; committed
+  datasets and valid positive or negative model votes survive.
 - A repeated classification reads its existing collection, including an empty
   or failed result. `POST /collector/collection-jobs/{job_id}/retry` explicitly
-  requeues an owned failed job and consumes the existing classification quota.
+  requeues an owned failed, incomplete or eligible empty job and consumes the
+  existing classification quota. Jobs with no supported recovery are rejected.
 
 Classification decisions and initial collection reservations share one
 transaction. If reservation fails, the decision rolls back too. Temporary database
-failures retry finalization; other failures require an explicit classification
-retry, which reuses all already persisted valid votes. LLM and network calls stay outside
-the transaction. Classification requests now persist as `queued` on existing candidates before
+failures retry finalization. Processing failures are recorded durably; bounded
+automatic model recovery or an explicit retry reuses already persisted valid
+votes. A failure of that terminal write retains the slot until persistence can
+complete or shutdown expires. LLM and network calls stay outside
+the transaction. Classification requests persist as `queued` on existing candidates before
 HTTP 202 is returned. `pending` means discovered but not requested; workers never
 execute it. `CLASSIFICATION_MAX_CONCURRENCY` (default `2`) bounds the separate
 classification pool. Queued requests survive restart; interrupted `classifying`
 candidates become errors and require an explicit `retry=true` request. An LLM
-response lost before persistence may need another call; no automatic retry is
-added. Both pools share the same bounded consumer implementation.
+response lost before persistence may need another call. See
+[bounded model recovery](#bounded-model-recovery) for automatic retry limits.
+All three queues share the same bounded consumer implementation.
 
-Schema version 6 adds `classification_runs` and `classification_votes`, with
-input/configuration fingerprints, per-voter attempts, and progress on candidates
-and collection jobs. Migration runs automatically at backend startup without
-removing existing data. Existing historical decisions are not backfilled as votes.
-Each response is validated and committed before waiting for the remaining voters.
-A changed input or ensemble configuration starts a separate run. No transaction
-stays open during an external request. Startup marks interrupted votes as failed
-without discarding successes. The CLI has no persistent vote store; this recovery
-applies to backend workers.
-Deploy backend and frontend together: classification submission now returns an
-intermediate state, followed through authenticated GET requests. The frontend
-restores the most recent search containing repository candidates on load and
-provides a restore button. It never submits its unrequested candidates implicitly.
-This is recovery of the last repository analysis, not a complete search history.
-The single-process/single-instance constraint also applies to classification.
+Each valid voter response is committed before waiting for the remaining voters.
+A changed input or ensemble configuration starts a separate classification run.
+Startup marks interrupted votes as failed without discarding completed votes.
+The CLI has no persistent vote store; this recovery applies to backend workers.
+
+Clients must use the asynchronous command/progress contract, including when
+calling the deprecated `/collector/search-datasets` alias. An accepted search
+continues after client disconnection. See
+[API compatibility](api-integration.md#restart-and-compatibility) before deploying
+changes alongside an existing client.
+
+### Bounded model recovery
+
+The default policy allows three total transient attempts, two for invalid
+responses, and a 120-second window for starting automatic retries. Compose
+forwards `LLM_MAX_ATTEMPTS`, `LLM_INVALID_MAX_ATTEMPTS` and
+`LLM_RETRY_WINDOW_SECONDS`. Set both attempt limits to 1 to disable automatic model
+retries. Provider `Retry-After`, attempt limits and the retry-planning window are
+independent of the collection execution budget. See the
+[collection reference](reference/collection.md) for scheduling and recovery rules.
+
+### Collection execution budget
+
+`COLLECTION_MAX_DURATION_SECONDS` (default 300, finite values from 1 to 3600)
+sets the execution window per collection attempt, beginning at claim; queue waits
+do not count. Both Compose deployments forward it. Scheduling a new automatic
+`retry_round` atomically clears `collection_deadline_at`; its next claim starts a
+new window. Recovering the same acquisition preserves its deadline. An admitted
+manual retry starts a new cycle.
+
+Expiry returns `collection_budget_exhausted` and an incomplete outcome, retaining
+validated datasets and committed model votes. It does not cancel persistence or
+release a slot while blocking work is still running. Built-in public HTTP and
+trusted LLM/browser transports use absolute request deadlines through headers,
+chunk framing and body reads. DNS runs in a process-wide pool of four daemon
+threads with at most four admitted lookups. Waiting for capacity or resolution
+consumes the same request and collection budget; late answers cannot connect.
+An OS lookup itself cannot be killed: four stuck lookups temporarily exhaust DNS
+capacity until they finish or the process restarts. Injected blocking callbacks
+remain cooperative limits. The collection window does not bound final persistence.
+Browser leases and proxy tunnels are capped at 300 seconds, navigation at 30
+seconds and probes at 10 seconds/64 KiB. See the
+[collection reference](reference/collection.md) for extraction and validation rules.
+
+The catalogue can reuse a collected dataset without revalidation. No periodic
+refresh is installed, and cache presence does not prove a complete collection.
 
 ## Internal operational logs
 
@@ -184,19 +288,6 @@ Existing application persistence and public error presentation are unchanged.
 Logging-handler failures are ignored so they cannot fail model calls, persistence
 or collection. These logs are best-effort diagnostics, not an audit trail.
 
-For example, this illustrative subset of events describes a successful collection
-that waited for the database after a successful model response:
-
-```json
-{"event":"collection_started","outcome":"started","job_id":42}
-{"event":"provider_request","outcome":"success","job_id":42,"duration_seconds":12.4}
-{"event":"persistence_retry","outcome":"retry","job_id":42,"retry_count":1,"delay_seconds":0.8}
-{"event":"persistence_retry","outcome":"retry","job_id":42,"retry_count":2,"delay_seconds":1.5}
-{"event":"persistence_finished","outcome":"success","job_id":42,"retry_count":2}
-{"event":"persistence_duration","outcome":"success","job_id":42,"duration_seconds":2.5}
-{"event":"collection_finished","outcome":"success","job_id":42,"duration_seconds":18.2}
-```
-
 High provider durations point to model-call latency. Repeated persistence retries
 point to a database or pool problem; the model result is retained without repeating
 the model call. A start event with no finish may mean ongoing work or an interrupted
@@ -207,7 +298,6 @@ To inspect backlog, run this read-only SQL through an administrative PostgreSQL
 connection. It returns only queue counts and the oldest queued age in seconds.
 `updated_at` is reset when work is enqueued or explicitly retried; once claimed it
 is overwritten, so this query does not measure historical per-task queue wait.
-That extra measurement remains deferred in TODO 7.
 
 ```sql
 BEGIN READ ONLY;
@@ -227,7 +317,31 @@ A growing oldest age with active workers suggests backlog. No claimed work plus
 `worker_poll` failures suggests that workers cannot access or finalize queue work.
 These are diagnostic indicators, not guarantees of the underlying cause.
 
+## Diagnostic history
+
+Owner-scoped diagnostic exports exclude raw exceptions, HTML, cookies and invalid
+model responses. Stored observations are sanitized again on read. Search exports
+are bounded snapshots; use paginated job/candidate history for older entries.
+See [API diagnostic history](api-integration.md#diagnostic-history) for endpoints,
+pagination and truncation limits, and the
+[investigation guide](../research/search-diagnostics.md) for interpreting evidence.
+
 ## Outbound network policy
+
+The runtime image removes unused global `setuptools`/`wheel` build tools after
+installation, including their vendored dependencies. Rebuild and rescan images
+before deployment: Python lockfile checks alone do not inspect the base image.
+The 2026-10-18 scan found no high/critical Python-package findings, but reported
+eight high-severity advisory IDs across Debian 13.7 packages, without a fixed
+version listed for this release. These affect util-linux mount helpers
+(CVE-2026-76642, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410), ACL
+(CVE-2026-54369), ncurses (CVE-2025-69720), systemd-homed (CVE-2026-16742), and
+Perl (CVE-2026-9538). The API has no mount, terminal or Perl execution endpoint,
+and systemd-homed is absent from the image; no reachable API exploit was
+demonstrated. This is deployment triage, not proof that the image is unaffected.
+Track vendor updates through the [Debian security tracker](https://security-tracker.debian.org/tracker/),
+rebuild when fixes land, and retain `util-linux`: its `setpriv` command implements
+the privilege drop below. Do not remove the bootstrap protection to quiet a scan.
 
 The backend image starts with a short bootstrap that installs an nftables
 `inet collector_egress` table inside its own network namespace. The API starts
@@ -271,7 +385,7 @@ to remove its process-level database exception entirely.
 
 ## Verify the deployed infrastructure
 
-After deploying on gpu217:
+After deploying to the internal EPFL host:
 
 ```bash
 curl -I "http://${PUBLIC_HOST}:1312/ai-commons/"
@@ -292,10 +406,10 @@ its `Uid`, `Gid`, `CapEff`, `CapBnd`, and `NoNewPrivs` in `/proc/1/status`.
 
 `GET /health` is cheap liveness: HTTP 200 with `{"status":"ok"}` means the
 process can serve a request. It never accesses PostgreSQL or model configuration.
-`GET /ready` is readiness: HTTP 200 with `{"status":"ok"}` requires completed
-startup, an initialized current database pool, nonblank API keys and effective
-model names for all three default voters, and a successful `SELECT 1` through
-that pool. Default model names are accepted when their overrides are absent;
+`GET /ready` requires completed startup, healthy ownership and worker consumers,
+an initialized database pool, nonblank keys and effective model names for the
+three default voters, and a successful `SELECT 1` through that pool. Default
+model names are accepted when their overrides are absent;
 explicitly blank overrides and missing/blank keys fail readiness. These local
 configuration checks cannot establish whether a provider accepts a key or serves
 a model. Neither endpoint calls LLM providers or incurs model charges.
@@ -306,16 +420,16 @@ pool for replacement. No new pool is created and no migration or schema scan is
 run by a probe. Failures return only HTTP 503 with `{"status":"unavailable"}`;
 exception messages and configuration values are not returned or logged by the
 endpoint. Readiness responses use `Cache-Control: no-store` and require no login.
-The next probe can return 200 after database recovery, without restarting the
-application or rerunning migrations. A reopened pool still needs normal schema
-initialization. Deployment environment changes normally require recreating the
-API container; editing an environment file does not update a running process.
+Temporary pool/query failures can recover on a subsequent probe while the
+ownership session remains healthy. Ownership loss requires an API restart after
+repair; it is not silently reacquired. A reopened pool still needs normal schema
+initialization.
 
 Uvicorn does not serve HTTP until startup finishes: during migrations or failed
 startup a monitor may get a connection failure, not a 503. The application clears
-its ready state before workers drain on shutdown. This check does not certify
-provider reachability, every business operation or ongoing worker health, and
-does not stop queued work or repair failures.
+its ready state before workers drain on shutdown. Worker persistence degradation
+and consumer failure are included in readiness. This check does not certify
+provider reachability or every business operation, and does not repair failures.
 
 Use the external deployment URL above for release checks and monitoring, for
 example every 30 seconds with a three-second client timeout. Treat connection
@@ -354,17 +468,90 @@ References: [Python TLS](https://docs.python.org/3.11/library/ssl.html),
 
 ## Schema validation and retired source administration
 
-Startup validates and migrates the schema before serving requests or starting
-workers. The initialized state belongs to the current database pool and is cleared
+The database has one initial migration, version 1, in
+`backend/app/db/migrations/v001.py`. It creates the complete schema only in an
+empty database. Earlier pre-release schemas are not converted automatically;
+prepare a fresh database for this baseline and retain any existing database until
+its data is no longer needed. Startup does not erase or rebuild an existing schema.
+
+With `DATABASE_MIGRATE_ON_STARTUP=true` (the default), startup initializes or
+validates the schema before serving requests or starting workers. With `false`,
+it verifies the exact current version and
+persistence contracts without DDL; an outdated or incomplete schema fails
+startup, as does a missing or newer unsupported schema. Only `true` or `false`
+are accepted.
+
+The initialized state belongs to the current database pool and is cleared
 on close/reopen or failed initialization. Business operations use this in-memory
 guard without repeating schema-version queries. Scripts that reopen a pool must
-call `init_database()` before business operations. Apply schema changes through
-startup migration; live external schema changes are not monitored per request.
+call `init_database()` or `validate_database_schema()` before business operations.
+Live external schema changes are not monitored per request. Subsequent releases
+can add migrations when preserving existing installations becomes necessary.
 
-The `/sources` administration routes, storage helpers, creation quota, and seed
-inserts are removed. Historical `data_sources` rows are preserved. No data-dropping
-migration is part of this cleanup, and source-discovery adapters still operate
-from URLs independently of the retired administration subsystem.
+To initialize or validate independently of API startup, stop the API first and
+keep PostgreSQL running. From an operator checkout with the intended
+`DATABASE_URL` configured:
+
+```sh
+PYTHONPATH=backend .venv/bin/python -m app.migrate
+PYTHONPATH=backend .venv/bin/python -m app.migrate --check
+```
+
+Both take the singleton lock and refuse another owner; `--check` performs no DDL
+but still requires the API stopped. Then start the API with
+`DATABASE_MIGRATE_ON_STARTUP=false`. Startup still recovers interrupted tasks
+through normal data writes. For the main Compose deployment, the equivalent
+one-off command uses the existing backend image and environment:
+
+```sh
+docker compose stop ai-commons-api
+docker compose run --rm --no-deps ai-commons-api python -m app.migrate
+docker compose run --rm --no-deps ai-commons-api python -m app.migrate --check
+# Recreate/start ai-commons-api with DATABASE_MIGRATE_ON_STARTUP=false afterward.
+```
+
+For `docker-compose.api.yml`, use its existing `--env-file`/`-f` options and the
+service name `api`. The container entrypoint continues installing its network
+policy before running either command; no entrypoint override is needed.
+
+The `/sources` administration routes, storage helpers, creation quota and seed
+inserts are removed. The schema retains `data_sources` for existing internal
+relationships. Source-discovery adapters operate from URLs independently of the
+retired administration subsystem.
+
+## Explicit retention maintenance
+
+`PYTHONPATH=backend .venv/bin/python -m app.db.maintenance` reports eligible old
+records and deletes nothing by default. No scheduler or startup cleanup is
+installed. Defaults are eight days for quota counters, 90 for terminal collection
+traces and 90 for terminal model-attempt history. Command receipts, worker
+receipts and searches remain unexpired unless their retention flags are supplied.
+
+Configure distinct durations with `--quota-days`, `--trace-days`,
+`--vote-history-days`, `--worker-claim-days`, `--command-days` and `--search-days`.
+Each accepts positive integer days up to 36500. Command pruning requires an
+explicit `--idempotency-window-days` no greater than
+command retention; search retention must cover command retention when both are
+set. Removing receipts ends unlimited replay protection for those keys, so align
+the selected window with clients before applying it.
+
+For example, review this dry-run before selecting the corresponding apply policy:
+
+```sh
+PYTHONPATH=backend .venv/bin/python -m app.db.maintenance \
+  --command-days 90 --idempotency-window-days 30 --worker-claim-days 90
+```
+
+Review the dry-run report, stop the API, then repeat the reviewed command with
+`--apply`. Apply holds exclusive ownership and deletes bounded transactional
+batches (`--batch-size` defaults to 1000 per category; maximum 10000). Queued or
+running tasks and targets of retained receipts are protected. Dataset records,
+distributions, current votes and run snapshots remain. Search cleanup excludes
+classification runs, referenced jobs and retained receipt targets; it therefore
+does not bound every table's lifetime. A timeout or failure rolls back the entire
+invocation; failures print a controlled category/message without a connection
+traceback. Review the report and run another explicit batch if needed. Dry-runs
+can run while the API serves; applying a policy requires the API stopped.
 
 ## Traffic limits and shared EPFL addresses
 
@@ -382,6 +569,29 @@ Optional deployment variables are `TRAEFIK_API_RATE_AVERAGE`,
 `TRAEFIK_FRONTEND_RATE_BURST`. Use positive integers; an average of zero disables
 Traefik limiting. Recreate the application containers after changing labels.
 
+`API_MAX_REQUEST_BODY_BYTES` defaults to 65536 bytes and must be an integer from
+1024 to 1048576. The API counts received bytes before JSON parsing, including
+chunked requests and missing or incorrect `Content-Length`, returning 413 before
+authentication or command admission when exceeded. The main Traefik router also
+uses `body-ai-commons-api.buffering.maxrequestbodybytes` with the same setting,
+before prefix stripping. The standalone API has its ASGI guard and can use an
+external proxy's corresponding body limit. This cap is independent of rate
+limits, workload quotas and connection/read timeouts. A disconnected incomplete
+body cannot admit a command.
+
+`API_REQUEST_BODY_TIMEOUT_SECONDS` defaults to 30 (valid 1–120). It bounds the
+whole upload, including empty chunks and slow streams; expiry returns 408 before
+command admission. Configure the upstream proxy's header, TLS and upload limits
+as well: the ASGI timer begins only after the request reaches the API.
+
+`DATABASE_STATEMENT_TIMEOUT_MS` defaults to 30000 (1000–300000), and
+`DATABASE_LOCK_TIMEOUT_MS` defaults to 5000 (100–30000, no greater than the
+statement timeout). Every pool connection receives these limits. Schema setup
+temporarily uses 120 seconds per statement and 30 seconds per lock; maintenance
+keeps its shorter limits. Request timeouts return 503 without database details.
+Workers retry transient lock contention and retain computed outcomes during
+storage failure, rather than repeating model calls.
+
 The default source is the direct client IP **seen by Traefik**, not an arbitrary
 `X-Forwarded-For` header or session cookie. Users behind EPFL NAT/VPN share a
 bucket. If another proxy sits in front of Traefik, verify that topology before
@@ -389,13 +599,17 @@ configuring `ipStrategy`; `FORWARDED_ALLOW_IPS` only controls Uvicorn's trust of
 Traefik, not Traefik's own source selection. Limits are per Traefik instance and
 reset when it restarts; these are traffic guards, not durable workload budgets.
 
-At the estimated 14 polls/second per active search, 5 visitors offer 70 req/s,
-10 offer 140, and 20 offer 280. With 20 visitors the API bucket's initial burst
-can hide overload for roughly five seconds; sustained polling will receive 429s.
-Multiple tabs and overlapping searches increase traffic further. The 200/400
-setting is an initial traffic policy, not a measured server capacity or a promise
-that 20 simultaneous searches behind one IP will be unthrottled. Reduce polling
-or revisit the IP threshold if that concurrency is required.
+The current frontend requests one progress snapshot about every two seconds per
+followed search, after the previous response completes. Twenty visitors following
+one search each therefore offer at most roughly 10 regular progress reads/second,
+plus other API activity. Multiple tabs and searches increase that traffic.
+
+The opt-in synthetic benchmark below models 14 requests/second per identity:
+5 identities offer 70 req/s, 10 offer 140, and 20 offer 280. In that benchmark,
+the initial burst can hide overload for roughly five seconds before sustained
+traffic receives 429s. This assumption describes the benchmark, not the current
+frontend's polling behavior. The 200/400 setting is an initial traffic policy,
+not measured application capacity; measure representative use before changing it.
 
 Backend quotas remain independent: 20 new sessions/minute/IP, 10 searches/minute/
 session, 30 searches/minute/IP, and 60 admitted classification work items/minute/IP.
@@ -417,18 +631,13 @@ Run the isolated proxy tests with:
 TRAEFIK_TEST_IMAGE=traefik:v3.7.5 .venv/bin/pytest tests/test_traefik_rate_limits.py -s
 ```
 
-They translate the deployed Compose router/middleware labels to Traefik's file
-provider, substitute a counting upstream, and exercise 5/10/20 cookie identities
-from one source IP. CI checks the production defaults separately, then stretches
-only the test bucket refill period to one hour while retaining the deployed burst
-sizes. This tests shared-IP exhaustion without requiring the runner to sustain
-280 req/s. Each proxy 429 is checked against the upstream counter. A
-separate test exhausts the frontend bucket while preserving API access. They do
-not mount the Docker socket, read production `.env`, or call model providers.
-Real signed-session/bootstrap, candidate-admission and polling quotas are covered
-separately by `tests/test_public_quotas.py` against PostgreSQL. This verifies the
-proxy policy and backend policy separately; it does not certify the live EPFL
-forwarding chain or full production throughput.
+These tests load the Compose router/middleware labels into an isolated Traefik
+with a counting upstream and 5/10/20 identities from one source IP. They verify
+the configured defaults, then lengthen only the test refill period to one hour
+to exercise burst exhaustion and frontend/API isolation. They do not mount the
+Docker socket, read production `.env`, or call model providers. Backend session,
+admission and polling quotas are covered by `tests/test_public_quotas.py` against
+PostgreSQL. Neither suite certifies the live forwarding chain or throughput.
 
 The original ten-second polling benchmark remains opt-in:
 
@@ -440,34 +649,8 @@ It uses the unmodified production periods and requires a sufficiently fast load
 generator. Its duration assertion measures benchmark validity, not application
 correctness; it is not a CI gate. No production limit is increased for slower CI.
 
-### Schema version 7: pipeline outcomes
+### Pipeline outcomes
 
-Version 7 adds structured diagnostics, search completeness/local-result counts,
-and collection outcomes. Migration preserves existing datasets and model votes;
-historical terminal jobs are conservatively marked incomplete. See
-[pipeline outcomes](pipeline-outcomes.md) for the additive API and compatibility
-rules. The usual startup migration applies this change; no new service or
-configuration variable is required. Automatic retries remain disabled.
-
-### Bounded model recovery
-
-Schema 9 preserves data and adds durable LLM retry scheduling. The default policy
-allows three total transient attempts, two for invalid responses, and a 120-second
-window for starting automatic retries. Compose forwards `LLM_MAX_ATTEMPTS`,
-`LLM_INVALID_MAX_ATTEMPTS` and `LLM_RETRY_WINDOW_SECONDS`. Set both attempt limits
-to 1 to disable automatic model retries. Keep one API instance/process. See
-[LLM recovery](llm-recovery.md) for deadline, persistence and restart behavior.
-
-### Collection execution budget
-
-`COLLECTION_MAX_DURATION_SECONDS` (default 180, allowed 1–3600 seconds) sets the
-execution window of each collection cycle. Both Compose deployments forward it.
-Schema migration 9 → 10 adds a nullable `collection_deadline_at`, preserving
-historical records. Initial queue time does not count. Automatic retries retain
-the first execution's deadline; an admitted manual retry receives a new window.
-
-Expiry returns `collection_budget_exhausted` and an incomplete outcome, retaining
-validated datasets and committed model votes. It does not cancel persistence or
-release a worker while blocking work is still running. DNS, HTTP header reads and
-other in-flight blocking operations can exceed the window; this is a cooperative
-limit. See [collection budget](collection-budget.md) for guarantees and tests.
+Search completeness and collection outcomes are included in the initial schema.
+Missing verification evidence is treated conservatively as incomplete; see
+[pipeline outcomes](reference/pipeline-outcomes.md).

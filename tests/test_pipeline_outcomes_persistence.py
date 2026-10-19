@@ -1,24 +1,24 @@
 """New conclusions and diagnostics survive real PostgreSQL transactions and recovery."""
 
+import asyncio
 import json
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 
 import pytest
-from app import classification_worker
-from app.db import classification_votes as votes
 from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.connection import _fetchall, _require_database_pool
 from app.routes.collector import _candidate_with_collection
-from test_classifier_factory import MODELS, _response
-from test_collection_workflow import candidate_for, decision
-from test_pipeline_outcomes import collect
-from test_search_progress import read
-from test_vote_persistence import transport  # noqa: F401
+from app.workers import classification as classification_worker
+from helpers.classification import MODELS
+from helpers.classification import response as _response
+from helpers.collection import collect
+from helpers.workflows import candidate_for, decision, read
 
-from collector.diagnostics import Diagnostic
-from collector.storage.models import CollectionReport, CollectionResult
+from collector.diagnostics import Diagnostic, PersistenceFailure
 
 pytestmark = pytest.mark.anyio
 
@@ -96,7 +96,7 @@ async def test_incomplete_report_can_commit_usable_datasets(database):
     assert (await database.get_collection_job(job_id))["saved_count"] == 1
 
 
-async def test_worker_preserves_failed_voter_cause_and_attempt(database, transport):  # noqa: F811
+async def test_worker_preserves_failed_voter_cause_and_attempt(database, transport):
     await database.init_database()
     candidate = await candidate_for(database)
     await database.complete_search_session(candidate["search_session_id"], "alice", origin="online")
@@ -150,60 +150,8 @@ async def test_restart_retry_and_old_write_preserve_error_contract(database):
     assert (await database.get_collection_job(job_id))["errors"] == []
 
 
-async def test_migration_preserves_old_data_without_claiming_complete_outcomes(database):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    await database.complete_search_session(candidate["search_session_id"], "alice", origin="online")
-    await database.fail_candidate_classification(candidate["id"], "alice", "old private error")
-    job = await database.create_collection_job("https://example.org/old")
-    await database.mark_collection_job_running(job["id"])
-    snapshot = {"configuration": [{"voter_id": "a"}], "payload": {}}
-    run = await votes.prepare_vote_run(snapshot, job_id=job["id"])
-    vote = await votes.claim_vote(run, "a", job_id=job["id"])
-    await votes.finish_vote(
-        run, "a", vote["attempt_token"], response={"accepted": False}, job_id=job["id"]
-    )
-    await database.complete_collection_job(
-        job["id"],
-        CollectionResult(
-            report=CollectionReport(verification_complete=True),
-        ),
-    )
-    from schema_helpers import restore_schema_seven
-
-    await restore_schema_seven()
-    async with _require_database_pool().connection() as connection:
-        for table in (
-            "search_sessions",
-            "repository_candidates",
-            "collection_jobs",
-            "classification_votes",
-        ):
-            await connection.execute(f"ALTER TABLE {table} DROP COLUMN errors")
-        await connection.execute(
-            "ALTER TABLE search_sessions DROP COLUMN local_result_count, "
-            "DROP COLUMN discovery_complete"
-        )
-        await connection.execute("ALTER TABLE collection_jobs DROP COLUMN outcome")
-        await connection.execute("DELETE FROM schema_migrations WHERE version = 7")
-    await database.init_database()
-    await database.init_database()
-    assert (await database.get_collection_job(job["id"]))["outcome"] == "incomplete"
-    progress = await read(candidate["search_session_id"])
-    assert progress.outcome == "incomplete"
-    assert progress.items[0].errors[0].code == "legacy_unknown"
-    assert (await database.get_repository_candidate(candidate["id"], "alice"))["error"] == (
-        "old private error"
-    )
-    saved = await query("SELECT * FROM classification_votes")
-    assert saved[0]["response"] == {"accepted": False}
-    assert saved[0]["attempts"] == 1
-    session = (await query("SELECT * FROM search_sessions"))[0]
-    assert session["discovery_complete"] is None and session["local_result_count"] is None
-
-
 async def test_vote_storage_failure_is_not_a_model_vote_failure(
-    database, transport, monkeypatch,  # noqa: F811
+    database, transport, monkeypatch,
 ):
     from app import vote_store
 
@@ -218,7 +166,9 @@ async def test_vote_storage_failure_is_not_a_model_vote_failure(
         return _response("repository", True)
 
     async def broken_save(*args, **kwargs):
-        raise RuntimeError("SQL private-secret")
+        # A fenced/superseded claim is a terminal persistence condition. Other
+        # SQL failures now retain the computed response until storage is repaired.
+        raise PersistenceFailure("SQL private-secret")
 
     transport(request)
     monkeypatch.setattr(vote_store, "finish_vote", broken_save)
@@ -229,3 +179,41 @@ async def test_vote_storage_failure_is_not_a_model_vote_failure(
     assert stored["errors"][0]["code"] == "persistence_failed"
     assert len(calls) == 3
     assert "private-secret" not in str(stored["errors"])
+
+
+async def test_repaired_vote_storage_keeps_model_responses_without_new_invocations(
+    database, transport, monkeypatch,
+):
+    from app import vote_store
+
+    await database.init_database()
+    candidate = await candidate_for(database)
+    claimed = await database.get_repository_candidate(candidate["id"], "alice")
+    claimed["owner_id"] = "alice"
+    calls, saves = Counter(), Counter()
+    actual_finish = vote_store.finish_vote
+
+    def request(req, timeout):
+        calls[json.loads(req.data)["model"]] += 1
+        return _response("repository", True)
+
+    async def repaired_save(run_id, voter_id, token, **kwargs):
+        saves[voter_id] += 1
+        if saves[voter_id] == 1:
+            raise RuntimeError("SQL private-secret")
+        return await actual_finish(run_id, voter_id, token, **kwargs)
+
+    transport(request)
+    monkeypatch.setattr(vote_store, "finish_vote", repaired_save)
+    monkeypatch.setattr(vote_store, "persist_with_retry",
+                        partial(vote_store.persist_with_retry, initial_delay=0))
+    with ThreadPoolExecutor(1) as executor:
+        await asyncio.wait_for(classification_worker._run_classification(claimed, executor), 3)
+    stored = await database.get_repository_candidate(candidate["id"], "alice")
+    assert stored["classification_status"] == "accepted" and stored["errors"] == []
+    assert calls == Counter({model: 1 for model in MODELS})
+    assert list(saves.values()) == [2, 2, 2]
+    saved = await query("SELECT status, attempts, response FROM classification_votes")
+    assert len(saved) == 3
+    assert all(vote["status"] == "succeeded" and vote["attempts"] == 1 and vote["response"]
+               for vote in saved)

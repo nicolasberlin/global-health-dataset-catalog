@@ -23,10 +23,15 @@ def normalize_doi(value: object) -> str:
 def metadata_evidence(
     dataset: PageSnapshot | CollectedDataset, *, kind: str, source_url: str,
 ) -> dict[str, object]:
-    return {
+    evidence = {
         field: [{"value": getattr(dataset, field), "kind": kind, "source_url": source_url}]
         for field in METADATA_FIELDS if getattr(dataset, field)
     }
+    if getattr(dataset, "dataset_metadata_ambiguous", False):
+        evidence["dataset_identity"] = [
+            {"kind": "ambiguous_json_ld", "source_url": source_url},
+        ]
+    return evidence
 
 
 def enrich_from_repository(
@@ -37,6 +42,10 @@ def enrich_from_repository(
     Call only after collection validation and after establishing that this
     candidate is the input of the individual-dataset collection job.
     """
+    if any(entry.get("kind") == "ambiguous_json_ld"
+           for entry in dataset.metadata_provenance.get("dataset_identity", [])
+           if isinstance(entry, dict)):
+        return dataset
     metadata = candidate.get("metadata") or {}
     values = {
         "date_of_publication": str(candidate.get("publication_date") or ""),

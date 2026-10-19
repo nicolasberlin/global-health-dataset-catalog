@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import uvicorn
+from app.auth.security import validate_api_security_configuration
 from app.routes.collector import router as collector_router
 from app.routes.sessions import router as sessions_router
-from app.security import validate_api_security_configuration
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -78,16 +78,14 @@ if __name__ == "__main__":
     # response schemas, and the built React application are not mocked.
     with ExitStack() as stack:
         for target, implementation in {
-            "app.security.consume_quota_limits": AsyncMock(),
-            "app.routes.collector.admit_search": admit,
-            "app.routes.collector.latest_search_id": latest,
-            "app.routes.collector.read_search_progress": progress,
-            "app.routes.collector.get_collected_datasets": AsyncMock(return_value=[dataset]),
-            "app.routes.collector.complete_search_session": AsyncMock(),
-            "app.routes.collector.search_collected_datasets": AsyncMock(return_value=[dataset]),
-            "app.routes.collector.list_collected_datasets": AsyncMock(return_value=[dataset]),
-            "app.routes.collector.latest_repository_analysis": AsyncMock(return_value=[]),
-            "app.routes.collector._search_online_repositories": AsyncMock(
+            "app.auth.security.consume_quota_limits": AsyncMock(),
+            "app.routes.searches.admit_search": admit,
+            "app.routes.searches.latest_search_id": latest,
+            "app.routes.searches.read_search_progress": progress,
+            "app.routes.catalog.get_collected_datasets": AsyncMock(return_value=[dataset]),
+            "app.routes.catalog.list_collected_datasets": AsyncMock(return_value=[dataset]),
+            "app.routes.candidates.latest_repository_analysis": AsyncMock(return_value=[]),
+            "app.workers.search.search_repository_metadata": AsyncMock(
                 side_effect=AssertionError("Browser tests must not call external providers"),
             ),
         }.items():

@@ -7,12 +7,14 @@ from functools import partial
 from unittest.mock import Mock
 
 import pytest
-from app import classification_worker, collection_worker, workers
 from app.db import classification_votes as votes
 from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.search_progress import read_search_progress
+from app.workers import classification as classification_worker
+from app.workers import collection as collection_worker
+from app.workers import runtime as workers
+from helpers.workflows import candidate_for, decision, rows
 from psycopg import OperationalError
-from test_collection_workflow import candidate_for, decision, rows
 
 from collector.storage.models import CollectedDataset, CollectionResult
 

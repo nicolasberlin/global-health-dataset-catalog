@@ -1,6 +1,6 @@
 # Isolated collection browser
 
-See [collection architecture and deployment](../docs/multimethod-collection.md).
+See [browser recovery and deployment](../docs/reference/collection.md#optional-browser).
 This service is optional and separate from the application's frontend/browser.
 
 For a local macOS development run, install dependencies and Chromium:

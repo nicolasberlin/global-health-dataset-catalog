@@ -7,7 +7,7 @@ name = "global-health-dataset-catalog"
 version = "0.1.0"
 description = "Catalog API for official global health dataset pages."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "itsdangerous>=2.2,<3",

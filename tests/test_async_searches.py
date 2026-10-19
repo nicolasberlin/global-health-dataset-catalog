@@ -9,24 +9,26 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from app import classification_worker, collection_worker, search_worker
 from app.db import search_jobs
 from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.commands import CommandConflict
 from app.db.connection import _require_database_pool
 from app.quota_policy import QuotaExceeded
 from app.search_service import DiscoveryResult
-from app.workers import persist_with_retry
+from app.workers import classification as classification_worker
+from app.workers import collection as collection_worker
+from app.workers import search as search_worker
+from app.workers.runtime import persist_with_retry
+from helpers.workflows import candidate, headers, read, rows, wait_until
+from helpers.workflows import classification_decision as decision
 from httpx import ASGITransport, AsyncClient
-from schema_helpers import restore_schema_seven
-from test_classification_workflow import api, candidate, decision, headers  # noqa: F401
-from test_collection_workflow import rows, wait_until
-from test_search_progress import read
 
 from collector.repository_search import (
+    DataCiteRepositorySearchProvider,
     RepositorySearchResponse,
     RepositorySearchResult,
     RepositorySearchWarning,
+    search_repository_metadata,
 )
 from collector.storage.models import CollectedDataset, CollectionReport, CollectionResult
 
@@ -56,9 +58,38 @@ async def run(job):
         await search_worker._run_search(job, executor)
 
 
+async def test_restore_external_analysis_skips_newer_local_search_and_preserves_owner(
+    database, api,
+):
+    await database.init_database()
+    external = await candidate(database, query="tuberculosis")
+    await database.complete_search_session(
+        external["search_session_id"], "alice", origin="online",
+    )
+    local = await database.create_search_session("tuberculosis", "alice")
+    await database.complete_search_session(local["id"], "alice", origin="database")
+    bob = await database.create_search_session("tuberculosis", "bob")
+    await database.complete_search_session(bob["id"], "bob", origin="database")
+    async with browser(api) as client:
+        latest = await client.get("/collector/searches/latest", headers=headers())
+        assert latest.json()["search_id"] == str(local["id"])
+        restored = await client.get(
+            "/collector/searches/latest?with_candidates=true", headers=headers(),
+        )
+        assert restored.status_code == 200
+        assert restored.json()["search_id"] == str(external["search_session_id"])
+        assert restored.json()["origin"] == "online"
+        assert [item["candidate_id"] for item in restored.json()["items"]] == [str(external["id"])]
+        assert (await client.get(
+            "/collector/searches/latest?with_candidates=true", headers=headers("bob"),
+        )).status_code == 404
+    assert len(await rows("SELECT * FROM search_sessions")) == 3
+    assert not await rows("SELECT * FROM collection_jobs")
+
+
 async def test_http_admission_is_idempotent_atomic_owned_and_does_no_provider_work(
     database,
-    api,  # noqa: F811
+    api,
     monkeypatch,
 ):
     await database.init_database()
@@ -119,7 +150,7 @@ async def test_http_admission_is_idempotent_atomic_owned_and_does_no_provider_wo
 
 async def test_single_post_then_disconnected_client_completes_all_stages(
     database,
-    api,  # noqa: F811
+    api,
     monkeypatch,
 ):
     await database.init_database()
@@ -251,6 +282,46 @@ async def test_empty_vs_unavailable_discovery_and_durable_warning(database, monk
     else:
         with pytest.raises(CommandConflict):
             await admit("retry", retry_search_id=session["id"])
+
+
+async def test_partial_datacite_warning_and_usable_candidates_survive_restart(
+    database, monkeypatch,
+):
+    await database.init_database()
+    unsafe_html = "<div>" * 129 + "unsafe" + "</div>" * 129
+    provider = DataCiteRepositorySearchProvider(
+        fetch_json=lambda _: {
+            "data": [
+                {"id": "10.1234/unsafe", "attributes": {"titles": [{"title": unsafe_html}]}},
+                {"id": "10.1234/valid", "attributes": {"titles": [{"title": "Valid dataset"}]}},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        search_worker,
+        "search_repository_metadata",
+        lambda query: search_repository_metadata(query, providers=[provider]),
+    )
+    session, _ = await admit(query="health")
+    await run(await search_jobs.claim_search())
+    valid = await database.claim_candidate_classification()
+    await database.complete_candidate_classification(valid["id"], "alice", decision(False))
+    await database.close_database_pool()
+    await database.open_database_pool()
+    await database.init_database()
+
+    result = await read(session["id"])
+    assert result.outcome == "incomplete"
+    assert len(result.warnings) == 1
+    assert result.warnings[0].code == "invalid_repository_metadata"
+    assert result.warnings[0].provider == "DataCite"
+    assert result.warnings[0].incomplete
+    candidates = await rows(
+        "SELECT candidate.title, session.query AS search_query "
+        "FROM repository_candidates AS candidate "
+        "JOIN search_sessions AS session ON session.id = candidate.search_session_id"
+    )
+    assert candidates == [{"title": "Valid dataset", "search_query": "health"}]
 
 
 async def test_restart_preserves_queue_fences_old_attempt_and_late_command_replay(database):
@@ -395,11 +466,12 @@ async def test_legacy_keyed_classification_and_collection_replays_never_retry_ag
         await admit("collect-retry", query="different command")
 
 
-async def test_schema_seven_migrates_without_scheduling_historical_work(database):
+async def test_reinitialization_does_not_reschedule_completed_inline_search(database):
     await database.init_database()
     item = await candidate(database)
     await database.complete_search_session(item["search_session_id"], "alice", origin="online")
-    await restore_schema_seven()
+    await database.close_database_pool()
+    await database.open_database_pool()
     await database.init_database()
     await database.init_database()
     assert await search_jobs.claim_search() is None
@@ -432,7 +504,7 @@ async def test_startup_consumes_queued_discovery_without_http(database, monkeypa
         await database.open_database_pool()
 
 
-async def test_http_retry_replay_and_operation_conflict(database, api):  # noqa: F811
+async def test_http_retry_replay_and_operation_conflict(database, api):
     await database.init_database()
     session, _ = await admit(query="health")
     job = await search_jobs.claim_search()

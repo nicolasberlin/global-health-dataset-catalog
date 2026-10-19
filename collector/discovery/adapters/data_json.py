@@ -26,6 +26,7 @@ from collector.discovery.adapters.shared import (
     _text,
     _text_values,
     _value_text,
+    document_url,
     fetch_json_url,
 )
 from collector.extraction.distributions import guess_format
@@ -55,8 +56,9 @@ class DataJsonAdapter:
         return bool(_data_json_datasets(data))
 
     def discover(self, source_url: str) -> list[DiscoveredPage]:
-        data_json_url = _data_json_url(source_url)
-        data = self._fetch_json(data_json_url)
+        requested_url = _data_json_url(source_url)
+        data = self._fetch_json(requested_url)
+        data_json_url = document_url(data, requested_url)
         query = _source_query(source_url)
         discovered_pages: list[DiscoveredPage] = []
 
@@ -64,11 +66,11 @@ class DataJsonAdapter:
             if query and not _data_json_dataset_matches_query(dataset, query):
                 continue
 
-            dataset_url = _data_json_dataset_url(source_url, data_json_url, dataset)
+            dataset_url = _data_json_dataset_url(data_json_url, dataset)
             if not dataset_url:
                 continue
 
-            distributions = tuple(_data_json_distribution_candidates(source_url, dataset))
+            distributions = tuple(_data_json_distribution_candidates(data_json_url, dataset))
             discovered_pages.append(
                 DiscoveredPage(
                     url=dataset_url,
@@ -94,6 +96,7 @@ class DataJsonAdapter:
                         distributions,
                     ),
                     distributions=distributions,
+                    metadata_source_url=data_json_url,
                     discovery_metadata={
                         "data_json_url": data_json_url,
                         "identifier": _first_text(dataset, "identifier", "@id"),
@@ -133,14 +136,13 @@ def _data_json_datasets(data: dict[str, object]) -> list[dict[object, object]]:
 
 
 def _data_json_dataset_url(
-    source_url: str,
     data_json_url: str,
     dataset: dict[object, object],
 ) -> str:
     for key in ("landingPage", "dcat:landingPage", "accessURL", "dcat:accessURL", "@id"):
         value = _first_url(dataset.get(key))
         if value:
-            return canonicalize_url(value, _site_root(source_url))
+            return canonicalize_url(value, data_json_url)
 
     identifier = _first_text(dataset, "identifier")
     if identifier:
@@ -150,7 +152,7 @@ def _data_json_dataset_url(
 
 
 def _data_json_distribution_candidates(
-    source_url: str,
+    data_json_url: str,
     dataset: dict[object, object],
 ) -> list[DistributionCandidate]:
     distributions = dataset.get("distribution") or dataset.get("dcat:distribution")
@@ -178,6 +180,7 @@ def _data_json_distribution_candidates(
         resource_url = download_url or access_url
         if not resource_url:
             continue
+        resource_url = canonicalize_url(resource_url, data_json_url)
 
         title = _first_text(distribution, "title", "dct:title", "name")
         description = _first_text(distribution, "description", "dct:description")
@@ -198,14 +201,14 @@ def _data_json_distribution_candidates(
 
         candidates.append(
             DistributionCandidate(
-                url=canonicalize_url(resource_url, source_url),
+                url=resource_url,
                 format=format_name,
                 probability=0.95 if download_url else 0.75,
                 anchor=anchor,
                 extension=extension,
                 mime_type=effective_mime_type,
                 same_domain=urlsplit(resource_url).netloc.lower()
-                == urlsplit(source_url).netloc.lower(),
+                == urlsplit(data_json_url).netloc.lower(),
                 signals={
                     "data_json_distribution": True,
                     "download_url": bool(download_url),

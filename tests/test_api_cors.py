@@ -1,7 +1,7 @@
 """Explicit origin configuration for independently hosted browser clients."""
 
 import pytest
-from app.security import api_cors_origins
+from app.auth.security import api_cors_origins
 
 
 def test_cors_origins_support_separate_frontends_and_server_only(monkeypatch):

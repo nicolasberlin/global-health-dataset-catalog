@@ -1,0 +1,22 @@
+{
+  "name": "ghdc-local-search-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.7.0",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  },
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0"
+  }
+}

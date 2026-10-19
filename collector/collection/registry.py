@@ -7,6 +7,10 @@ from dataclasses import dataclass
 
 from collector.collection.connectors import RecordConnector
 from collector.collection.connectors.dataverse import DataverseConnector
+from collector.collection.connectors.dryad import DryadConnector
+from collector.collection.connectors.dspace import DSpaceConnector
+from collector.collection.connectors.figshare import FigshareConnector
+from collector.collection.connectors.inveniordm import InvenioRDMConnector
 from collector.collection.connectors.zenodo import ZenodoConnector
 from collector.config import CollectorConfig
 
@@ -35,5 +39,9 @@ def default_registry(config: CollectorConfig) -> ConnectorRegistry:
     return ConnectorRegistry((
         DataverseConnector(config.dataverse_hosts),
         ZenodoConnector(config.zenodo_hosts),
+        FigshareConnector(config.figshare_hosts),
+        DryadConnector(),
+        InvenioRDMConnector(config.inveniordm_hosts),
+        DSpaceConnector(config.dspace_api_bases),
     ))
 

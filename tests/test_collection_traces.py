@@ -8,51 +8,14 @@ from app.db.classification_votes import (
     read_collection_vote_history,
 )
 from app.db.collection_jobs import retry_collection_job_for_owner
-from app.db.collection_traces import read_collection_trace, write_collection_trace
+from app.db.collection_traces import read_collection_trace, safe_url, write_collection_trace
 from app.db.connection import _fetchall, _require_database_pool
+from helpers.workflows import claimed, headers, observation
 from httpx import ASGITransport, AsyncClient
-from schema_helpers import restore_schema_eleven
-from test_classification_workflow import api, headers  # noqa: F401
-from test_collection_workflow import candidate_for, decision
 
 from collector.storage.models import CollectionReport, CollectionResult
 
 pytestmark = pytest.mark.anyio
-
-
-async def claimed(database):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    accepted = await database.complete_candidate_classification(
-        candidate["id"], "alice", decision()
-    )
-    job = await database.claim_pending_collection_job()
-    assert job["id"] == accepted.collection.job["id"]
-    return job, datetime.fromisoformat(job["updated_at"])
-
-
-def observation(status="succeeded"):
-    return {
-        "method": "browser",
-        "status": status,
-        "http_status": 200,
-        "requested_url": "https://example.org/data?token=secret",
-        "final_url": "https://example.org/data?fileId=1&token=secret",
-        "html": "DO NOT STORE",
-        "cookies": {"auth": "DO NOT STORE"},
-        "code": "repository_metadata_invalid",
-        "failure_phase": "normalize",
-        "reason": "DO NOT STORE",
-        "checks": [
-            {
-                "resource_key": "file:1",
-                "url": "https://example.org/file?token=secret",
-                "format": "CSV",
-                "status": "available",
-                "http_status": 206,
-            }
-        ],
-    }
 
 
 async def test_trace_upsert_does_not_change_claim_and_guards_stale_attempts(database):
@@ -85,7 +48,7 @@ async def test_trace_upsert_does_not_change_claim_and_guards_stale_attempts(data
     assert replay["status"] == "running" and replay["updated_at"] == new_job["updated_at"]
 
 
-async def test_final_coverage_and_protected_diagnostic_export(database, api):  # noqa: F811
+async def test_final_coverage_and_protected_diagnostic_export(database, api):
     job, version = await claimed(database)
     scope = {"job_id": job["id"], "expected_updated_at": version}
     run = await prepare_vote_run(
@@ -93,8 +56,9 @@ async def test_final_coverage_and_protected_diagnostic_export(database, api):  #
         **scope,
     )
     vote = await claim_vote(run, "apertus", **scope)
-    await finish_vote(run, "apertus", vote["attempt_token"], error="Invalid dataset_signals.",
-                      **scope)
+    await finish_vote(
+        run, "apertus", vote["attempt_token"], error="Invalid dataset_signals.", **scope
+    )
     # Simulate a subsequent authorized cycle; retain the failed attempt.
     async with _require_database_pool().connection() as connection:
         await connection.execute(
@@ -102,8 +66,7 @@ async def test_final_coverage_and_protected_diagnostic_export(database, api):  #
             (job["id"],),
         )
     vote = await claim_vote(run, "apertus", **scope)
-    await finish_vote(run, "apertus", vote["attempt_token"], response={"accepted": True},
-                      **scope)
+    await finish_vote(run, "apertus", vote["attempt_token"], response={"accepted": True}, **scope)
     await write_collection_trace(job["id"], version, 0, observation())
     coverage = {"checked": 1, "validated": 0, "limited": False}
     result = CollectionResult(
@@ -119,7 +82,8 @@ async def test_final_coverage_and_protected_diagnostic_export(database, api):  #
         assert response.json()["coverage"] == coverage
         history = response.json()["classification_history"]["attempts"]
         assert [a["status"] for a in history] == ["error", "succeeded"]
-        assert history[0]["error"] == "Invalid dataset_signals."
+        assert "error" not in history[0]
+        assert history[0]["errors"][0]["code"] == "processing_failed"
         assert history[0]["model"] == "Apertus Meditron"
         async with _require_database_pool().connection() as connection:
             rows = await _fetchall(
@@ -135,18 +99,42 @@ async def test_final_coverage_and_protected_diagnostic_export(database, api):  #
         assert len(export.json()["repository_classifications"]) == 1
 
 
-async def test_migration_from_eleven_preserves_existing_job(database):
+async def test_reinitialization_preserves_completed_job(database):
     job, version = await claimed(database)
     await database.complete_collection_job(
         job["id"],
         CollectionResult([], report=CollectionReport(verification_complete=True)),
         expected_updated_at=version,
     )
-    await restore_schema_eleven()
+    await database.close_database_pool()
+    await database.open_database_pool()
     await database.init_database()
     stored = await database.get_collection_job(job["id"])
     assert stored["status"] == "done" and stored["outcome"] == "empty"
     assert (await read_collection_trace(job["id"], "alice"))["method_attempts"] == []
+
+
+async def test_ipv6_diagnostic_urls_survive_storage_and_repeated_sanitization(database):
+    job, version = await claimed(database)
+    raw_url = "https://user:secret@[2001:db8::1]:8443/data?token=secret&id=123#private"
+    expected = "https://[2001:db8::1]:8443/data?id=123"
+    value = observation()
+    value.update(requested_url=raw_url, final_url=raw_url)
+    value["checks"] = [{"url": raw_url, "resource_key": raw_url, "status": "available"}]
+
+    assert await write_collection_trace(job["id"], version, 0, value)
+    trace = await read_collection_trace(job["id"], "alice")
+    method = trace["method_attempts"][0]
+    assert method["requested_url"] == method["final_url"] == expected
+    assert method["checks"][0]["url"] == method["checks"][0]["resource_key"] == expected
+    assert "secret" not in str(trace) and "private" not in str(trace)
+
+    assert await write_collection_trace(job["id"], version, 0, method)
+    reread = (await read_collection_trace(job["id"], "alice"))["method_attempts"][0]
+    assert reread["requested_url"] == reread["final_url"] == expected
+    assert reread["checks"] == method["checks"]
+    assert safe_url("https://[invalid-address]/data") == ""
+    assert safe_url("https://[2001:db8::1]:invalid/data") == ""
 
 
 async def test_retry_lineage_history_requires_ownership_of_requested_job(database):
@@ -176,6 +164,7 @@ async def test_retry_lineage_history_requires_ownership_of_requested_job(databas
         )
     history = await read_collection_vote_history(child["id"], "alice")
     assert [a["status"] for a in history["attempts"]] == ["interrupted", "succeeded"]
-    assert history["attempts"][0]["error"] == "Vote replaced by a new retry cycle."
+    assert "error" not in history["attempts"][0]
+    assert history["attempts"][0]["errors"][0]["code"] == "processing_interrupted"
     assert first["attempts"] == 1
     assert await read_collection_vote_history(child["id"], "bob") is None

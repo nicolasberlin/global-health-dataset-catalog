@@ -7,10 +7,11 @@ import subprocess
 import threading
 from email.message import Message
 from urllib.error import URLError
-from urllib.request import Request
+from urllib.request import ProxyHandler, Request, build_opener
 
 import pytest
 
+from collector.budget import request_budget
 from collector.fetch import (
     PageFetchError,
     _connect_public,
@@ -18,6 +19,7 @@ from collector.fetch import (
     fetch_public_html,
     open_public_http_url,
 )
+from collector.transport import DeadlineHTTPSHandler
 from collector.validation.downloads import probe_url
 
 
@@ -119,7 +121,7 @@ def test_dns_rebinding_cannot_change_the_connected_address(monkeypatch, address)
 
     assert lookups == [("rebind.example", 8080)]
     assert connection.destination == _address(address, 8080)[4]
-    assert connection.timeout == 2
+    assert 0 < connection.timeout <= 2
     assert b"Host: rebind.example:8080\r\n" in connection.sent
 
 
@@ -312,8 +314,9 @@ def tls_certificate(tmp_path_factory):
         ("public.example", False),
     ],
 )
+@pytest.mark.parametrize("transport", ["public", "trusted"])
 def test_real_tls_preserves_sni_and_verifies_certificate(
-    monkeypatch, tls_certificate, hostname, trusted
+    monkeypatch, tls_certificate, hostname, trusted, transport,
 ):
     certificate, key = tls_certificate
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -344,17 +347,35 @@ def test_real_tls_preserves_sni_and_verifies_certificate(
 
     monkeypatch.setattr("collector.fetch.ssl.create_default_context", create_context)
     monkeypatch.setattr("collector.fetch._connect_public", lambda *a: client_socket)
+
+    class LocalPairSocket:
+        def __getattr__(self, name):
+            return getattr(client_socket, name)
+
+        def setsockopt(self, *args):
+            pass  # The local Unix socket pair has no TCP_NODELAY option.
+
+    monkeypatch.setattr("collector.transport._connect_with_deadline", lambda *a: LocalPairSocket())
+
+    def open_request(url):
+        if transport == "public":
+            return open_public_http_url(Request(url), timeout=3)
+        return build_opener(
+            ProxyHandler({}), DeadlineHTTPSHandler(context=create_context()),
+        ).open(Request(url), timeout=3)
+
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     try:
-        if trusted and hostname == "public.example":
-            with open_public_http_url(Request(f"https://{hostname}/data"), timeout=3) as response:
-                assert response.read() == b"ok"
-            assert b"Host: public.example\r\n" in requests[0]
-        else:
-            with pytest.raises(URLError) as caught:
-                open_public_http_url(Request(f"https://{hostname}/data"), timeout=3)
-            assert isinstance(caught.value.reason, ssl.SSLCertVerificationError)
+        with request_budget(seconds=3):
+            if trusted and hostname == "public.example":
+                with open_request(f"https://{hostname}/data") as response:
+                    assert response.read() == b"ok"
+                assert b"Host: public.example\r\n" in requests[0]
+            else:
+                with pytest.raises(URLError) as caught:
+                    open_request(f"https://{hostname}/data")
+                assert isinstance(caught.value.reason, ssl.SSLCertVerificationError)
     finally:
         client_socket.close()
         thread.join(timeout=4)

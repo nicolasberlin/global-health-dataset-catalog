@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -13,12 +13,24 @@ from urllib.request import Request
 
 from collector.budget import check_collection_budget, read_with_budget
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import open_public_http_url
+from collector.fetch import decode_json_body, open_public_http_url
 from collector.storage.models import DistributionCandidate
 
 JsonFetcher = Callable[[str], dict[str, object]]
 
 EXCLUDED_RESOURCE_FORMATS = {"HTML", "HTM", "PDF", "PNG", "JPG", "JPEG", "GIF", "SVG"}
+
+
+class JsonDocument(dict[str, object]):
+    """JSON object with its effective document URL for relative links and evidence."""
+
+    def __init__(self, payload: dict[str, object], final_url: str) -> None:
+        super().__init__(payload)
+        self.final_url = final_url
+
+
+def document_url(payload: dict[str, object], requested_url: str) -> str:
+    return payload.final_url if isinstance(payload, JsonDocument) else requested_url
 
 # These vocabularies enrich metadata only; they do not accept or reject a page.
 DISEASE_TERMS = (
@@ -142,9 +154,11 @@ def fetch_json_url(
     try:
         with open_public_http_url(request, timeout=timeout) as response:
             body = read_with_budget(response, max_bytes + 1)
+            final_url = response.geturl() if hasattr(response, "geturl") else url
     except HTTPError as exception:
-        check_collection_budget()
-        raise ValueError(f"JSON URL returned HTTP {exception.code}.") from exception
+        with exception if exception.fp is not None else nullcontext():
+            check_collection_budget()
+            raise ValueError(f"JSON URL returned HTTP {exception.code}.") from exception
     except (TimeoutError, URLError, OSError) as exception:
         check_collection_budget()
         raise ValueError(f"Could not fetch JSON URL: {exception}") from exception
@@ -152,15 +166,11 @@ def fetch_json_url(
     if len(body) > max_bytes:
         raise ValueError("JSON response is too large for discovery.")
 
-    try:
-        data = json.loads(body.decode("utf-8"))
-    except json.JSONDecodeError as exception:
-        raise ValueError("JSON URL did not return valid JSON.") from exception
-
+    data = decode_json_body(body)
     if not isinstance(data, dict) and not (allow_list and isinstance(data, list)):
         raise ValueError("JSON URL did not return an object.")
 
-    return data
+    return JsonDocument(data, final_url) if isinstance(data, dict) else data
 
 
 def _geography_from_mapping(mapping: dict[object, object]) -> list[str]:
@@ -411,17 +421,33 @@ def _dedupe(values: list[str]) -> list[str]:
 
 
 def _first_url(*values: object) -> str:
-    for value in values:
-        text = _first_text_value(value)
-        if text:
-            return text
+    pending = list(reversed(values))
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            pending.extend(
+                value.get(key) for key in ("title", "name", "value", "@value", "@id")
+            )
+        if isinstance(value, list):
+            pending.extend(reversed(value))
 
     return ""
 
 
 def _json_ld_type_matches(value: object, expected_type: str) -> bool:
+    supported = {
+        expected_type,
+        f"dcat:{expected_type}",
+        f"schema:{expected_type}",
+        f"http://www.w3.org/ns/dcat#{expected_type}",
+        f"https://www.w3.org/ns/dcat#{expected_type}",
+        f"http://schema.org/{expected_type}",
+        f"https://schema.org/{expected_type}",
+    }
     return any(
-        item.rsplit(":", 1)[-1].lower() == expected_type.lower()
+        item in supported
         for item in _text_values(value)
     )
 

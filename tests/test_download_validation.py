@@ -507,6 +507,35 @@ def test_malformed_html_remains_unconfirmed(code):
         ),
     )
     assert result.status == "unconfirmed"
+    assert result.ok is False
+    # HTMLParser accepts some malformed declarations on newer Python versions.
+    interpreted_reason = (
+        "HTTP 403 refused the check without explicit authentication or permission requirements."
+        if code == 403 else "HTML was returned instead of data."
+    )
+    assert result.reason in {
+        "The HTML response could not be interpreted to confirm data access.",
+        interpreted_reason,
+    }
+
+
+@pytest.mark.parametrize("code", [200, 403])
+@pytest.mark.parametrize("error_type", [AssertionError, NotImplementedError])
+def test_html_parser_failure_remains_unconfirmed(monkeypatch, code, error_type):
+    from collector.validation.downloads import _AccessPage
+
+    def fail_parse(self, data):
+        raise error_type("Malformed markup")
+
+    monkeypatch.setattr(_AccessPage, "feed", fail_parse)
+    result = validate_distribution(
+        DistributionCandidate(URL, "API", .9),
+        probe=lambda url, **kw: HTTPProbe(
+            url, url, code, {"content-type": "text/html"}, b"<html>invalid</html>",
+        ),
+    )
+    assert result.status == "unconfirmed"
+    assert result.ok is False
     assert result.reason == "The HTML response could not be interpreted to confirm data access."
 
 

@@ -14,10 +14,12 @@ from collector.collection.failures import CollectionMetadataError, CollectionSte
 from collector.collection.http import JsonResponse, fetch_record_json
 from collector.collection.pipeline import classify_resolution, eligible_resources
 from collector.collection.registry import ConnectorRegistry, default_registry
+from collector.collection.resources import ResourceCheckState, retain_validated_resources
 from collector.config import CollectorConfig
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.discovery.adapters.shared import DiscoveredPage
-from collector.fetch import PageFetchError, fetch_public_html
+from collector.extraction.errors import ExtractionError
+from collector.fetch import PageFetchError, fetch_public_html, is_timeout_error
 from collector.storage.models import CollectionReport, CollectionResult
 from collector.validation.downloads import page_access_diagnostic, validate_distribution
 
@@ -46,7 +48,9 @@ def collect_record(
         None
         if custom_html
         else partial(
-            fetch_record_json, timeout=config.request_timeout_seconds, user_agent=config.user_agent,
+            fetch_record_json, timeout=config.record_request_timeout_seconds,
+            max_attempts=config.record_max_attempts,
+            max_retry_wait=config.record_retry_max_wait_seconds, user_agent=config.user_agent,
         )
     )
     validate = validate or partial(
@@ -57,8 +61,7 @@ def collect_record(
     )
     attempts, failed_checks, unresolved = [], [], []
     datasets = []
-    seen = set()
-    checks_count = 0
+    check_state = ResourceCheckState(failures=failed_checks)
     rejected = False
     analyzed = False
     known_record = None
@@ -81,7 +84,7 @@ def collect_record(
         methods.append("browser")
     with collection_budget(seconds=config.collection_max_duration_seconds):
         for method in methods:
-            if checks_count >= config.max_distribution_attempts:
+            if check_state.checked >= config.max_distribution_attempts:
                 coverage["limited"] = True
                 break
             attempt = MethodAttempt(method=method, started_at=now(), requested_url=public_url(url))
@@ -94,8 +97,45 @@ def collect_record(
                 check_collection_budget()
                 if method == api_method:
                     attempt.requested_url = public_url(api_url)
-                    response = fetch_json(api_url)
+                    fetch_metadata = getattr(selection.connector, "fetch_metadata", None)
+                    if fetch_metadata:
+                        evidence, request_count = {}, [0]
+
+                        def related_json(
+                            metadata_url, *, evidence=evidence, request_count=request_count,
+                        ):
+                            try:
+                                result = fetch_json(metadata_url)
+                            except CollectionStepError as exc:
+                                request_count[0] += getattr(exc, "request_attempts", None) or 1
+                                exc.request_attempts = request_count[0]
+                                raise
+                            if isinstance(result, JsonResponse):
+                                evidence.update(
+                                    http_status=result.http_status, final_url=result.final_url,
+                                )
+                                request_count[0] += result.request_attempts
+                            else:
+                                request_count[0] += 1
+                            return result
+
+                        try:
+                            response = fetch_metadata(url, related_json)
+                        except CollectionStepError as exc:
+                            exc.request_attempts = request_count[0] or None
+                            raise
+                        except ValueError as exc:
+                            if isinstance(exc.__cause__, HTTPError):
+                                raise  # Preserve legacy injected transport failures.
+                            error = CollectionMetadataError(
+                                "repository_metadata_invalid", "normalize", **evidence,
+                            )
+                            error.request_attempts = request_count[0] or None
+                            raise error from exc
+                    else:
+                        response = fetch_json(api_url)
                     if isinstance(response, JsonResponse):
+                        attempt.request_attempts = response.request_attempts
                         attempt.http_status = response.http_status
                         attempt.final_url = public_url(response.final_url)
                         payload = response.payload
@@ -133,7 +173,7 @@ def collect_record(
                 phase = "normalize"
                 if resolved.record is not None:
                     known_record = resolved.record
-                resources = eligible_resources(resolved)
+                resources = eligible_resources(resolved, expected_identity=reference_identity)
                 if selection is not None:
                     resources = selection.connector.scope_resources(url, resources, known_record)
                 analyzed = True
@@ -142,6 +182,12 @@ def collect_record(
                 coverage["discovery"] = resolved.discovery_coverage
                 coverage["discovered"] = max(int(coverage["discovered"]), len(resources))
                 if not resources:
+                    if (resolved.snapshot is not None
+                            and resolved.snapshot.dataset_metadata_ambiguous):
+                        raise ExtractionError(
+                            "Dataset identity remains ambiguous.",
+                            code="dataset_identity_ambiguous",
+                        )
                     barrier = page_access_diagnostic(resolved.html) if resolved.html else None
                     if barrier:
                         raise PageFetchError("Landing access barrier", code=barrier.code)
@@ -169,22 +215,10 @@ def collect_record(
                     rejected = True
                     unresolved.clear()
                     break  # A valid semantic rejection is not retried for a more favorable vote.
-                retained, validations = [], []
                 phase = "validate"
-                for resource in sorted(resources, key=lambda x: x.probability, reverse=True):
-                    if checks_count >= config.max_distribution_attempts:
-                        coverage["limited"] = True
-                        break
+
+                def record_check(resource, validation, *, attempt=attempt):
                     key = str(resource.signals.get("resource_key") or resource.url)
-                    # The same resource may need a session-bound probe after a failed HTTP probe.
-                    probe_key = (key, "browser" if method == "browser" else "http")
-                    if probe_key in seen:
-                        continue
-                    seen.add(probe_key)
-                    check_collection_budget()
-                    checks_count += 1
-                    validator = browser.validate if method == "browser" else validate
-                    validation = validator(resource)
                     attempt.checks.append(
                         {
                             "resource_key": public_url(key) if "://" in key else key,
@@ -195,20 +229,16 @@ def collect_record(
                             "code": "" if validation.ok else "verification_unconfirmed",
                         }
                     )
-                    coverage["checked"] = checks_count
-                    if validation.ok:
-                        retained.append(
-                            replace(
-                                resource, format=validation.format, mime_type=validation.mime_type
-                            )
-                        )
-                        validations.append(validation)
-                        coverage["validated"] = len(retained)
-                        if len(retained) >= config.max_distributions_saved:
-                            coverage["limited"] = len(resources) > len(retained)
-                            break
-                    else:
-                        failed_checks.append(validation)
+                    coverage["checked"] = check_state.checked
+
+                selected = retain_validated_resources(
+                    resources, config, browser.validate if method == "browser" else validate,
+                    state=check_state, context="browser" if method == "browser" else "http",
+                    on_check=record_check,
+                )
+                retained, validations = selected.resources, selected.validations
+                coverage["validated"] = len(retained)
+                coverage["limited"] = coverage["limited"] or selected.limited
                 if retained:
                     datasets.append(
                         replace(
@@ -220,6 +250,9 @@ def collect_record(
                     )
                     attempt.status = "succeeded"
                     unresolved.clear()
+                    if selected.budget_exhausted:
+                        attempt.code = "collection_budget_exhausted"
+                        unresolved.append(Diagnostic("collection_budget_exhausted", "collection"))
                     break
                 attempt.status, attempt.code = "inconclusive", "resource_checks_failed"
                 unresolved.append(Diagnostic("verification_unconfirmed", "validation"))
@@ -228,7 +261,12 @@ def collect_record(
                 attempt.failure_phase = phase
                 unresolved.extend(exc.diagnostics)
                 break
+            except ExtractionError as exc:
+                attempt.status, attempt.code = "failed", exc.code
+                attempt.failure_phase = "normalize"
+                unresolved.append(Diagnostic(exc.code, "collection"))
             except CollectionStepError as exc:
+                attempt.request_attempts = getattr(exc, "request_attempts", None)
                 attempt.status, attempt.code = "failed", exc.diagnostics[0].code
                 attempt.failure_phase = exc.phase
                 if exc.http_status is not None:
@@ -237,6 +275,13 @@ def collect_record(
                     attempt.final_url = public_url(exc.final_url)
                 attempt.service_http_status = exc.service_http_status
                 unresolved.extend(exc.diagnostics)
+                # A pending provider deadline also applies to HTML/browser requests
+                # to this repository; a fallback must not bypass Retry-After.
+                if any(
+                    item.retry_at and datetime.fromisoformat(item.retry_at)
+                    > datetime.now(timezone.utc) for item in exc.diagnostics
+                ):
+                    break
             except PageFetchError as exc:
                 code = exc.diagnostics[0].code
                 cause = exc.__cause__
@@ -244,10 +289,9 @@ def collect_record(
                     attempt.http_status = cause.code
                     code = "repository_http_error"
                 elif isinstance(cause, (URLError, OSError)):
-                    code = "repository_timeout" if (
-                        isinstance(cause, TimeoutError)
-                        or isinstance(getattr(cause, "reason", None), TimeoutError)
-                    ) else "repository_network_error"
+                    code = "repository_timeout" if is_timeout_error(cause) else (
+                        "repository_network_error"
+                    )
                 blocked = code in {"verification_unconfirmed", "access_restricted"}
                 attempt.status, attempt.code = "blocked" if blocked else "failed", code
                 attempt.failure_phase = "access" if blocked else phase

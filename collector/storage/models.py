@@ -59,6 +59,8 @@ class PageSnapshot:
     uploader: str = ""
     links: tuple[LinkCandidate, ...] = ()
     json_ld: tuple[object, ...] = ()
+    dataset_json_ld: tuple[object, ...] | None = None
+    dataset_metadata_ambiguous: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "search_query", self.search_query.strip())

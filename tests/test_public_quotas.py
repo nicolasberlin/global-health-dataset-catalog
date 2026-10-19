@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from app.auth.security import public_client_key, validate_api_security_configuration
+from app.auth.sessions import VisitorSessionSettings
 from app.db.api_quotas import consume_quota_limits
 from app.db.connection import _fetchall, _require_database_pool
+from app.db.search_jobs import claim_search
 from app.quota_policy import QuotaExceeded, classification_admission, public_daily_quota
 from app.routes.collector import router as collector_router
 from app.routes.sessions import router as sessions_router
-from app.security import public_client_key, validate_api_security_configuration
-from app.visitor_sessions import VisitorSessionSettings
+from app.workers import search as search_worker
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 
@@ -70,6 +73,14 @@ async def batch(database, owner, *, size=1):
     )
 
 
+async def execute_next_search():
+    job = await claim_search()
+    assert job is not None
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        await search_worker._run_search(job, executor)
+    return job
+
+
 async def test_session_creation_limit_survives_cookie_reset_and_forwarded_header_spoofing(
     public_api,
     monkeypatch,
@@ -95,13 +106,14 @@ async def test_ip_search_quota_cannot_be_reset_by_minting_a_new_cookie(public_ap
         provider_calls.append(query)
         return RepositorySearchResponse()
 
-    monkeypatch.setattr("app.routes.collector.search_repository_metadata", provider)
+    monkeypatch.setattr("app.workers.search.search_repository_metadata", provider)
     async with browser(public_api) as alice, browser(public_api) as bob:
         await bootstrap(alice)
         await bootstrap(bob)
         assert (
             await alice.post("/collector/search-datasets", json={"query": "malaria"})
-        ).status_code == 200
+        ).status_code == 202
+        await execute_next_search()
         denied = await bob.post("/collector/search-datasets", json={"query": "malaria"})
         assert denied.status_code == 429
         assert len(await rows("SELECT * FROM search_sessions")) == 1
@@ -124,16 +136,21 @@ async def test_daily_online_budget_blocks_providers_across_visitors_and_ips(
         provider_calls.append(query)
         return RepositorySearchResponse()
 
-    monkeypatch.setattr("app.routes.collector.search_repository_metadata", provider)
+    monkeypatch.setattr("app.workers.search.search_repository_metadata", provider)
     async with browser(public_api) as alice, browser(public_api, "198.51.100.2") as bob:
         await bootstrap(alice)
         await bootstrap(bob)
         assert (
             await alice.post("/collector/search-datasets", json={"query": "malaria"})
-        ).status_code == 200
-        denied = await bob.post("/collector/search-datasets", json={"query": "diabetes"})
-        assert denied.status_code == 429
-        assert 1 <= int(denied.headers["retry-after"]) <= 86400
+        ).status_code == 202
+        await execute_next_search()
+        queued = await bob.post("/collector/search-datasets", json={"query": "diabetes"})
+        assert queued.status_code == 202
+        await execute_next_search()
+        denied = await bob.get(queued.headers["location"])
+        assert denied.status_code == 200
+        error = next(e for e in denied.json()["errors"] if e["code"] == "api_quota_exceeded")
+        assert error["retry_at"]
         assert len(provider_calls) == 1
         failed = await rows("SELECT status FROM search_sessions WHERE query = 'diabetes'")
         assert failed == [{"status": "error"}]
@@ -142,7 +159,7 @@ async def test_daily_online_budget_blocks_providers_across_visitors_and_ips(
 async def test_public_candidate_cap_deduplicates_before_charging(public_api, monkeypatch):
     monkeypatch.setenv("API_PUBLIC_MAX_CANDIDATES_PER_SEARCH", "2")
     monkeypatch.setattr(
-        "app.routes.collector.search_repository_metadata",
+        "app.workers.search.search_repository_metadata",
         lambda query: RepositorySearchResponse(
             results=[result(0), result(0), result(1), result(2)]
         ),
@@ -150,9 +167,12 @@ async def test_public_candidate_cap_deduplicates_before_charging(public_api, mon
     async with browser(public_api) as client:
         await bootstrap(client)
         response = await client.post("/collector/search-datasets", json={"query": "malaria"})
-        assert response.status_code == 200
-        assert len(response.json()["items"]) == 2
-        assert response.json()["warnings"]
+        assert response.status_code == 202
+        await execute_next_search()
+        progress = await client.get(response.headers["location"])
+        assert progress.status_code == 200
+        assert len(progress.json()["items"]) == 2
+        assert progress.json()["warnings"]
         assert await rows("SELECT status FROM search_sessions") == [{"status": "partial"}]
         charged = await rows(
             "SELECT request_count FROM api_rate_limits WHERE operation = 'work_daily'"
@@ -283,7 +303,7 @@ async def test_quota_storage_failure_never_issues_a_session(monkeypatch):
     async def unavailable(quotas):
         raise QuotaUnavailable()
 
-    monkeypatch.setattr("app.security.consume_quota_limits", unavailable)
+    monkeypatch.setattr("app.auth.security.consume_quota_limits", unavailable)
     app = FastAPI()
     app.include_router(sessions_router)
     async with browser(app) as client:
@@ -309,23 +329,33 @@ async def test_local_results_remain_available_when_external_budget_is_exhausted(
         dataset_id = (await row.fetchone())["id"]
 
     async def local_result(query):
-        return [CollectedDataset(
-            database_id=dataset_id, dataset_url="https://example.org/data",
-            title="Malaria", description="", publisher="", hosting_platform="",
-            uploader="", dataset_signals={},
-        )]
+        return [
+            CollectedDataset(
+                database_id=dataset_id,
+                dataset_url="https://example.org/data",
+                title="Malaria",
+                description="",
+                publisher="",
+                hosting_platform="",
+                uploader="",
+                dataset_signals={},
+            )
+        ]
 
     def forbidden(query):
         pytest.fail("Local results must not require an external search")
 
-    monkeypatch.setattr("app.routes.collector.search_collected_datasets", local_result)
-    monkeypatch.setattr("app.routes.collector.search_repository_metadata", forbidden)
+    monkeypatch.setattr("app.workers.search.lookup_local", local_result)
+    monkeypatch.setattr("app.workers.search.search_repository_metadata", forbidden)
     async with browser(public_api) as client:
         await bootstrap(client)
         response = await client.post("/collector/search-datasets", json={"query": "malaria"})
-        assert response.status_code == 200
-        assert response.json()["origin"] == "database"
-        assert len(response.json()["items"]) == 1
+        assert response.status_code == 202
+        await execute_next_search()
+        progress = await client.get(response.headers["location"])
+        assert progress.status_code == 200
+        assert progress.json()["origin"] == "database"
+        assert progress.json()["dataset_ids"] == [dataset_id]
 
 
 async def test_older_request_timestamp_never_moves_the_quota_window_backward(database):
@@ -368,7 +398,7 @@ async def test_shared_ip_sessions_candidate_admission_and_polling(
     from contextlib import AsyncExitStack
 
     monkeypatch.setattr(
-        "app.routes.collector.search_repository_metadata",
+        "app.workers.search.search_repository_metadata",
         lambda query: RepositorySearchResponse(results=[result(i) for i in range(10)]),
     )
     async with AsyncExitStack() as stack:
@@ -379,22 +409,30 @@ async def test_shared_ip_sessions_candidate_admission_and_polling(
         started = await rows("SELECT date_trunc('minute', now()) AS bucket")
         searches = []
         for client in clients:
-            searches.append(await client.post(
-                "/collector/search-datasets", json={"query": "malaria"}
-            ))
+            searches.append(
+                await client.post("/collector/search-datasets", json={"query": "malaria"})
+            )
+        assert all(response.status_code == 202 for response in searches)
+        for _ in searches:
+            await execute_next_search()
         if started != await rows("SELECT date_trunc('minute', now()) AS bucket"):
             pytest.skip("Search batch crossed the fixed quota minute boundary")
-        assert sum(r.status_code == 200 for r in searches) == min(visitors, 6)
-        assert all(r.status_code in (200, 429) for r in searches)
-        for response in searches:
-            if response.status_code == 429:
-                assert response.headers["retry-after"]
-                assert response.json()["detail"]
+        states = await rows("SELECT status FROM search_sessions")
+        assert sum(row["status"] == "completed" for row in states) == min(visitors, 6)
+        assert all(row["status"] in ("completed", "error") for row in states)
+        for client, response in zip(clients, searches):
+            progress = await client.get(response.headers["location"])
+            assert progress.status_code == 200
+            if progress.json()["execution_status"] == "failed":
+                assert any(e["code"] == "api_quota_exceeded" for e in progress.json()["errors"])
         before = await rows("SELECT * FROM api_rate_limits ORDER BY owner_id, operation")
         # Polling remains usable even for sessions refused costly work.
-        responses = await asyncio.gather(*[
-            client.get("/collector/repository-analyses/latest") for client in clients
-            for _ in range(14)
-        ])
+        responses = await asyncio.gather(
+            *[
+                client.get("/collector/repository-analyses/latest")
+                for client in clients
+                for _ in range(14)
+            ]
+        )
         assert all(r.status_code in (200, 404) for r in responses)
         assert await rows("SELECT * FROM api_rate_limits ORDER BY owner_id, operation") == before

@@ -11,10 +11,18 @@ from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from collector.budget import check_collection_budget, read_with_budget, remaining_timeout
+from collector.budget import (
+    check_collection_budget,
+    read_with_budget,
+    remaining_timeout,
+    request_budget,
+)
 from collector.classification.page import PageClassificationError
 from collector.diagnostics import retry_after
+from collector.execution import check_execution_active
+from collector.fetch import decode_json_body, is_timeout_error
 from collector.observability import measure_operation
+from collector.transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 RequestBodyBuilder = Callable[[dict[str, object], str], dict[str, object]]
 ResponseTextExtractor = Callable[[object], str]
@@ -89,7 +97,9 @@ class HTTPJSONLLMClient:
         self._api_key = api_key
         self._model = model
         self._timeout_seconds = timeout_seconds
-        self._request = request if request is not None else build_opener(_RejectLLMRedirects()).open
+        self._request = request if request is not None else build_opener(
+            DeadlineHTTPHandler(), DeadlineHTTPSHandler(), _RejectLLMRedirects(),
+        ).open
 
     def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
         return self.classify_request(self.prepare_request(payload))
@@ -113,6 +123,7 @@ class HTTPJSONLLMClient:
             return self._classify_request(request_body, measurement)
 
     def _classify_request(self, request_body, measurement):
+        check_execution_active()
         check_collection_budget()
         api_key = self._api_key or os.getenv(self._provider.api_key_env_var, "")
         if not api_key:
@@ -137,7 +148,7 @@ class HTTPJSONLLMClient:
 
         measurement["outcome"] = "failed"
         try:
-            with self._request(
+            with request_budget(seconds=self._timeout_seconds), self._request(
                 request, timeout=remaining_timeout(self._timeout_seconds),
             ) as response:
                 payload_bytes = read_with_budget(response, MAX_LLM_RESPONSE_BYTES + 1)
@@ -148,7 +159,7 @@ class HTTPJSONLLMClient:
                         code="llm_response_too_large",
                         recovery="none",
                     )
-                response_payload = json.loads(payload_bytes.decode("utf-8"))
+                response_payload = decode_json_body(payload_bytes)
         except HTTPError as exception:
             with exception if exception.fp is not None else nullcontext():
                 check_collection_budget()
@@ -177,15 +188,14 @@ class HTTPJSONLLMClient:
             check_collection_budget()
             measurement["outcome"] = (
                 "timeout"
-                if isinstance(exception, TimeoutError)
-                or isinstance(getattr(exception, "reason", None), TimeoutError)
+                if is_timeout_error(exception)
                 else "network_error"
             )
             raise PageClassificationError(
                 f"{self._provider.name} classification request failed.",
                 code="llm_timeout" if measurement["outcome"] == "timeout" else "llm_network_error",
             ) from exception
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exception:
+        except ValueError as exception:
             raise PageClassificationError(
                 f"{self._provider.name} classification response was not valid JSON.",
                 code="llm_invalid_response",

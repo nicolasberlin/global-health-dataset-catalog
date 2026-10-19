@@ -31,9 +31,7 @@ async def schedule_llm_retry(item_id, version, diagnostics, *, collection=False)
                 now=row["retry_now"],
             )
             deadline = row.get("collection_deadline_at") if collection else None
-            if deadline is not None and (
-                row["retry_now"] >= deadline or (due is not None and due >= deadline)
-            ):
+            if deadline is not None and row["retry_now"] >= deadline:
                 diagnostics = [
                     replace(item, recovery="manual") if item.recovery == "automatic" else item
                     for item in diagnostics
@@ -43,7 +41,11 @@ async def schedule_llm_retry(item_id, version, diagnostics, *, collection=False)
                 return False, diagnostics
             if due is None:
                 return False, diagnostics
-            extra = ", outcome = NULL, finished_at = NULL" if collection else ""
+            # Only a new retry round earns a budget when it is next claimed.
+            extra = (
+                ", outcome = NULL, finished_at = NULL, collection_deadline_at = NULL"
+                if collection else ""
+            )
             await connection.execute(
                 f"""
                 UPDATE {table} SET {column} = %s, next_retry_at = %s,

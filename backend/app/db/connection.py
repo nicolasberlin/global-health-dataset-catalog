@@ -53,17 +53,49 @@ def _database_url_from_env() -> str:
     return database_url
 
 
+def configured_database_timeouts() -> tuple[int, int]:
+    """Bound ordinary SQL; migrations and maintenance set local overrides."""
+    values = []
+    for name, default, minimum, maximum in (
+        ("DATABASE_STATEMENT_TIMEOUT_MS", "30000", 1000, 300000),
+        ("DATABASE_LOCK_TIMEOUT_MS", "5000", 100, 30000),
+    ):
+        try:
+            value = int(os.environ.get(name, default))
+        except ValueError as exception:
+            raise ValueError(
+                f"{name} must be an integer between {minimum} and {maximum}."
+            ) from exception
+        if not minimum <= value <= maximum:
+            raise ValueError(f"{name} must be an integer between {minimum} and {maximum}.")
+        values.append(value)
+    statement_timeout, lock_timeout = values
+    if lock_timeout > statement_timeout:
+        raise ValueError("DATABASE_LOCK_TIMEOUT_MS must not exceed DATABASE_STATEMENT_TIMEOUT_MS.")
+    return statement_timeout, lock_timeout
+
+
 async def open_database_pool() -> None:
     global _database_pool
 
     if _database_pool is not None:
         return
 
+    statement_timeout, lock_timeout = configured_database_timeouts()
+
+    async def configure(connection):
+        await connection.execute(
+            "SELECT set_config('statement_timeout', %s, false), "
+            "set_config('lock_timeout', %s, false)",
+            (str(statement_timeout), str(lock_timeout)),
+        )
+
     pool = AsyncConnectionPool(
         conninfo=_database_url_from_env(),
         min_size=int(os.environ.get("DATABASE_POOL_MIN_SIZE", "1")),
         max_size=int(os.environ.get("DATABASE_POOL_MAX_SIZE", "10")),
         kwargs={"row_factory": dict_row, "autocommit": True},
+        configure=configure,
         open=False,
     )
     await pool.open()

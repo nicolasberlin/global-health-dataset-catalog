@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
@@ -33,15 +33,17 @@ class CollectorDiagnostic(BaseModel):
     stage: Stage
     message: str
     recovery: Recovery
-    retry_at: Optional[str] = None  # noqa: UP045 - Pydantic on Python 3.9.
-    attempt: Optional[int] = Field(default=None, ge=1)  # noqa: UP045
-    max_attempts: Optional[int] = Field(default=None, ge=1)  # noqa: UP045
-    voter_id: Optional[str] = None  # noqa: UP045
+    retry_at: str | None = None
+    attempt: int | None = Field(default=None, ge=1)
+    max_attempts: int | None = Field(default=None, ge=1)
+    voter_id: str | None = None
 
 
 
 # Query-driven repository search endpoint.
 class CollectorRepositorySearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str = Field(min_length=1, max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS)
 
 
@@ -182,7 +184,7 @@ class CollectorCollectionJob(BaseModel):
     kind: Literal["source", "repository_candidate"] = "source"
     status: Literal["pending", "running", "done", "error"]
     execution_status: ExecutionStatus
-    outcome: Optional[Outcome] = None  # noqa: UP045
+    outcome: Outcome | None = None
     errors: list[CollectorDiagnostic] = Field(default_factory=list)
     saved_count: int
     classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
@@ -205,11 +207,11 @@ class CollectorCollectionJob(BaseModel):
 
 class CollectorAutomaticCollection(BaseModel):
     execution_status: ExecutionStatus
-    outcome: Optional[Outcome] = None  # noqa: UP045
+    outcome: Outcome | None = None
     errors: list[CollectorDiagnostic] = Field(default_factory=list)
     dataset_ids: list[int] = Field(default_factory=list)
     state: Literal["pending", "running", "saved", "empty", "error"]
-    job: Optional[CollectorCollectionJob] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    job: CollectorCollectionJob | None = None
     error: str = Field(default="", max_length=2_000)
     error_code: Literal["", "collection_scheduling_failed", "collection_not_scheduled"] = ""
 
@@ -234,12 +236,12 @@ class CollectorRepositorySearchItem(BaseModel):
     classification_status: Literal[
         "pending", "queued", "classifying", "accepted", "rejected", "error"
     ] = "pending"
-    classification: Optional[CollectorRepositoryClassification] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    classification: CollectorRepositoryClassification | None = None
     classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
     errors: list[CollectorDiagnostic] = Field(default_factory=list)
     classification_error: str = Field(default="", max_length=2_000)
     classification_error_code: Literal["", "classification_failed"] = ""
-    automatic_collection: Optional[CollectorAutomaticCollection] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    automatic_collection: CollectorAutomaticCollection | None = None
     created_at: str = ""
     updated_at: str = ""
 
@@ -267,7 +269,7 @@ class CollectorRepositorySearchWarning(BaseModel):
     code: str = "repository_unavailable"
     incomplete: bool = True
     message: str
-    provider: Optional[str] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    provider: str | None = None
 
 
 class CollectorDistribution(BaseModel):
@@ -288,9 +290,9 @@ class CollectorValidation(BaseModel):
     ok: bool
     status: Literal["available", "restricted", "unavailable", "unconfirmed"] = "unconfirmed"
     reason: str = ""
-    http_status: Optional[int]  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    http_status: int | None
     mime_type: str = ""
-    size_bytes: Optional[int] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    size_bytes: int | None = None
     etag: str = ""
     last_modified: str = ""
     content_disposition: str = ""
@@ -299,7 +301,7 @@ class CollectorValidation(BaseModel):
 
 
 class CollectorCollectedDataset(BaseModel):
-    id: Optional[int] = None  # noqa: UP045 - Pydantic evaluates this on Python 3.9.
+    id: int | None = None
     source_url: str = ""
     dataset_url: HttpUrl
     title: str
@@ -322,14 +324,6 @@ class CollectorCollectedDataset(BaseModel):
     updated_at: str = ""
 
 
-class CollectorDatabaseDatasetSearchResponse(BaseModel):
-    search_id: UUID
-    query: str
-    origin: Literal["database"] = "database"
-    items: list[CollectorCollectedDataset] = Field(default_factory=list)
-    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
-
-
 class CollectorOnlineDatasetSearchResponse(BaseModel):
     search_id: UUID
     query: str
@@ -339,7 +333,7 @@ class CollectorOnlineDatasetSearchResponse(BaseModel):
 
 
 class CollectorCollectionResponse(BaseModel):
-    next_cursor: Optional[int] = None  # noqa: UP045 - Pydantic on Python 3.9.
+    next_cursor: int | None = None
     items: list[CollectorCollectedDataset]
 
 
@@ -350,7 +344,7 @@ class CollectorCollectionJobResponse(BaseModel):
 class CollectorSearchProgressResponse(BaseModel):
     search_id: UUID
     query: str = ""
-    origin: Optional[Literal["database", "online"]] = None  # noqa: UP045
+    origin: Literal["database", "online"] | None = None
     local_dataset_ids: list[int] = Field(default_factory=list)
     dataset_ids: list[int] = Field(default_factory=list)
     warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
@@ -359,10 +353,10 @@ class CollectorSearchProgressResponse(BaseModel):
     updated_at: str = ""
     polling_required: bool
     execution_status: ExecutionStatus
-    outcome: Optional[Outcome] = None  # noqa: UP045
+    outcome: Outcome | None = None
     active_stages: list[Stage]
     errors: list[CollectorDiagnostic] = Field(default_factory=list)
-    local_result_count: Optional[int] = Field(default=None, ge=0)  # noqa: UP045
+    local_result_count: int | None = Field(default=None, ge=0)
     items: list[CollectorRepositorySearchItem]
 
 
@@ -379,3 +373,7 @@ class CollectorSearchCommandResponse(BaseModel):
     execution_status: ExecutionStatus
     attempt: int
     progress_url: str
+
+
+class CollectorHTTPError(BaseModel):
+    detail: str

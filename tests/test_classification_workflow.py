@@ -1,65 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 from uuid import uuid4
 
 import pytest
-from app import classification_worker
-from app.db import schema
 from app.db.connection import _fetchall, _require_database_pool
-from app.routes.collector import router
-from fastapi import FastAPI
+from app.workers import classification as classification_worker
+from helpers.workflows import candidate, headers
+from helpers.workflows import classification_decision as decision
 from httpx import ASGITransport, AsyncClient
 
-from collector.classification.repository import RepositoryClassification
-from collector.repository_search import RepositorySearchResult
-
 pytestmark = pytest.mark.anyio
-
-
-def decision(accepted=True):
-    label = "relevant" if accepted else "not_relevant"
-    return RepositoryClassification(
-        relevance_label=label,
-        reason="Matches the persisted query.",
-        ensemble={
-            "votes_required": 2,
-            "minimum_successful_votes": 3,
-            "successful_votes": 3,
-            "failed_votes": 0,
-            "accepted_votes": 3 if accepted else 0,
-            "decision": "accepted" if accepted else "rejected",
-            "decision_reason": "enough_accept_votes" if accepted else "rejected_by_majority",
-            "decision_voter_ids": ["a", "b", "c"],
-            "failures": [],
-            "voters": [
-                {
-                    "voter_id": voter,
-                    "accepted": accepted,
-                    "relevance_label": label,
-                    "reason": "Matches.",
-                    "missing_information": [],
-                }
-                for voter in ("a", "b", "c")
-            ],
-        },
-    )
-
-
-async def candidate(database, owner="alice", query="mortality"):
-    search = await database.create_search_session(query, owner)
-    items = await database.save_repository_candidates(
-        search["id"],
-        owner,
-        [
-            RepositorySearchResult(
-                title="Mortality", url="https://example.org/data", source="DataCite"
-            )
-        ],
-    )
-    return items[0]
 
 
 async def wait_for_status(database, item, status, owner="alice"):
@@ -71,27 +23,6 @@ async def wait_for_status(database, item, status, owner="alice"):
             await asyncio.sleep(0.01)
 
     return await asyncio.wait_for(poll(), timeout=5)
-
-
-@pytest.fixture
-def api(monkeypatch):
-    monkeypatch.setenv("API_AUTH_MODE", "token")
-    monkeypatch.setenv(
-        "API_ACCESS_TOKENS",
-        json.dumps(
-            {
-                owner: f"{owner}-test-token-with-at-least-thirty-two-characters"
-                for owner in ("alice", "bob")
-            }
-        ),
-    )
-    app = FastAPI()
-    app.include_router(router)
-    return app
-
-
-def headers(owner="alice"):
-    return {"Authorization": f"Bearer {owner}-test-token-with-at-least-thirty-two-characters"}
 
 
 async def test_requested_state_survives_restart_but_discoveries_are_not_executed(
@@ -278,24 +209,20 @@ async def test_classification_capacity_is_bounded_and_shutdown_keeps_backlog(dat
     ] == "queued"
 
 
-async def test_v2_migration_preserves_candidates_and_enables_queued_state(database):
-    async with _require_database_pool().connection() as connection:
-        await schema._run_schema_migration(connection, 0, 1, schema._migrate_0_to_1)
-        await schema._run_schema_migration(connection, 1, 2, schema._migrate_1_to_2)
-        search_id, candidate_id = uuid4(), uuid4()
-        await connection.execute(
-            "INSERT INTO search_sessions(id, owner_id, query) VALUES (%s, 'alice', 'mortality')",
-            (search_id,),
-        )
-        await connection.execute(
-            """INSERT INTO repository_candidates(id, search_session_id, title, url, source)
-               VALUES (%s, %s, 'Preserved', 'https://example.org/data', 'DataCite')""",
-            (candidate_id, search_id),
-        )
+async def test_reinitialization_preserves_candidates_and_queued_classification(database):
     await database.init_database()
-    await database.init_database()
-    stored = await database.get_repository_candidate(candidate_id, "alice")
-    assert stored["title"] == "Preserved"
-    assert stored["classification_status"] == "pending"
-    queued = await database.enqueue_candidate_classification(candidate_id, "alice")
+    item = await candidate(database)
+    queued = await database.enqueue_candidate_classification(item["id"], "alice")
     assert queued["classification_status"] == "queued"
+
+    await database.init_database()
+    await database.init_database()
+
+    stored = await database.get_repository_candidate(item["id"], "alice")
+    assert stored["title"] == "Mortality"
+    assert stored["classification_status"] == "queued"
+    assert await database.get_repository_candidate(item["id"], "bob") is None
+    claimed = await database.claim_candidate_classification()
+    assert claimed["id"] == item["id"]
+    assert claimed["classification_status"] == "classifying"
+    assert await database.claim_candidate_classification() is None

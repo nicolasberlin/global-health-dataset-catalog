@@ -1,316 +1,170 @@
 # Global Health Dataset Catalog
 
-A React, FastAPI, and PostgreSQL application for discovering, classifying, validating, and cataloguing global health dataset pages.
+A FastAPI and PostgreSQL application for finding, classifying and cataloguing
+global health datasets, with an optional React interface.
 
-The application stores dataset metadata and links. It does not download or retain complete dataset files.
-
-## Overview
-
-The project is under active development.
-
-The current application can:
-
-- search previously collected datasets in PostgreSQL;
-- fall back to external repository search when no local result is found;
-- classify repository results and dataset pages through EPFL RCP;
-- discover pages from CKAN, Socrata, data.json/DCAT, and websites;
-- validate candidate download and API links;
-- persist accepted datasets and their distributions.
-
-Record collection uses a shared connector registry for Dataverse and Zenodo,
-with common classification/validation and HTML/browser recovery. See
-[Collection connectors](docs/collection-connectors.md) for the implementation,
-configuration and long-term architecture stages.
-
-The application does not yet guarantee that every collected dataset comes from an official publisher.
-
-## Architecture
-
-```text
-React frontend
-      |
-      v
-FastAPI backend
-      |
-      +-- PostgreSQL search and persistence
-      +-- External repository search
-      +-- Background collection jobs
-      |
-      v
-Collector
-      |
-      +-- Discovery and extraction
-      +-- EPFL RCP classification
-      +-- Distribution validation
-```
-
-## Standalone API
-
-The backend can run independently of the React frontend. Submit one asynchronous
-search, disconnect, and retrieve its progress and saved datasets later.
-See the [API integration guide](docs/api-integration.md) for backend-only Docker
-deployment, authentication, curl examples, idempotency and retries.
+It searches the local catalogue first, uses external repositories when needed,
+and runs background classification and collection. It stores **metadata and
+links**, with bounded access checks rather than complete dataset downloads.
 
 ## Quick start
 
-### Requirements
+Try the complete API locally before connecting a frontend. You need:
 
-- Python 3.11 recommended (Python 3.9 compatibility is tested in CI)
-- uv 0.12.17 ([installation](https://docs.astral.sh/uv/getting-started/installation/))
-- Node.js 22 recommended
-- Docker
-- An EPFL RCP API key
-- One private API access token of at least 32 characters
+- Python 3.11 or later;
+- Docker running, with the `docker compose` command available;
+- EPFL laboratory access with credentials for all three configured RCP models:
+  DeepSeek, Gemma Meditron and Apertus Meditron. Use the keys provided through
+  your laboratory access; credentials are not included in the project.
 
-### Install Dependencies
+Without model credentials, you can still run the [automated checks](docs/ONBOARDING.md#validation)
+after installing development dependencies. Tests simulate providers; database and
+infrastructure checks need the separate setup described in that guide.
 
-From the repository root:
+Docker builds the API and runs PostgreSQL. This path does not require Node.js,
+uv or a separate PostgreSQL installation. Run these commands from the repository
+root after cloning it.
 
-```bash
-uv sync --locked --extra dev
-npm --prefix frontend ci
+### 1. Prepare your configuration
+
+```sh
+python3 scripts/setup_api.py
 ```
 
-`pyproject.toml` is the single source for Python dependencies, including the API
-server and development tools. Commit `uv.lock` when dependencies change; local
-setup, CI, and the backend image all consume this lock. `.python-version` selects
-Python 3.11 by default. To check the minimum supported version, use
-`uv sync --locked --extra dev --python 3.9` in a separate environment.
+The helper creates two private, Git-ignored files:
 
-To update dependencies intentionally, run `uv lock --upgrade`, then
-`uv sync --locked --extra dev` and the checks below. Normal installs must use
-`--locked`; do not maintain a second requirements list. Use uv 0.12.17, matching
-CI and Docker. This locks Python packages, not the operating-system image or apt
-packages used by Docker.
+| File | What you need to do |
+| --- | --- |
+| `.env.api` | Fill in the three RCP keys below; other settings are generated |
+| `.env.api-client` | Nothing: the local address and matching API token are generated |
 
-### Configure the Environment
+### 2. Add your model credentials
 
-Create or update `.env.local`:
+Open `.env.api` and replace these values with your own keys:
 
-```bash
-export POSTGRES_PASSWORD="change-me-locally"
-export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
-
-export RCP_DEEPSEEK_API_KEY="your-rcp-api-key"
-export RCP_DEEPSEEK_MODEL="deepseek-ai/DeepSeek-V4-Flash-0731"
-export RCP_GEMMA_MEDITRON_API_KEY="your-separate-meditron-rcp-api-key"
-export RCP_GEMMA_MEDITRON_MODEL="EPFLiGHT/Gemma-3-27B-MeditronFO"
-export RCP_APERTUS_MEDITRON_API_KEY="$RCP_GEMMA_MEDITRON_API_KEY"
-export RCP_APERTUS_MEDITRON_MODEL="EPFLiGHT/Apertus-70B-MeditronFO"
-export COLLECTION_MAX_CONCURRENCY="2"
-export CLASSIFICATION_MAX_CONCURRENCY="2"
-
-# Local development: no token entry, backend bound to loopback only.
-export API_AUTH_MODE="local"
-export VITE_API_AUTH_MODE="local"
-
-export VITE_API_BASE_URL="http://127.0.0.1:8001"
+```dotenv
+RCP_DEEPSEEK_API_KEY=your-deepseek-key
+RCP_GEMMA_MEDITRON_API_KEY=your-gemma-key
+RCP_APERTUS_MEDITRON_API_KEY=your-apertus-key
 ```
 
-Load the variables:
+The database password and API access token are already configured. Rerunning the
+helper preserves existing files and reports conflicts without replacing secrets.
+The `.env.local` and laboratory settings are for other workflows and are not
+loaded by these commands.
 
-```bash
-source .env.local
+### 3. Start the API and run a search
+
+```sh
+docker compose --env-file .env.api -f docker-compose.api.yml up -d --build
+python3 scripts/test_api.py --query "pneumonia"
 ```
 
-`.env.local` is ignored by Git. Never commit passwords or API keys.
+The first build can take a few minutes. The client waits up to 60 seconds for
+initial API readiness, submits a search, follows its progress, then fetches the
+saved datasets and diagnostics. Real searches consume provider/model quotas.
 
-Page and repository classification each call three models in parallel: DeepSeek,
-Gemma Meditron, and Apertus Meditron. Acceptance requires two positive votes and
-three usable responses. Validated responses are saved individually in PostgreSQL
-by backend workers. If a model fails, an explicit retry calls only missing or
-failed voters; successful negative votes are preserved too. A changed input,
-model, or prompt starts a new set of votes. Each model has its own model and credential variables;
-the example explicitly reuses the Gemma key for Apertus. All three use the same
-client, prompt per flow, parser, and error handling. The EPFL RCP Chat Completions
-endpoint, which must serve these model IDs and support the JSON response mode.
-An initial classification makes three inference requests; existing
-request quotas still count application operations, not individual model calls.
+- API: `http://127.0.0.1:8001`
+- Interactive API documentation: `http://127.0.0.1:8001/docs`
+- Report: `research/api/outputs/api-test.json`
 
-### Start PostgreSQL
+The report is updated during the run, and a new search replaces the default
+report. To keep separate reports, pass
+`--output research/api/outputs/pneumonia.json`. Accepted dataset records also
+remain in PostgreSQL. See [reading reports](research/README.md) for the fields
+and the difference between an empty result and a failed step.
 
-```bash
-docker compose -f docker-compose.local.yml up -d postgres
+## Choose a Docker configuration
+
+Always specify the Compose file for your workflow:
+
+| File | Purpose |
+| --- | --- |
+| [`docker-compose.api.yml`](docker-compose.api.yml) | API and PostgreSQL; use this for the quick start above |
+| [`docker-compose.local.yml`](docker-compose.local.yml) | PostgreSQL only; run Python and the optional React interface manually using [onboarding](docs/ONBOARDING.md#start-locally) |
+| [`docker-compose.yml`](docker-compose.yml) | Internal EPFL deployment behind existing Traefik infrastructure; requires the [deployment configuration](docs/DEPLOYMENT.md) |
+
+## Stop and resume
+
+```sh
+docker compose --env-file .env.api -f docker-compose.api.yml down
 ```
 
-### Start the Backend
+This keeps the database volume. Adding `--volumes` deletes that volume and its
+saved data. To resume later, run the same startup command from step 3 and follow
+your latest search without submitting another:
 
-```bash
-cd backend
-PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app \
-  --reload \
-  --reload-dir . \
-  --reload-dir ../collector \
-  --host 127.0.0.1 --no-proxy-headers \
-  --port 8001
+```sh
+python3 scripts/test_api.py --latest
 ```
 
-The API is available at:
+This resumes tracking only. Tasks interrupted during shutdown can require an
+explicit [retry](docs/api-integration.md#explicit-retries); saved results remain.
 
-- `http://127.0.0.1:8001`
-- `http://127.0.0.1:8001/docs`
+## Troubleshooting
 
-### Start the Frontend
+| Problem | What to check |
+| --- | --- |
+| Docker is unavailable | Start Docker, then retry the startup command |
+| Connection refused or readiness fails | Inspect the service status and logs below; check the database and all three model settings |
+| Model calls fail | Verify each RCP key has access to its configured model; readiness checks configuration, not provider availability |
+| Schema validation fails after updating | This release uses one initial schema for a fresh database; earlier pre-release volumes are not upgraded automatically. Follow [schema operations](docs/DEPLOYMENT.md#schema-validation-and-retired-source-administration) |
+| HTTP 401 | Check that the tokens in `.env.api` and `.env.api-client` match; rerun the setup helper to detect conflicts |
+| Old client settings take precedence | Previously exported `API_TOKEN` and `API_BASE_URL` override `.env.api-client`; unset them before retrying |
+| Port 8001 is occupied | For a new setup, use `python3 scripts/setup_api.py --port 8002`; for existing files, align `API_PORT` and the client `API_BASE_URL` |
 
-In another terminal, from the repository root:
-
-```bash
-source .env.local
-npm --prefix frontend run dev
+```sh
+docker compose --env-file .env.api -f docker-compose.api.yml ps
+docker compose --env-file .env.api -f docker-compose.api.yml logs --tail=100 api
 ```
 
-Open `http://127.0.0.1:5173/`.
-Local mode opens directly without a token. Run the backend on `127.0.0.1`
-with `--no-proxy-headers`; local access rejects remote clients and foreign browser
-origins. All local searches belong to `local-user`, with quotas still enforced.
-The frontend local mode applies only to the development server.
+For an existing configuration with several token owners, run the setup helper
+with `--owner OWNER`. Keep the existing database password when reusing its volume.
+The [API guide](docs/api-integration.md) covers client options, authentication,
+retry rules and connecting to an API deployed elsewhere.
 
-Token deployments retain the default `API_AUTH_MODE=token` and require
-`API_ACCESS_TOKENS` (a JSON mapping of owner IDs to private tokens).
-Never enable local mode behind a public reverse proxy.
-The token is stored only in that browser tab's `sessionStorage`; it is not a
-Vite build variable and must never be compiled into the frontend.
+## Next steps
 
-Set `API_AUTH_MODE=public` for automatic anonymous browser sessions, with
-per-visitor/IP quotas and global workload limits. Compose builds the frontend
-in the same mode. HTTP is the intended mode for the internal EPFL site and
-requires explicit opt-in. HTTPS remains the default for other deployments.
-Trusted proxy configuration and network access must
-be verified before deployment. See
-[Anonymous visitor sessions](docs/anonymous-visitor-sessions.md) for the API
-contract, configuration, and browser validation.
+You only need the quick start above to try the API. Choose another guide when
+you need to integrate, change or deploy it:
 
-The local Compose file publishes PostgreSQL only on `127.0.0.1`. The main
-`docker-compose.yml` is for internal EPFL HTTP deployment on port 1312 behind the external Traefik and
-does not publish PostgreSQL. See [Deployment on EPFL](docs/DEPLOYMENT.md) for
-the required hostname, proxy settings, and container egress policy.
+| Guide | Use it to |
+| --- | --- |
+| [API integration](docs/api-integration.md) | Build your own client: commands, progress, authentication, results and retries |
+| [Developer onboarding](docs/ONBOARDING.md) | Run Python and the optional React interface outside Docker, change code and run tests |
+| [Architecture](docs/technical-design-document.md) | Understand modules, persistence, collection and safety constraints |
+| [Deployment](docs/DEPLOYMENT.md) | Configure a server, proxy, database operations and maintenance |
 
-For a more detailed setup and troubleshooting guide, read
-[Developer Onboarding](docs/ONBOARDING.md).
+The optional [Search Lab](search_lab/README.md) has its own interface and private
+observations; it is independent of the API quick start. [Research files](research/README.md)
+explain generated reports and optional investigation templates.
 
-## Main workflows
-
-Repository search and automatic candidate collection are connected workflows:
+## Project layout
 
 ```text
-Repository search
-    -> authenticate and consume the owner's search quota
-    -> search PostgreSQL first
-    -> search DataCite when no local result exists
-    -> persist the owned search session and external candidates
-    -> classify owned candidates by server-generated ID and quota
-    -> automatically collect accepted candidates
-    -> persist only datasets that pass page and distribution validation
-
-Automatic collection
-    -> starts from an accepted repository candidate
-    -> dataset-page classification
-    -> distribution validation
-    -> PostgreSQL persistence
+backend/app/       FastAPI routes, PostgreSQL access and background workers
+collector/         Repository discovery, classification and bounded validation
+browser/           Isolated browser service for collection fallback
+frontend/          Optional React interface
+deploy/            Example Traefik proxy configuration
+scripts/           Local API configuration helper and HTTP client
+tests/             Python unit and integration tests
+docs/              Integration, development, architecture and deployment guides
+research/          Private generated API reports and investigation templates
+search_lab/        Optional laboratory with its own setup and local data
 ```
 
-## API
+## Current limits
 
-The website offers Search and Catalog views. Source administration (`/sources`)
-and the manual `POST /collector/collection-jobs` endpoint have been removed.
-Automatic collection, progress, and explicit failed-job retries remain available.
-Historical source records and collected datasets are preserved; startup no longer
-seeds source records.
+- Run one API process and one instance per application database schema.
+- Model decisions and sampled resource checks do not guarantee scientific
+  quality, publisher authority, licensing compliance or complete data access.
+- This is an actively developed project. Automated tests simulate external
+  providers; they do not certify live provider availability or production capacity.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Check that the backend process is running |
-| `POST` | `/collector/search-datasets` | Search PostgreSQL, then external repositories |
-| `POST` | `/collector/repository-candidates/{candidate_id}/classify` | Queue an owned classification (202); read its state separately |
-| `GET` | `/collector/collection-jobs/{id}` | Read collection progress |
-| `POST` | `/collector/collection-jobs/{job_id}/retry` | Retry an owned failed collection, preserving saved votes |
-| `GET` | `/collector/collected-datasets` | List persisted datasets |
+The [validation guide](docs/ONBOARDING.md#validation) explains local checks and
+the [GitHub workflow](.github/workflows/ci.yml) defines automated checks.
 
-All routes in the table except `/health` and `/collector/collected-datasets`
-require `Authorization: Bearer <token>`.
-Search and classification quotas are counted per configured owner in
-PostgreSQL; optional environment overrides are documented in the TDD.
+## License
 
-Interactive API documentation:
-
-- Swagger UI: `http://127.0.0.1:8001/docs`
-- ReDoc: `http://127.0.0.1:8001/redoc`
-- OpenAPI schema: `http://127.0.0.1:8001/openapi.json`
-
-## Project structure
-
-```text
-backend/app/                 FastAPI routes, PostgreSQL access, orchestration
-collector/                   Discovery, classification, validation
-frontend/src/                React interface
-tests/                       Python tests
-docs/                        Architecture, policy, decisions, onboarding
-```
-
-## Tests
-
-Run the standard checks from the repository root:
-
-```bash
-uv sync --locked --extra dev
-.venv/bin/ruff check .
-.venv/bin/pytest
-npm --prefix frontend test
-npm --prefix frontend run build
-git diff --check
-```
-
-To include PostgreSQL integration tests:
-
-```bash
-TEST_DATABASE_URL="$DATABASE_URL" .venv/bin/pytest
-```
-
-GitHub Actions runs these checks on pushes and pull requests: Python 3.9 and
-3.11 with a disposable PostgreSQL 16 service, frontend tests and build on Node.js
-22, and a separate backend image/firewall test. The database jobs always set
-`TEST_DATABASE_URL`; missing or unreachable PostgreSQL must fail CI. The Docker
-firewall test also exercises public HTTPS and needs network access, but no RCP
-credentials or production database.
-
-## Documentation
-
-Start with:
-
-1. [Developer Onboarding](docs/ONBOARDING.md)
-2. [Technical Design](docs/technical-design-document.md)
-
-Detailed documentation:
-
-- [Collector Pipeline](docs/collector-pipeline-diagram.md)
-- [Search Diagnostics — trace and report templates (French)](docs/diagnostic-recherche.md)
-- [Multi-method Record Collection — API, HTML, isolated browser and diagnostics](docs/multimethod-collection.md)
-- [Classification Architecture](docs/classification-architecture.md)
-- [Database Schema](docs/database-schema-diagram.md)
-- [Secure Deployment](docs/DEPLOYMENT.md)
-- [Proposed Multi-Repository Architecture](docs/props/multi-repository-architecture.md)
-- [Collection Workflow Policy — target behavior and acceptance scenarios](docs/collection-workflow-policy.md)
-- [Roadmap](docs/roadmap.md)
-- [ADR 0001: PostgreSQL Only](docs/adr/0001-postgresql-only.md)
-
-## Development notes
-
-- Repository search sessions and provider candidates are persisted for trusted
-  classification and auditability. Provider metadata is never inserted directly
-  into `collected_datasets`: accepted candidates still pass page classification
-  and distribution validation before catalogue persistence.
-- Repository relevance classification does not independently guarantee health relevance.
-- Source authority and licensing policies are not fully enforced.
-- Dataset deduplication currently uses the normalized dataset URL.
-- Collection jobs use PostgreSQL as their persistent queue. Pending jobs survive
-  restart; interrupted running jobs become errors. Acceptance and collection
-  reservation commit together, and repeating a classification only reads its
-  existing follow-up. Run a single API process/instance: there are no worker
-  leases. Classification requests also persist in PostgreSQL before a bounded
-  worker executes them. The frontend restores the last repository analysis.
-  See the [deployment constraints](docs/DEPLOYMENT.md#collection-execution).
-- Static per-user Bearer tokens, search-session ownership, and PostgreSQL
-  request quotas protect costly and mutating routes. This MVP mechanism is not
-  an OAuth/OIDC login system and should be replaced by an institutional identity
-  provider before broader multi-user production use.
-- Production monitoring and human review workflows are not implemented.
+[Apache License 2.0](LICENSE).

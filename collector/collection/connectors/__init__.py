@@ -1,4 +1,9 @@
-"""Collection connectors resolve one record; repository search stays separate."""
+"""Collection connectors resolve one record; repository search stays separate.
+
+Connectors may additionally implement fetch_metadata(url, fetch_json) when record
+and file metadata require several API reads. It returns a JsonResponse containing
+the assembled payload, or an equivalent mapping for injected fixture transports.
+"""
 
 from __future__ import annotations
 

@@ -1,0 +1,60 @@
+{
+  "id": 15185481,
+  "doi": "10.5281/zenodo.15185481",
+  "conceptdoi": "10.5281/zenodo.15185480",
+  "conceptrecid": "15185480",
+  "metadata": {
+    "title": "TUBERCULOSIS TRANSMISSION ROUTES",
+    "doi": "10.5281/zenodo.15185481",
+    "publication_date": "2025-04-09",
+    "description": "<p><em><span lang=\"UZ\">Tuberculosis remains a global health problem with an enormous burden of disease, estimated at 10.4 million new cases in 2015. To stop the tuberculosis epidemic, it is critical that we interrupt tuberculosis transmission. Further, the interventions required to interrupt tuberculosis transmission must be targeted to high-risk groups and settings. A simple cascade for tuberculosis transmission has been proposed in which<span>&nbsp; </span>a source case of tuberculosis<span>&nbsp; </span>generates infectious particles<span>&nbsp; </span>that survive in the air and<span>&nbsp; </span>are inhaled by a susceptible individual<span>&nbsp; </span>who may become infected and<span>&nbsp; </span>then has the potential to develop tuberculosis. Interventions that target these events will interrupt tuberculosis transmission and accelerate the decline in tuberculosis incidence and mortality. The purpose of this article is to provide a high-level overview of what is known about tuberculosis transmission, using the tuberculosis transmission cascade as a framework, and to set the scene for the articles in this series, which address specific aspects of tuberculosis transmission.</span></em></p>",
+    "access_right": "open",
+    "creators": [
+      {
+        "name": "Maxkamova Dilafro'z Xabibiddin qizi",
+        "affiliation": null
+      },
+      {
+        "name": "Umaraliyev Nurillo",
+        "affiliation": null
+      },
+      {
+        "name": "Xabibullayev Ne'matillo Ubaydullo o'g'li",
+        "affiliation": null
+      }
+    ],
+    "resource_type": {
+      "title": "Dataset",
+      "type": "dataset"
+    },
+    "journal": {
+      "issue": "4",
+      "pages": "7-16",
+      "title": "International Multidisciplinary Research in Academic Science (IMRAS)",
+      "volume": "8"
+    },
+    "relations": {
+      "version": [
+        {
+          "index": 0,
+          "is_last": true,
+          "parent": {
+            "pid_type": "recid",
+            "pid_value": "15185480"
+          }
+        }
+      ]
+    }
+  },
+  "files": [
+    {
+      "id": "f74a4983-f53e-4809-8de3-ba1ceeda5f6a",
+      "key": "Umaraliyev Nurillo.pdf",
+      "size": 641159,
+      "checksum": "md5:144bdc550ec1bff02f348cbcad6e2ff3",
+      "links": {
+        "self": "https://zenodo.org/api/records/15185481/files/Umaraliyev%20Nurillo.pdf/content"
+      }
+    }
+  ]
+}

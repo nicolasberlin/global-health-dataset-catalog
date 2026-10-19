@@ -73,6 +73,39 @@ def test_zenodo_record_urls_use_the_exact_record_endpoint(path):
     assert selected.api_url == "https://zenodo.org/api/records/123"
 
 
+def test_zenodo_concept_doi_resolves_its_verified_version_and_excludes_pdf():
+    url = "https://zenodo.org/doi/10.5281/zenodo.15185480"
+    payload = json.loads((FIXTURES / "zenodo_transmission_pdf.json").read_text())
+    selected = default_registry(DEFAULT_CONFIG).select(url)
+    assert selected.api_url == "https://zenodo.org/api/records/15185480"
+    record = selected.connector.normalize(url, payload)
+    assert record.identity.native_id == "15185481"
+    assert record.doi == "10.5281/zenodo.15185481"
+    result = collect(url, payload)
+    assert not result.datasets
+    assert result.report.method_attempts[0]["method"] == "zenodo_api"
+    assert result.report.method_attempts[0]["status"] == "empty"
+    assert result.report.coverage["checked"] == 0
+
+
+@pytest.mark.parametrize("field,value", [
+    ("conceptrecid", "999"), ("conceptdoi", "10.5281/zenodo.999"),
+])
+def test_zenodo_concept_doi_rejects_unrelated_version(field, value):
+    payload = json.loads((FIXTURES / "zenodo_transmission_pdf.json").read_text())
+    payload[field] = value
+    with pytest.raises(ValueError, match="identity mismatch"):
+        ZenodoConnector().normalize("https://zenodo.org/doi/10.5281/zenodo.15185480", payload)
+
+
+def test_zenodo_version_doi_cannot_select_another_version(zenodo):
+    record = ZenodoConnector().normalize("https://zenodo.org/doi/10.5281/zenodo.123", zenodo)
+    assert record.identity.native_id == "123"
+    zenodo["id"] = 124
+    with pytest.raises(ValueError, match="identity mismatch"):
+        ZenodoConnector().normalize("https://zenodo.org/doi/10.5281/zenodo.123", zenodo)
+
+
 def test_hosts_are_configuration_and_do_not_require_new_connectors():
     config = replace(DEFAULT_CONFIG, dataverse_hosts=("data.example.org",), zenodo_hosts=())
     registry = default_registry(config)
@@ -84,6 +117,39 @@ def test_hosts_are_configuration_and_do_not_require_new_connectors():
 def test_duplicate_connector_names_are_rejected():
     with pytest.raises(ValueError):
         ConnectorRegistry((ZenodoConnector(), ZenodoConnector()))
+
+
+def test_unc_study31_uses_api_and_collects_data_archive_without_html():
+    url = "https://dataverse.unc.edu/dataset.xhtml?persistentId=doi:10.15139/S3/XQW69I"
+    payload = json.loads((FIXTURES / "dataverse_unc_study31.json").read_text())
+    selected = default_registry(DEFAULT_CONFIG).select(url)
+    assert selected.connector.name == "dataverse"
+    assert selected.api_url == (
+        "https://dataverse.unc.edu/api/v1/datasets/:persistentId/"
+        "?persistentId=doi%3A10.15139%2FS3%2FXQW69I"
+    )
+    requested, checked = [], []
+
+    def fetch_json(api_url):
+        requested.append(api_url)
+        return payload
+
+    def validate(resource):
+        checked.append(resource.url)
+        return available(resource)
+
+    result = collect_repository_candidate_with_report(
+        url, fetch_json=fetch_json,
+        fetch_html=lambda _: pytest.fail("UNC should resolve through the API"),
+        classifier=Accept(), validate=validate,
+    )
+    assert requested == [selected.api_url]
+    assert checked == ["https://dataverse.unc.edu/api/access/datafile/7563340"]
+    dataset = result.datasets[0]
+    assert dataset.doi == "10.15139/s3/xqw69i"
+    assert dataset.discovery_method == "dataverse_api"
+    assert dataset.record_identity["version"] == "2.0"
+    assert dataset.distributions[0].anchor == "S31_21jul2026.zip"
 
 
 def test_dataverse_metadata_version_id_is_never_used_as_download_id(dataverse_file):

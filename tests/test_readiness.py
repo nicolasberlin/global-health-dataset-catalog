@@ -19,6 +19,8 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 async def client(monkeypatch):
     monkeypatch.setattr(main.app.state, "ready", True, raising=False)
+    monkeypatch.setattr(main.app.state, "runtime_enforced", False, raising=False)
+    monkeypatch.setattr(main.app.state, "ownership", None, raising=False)
     for _, model_var, _, key_var in factory._DEFAULT_VOTERS:
         monkeypatch.setenv(key_var, "private-test-key")
         monkeypatch.delenv(model_var, raising=False)
@@ -221,12 +223,28 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
     monkeypatch.setattr(main, "open_database_pool", AsyncMock())
     monkeypatch.setattr(main, "close_database_pool", close)
     monkeypatch.setattr(main, "check_database_readiness", AsyncMock())
+    ownership = Mock(healthy=True, lost=asyncio.Event(), activate=AsyncMock())
+    lock_held = False
+
+    @asynccontextmanager
+    async def lock():
+        nonlocal lock_held
+        lock_held = True
+        try:
+            yield ownership
+        finally:
+            assert not main.app.state.ready
+            lock_held = False
+
+    monkeypatch.setattr(main, "application_lock", lock)
 
     async def startup_step():
+        assert lock_held
         assert (await client.get("/ready")).status_code == 503
         if fail_startup:
             raise RuntimeError("failed initialization")
 
+    ownership.activate.side_effect = startup_step
     for name in ("init_database", "mark_interrupted_votes_error",
                  "mark_interrupted_search_sessions_error",
                  "mark_interrupted_candidate_classifications_error",
@@ -243,6 +261,7 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
 
     monkeypatch.setattr(main, "collection_workers", workers)
     monkeypatch.setattr(main, "classification_workers", workers)
+    monkeypatch.setattr(main, "search_workers", workers)
     if fail_startup:
         with pytest.raises(RuntimeError, match="failed initialization"):
             async with main.lifespan(main.app):
@@ -250,6 +269,7 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
     else:
         async with main.lifespan(main.app):
             assert (await client.get("/ready")).status_code == 200
+        ownership.activate.assert_awaited_once()
     assert not main.app.state.ready
     close.assert_awaited_once()
 

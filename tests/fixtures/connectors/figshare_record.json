@@ -1,0 +1,17 @@
+{
+  "id": 20522745,
+  "version": 1,
+  "doi": "10.6084/m9.figshare.20522745.v1",
+  "title": "BCG vaccine genomic comparison data",
+  "description": "<p>Tables of SNPs and indels compared to M. tuberculosis.</p>",
+  "published_date": "2022-08-21T03:12:31Z",
+  "license": {"name": "CC BY + CC0"},
+  "is_embargoed": false,
+  "files": [{
+    "id": 36733443,
+    "name": "12864_2022_8826_MOESM1_ESM.zip",
+    "size": 402469,
+    "mimetype": "application/zip",
+    "download_url": "https://ndownloader.figshare.com/files/36733443"
+  }]
+}

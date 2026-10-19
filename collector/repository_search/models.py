@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Protocol
 
 from collector.classification.repository import RepositoryClassification
 from collector.extraction.dataset_metadata import MISSING_DATASET_METADATA_VALUE
@@ -46,7 +46,7 @@ class RepositorySearchWarning:
     code: str = "repository_unavailable"
     incomplete: bool = True
     message: str = PROVIDER_UNAVAILABLE_MESSAGE
-    provider: Optional[str] = None  # noqa: UP045 - Keep Python 3.9-compatible typing.
+    provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,5 +62,5 @@ class RepositorySearchProvider(Protocol):
 
     name: str
 
-    def search(self, query: str) -> list[RepositorySearchResult]:
+    def search(self, query: str) -> RepositorySearchResponse:
         ...

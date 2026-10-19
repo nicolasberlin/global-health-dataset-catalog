@@ -15,7 +15,7 @@ from urllib.request import Request
 
 from collector.budget import check_collection_budget, read_with_budget
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import open_public_http_url
+from collector.fetch import decode_text_body, open_public_http_url
 from collector.url_utils import canonicalize_url, same_domain
 
 TextFetcher = Callable[[str], str]
@@ -304,11 +304,4 @@ def _dedupe_urls(urls: list[str]) -> list[str]:
 
 
 def _decode_text(body: bytes, content_type: str) -> str:
-    charset = "utf-8"
-    for part in content_type.split(";"):
-        part = part.strip()
-        if part.lower().startswith("charset="):
-            charset = part.split("=", 1)[1].strip()
-            break
-
-    return body.decode(charset, errors="replace")
+    return decode_text_body(body, content_type)

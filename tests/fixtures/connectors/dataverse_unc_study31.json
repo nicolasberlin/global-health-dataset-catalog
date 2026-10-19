@@ -1,0 +1,358 @@
+{
+  "status": "OK",
+  "data": {
+    "id": 7563339,
+    "latestVersion": {
+      "versionNumber": 2,
+      "versionMinorNumber": 0,
+      "releaseTime": "2026-10-01T18:40:45Z",
+      "metadataBlocks": {
+        "citation": {
+          "displayName": "Citation Metadata",
+          "name": "citation",
+          "fields": [
+            {
+              "typeName": "title",
+              "multiple": false,
+              "typeClass": "primitive",
+              "value": "TBTC Study 31: Rifapentine-containing Tuberculosis Treatment Shortening Regimens (S31/A5349)"
+            },
+            {
+              "typeName": "author",
+              "multiple": true,
+              "typeClass": "compound",
+              "value": [
+                {
+                  "authorName": {
+                    "typeName": "authorName",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Tuberculosis Trials Consortium"
+                  },
+                  "authorAffiliation": {
+                    "typeName": "authorAffiliation",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Emory University"
+                  },
+                  "authorIdentifierScheme": {
+                    "typeName": "authorIdentifierScheme",
+                    "multiple": false,
+                    "typeClass": "controlledVocabulary",
+                    "value": "ROR"
+                  },
+                  "authorIdentifier": {
+                    "typeName": "authorIdentifier",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "042twtr12"
+                  }
+                }
+              ]
+            },
+            {
+              "typeName": "datasetContact",
+              "multiple": true,
+              "typeClass": "compound",
+              "value": [
+                {
+                  "datasetContactName": {
+                    "typeName": "datasetContactName",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Lisa Sharling"
+                  },
+                  "datasetContactAffiliation": {
+                    "typeName": "datasetContactAffiliation",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Emory University Rollins School of Public Health"
+                  },
+                  "datasetContactEmail": {
+                    "typeName": "datasetContactEmail",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "dataset-contact@example.org"
+                  }
+                }
+              ]
+            },
+            {
+              "typeName": "dsDescription",
+              "multiple": true,
+              "typeClass": "compound",
+              "value": [
+                {
+                  "dsDescriptionValue": {
+                    "typeName": "dsDescriptionValue",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Rifapentine-containing treatment shortening regimens for pulmonary tuberculosis: A randomized, open-label, controlled phase 3 clinical trial"
+                  },
+                  "dsDescriptionDate": {
+                    "typeName": "dsDescriptionDate",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "2026-08-24"
+                  }
+                }
+              ]
+            },
+            {
+              "typeName": "subject",
+              "multiple": true,
+              "typeClass": "controlledVocabulary",
+              "value": [
+                "Medicine, Health and Life Sciences"
+              ]
+            },
+            {
+              "typeName": "keyword",
+              "multiple": true,
+              "typeClass": "compound",
+              "value": [
+                {
+                  "keywordValue": {
+                    "typeName": "keywordValue",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "tuberculosis"
+                  }
+                },
+                {
+                  "keywordValue": {
+                    "typeName": "keywordValue",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "tb"
+                  }
+                },
+                {
+                  "keywordValue": {
+                    "typeName": "keywordValue",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "clinical trial"
+                  }
+                },
+                {
+                  "keywordValue": {
+                    "typeName": "keywordValue",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "pulmonary tuberculosis"
+                  }
+                },
+                {
+                  "keywordValue": {
+                    "typeName": "keywordValue",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "phase 3"
+                  }
+                },
+                {
+                  "keywordValue": {
+                    "typeName": "keywordValue",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "treatment shortening"
+                  }
+                }
+              ]
+            },
+            {
+              "typeName": "publication",
+              "multiple": true,
+              "typeClass": "compound",
+              "value": [
+                {
+                  "publicationCitation": {
+                    "typeName": "publicationCitation",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Dorman SE, Nahid P, Kurbatova EV, Phillips PPJ, Bryant K, Dooley KE, Engle M, Goldberg SV, Phan HTT, Hakim J, Johnson JL, Lourens M, Martinson NA, Muzanyi G, Narunsky K, Nerette S, Nguyen NV, Pham TH, Pierre S, Purfield AE, Samaneka W, Savic RM, Sanne I, Scott NA, Shenje J, Sizemore E, Vernon A, Waja Z, Weiner M, Swindells S, Chaisson RE; AIDS Clinical Trials Group; Tuberculosis Trials Consortium. Four-Month Rifapentine Regimens with or without Moxifloxacin for Tuberculosis. N Engl J Med. 2021 May 6;384(18):1705-1718. doi: 10.1056/NEJMoa2033400. PMID: 33951360."
+                  },
+                  "publicationIDType": {
+                    "typeName": "publicationIDType",
+                    "multiple": false,
+                    "typeClass": "controlledVocabulary",
+                    "value": "doi"
+                  },
+                  "publicationIDNumber": {
+                    "typeName": "publicationIDNumber",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "doi: 10.1056/NEJMoa2033400"
+                  },
+                  "publicationURL": {
+                    "typeName": "publicationURL",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "https://pubmed.ncbi.nlm.nih.gov/33951360/"
+                  }
+                }
+              ]
+            },
+            {
+              "typeName": "producer",
+              "multiple": true,
+              "typeClass": "compound",
+              "value": [
+                {
+                  "producerName": {
+                    "typeName": "producerName",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Centers for Disease Control and Prevention"
+                  },
+                  "producerAbbreviation": {
+                    "typeName": "producerAbbreviation",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "CDC"
+                  },
+                  "producerURL": {
+                    "typeName": "producerURL",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "https://data.cdc.gov/National-Center-for-HIV-Viral-Hepatitis-STD-and-TB/Tuberculosis-Trials-Consortium-Study-31-A5349/nihk-gy83/about_data"
+                  }
+                }
+              ]
+            },
+            {
+              "typeName": "distributor",
+              "multiple": true,
+              "typeClass": "compound",
+              "value": [
+                {
+                  "distributorName": {
+                    "typeName": "distributorName",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Emory/Georgia Tuberculosis Research Advancement Center"
+                  },
+                  "distributorAffiliation": {
+                    "typeName": "distributorAffiliation",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "Emory University Rollins School of Public Health"
+                  },
+                  "distributorAbbreviation": {
+                    "typeName": "distributorAbbreviation",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "TRAC"
+                  },
+                  "distributorURL": {
+                    "typeName": "distributorURL",
+                    "multiple": false,
+                    "typeClass": "primitive",
+                    "value": "https://tb.emory.edu/"
+                  }
+                }
+              ]
+            },
+            {
+              "typeName": "depositor",
+              "multiple": false,
+              "typeClass": "primitive",
+              "value": "Banks, Kiara"
+            },
+            {
+              "typeName": "dateOfDeposit",
+              "multiple": false,
+              "typeClass": "primitive",
+              "value": "2026-09-01"
+            }
+          ]
+        }
+      },
+      "files": [
+        {
+          "label": "Rifapentine-containing treatment shortening regimens for pulmonary tuberculosis - A randomized, open-label, controlled phase 3 clinical trial protocol & analysis plans.pdf",
+          "restricted": false,
+          "version": 1,
+          "datasetVersionId": 36089,
+          "dataFile": {
+            "id": 7563913,
+            "persistentId": "",
+            "filename": "Rifapentine-containing treatment shortening regimens for pulmonary tuberculosis - A randomized, open-label, controlled phase 3 clinical trial protocol & analysis plans.pdf",
+            "contentType": "application/pdf",
+            "friendlyType": "Adobe PDF",
+            "filesize": 6661763,
+            "storageIdentifier": "s3://unc-dataverse-prod:1a0f8c25d26-f03c0a5ea01e",
+            "rootDataFileId": -1,
+            "md5": "2a2cb32fc200672f07435c29378e3ae4",
+            "checksum": {
+              "type": "MD5",
+              "value": "2a2cb32fc200672f07435c29378e3ae4"
+            },
+            "tabularData": false,
+            "creationDate": "2026-10-01",
+            "publicationDate": "2026-10-01",
+            "lastUpdateTime": "2026-10-01T18:40:45Z",
+            "fileAccessRequest": true
+          }
+        },
+        {
+          "description": "Public Use Data",
+          "label": "S31_21jul2026.zip",
+          "restricted": false,
+          "version": 1,
+          "datasetVersionId": 36089,
+          "dataFile": {
+            "id": 7563340,
+            "persistentId": "",
+            "filename": "S31_21jul2026.zip",
+            "contentType": "application/zip",
+            "friendlyType": "ZIP Archive",
+            "filesize": 71121923,
+            "description": "Public Use Data",
+            "storageIdentifier": "s3://unc-dataverse-prod:1a05e7995b0-00fbac82d7e2",
+            "rootDataFileId": -1,
+            "md5": "f04d49a74886e2813a2c5cb3adfbc6ec",
+            "checksum": {
+              "type": "MD5",
+              "value": "f04d49a74886e2813a2c5cb3adfbc6ec"
+            },
+            "tabularData": false,
+            "creationDate": "2026-09-01",
+            "publicationDate": "2026-10-01",
+            "lastUpdateTime": "2026-10-01T18:40:45Z",
+            "fileAccessRequest": true
+          }
+        },
+        {
+          "description": "Data Use Guide",
+          "label": "Study_31_Data_Use_Guide_Final_Aug2026.pdf",
+          "restricted": false,
+          "version": 1,
+          "datasetVersionId": 36089,
+          "dataFile": {
+            "id": 7563341,
+            "persistentId": "",
+            "filename": "Study_31_Data_Use_Guide_Final_Aug2026.pdf",
+            "contentType": "application/pdf",
+            "friendlyType": "Adobe PDF",
+            "filesize": 320244,
+            "description": "Data Use Guide",
+            "storageIdentifier": "s3://unc-dataverse-prod:1a05e577514-3af86055fa1b",
+            "rootDataFileId": -1,
+            "md5": "ea874243abcb816dbf29c961ef43a8ab",
+            "checksum": {
+              "type": "MD5",
+              "value": "ea874243abcb816dbf29c961ef43a8ab"
+            },
+            "tabularData": false,
+            "creationDate": "2026-09-01",
+            "publicationDate": "2026-10-01",
+            "lastUpdateTime": "2026-10-01T18:40:45Z",
+            "fileAccessRequest": true
+          }
+        }
+      ]
+    }
+  }
+}

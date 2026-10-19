@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qsl, urlsplit
 
+from collector.budget import check_collection_budget
+from collector.extraction.graph import select_dataset_scope
 from collector.storage.models import DistributionCandidate, LinkCandidate, PageSnapshot
 from collector.url_utils import canonicalize_url
 
@@ -54,10 +56,23 @@ EXCLUDED_EXTENSIONS = {".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif",
 
 
 def extract_distributions(page: PageSnapshot) -> list[DistributionCandidate]:
+    check_collection_budget()
+    if page.dataset_metadata_ambiguous:
+        return []
+    scoped = page.dataset_json_ld
+    allow_html_links = True
+    if scoped is None:
+        scope = select_dataset_scope(page.json_ld, page.url, page.canonical_url,
+                                     citation_doi=page.doi)
+        if scope.ambiguous:
+            return []
+        scoped = scope.nodes
+        allow_html_links = not scope.multiple
     candidates: list[DistributionCandidate] = []
-    candidates.extend(_schema_distribution_candidates(page))
+    candidates.extend(_schema_distribution_candidates(page, scoped))
 
-    for link in page.links:
+    for link in page.links if allow_html_links else ():
+        check_collection_budget()
         candidate = _candidate_from_link(link)
         if candidate is not None:
             candidates.append(candidate)
@@ -128,10 +143,15 @@ def _candidate_from_link(link: LinkCandidate) -> DistributionCandidate | None:
     )
 
 
-def _schema_distribution_candidates(page: PageSnapshot) -> list[DistributionCandidate]:
+def _schema_distribution_candidates(
+    page: PageSnapshot, scoped: tuple[object, ...],
+) -> list[DistributionCandidate]:
     candidates: list[DistributionCandidate] = []
 
-    for node in _iter_json_objects(page.json_ld):
+    for node in scoped:
+        check_collection_budget()
+        if not isinstance(node, dict):
+            continue
         distribution = node.get("distribution")
         if distribution is None:
             continue
@@ -209,17 +229,3 @@ def _guess_query_extension(url: str) -> str:
 def _looks_like_api(url: str, anchor: str = "") -> bool:
     combined = f"{url} {anchor}".lower()
     return any(marker in combined for marker in ("/api/", "api/", "format=json", "export?"))
-
-
-def _iter_json_objects(value: object) -> list[dict[str, object]]:
-    objects: list[dict[str, object]] = []
-
-    if isinstance(value, dict):
-        objects.append(value)
-        for nested in value.values():
-            objects.extend(_iter_json_objects(nested))
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            objects.extend(_iter_json_objects(item))
-
-    return objects

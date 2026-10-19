@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 
 import pytest
-from app.quota_policy import QuotaExceeded, QuotaLimit
-from app.security import (
+from app.auth.security import (
     APIPrincipal,
     enforce_api_quota,
     require_api_principal,
     validate_api_security_configuration,
 )
+from app.quota_policy import QuotaExceeded, QuotaLimit
 from fastapi import HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -122,7 +122,7 @@ async def test_api_quota_returns_retry_after_when_limit_is_exhausted(monkeypatch
         assert quotas == (QuotaLimit("test-user", "repository_search", 10),)
         raise QuotaExceeded(17)
 
-    monkeypatch.setattr("app.security.consume_quota_limits", reject_request)
+    monkeypatch.setattr("app.auth.security.consume_quota_limits", reject_request)
 
     with pytest.raises(HTTPException) as error:
         await enforce_api_quota(APIPrincipal("test-user"), "repository_search")

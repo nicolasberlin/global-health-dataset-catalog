@@ -20,7 +20,7 @@ function launchChild() {
   const worker = path.join(__dirname, 'worker.cjs');
   const env = { DEBUG: process.env.BROWSER_DEBUG === '1' ? 'pw:browser' : '', PATH: process.env.PATH, BROWSER_PROXY_URL: proxy,
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(os.homedir(), 'Library/Caches/ms-playwright'),
-    NODE_PATH: process.env.NODE_PATH || path.resolve(__dirname, '../frontend/node_modules') };
+    NODE_PATH: process.env.NODE_PATH || path.join(__dirname, 'node_modules') };
   let command = process.execPath, args = [worker];
   if (process.platform === 'darwin') {
     const port = Number(new URL(proxy).port);
@@ -67,7 +67,7 @@ const server = http.createServer(async (request, response) => {
       if (session) return send(429, { error: 'browser_busy' });
       const url = new URL(payload.url);
       if (url.protocol !== 'https:' || !allowedHosts.includes(url.hostname) || url.username || url.password || (url.port && url.port !== '443')) return send(400, { error: 'host_not_allowed' });
-      const budget = Math.min(Number(payload.budget_ms), 180000);
+      const budget = Math.min(Number(payload.budget_ms), 300000);
       if (!Number.isFinite(budget) || budget < 1) return send(400, { error: 'invalid_budget' });
       const id = crypto.randomUUID(), child = launchChild();
       session = { id, child, busy: true, deadline: Date.now() + budget, timer: setTimeout(() => killSession(id), budget) };

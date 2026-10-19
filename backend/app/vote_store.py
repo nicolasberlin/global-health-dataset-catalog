@@ -6,9 +6,10 @@ import asyncio
 from uuid import uuid4
 
 from app.db.classification_votes import claim_vote, finish_vote, prepare_vote_run
-from app.workers import persist_with_retry
+from app.persistence import persist_with_retry
 from collector.classification.page import PageClassificationError
 from collector.diagnostics import PersistenceFailure, PipelineFailure, voter_diagnostics
+from collector.execution import check_execution_active, wait_for_future
 
 
 class PostgresVoteStore:
@@ -20,11 +21,18 @@ class PostgresVoteStore:
             "expected_updated_at": expected_updated_at,
         }
 
-    def _wait(self, operation):
+    def _wait(self, operation, *, finalizing=False):
+        check_execution_active()
+        coroutine = persist_with_retry(
+            operation, retry_storage_failures=True, retry_unexpected=finalizing,
+        )
         try:
-            return asyncio.run_coroutine_threadsafe(
-                persist_with_retry(operation), self.loop
-            ).result()
+            try:
+                future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+            except BaseException:
+                coroutine.close()
+                raise
+            return wait_for_future(future)
         except (PageClassificationError, PersistenceFailure):
             raise
         except Exception as exception:
@@ -37,6 +45,7 @@ class PostgresVoteStore:
         if vote["status"] == "succeeded":
             return vote["response"]
         try:
+            check_execution_active()
             response = invoke()
         except Exception as exception:
             diagnostics = voter_diagnostics(exception, voter_id, vote["cycle_attempts"])
@@ -51,7 +60,7 @@ class PostgresVoteStore:
                     error=error,
                     errors=[item.to_dict() for item in diagnostics],
                     **self.scope,
-                )
+                ), finalizing=True,
             )
             raise
         self._wait(
@@ -61,6 +70,6 @@ class PostgresVoteStore:
                 vote["attempt_token"],
                 response=response,
                 **self.scope,
-            )
+            ), finalizing=True,
         )
         return response

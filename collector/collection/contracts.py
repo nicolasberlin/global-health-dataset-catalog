@@ -8,12 +8,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from collector.collection.records import NormalizedRecord
 from collector.discovery.adapters.shared import DiscoveredPage
+from collector.storage.models import PageSnapshot
 
 
 def public_url(value: str) -> str:
     """Diagnostic URLs retain public identifiers, never session/access credentials."""
     parsed = urlsplit(value)
     host = parsed.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
     if parsed.port:
         host += f":{parsed.port}"
     keep = {"persistentid", "fileid", "version", "format", "id"}
@@ -40,6 +43,7 @@ class MethodAttempt:
     metadata_code: str = ""
     metadata_http_status: int | None = None
     checks: list[dict] = field(default_factory=list)
+    request_attempts: int | None = None
 
 
 @dataclass
@@ -53,3 +57,4 @@ class StrategyResult:
     record: NormalizedRecord | None = None
     metadata_code: str = ""
     metadata_http_status: int | None = None
+    snapshot: PageSnapshot | None = None

@@ -7,15 +7,18 @@ from urllib.error import HTTPError, URLError
 import pytest
 from app.routes.collector_presenters import public_collection_job
 from app.search_outcomes import summarize_search
+from helpers.classification import distribution as _distribution
+from helpers.classification import page as _page
+from helpers.collection import Accept, collect
+from helpers.workflows import collection_job as _collection_job
 
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.classification.page import PageClassification, PageClassificationError
+from collector.classification.page import PageClassificationError
 from collector.classification.page_llm_classifier import LLMPageClassifier
 from collector.diagnostics import Diagnostic, PersistenceFailure, public_diagnostics, retry_after
 from collector.discovery.adapters import DiscoveredPage
 from collector.fetch import FetchedPage, PageFetchError
 from collector.main import collect_source_with_report
-from collector.storage.models import DistributionCandidate, ValidationResult
 
 SEARCH = {"status": "completed", "origin": "online", "discovery_complete": True}
 
@@ -187,38 +190,8 @@ def test_persistence_failure_is_not_wrapped_as_a_model_failure():
         def classify_page(self, payload):
             raise PersistenceFailure("SQL private-secret")
 
-    from test_llm_page_classifier import _distribution, _page
-
     with pytest.raises(PersistenceFailure):
         LLMPageClassifier(FailingStore()).classify(_page(), [_distribution()])
-
-
-class Accept:
-    def classify(self, page, distributions):
-        return PageClassification(accepted=True)
-
-
-def collect(validations):
-    links = tuple(
-        DistributionCandidate(f"https://example.org/{i}.csv", "CSV", 0.9)
-        for i in range(len(validations))
-    )
-    results = iter(validations)
-
-    def validate(item):
-        status = next(results)
-        return ValidationResult(
-            item.url, item.url, "CSV", status == "available", 200, status=status
-        )
-
-    return collect_source_with_report(
-        "https://example.org",
-        classifier=Accept(),
-        discover=lambda _: [
-            DiscoveredPage("https://example.org/dataset", "test", distributions=links)
-        ],
-        validate=validate,
-    )
 
 
 @pytest.mark.parametrize(
@@ -253,8 +226,6 @@ def test_captcha_landing_page_cannot_become_empty():
 
 
 def test_historical_zero_saved_is_incomplete_and_legacy_contract_survives():
-    from test_collector_routes import _collection_job
-
     job = public_collection_job(_collection_job(status="done"))
     assert job.status == "done" and job.saved_count == 0
     assert job.outcome == "incomplete"

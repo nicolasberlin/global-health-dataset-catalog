@@ -12,6 +12,8 @@ from app.db import schema as db_schema
 from app.db import serialization as db_serialization
 from app.db.repository_candidates import _complete_candidate_classification
 from fastapi import FastAPI
+from helpers.collection import mortality_dataset as _mortality_dataset
+from helpers.workflows import start_candidate as _start_candidate
 from httpx import ASGITransport, AsyncClient
 from psycopg import sql as pg_sql
 
@@ -43,18 +45,16 @@ SCHEMA_TABLES = (
     "collection_job_candidates",
     "classification_runs",
     "classification_votes",
+    "classification_vote_attempts",
     "api_commands",
+    "worker_claims",
+    "application_ownership",
     "search_local_results",
+    "collection_method_attempts",
+    "collection_resource_checks",
 )
 
 TEST_OWNER_ID = "test-user"
-
-
-async def _start_candidate(database, candidate_id, owner_id, *, retry=False):
-    queued = await database.enqueue_candidate_classification(candidate_id, owner_id, retry=retry)
-    if queued is None:
-        return None
-    return await database.claim_candidate_classification()
 
 
 async def _schema_version(database) -> int:
@@ -286,40 +286,29 @@ async def test_job_http_access_and_public_view_use_real_owner_associations(datab
     assert stored["error"] == private_error
 
 
-async def test_job_access_migration_preserves_data_and_only_backfills_known_owners(database):
+async def test_reinitialization_preserves_jobs_and_owner_associations(database):
     await database.init_database()
     _, first = await _create_repository_candidate(database, owner_id="alice")
-    await _create_repository_candidate(database, owner_id="bob")
+    _, second = await _create_repository_candidate(database, owner_id="bob")
     await _accept_repository_candidate(database, first["id"], "alice")
+    await _accept_repository_candidate(database, second["id"], "bob")
     reservation = await database.reserve_repository_candidate_collection_job(first["id"], "alice")
     job_id = int(reservation.job["id"])
-    from schema_helpers import restore_schema_seven
+    original = await database.get_collection_job(job_id)
 
-    await restore_schema_seven()
-    # Reproduce the previous schema, whose only durable association was the origin candidate.
-    await _execute(database, "DROP TABLE collection_job_candidates")
-    await _execute(database, """ALTER TABLE collected_datasets
-        DROP COLUMN date_of_publication, DROP COLUMN sharing_license,
-        DROP COLUMN doi, DROP COLUMN metadata_provenance""")
-    await _execute(database, """ALTER TABLE collected_distributions
-        DROP COLUMN validation_status, DROP COLUMN validation_reason""")
-    await _execute(database, "ALTER TABLE collection_jobs DROP COLUMN validation_failures")
-    await _execute(database, "DROP TABLE classification_votes, classification_runs")
-    await _execute(database,
-                   "ALTER TABLE repository_candidates DROP COLUMN classification_progress")
-    await _execute(database, """ALTER TABLE collection_jobs DROP COLUMN classification_progress,
-        DROP COLUMN classification_root_id""")
-    await _execute(database, "ALTER TABLE search_sessions DROP COLUMN errors, "
-                   "DROP COLUMN local_result_count, DROP COLUMN discovery_complete")
-    await _execute(database, "ALTER TABLE repository_candidates DROP COLUMN errors")
-    await _execute(database, "ALTER TABLE collection_jobs DROP COLUMN errors, DROP COLUMN outcome")
-    await _execute(database, "DELETE FROM schema_migrations WHERE version >= 2")
     await database.init_database()
     await database.init_database()
-    assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
+
+    assert await database.get_collection_job(job_id) == original
     assert (await database.get_collection_job_for_owner(job_id, "alice"))["status"] == "pending"
     assert await database.get_collection_job_for_owner(job_id, "bob") is None
     assert len(await _fetchall(database, "SELECT * FROM collection_jobs")) == 1
+    assert len(await _fetchall(database, "SELECT * FROM repository_candidates")) == 2
+    links = await _fetchall(database, "SELECT job_id, candidate_id FROM collection_job_candidates")
+    assert [(row["job_id"], str(row["candidate_id"])) for row in links] == [
+        (job_id, str(first["id"])),
+    ]
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
 
 
 async def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
@@ -504,42 +493,7 @@ async def test_current_schema_rejects_obsolete_collected_dataset_columns(monkeyp
     assert "dataset_probability, health_label" in str(error.value)
 
 
-def _mortality_dataset() -> CollectedDataset:
-    return CollectedDataset(
-        dataset_url="https://catalog.example.org/dataset/mortality",
-        title="Mortality health dataset",
-        description="Official mortality health data.",
-        publisher="National Health Agency",
-        hosting_platform="",
-        uploader="",
-        geography=("France",),
-        dataset_signals={"schema_dataset": True},
-        distributions=[
-            DistributionCandidate(
-                url="https://catalog.example.org/files/mortality.csv",
-                format="CSV",
-                probability=0.95,
-                anchor="CSV download",
-                mime_type="text/csv",
-                signals={"ckan_resource": True},
-            )
-        ],
-        discovery_method="ckan",
-        validation_results=[
-            ValidationResult(
-                url="https://catalog.example.org/files/mortality.csv",
-                final_url="https://catalog.example.org/files/mortality.csv",
-                format="CSV",
-                ok=True,
-                http_status=200,
-                mime_type="text/csv",
-                size_bytes=123,
-            )
-        ],
-    )
-
-
-async def test_init_database_preserves_legacy_sources_without_seeding(database):
+async def test_reinitialization_preserves_sources_without_seeding(database):
     await database.init_database()
     assert await _fetchall(database, "SELECT * FROM data_sources") == []
     await _execute(database, """
@@ -556,8 +510,9 @@ async def test_init_database_preserves_legacy_sources_without_seeding(database):
 async def test_init_database_creates_current_schema_with_integrity(database):
     await database.init_database()
 
-    assert await _schema_version(database) == db_schema.CURRENT_SCHEMA_VERSION
-    assert set(SCHEMA_TABLES).issubset(await _table_names(database))
+    assert db_schema.CURRENT_SCHEMA_VERSION == 1
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+    assert set(SCHEMA_TABLES) == await _table_names(database)
     indexes = await _fetchall(
         database,
         """
@@ -733,56 +688,36 @@ async def test_init_database_rejects_missing_repository_persistence_index(databa
 
 
 async def test_init_database_rejects_current_version_with_obsolete_columns(database):
-    async with db_connection._require_database_pool().connection() as connection:
-        await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
-        for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
-            await connection.execute(schema)
-        for version in range(1, db_schema.CURRENT_SCHEMA_VERSION):
-            await db_schema._migration_for_version(version)(connection)
-        await connection.execute(
-            """
-            ALTER TABLE collected_datasets
-            ADD COLUMN dataset_probability DOUBLE PRECISION NOT NULL DEFAULT 0
-            """
-        )
-        await db_schema._set_schema_version(
-            connection,
-            db_schema.CURRENT_SCHEMA_VERSION,
-        )
+    await database.init_database()
+    dataset_id = await _insert_minimal_dataset(database, "-obsolete-column")
+    await _execute(database, """
+        ALTER TABLE collected_datasets
+        ADD COLUMN dataset_probability DOUBLE PRECISION NOT NULL DEFAULT 0
+    """)
 
     with pytest.raises(RuntimeError, match="Recreate the local database") as error:
         await database.init_database()
 
     assert "dataset_probability" in str(error.value)
-    assert "collected_datasets" in await _table_names(database)
+    assert await _fetchall(database, "SELECT id FROM collected_datasets") == [{"id": dataset_id}]
 
 
-async def test_init_database_does_not_overwrite_existing_legacy_sources(
-    database,
-):
-    async with db_connection._require_database_pool().connection() as connection:
-        await connection.execute(db_schema.SCHEMA_MIGRATIONS_SCHEMA)
-        for schema in db_schema.INITIAL_SCHEMA_STATEMENTS:
-            await connection.execute(schema)
-        for version in range(1, db_schema.CURRENT_SCHEMA_VERSION):
-            await db_schema._migration_for_version(version)(connection)
-        await connection.execute(
-            """
-            INSERT INTO data_sources (source_key, name, description, theme, page_url)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (
-                "who_gho_life_expectancy",
-                "Custom life expectancy source",
-                "Already at current schema.",
-                "Custom",
-                "https://example.org/current-collision",
-            ),
-        )
-        await db_schema._set_schema_version(
-            connection,
-            db_schema.CURRENT_SCHEMA_VERSION,
-        )
+async def test_reinitialization_does_not_overwrite_existing_sources(database):
+    await database.init_database()
+    await _execute(
+        database,
+        """
+        INSERT INTO data_sources (source_key, name, description, theme, page_url)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (
+            "who_gho_life_expectancy",
+            "Custom life expectancy source",
+            "Already at current schema.",
+            "Custom",
+            "https://example.org/current-collision",
+        ),
+    )
 
     await database.init_database()
 
@@ -795,8 +730,96 @@ async def test_init_database_does_not_overwrite_existing_legacy_sources(
         """,
         ("who_gho_life_expectancy",),
     )
-    assert rows[0]["name"] == "Custom life expectancy source"
-    assert rows[0]["page_url"] == "https://example.org/current-collision"
+    assert rows == [{
+        "name": "Custom life expectancy source",
+        "page_url": "https://example.org/current-collision",
+    }]
+
+
+@pytest.mark.parametrize("unsupported_version", [2, 15, 99])
+async def test_init_database_rejects_unsupported_versions_without_data_loss(
+    database, unsupported_version,
+):
+    await database.init_database()
+    dataset_id = await _insert_minimal_dataset(database, "-unsupported-version")
+    await _execute(
+        database, "INSERT INTO schema_migrations (version) VALUES (%s)", (unsupported_version,),
+    )
+    original_tables = await _table_names(database)
+
+    with pytest.raises(RuntimeError, match="newer than supported"):
+        await database.init_database()
+
+    assert await _table_names(database) == original_tables
+    assert await _fetchall(database, "SELECT id FROM collected_datasets") == [{"id": dataset_id}]
+    assert await _schema_version(database) == unsupported_version
+
+
+async def test_failed_initialization_rolls_back_schema_and_allows_retry(database, monkeypatch):
+    migration = db_schema._migration_for_version(0)
+
+    async def fail_after_creating_schema(connection):
+        await migration(connection)
+        await connection.execute("""
+            INSERT INTO collected_datasets (dataset_url, title)
+            VALUES ('https://example.org/rolled-back', 'Incomplete initialization')
+        """)
+        raise RuntimeError("Initialization interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            db_schema, "_migration_for_version", lambda version: fail_after_creating_schema,
+        )
+        with pytest.raises(RuntimeError, match="Initialization interrupted"):
+            await database.init_database()
+
+    assert await _table_names(database) == set()
+    assert await _schema_version(database) == 0
+    with pytest.raises(RuntimeError, match="Run init_database"):
+        await database.list_collected_datasets()
+
+    await database.init_database()
+    assert set(SCHEMA_TABLES) == await _table_names(database)
+    assert await database.list_collected_datasets() == []
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+
+
+async def test_concurrent_fresh_initialization_creates_one_complete_baseline(database):
+    await asyncio.wait_for(
+        asyncio.gather(database.init_database(), database.init_database()), timeout=10,
+    )
+
+    assert set(SCHEMA_TABLES) == await _table_names(database)
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+    await _assert_schema_constraints_are_enforced(database, "-concurrent")
+
+
+async def test_validate_database_schema_does_not_initialize_an_empty_database(database):
+    with pytest.raises(RuntimeError, match="explicit migration"):
+        await database.validate_database_schema()
+
+    assert await _table_names(database) == set()
+    with pytest.raises(RuntimeError, match="Run init_database"):
+        await database.list_collected_datasets()
+
+
+async def test_validate_database_schema_only_reads_and_preserves_data(database, monkeypatch):
+    await database.init_database()
+    dataset_id = await _insert_minimal_dataset(database, "-check-only")
+    await database.close_database_pool()
+    await database.open_database_pool()
+    original_execute = psycopg.AsyncConnection.execute
+
+    async def read_only_execute(connection, query, parameters=None, **kwargs):
+        assert isinstance(query, str) and query.lstrip().upper().startswith("SELECT"), query
+        return await original_execute(connection, query, parameters, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg.AsyncConnection, "execute", read_only_execute)
+        await database.validate_database_schema()
+
+    assert (await database.list_collected_datasets())[0].database_id == dataset_id
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
 
 
 async def test_business_operations_do_not_apply_schema_migrations(database):

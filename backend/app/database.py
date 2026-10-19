@@ -38,7 +38,7 @@ from .db.repository_candidates import (
     mark_interrupted_candidate_classifications_error,
     save_repository_candidates,
 )
-from .db.schema import init_database
+from .db.schema import init_database, validate_database_schema
 from .db.search_sessions import (
     complete_search_session,
     create_search_session,
@@ -67,6 +67,7 @@ __all__ = (
     "get_collection_job_for_owner",
     "get_repository_candidate",
     "init_database",
+    "validate_database_schema",
     "get_collected_datasets",
     "list_collected_datasets",
     "list_dataset_discovery_observations",

@@ -38,6 +38,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        self.do_GET()
     def log_message(self, *args):
         pass
 ThreadingHTTPServer.request_queue_size = 128
@@ -78,6 +81,10 @@ def configuration():
                     'average': int(labels[prefix + 'ratelimit.average']),
                     'period': labels[prefix + 'ratelimit.period'],
                     'burst': int(labels[prefix + 'ratelimit.burst']),
+                }}
+            elif prefix + 'buffering.maxrequestbodybytes' in labels:
+                http['middlewares'][middleware] = {'buffering': {
+                    'maxRequestBodyBytes': int(labels[prefix + 'buffering.maxrequestbodybytes']),
                 }}
             else:
                 http['middlewares'][middleware] = {'stripPrefix': {
@@ -137,6 +144,20 @@ def proxy(tmp_path, request):
         for container in (gateway, origin):
             subprocess.run(['docker', 'rm', '-f', container], capture_output=True)
         docker('network', 'rm', name)
+
+
+@pytest.mark.anyio
+async def test_request_body_limit_rejects_before_upstream(proxy):
+    limit = configuration()['http']['middlewares']['body-ai-commons-api'][
+        'buffering']['maxRequestBodyBytes']
+    async with httpx.AsyncClient(base_url=proxy, headers={'Host': 'test.invalid'}) as client:
+        before = (await client.get('/stats')).json()['count']
+        accepted = await client.post('/ai-commons/api/search', content=b'x' * limit)
+        assert accepted.status_code == 200
+        rejected = await client.post('/ai-commons/api/search', content=b'x' * (limit + 1))
+        assert rejected.status_code == 413
+        assert 'x-test-origin' not in rejected.headers
+        assert (await client.get('/stats')).json()['count'] - before == 1
 
 
 @pytest.mark.anyio

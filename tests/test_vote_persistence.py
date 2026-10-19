@@ -9,44 +9,24 @@ import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from functools import partial
 
 import pytest
-from app import classification_worker, collection_worker
 from app.db import classification_votes as votes
 from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.connection import _fetchall, _require_database_pool
 from app.vote_store import PostgresVoteStore
-from test_classifier_factory import KEY_VARIABLES, KEYS, MODELS, PAGE, _response
-from test_collection_workflow import candidate_for, decision, wait_until
+from app.workers import classification as classification_worker
+from app.workers import collection as collection_worker
+from helpers.classification import KEYS, MODELS, PAGE
+from helpers.classification import response as _response
+from helpers.workflows import candidate_for, decision, rows, wait_until
 
 from collector.classification import factory
-from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.page import PageClassificationError
 from collector.diagnostics import PersistenceFailure
 from collector.storage.models import CollectionReport, CollectionResult
 
 pytestmark = pytest.mark.anyio
-
-
-@pytest.fixture
-def transport(monkeypatch):
-    for name, key in zip(KEY_VARIABLES, KEYS):
-        monkeypatch.setenv(name, key)
-    for _, variable, _, _ in factory._DEFAULT_VOTERS:
-        monkeypatch.delenv(variable, raising=False)
-
-    def install(request):
-        monkeypatch.setattr(
-            factory, "HTTPJSONLLMClient", partial(HTTPJSONLLMClient, request=request)
-        )
-
-    return install
-
-
-async def rows(query):
-    async with _require_database_pool().connection() as connection:
-        return await _fetchall(connection, query)
 
 
 async def scope_for(database, kind):
@@ -124,7 +104,8 @@ async def test_retry_only_failed_model_preserves_negative_votes(
     if kind == "repository":
         exported = await votes.read_candidate_vote_history(scope["candidate_id"], "alice")
         assert len(exported["attempts"]) == 4
-        assert next(a for a in exported["attempts"] if a["status"] == "error")["error"]
+        failed = next(a for a in exported["attempts"] if a["status"] == "error")
+        assert failed["errors"] and "error" not in failed
         assert await votes.read_candidate_vote_history(scope["candidate_id"], "bob") is None
 
 
@@ -196,29 +177,35 @@ async def test_restart_and_attempt_tokens_preserve_successes(database):
     assert new["attempts"] == 2
 
 
-async def test_schema_thirteen_preserves_latest_legacy_error_without_inventing_attempts(database):
+@pytest.mark.parametrize("kind", ["repository", "page"])
+async def test_parent_recovery_prevents_late_vote_claim_and_finish_before_vote_cleanup(
+    database, kind,
+):
     await database.init_database()
-    scope = await scope_for(database, "page")
-    run = await votes.prepare_vote_run(
-        {"configuration": [{"voter_id": "a", "body": {"model": "test-model"}}]}, **scope
-    )
-    vote = await votes.claim_vote(run, "a", **scope)
-    await votes.finish_vote(
-        run, "a", vote["attempt_token"], error="Invalid dataset_signals keys.", **scope
-    )
+    scope = await scope_for(database, kind)
+    table = "repository_candidates" if kind == "repository" else "collection_jobs"
+    scope_id = scope.get("candidate_id", scope.get("job_id"))
     async with _require_database_pool().connection() as connection:
-        await connection.execute("DROP TABLE classification_vote_attempts")
-        await connection.execute("ALTER TABLE collected_datasets DROP COLUMN record_identity")
-        await connection.execute("DELETE FROM schema_migrations WHERE version >= 13")
-    await database.init_database()
-    await database.init_database()
-    history = await rows("SELECT * FROM classification_vote_attempts")
-    assert len(history) == 1
-    assert history[0]["error"] == "Invalid dataset_signals keys."
-    assert history[0]["model"] == "test-model"
-    assert history[0]["evidence"] == "legacy_snapshot"
-    assert history[0]["started_at"] is None
-    assert history[0]["status"] == "error"
+        current = (await _fetchall(
+            connection, f"SELECT updated_at FROM {table} WHERE id = %s", (scope_id,),
+        ))[0]
+    scope["expected_updated_at"] = current["updated_at"]
+    snapshot = {"configuration": [{"voter_id": "a"}, {"voter_id": "b"}], "payload": {}}
+    run = await votes.prepare_vote_run(snapshot, **scope)
+    old = await votes.claim_vote(run, "a", **scope)
+    if kind == "repository":
+        await database.mark_interrupted_candidate_classifications_error()
+    else:
+        await database.mark_interrupted_collection_jobs_error()
+    with pytest.raises(PersistenceFailure, match="no longer running"):
+        await votes.claim_vote(run, "b", **scope)
+    with pytest.raises(PersistenceFailure, match="no longer running"):
+        await votes.finish_vote(
+            run, "a", old["attempt_token"], response={"accepted": True}, **scope,
+        )
+    await votes.mark_interrupted_votes_error()
+    saved = await rows("SELECT status, response FROM classification_votes ORDER BY voter_id")
+    assert saved == [{"status": "error", "response": None}, {"status": "pending", "response": None}]
 
 
 @pytest.mark.parametrize("change", ["input", "model", "prompt"])
@@ -297,10 +284,12 @@ async def test_finalization_retry_reuses_all_votes(database, transport, monkeypa
     assert len(await rows("SELECT id FROM collection_jobs")) == 1
 
 
+@pytest.mark.parametrize("failure", ["timeout", "invalid_signals"])
 async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
     database,
     transport,
     monkeypatch,
+    failure,
 ):
     monkeypatch.setenv("LLM_MAX_ATTEMPTS", "1")
     monkeypatch.setenv("LLM_INVALID_MAX_ATTEMPTS", "1")
@@ -316,7 +305,11 @@ async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
         model = json.loads(req.data)["model"]
         calls[model] += 1
         if model == MODELS[2] and calls[model] == 1:
-            raise TimeoutError()
+            if failure == "timeout":
+                raise TimeoutError()
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps({
+                "accepted": True, "dataset_signals": {"reason": "dataset"},
+            })}}]}).encode())
         return _response("page", True)
 
     def collect(url, *, classifier, **options):
@@ -346,8 +339,8 @@ async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
 
 
 async def test_collection_retry_route_enforces_owner_and_quota(database, monkeypatch):
+    from app.auth.security import APIPrincipal
     from app.routes.collector import retry_collection_job
-    from app.security import APIPrincipal
     from fastapi import HTTPException
 
     await database.init_database()

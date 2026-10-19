@@ -14,6 +14,12 @@ from collector.storage.models import DistributionCandidate
 from collector.url_utils import normalize_http_url
 
 RECORD_PATH = re.compile(r"^/records?/([1-9][0-9]*)(?:/files/(.+))?/?$")
+DOI_PATH = re.compile(r"^/doi/10\.5281/zenodo\.([1-9][0-9]*)(/)?$", re.I)
+
+
+def reference_match(url: str):
+    path = urlsplit(url).path
+    return RECORD_PATH.fullmatch(path) or DOI_PATH.fullmatch(path.rstrip("/"))
 
 
 class ZenodoConnector:
@@ -28,7 +34,7 @@ class ZenodoConnector:
 
     def api_url(self, url: str) -> str | None:
         origin = repository_origin(url, self.hosts)
-        match = RECORD_PATH.fullmatch(urlsplit(url).path) if origin else None
+        match = reference_match(url) if origin else None
         if match is None:
             return None
         if "version" in parse_qs(urlsplit(url).query, keep_blank_values=True):
@@ -39,9 +45,15 @@ class ZenodoConnector:
         api_url = self.api_url(url)
         if api_url is None or not isinstance(payload, dict):
             raise ValueError("Invalid Zenodo response")
-        match = RECORD_PATH.fullmatch(urlsplit(url).path)
+        match = reference_match(url)
         identifier = positive_id(payload.get("id"))
-        if not identifier or identifier != match[1]:
+        is_doi = urlsplit(url).path.lower().startswith("/doi/")
+        requested_doi = f"10.5281/zenodo.{match[1]}" if is_doi else ""
+        concept_matches = (
+            is_doi and positive_id(payload.get("conceptrecid")) == match[1]
+            and normalize_doi(payload.get("conceptdoi")) == requested_doi
+        )
+        if not identifier or (identifier != match[1] and not concept_matches):
             raise ValueError("Zenodo record identity mismatch")
         metadata = payload.get("metadata")
         if not isinstance(metadata, dict) or not text(metadata.get("title")):
@@ -81,6 +93,8 @@ class ZenodoConnector:
             raise ValueError("Requested Zenodo file is missing")
         origin = f"https://{urlsplit(url).hostname}"
         doi = normalize_doi(payload.get("doi") or metadata.get("doi"))
+        if is_doi and doi != requested_doi and not concept_matches:
+            raise ValueError("Zenodo DOI identity mismatch")
         license_info = metadata.get("license")
         license_name = text(license_info.get("id")) if isinstance(license_info, dict) else text(
             license_info
@@ -107,7 +121,7 @@ class ZenodoConnector:
         self, url: str, resources: list[DistributionCandidate],
         known_record: NormalizedRecord | None = None,
     ) -> list[DistributionCandidate]:
-        match = RECORD_PATH.fullmatch(urlsplit(url).path)
+        match = reference_match(url)
         if match is None or not match[2]:
             return resources
         filename = unquote(match[2].rstrip("/"))
@@ -134,11 +148,14 @@ class ZenodoConnector:
         if not self.supports(url):
             raise ValueError("Unsupported Zenodo reference")
         parsed = urlsplit(url)
-        match = RECORD_PATH.fullmatch(parsed.path)
+        match = reference_match(url)
         filename = unquote(match[2].rstrip("/")) if match[2] else ""
+        is_doi = parsed.path.lower().startswith("/doi/")
+        native_id = f"{match[1]}/files/{filename}" if filename else match[1]
         return RecordIdentity(
             platform=self.name, repository_origin=f"https://{parsed.hostname}",
             kind="file" if filename else "dataset",
-            native_id=f"{match[1]}/files/{filename}" if filename else match[1],
+            native_id="" if is_doi else native_id,
+            persistent_id=f"10.5281/zenodo.{match[1]}" if is_doi else "",
         )
 

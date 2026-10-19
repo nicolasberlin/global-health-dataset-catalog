@@ -1,4 +1,4 @@
-import { searchApi } from './test/searchApi.js';
+import { searchApi, snapshot } from './test/searchApi.js';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -31,6 +31,27 @@ function deferred() {
     const promise = new Promise(done => { resolve = done; });
     return { promise, resolve };
 }
+
+it('manual restore retrieves external candidates after a newer local search', async () => {
+    const local = snapshot({ search_id: 'local-search', query: 'tuberculosis',
+        origin: 'database', items: [], local_dataset_ids: [] });
+    const external = snapshot({ ...analysis([candidate('external', 'pending')]), query: 'tuberculosis' });
+    api(url => {
+        if (url.endsWith('/searches/latest?with_candidates=true')) return response(external);
+        if (url.endsWith('/searches/latest') || url.endsWith('/searches/local-search/progress')) return response(local);
+        if (url.endsWith('/searches/search-a/progress')) return response(external);
+        throw new Error(`Unexpected request ${url}`);
+    });
+    render(<App />);
+    await advance(50);
+    expect(screen.getByText('Results found in the local catalog')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore last analysis' }));
+    await advance(50);
+    expect(screen.getByText('Dataset external')).toBeVisible();
+    expect(screen.queryByText('Results found in the local catalog')).not.toBeInTheDocument();
+    expect(calls('/searches/latest?with_candidates=true')).toHaveLength(1);
+    expect(global.fetch.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0);
+});
 
 beforeEach(() => {
     vi.useFakeTimers();
@@ -168,7 +189,7 @@ it('leaves the interface usable when restoring interrupts a search and no analys
     const late = deferred();
     let searchSignal;
     api((url, options) => {
-        if (url.endsWith('/searches/latest')) return response({ detail: 'No previous analysis.' }, 404);
+        if (url.includes('/searches/latest')) return response({ detail: 'No previous analysis.' }, 404);
         if (url.endsWith('/searches')) { searchSignal = options.signal; return late.promise; }
         throw new Error(`Unexpected request ${url}`);
     });

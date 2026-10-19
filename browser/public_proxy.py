@@ -59,7 +59,7 @@ class PublicProxy(BaseHTTPRequestHandler):
             self.send_response(200, "Connection established")
             self.end_headers()
             sockets = [self.connection, upstream]
-            deadline = monotonic() + 180
+            deadline = monotonic() + 300
             remaining = 16 * 1024 * 1024
             while remaining > 0 and monotonic() < deadline:
                 ready, _, _ = select.select(sockets, [], [], min(10, deadline - monotonic()))

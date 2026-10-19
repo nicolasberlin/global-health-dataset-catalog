@@ -18,6 +18,7 @@ from collector.discovery.adapters.shared import (
     _publication_date_from_mapping,
     _text,
     _value_text,
+    document_url,
     fetch_json_url,
 )
 from collector.extraction.distributions import guess_format
@@ -47,13 +48,13 @@ class CKANAdapter:
         return data.get("success") is True and isinstance(data.get("result"), dict)
 
     def discover(self, source_url: str) -> list[DiscoveredPage]:
-        data = self._fetch_json(
-            _ckan_action_url(
-                source_url,
-                "package_search",
-                _ckan_search_params(source_url, self._rows),
-            )
+        requested_url = _ckan_action_url(
+            source_url,
+            "package_search",
+            _ckan_search_params(source_url, self._rows),
         )
+        data = self._fetch_json(requested_url)
+        metadata_source_url = document_url(data, requested_url)
         result = data.get("result")
         if data.get("success") is not True or not isinstance(result, dict):
             return []
@@ -95,6 +96,7 @@ class CKANAdapter:
                     ),
                     modality_of_data=_modalities_from_distributions(distributions),
                     distributions=distributions,
+                    metadata_source_url=metadata_source_url,
                     discovery_metadata={
                         "ckan_id": _text(package.get("id")),
                         "ckan_name": _text(package.get("name")),

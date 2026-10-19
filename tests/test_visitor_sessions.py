@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Annotated
 
 import pytest
-from app.routes.collector import router as collector_router
-from app.routes.sessions import router as sessions_router
-from app.security import APIPrincipal, require_api_principal, validate_api_security_configuration
-from app.visitor_sessions import (
+from app.auth.security import (
+    APIPrincipal,
+    require_api_principal,
+    validate_api_security_configuration,
+)
+from app.auth.sessions import (
     HTTP_SESSION_COOKIE_NAME,
     SESSION_COOKIE_NAME,
     SESSION_MAX_AGE_SECONDS,
@@ -15,6 +17,8 @@ from app.visitor_sessions import (
     visitor_owner_id,
     visitor_session_settings,
 )
+from app.routes.collector import router as collector_router
+from app.routes.sessions import router as sessions_router
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 from itsdangerous import TimestampSigner
@@ -193,7 +197,7 @@ async def test_cookie_owner_is_passed_to_existing_collector_access_checks(public
         return {"id": job_id, "source_url": "https://example.org/data", "status": "done",
                 "saved_count": 0}
 
-    monkeypatch.setattr("app.routes.collector.get_collection_job_for_owner", read_job)
+    monkeypatch.setattr("app.routes.collection_jobs.get_collection_job_for_owner", read_job)
     async with browser(public_api) as client:
         await bootstrap(client)
         owner = (await client.get("/identity")).json()["owner_id"]

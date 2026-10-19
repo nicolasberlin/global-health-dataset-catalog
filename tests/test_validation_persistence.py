@@ -154,41 +154,6 @@ async def test_access_diagnosis_survives_storage_and_public_conversion(
     assert failure["ok"] is False
 
 
-async def test_version_four_upgrade_preserves_existing_validation(database):
-    await database.init_database()
-    validation = ValidationResult(URL, URL, "CSV", True, 200, size_bytes=123)
-    await database.save_collected_datasets(URL, [dataset(validation)])
-    from schema_helpers import restore_schema_seven
-
-    await restore_schema_seven()
-    async with _require_database_pool().connection() as connection:
-        await connection.execute("""
-            ALTER TABLE collected_distributions
-                DROP COLUMN validation_status, DROP COLUMN validation_reason,
-                ALTER COLUMN validation_size_bytes TYPE INTEGER;
-            ALTER TABLE collection_jobs DROP COLUMN validation_failures;
-            DROP TABLE classification_votes, classification_runs;
-            ALTER TABLE repository_candidates DROP COLUMN classification_progress;
-            ALTER TABLE collection_jobs DROP COLUMN classification_progress,
-                DROP COLUMN classification_root_id;
-            ALTER TABLE search_sessions DROP COLUMN errors,
-                DROP COLUMN local_result_count, DROP COLUMN discovery_complete;
-            ALTER TABLE repository_candidates DROP COLUMN errors;
-            ALTER TABLE collection_jobs DROP COLUMN errors, DROP COLUMN outcome;
-            DELETE FROM schema_migrations WHERE version >= 5;
-        """)
-    await database.init_database()
-    await database.init_database()
-    stored = (await database.list_collected_datasets())[0].validation_results[0]
-    assert stored.status == "available"
-    assert stored.size_bytes == 123
-    await database.save_collected_datasets(
-        URL, [dataset(replace(validation, size_bytes=4_200_000_000))],
-    )
-    stored = (await database.list_collected_datasets())[0].validation_results[0]
-    assert stored.size_bytes == 4_200_000_000
-
-
 async def test_search_commits_classification_queue_without_browser_submission(database):
     await database.init_database()
     search = await database.create_search_session("health", "alice")

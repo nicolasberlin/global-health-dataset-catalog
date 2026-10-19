@@ -8,31 +8,13 @@ import threading
 from functools import partial
 
 import pytest
+from helpers.classification import KEY_VARIABLES, KEYS, MODEL_VARIABLES, MODELS, PAGE
+from helpers.classification import response as _response
 
 from collector.classification import factory
 from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.page import PageClassificationError
 from collector.classification.providers.epfl_rcp import EPFL_RCP_CHAT_COMPLETIONS_URL
-from collector.storage.models import PageSnapshot
-
-MODELS = (
-    "deepseek-ai/DeepSeek-V4-Flash-0731",
-    "EPFLiGHT/Gemma-3-27B-MeditronFO",
-    "EPFLiGHT/Apertus-70B-MeditronFO",
-)
-MODEL_VARIABLES = (
-    "RCP_DEEPSEEK_MODEL", "RCP_GEMMA_MEDITRON_MODEL", "RCP_APERTUS_MEDITRON_MODEL"
-)
-KEY_VARIABLES = (
-    "RCP_DEEPSEEK_API_KEY", "RCP_GEMMA_MEDITRON_API_KEY", "RCP_APERTUS_MEDITRON_API_KEY"
-)
-KEYS = ("test-deepseek-key", "test-gemma-key", "test-apertus-key")
-PAGE = PageSnapshot(
-    url="https://example.org/dataset",
-    canonical_url="https://example.org/dataset",
-    title="Infant mortality by country",
-    search_query="infant mortality",
-)
 
 
 @pytest.fixture(autouse=True)
@@ -41,18 +23,6 @@ def configure_keys(monkeypatch):
         monkeypatch.setenv(variable, key)
     for variable in MODEL_VARIABLES:
         monkeypatch.delenv(variable, raising=False)
-
-
-def _response(kind, accepted):
-    decision = (
-        {"accepted": accepted, "dataset_signals": {"reason": "Test vote", "evidence": "Title"}}
-        if kind == "page"
-        else {"label": "relevant" if accepted else "not_relevant", "reason": "Test vote",
-              "missing_information": []}
-    )
-    return io.BytesIO(json.dumps({
-        "choices": [{"message": {"content": json.dumps(decision)}}]
-    }).encode())
 
 
 def _classify(kind):

@@ -1,0 +1,7 @@
+{
+  "case_id": "dataverse-file-response-shape",
+  "url": "https://dataverse.harvard.edu/file.xhtml?fileId=123",
+  "expected": "A limited /metadata response fails normalization; it must not be reported as a connection failure.",
+  "fixture": "metadata.json",
+  "fixture_kind": "synthetic minimized reproduction; not a historical HTTP response"
+}

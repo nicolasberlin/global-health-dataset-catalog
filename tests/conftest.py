@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import uuid
+from functools import partial
 from urllib.parse import quote
 
 import psycopg
 import pytest
+from app.routes.collector import router
+from fastapi import FastAPI
+from helpers.classification import KEY_VARIABLES, KEYS
+
+from collector.classification import factory
+from collector.classification.llm_client import HTTPJSONLLMClient
 
 
 @pytest.fixture
@@ -72,3 +80,35 @@ async def database(monkeypatch, test_database_url):
             connect_timeout=3,
         ) as connection:
             connection.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+
+
+@pytest.fixture
+def api(monkeypatch):
+    monkeypatch.setenv("API_AUTH_MODE", "token")
+    monkeypatch.setenv(
+        "API_ACCESS_TOKENS",
+        json.dumps(
+            {
+                owner: f"{owner}-test-token-with-at-least-thirty-two-characters"
+                for owner in ("alice", "bob")
+            }
+        ),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    return app
+
+
+@pytest.fixture
+def transport(monkeypatch):
+    for name, key in zip(KEY_VARIABLES, KEYS):
+        monkeypatch.setenv(name, key)
+    for _, variable, _, _ in factory._DEFAULT_VOTERS:
+        monkeypatch.delenv(variable, raising=False)
+
+    def install(request):
+        monkeypatch.setattr(
+            factory, "HTTPJSONLLMClient", partial(HTTPJSONLLMClient, request=request)
+        )
+
+    return install

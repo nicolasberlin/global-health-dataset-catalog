@@ -28,6 +28,17 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --workers
+      - "1"
+      - --root-path
+      - /ai-commons/api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-global_health}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting the application}@postgres:5432/${POSTGRES_DB:-global_health}
       RCP_DEEPSEEK_API_KEY: ${RCP_DEEPSEEK_API_KEY:?Set RCP_DEEPSEEK_API_KEY before starting the application}
@@ -48,15 +59,21 @@ services:
       API_SOURCE_CREATION_REQUESTS_PER_MINUTE: ${API_SOURCE_CREATION_REQUESTS_PER_MINUTE:-10}
       SEARCH_MAX_CONCURRENCY: ${SEARCH_MAX_CONCURRENCY:-1}
       SEARCH_MAX_ACTIVE: ${SEARCH_MAX_ACTIVE:-100}
+      API_MAX_REQUEST_BODY_BYTES: ${API_MAX_REQUEST_BODY_BYTES:-65536}
+      API_REQUEST_BODY_TIMEOUT_SECONDS: ${API_REQUEST_BODY_TIMEOUT_SECONDS:-30}
+      DATABASE_STATEMENT_TIMEOUT_MS: ${DATABASE_STATEMENT_TIMEOUT_MS:-30000}
+      DATABASE_LOCK_TIMEOUT_MS: ${DATABASE_LOCK_TIMEOUT_MS:-5000}
+      DATABASE_MIGRATE_ON_STARTUP: ${DATABASE_MIGRATE_ON_STARTUP:-true}
+      WORKER_SHUTDOWN_TIMEOUT_SECONDS: ${WORKER_SHUTDOWN_TIMEOUT_SECONDS:-10}
       API_CORS_ORIGINS: ${API_CORS_ORIGINS-http://localhost:5173,http://127.0.0.1:5173}
       CLASSIFICATION_MAX_CONCURRENCY: ${CLASSIFICATION_MAX_CONCURRENCY:-2}
       COLLECTION_MAX_CONCURRENCY: ${COLLECTION_MAX_CONCURRENCY:-2}
       COLLECTION_BROWSER_URL: ${COLLECTION_BROWSER_URL:-}
       COLLECTION_BROWSER_TOKEN: ${COLLECTION_BROWSER_TOKEN:-}
-      COLLECTION_DATAVERSE_HOSTS: ${COLLECTION_DATAVERSE_HOSTS:-dataverse.harvard.edu}
+      COLLECTION_DATAVERSE_HOSTS: ${COLLECTION_DATAVERSE_HOSTS:-dataverse.harvard.edu,dataverse.unc.edu}
       COLLECTION_ZENODO_HOSTS: ${COLLECTION_ZENODO_HOSTS:-zenodo.org}
       COLLECTION_BROWSER_HOSTS: ${COLLECTION_BROWSER_HOSTS:-dataverse.harvard.edu}
-      COLLECTION_MAX_DURATION_SECONDS: ${COLLECTION_MAX_DURATION_SECONDS:-180}
+      COLLECTION_MAX_DURATION_SECONDS: ${COLLECTION_MAX_DURATION_SECONDS:-300}
       LLM_MAX_ATTEMPTS: ${LLM_MAX_ATTEMPTS:-3}
       LLM_INVALID_MAX_ATTEMPTS: ${LLM_INVALID_MAX_ATTEMPTS:-2}
       LLM_RETRY_WINDOW_SECONDS: ${LLM_RETRY_WINDOW_SECONDS:-120}
@@ -71,6 +88,7 @@ services:
       - SETPCAP
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,7 +107,8 @@ services:
       - traefik.http.middlewares.limit-ai-commons-api.ratelimit.average=${TRAEFIK_API_RATE_AVERAGE:-200}
       - traefik.http.middlewares.limit-ai-commons-api.ratelimit.period=1s
       - traefik.http.middlewares.limit-ai-commons-api.ratelimit.burst=${TRAEFIK_API_RATE_BURST:-400}
-      - traefik.http.routers.ai-commons-api.middlewares=limit-ai-commons-api,strip-ai-commons-api
+      - traefik.http.middlewares.body-ai-commons-api.buffering.maxrequestbodybytes=${API_MAX_REQUEST_BODY_BYTES:-65536}
+      - traefik.http.routers.ai-commons-api.middlewares=limit-ai-commons-api,body-ai-commons-api,strip-ai-commons-api
       - traefik.http.services.ai-commons-api.loadbalancer.server.port=8001
 
 

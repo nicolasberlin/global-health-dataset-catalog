@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable
 from urllib.parse import urlencode
 
 from collector.discovery.adapters import fetch_json_url
 from collector.extraction.dataset_metadata import build_dataset_metadata
+from collector.extraction.errors import ExtractionError
 from collector.extraction.extractor import html_to_text
 from collector.repository_search.filtering import _http_url, _text
 from collector.repository_search.models import (
+    INVALID_METADATA_MESSAGE,
     MISSING_METADATA_VALUE,
     JsonFetcher,
+    RepositorySearchResponse,
     RepositorySearchResult,
+    RepositorySearchWarning,
 )
 
 # These vocabularies infer metadata fields only; relevance is decided later.
@@ -122,22 +127,37 @@ class DataCiteRepositorySearchProvider:
         self._fetch_json = fetch_json or fetch_json_url
         self._page_size = page_size
 
-    def search(self, query: str) -> list[RepositorySearchResult]:
+    def search(self, query: str) -> RepositorySearchResponse:
         data = self._fetch_json(self._search_url(query))
         items = data.get("data")
         if not isinstance(items, list):
             raise ValueError("Invalid DataCite response shape: expected data list.")
 
         results: list[RepositorySearchResult] = []
+        omitted = False
         for item in items:
             if not isinstance(item, dict):
+                omitted = True
                 continue
 
-            result = _datacite_result(item)
-            if result is not None:
-                results.append(result)
+            try:
+                result = _datacite_result(item)
+            except ExtractionError:
+                omitted = True
+                continue
+            if result is None:
+                omitted = True
+                continue
+            results.append(result)
 
-        return results
+        warnings = [
+            RepositorySearchWarning(
+                code="invalid_repository_metadata",
+                message=INVALID_METADATA_MESSAGE,
+                provider=self.name,
+            )
+        ] if omitted else []
+        return RepositorySearchResponse(results=results, warnings=warnings)
 
     def _search_url(self, query: str) -> str:
         params = {
@@ -207,10 +227,6 @@ def _search_result_metadata(
         modality_of_data=_data_modalities(attributes, searchable_text),
         description_of_dataset=description,
     )
-
-
-def _metadata_value(value: str) -> str:
-    return _metadata_values([value])
 
 
 def _metadata_values(values: Iterable[str]) -> str:
@@ -395,8 +411,12 @@ def _geo_point(value: object) -> str:
     if not isinstance(value, dict):
         return ""
 
-    latitude = _text(value.get("pointLatitude")) or _text(value.get("latitude"))
-    longitude = _text(value.get("pointLongitude")) or _text(value.get("longitude"))
+    latitude = _coordinate(value.get("pointLatitude"), maximum=90) or _coordinate(
+        value.get("latitude"), maximum=90
+    )
+    longitude = _coordinate(value.get("pointLongitude"), maximum=180) or _coordinate(
+        value.get("longitude"), maximum=180
+    )
     if latitude and longitude:
         return f"{latitude}, {longitude}"
 
@@ -407,14 +427,29 @@ def _geo_box(value: object) -> str:
     if not isinstance(value, dict):
         return ""
 
-    west = _text(value.get("westBoundLongitude"))
-    east = _text(value.get("eastBoundLongitude"))
-    south = _text(value.get("southBoundLatitude"))
-    north = _text(value.get("northBoundLatitude"))
-    if west and east and south and north:
+    west = _coordinate(value.get("westBoundLongitude"), maximum=180)
+    east = _coordinate(value.get("eastBoundLongitude"), maximum=180)
+    south = _coordinate(value.get("southBoundLatitude"), maximum=90)
+    north = _coordinate(value.get("northBoundLatitude"), maximum=90)
+    # West may exceed east when the box crosses the antimeridian.
+    if west and east and south and north and float(south) <= float(north):
         return f"{south}, {west} to {north}, {east}"
 
     return ""
+
+
+def _coordinate(value: object, *, maximum: int) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return ""
+    if isinstance(value, str) and (not value.strip() or len(value) > 128):
+        return ""
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        return ""
+    if not math.isfinite(number) or not -maximum <= number <= maximum:
+        return ""
+    return str(value).strip()
 
 
 def _normalize_for_matching(value: str) -> str:

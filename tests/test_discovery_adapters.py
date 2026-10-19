@@ -287,17 +287,26 @@ def test_socrata_adapter_discovers_dataset_pages_and_api_resources():
         "socrata_id": "abcd-1234",
         "socrata_type": "dataset",
         "socrata_domain": "data.cdc.gov",
+        "socrata_pagination": {
+            "kind": "offset",
+            "limit_parameter": "$limit",
+            "offset_parameter": "$offset",
+            "page_size": 1000,
+            "initial_offset": 0,
+            "next_offset_increment": 1000,
+            "order_parameter": "$order",
+            "order": ":id",
+            "completion": "empty_page",
+        },
     }
 
     assert [distribution.format for distribution in page.distributions] == [
         "CSV",
         "JSON",
-        "API",
     ]
     assert [distribution.url for distribution in page.distributions] == [
-        "https://data.cdc.gov/resource/abcd-1234.csv",
-        "https://data.cdc.gov/resource/abcd-1234.json",
-        "https://data.cdc.gov/resource/abcd-1234.json?%24limit=1",
+        "https://data.cdc.gov/resource/abcd-1234.csv?%24limit=1000&%24offset=0&%24order=%3Aid",
+        "https://data.cdc.gov/resource/abcd-1234.json?%24limit=1000&%24offset=0&%24order=%3Aid",
     ]
     assert all(
         distribution.signals["socrata_resource"] is True
@@ -323,7 +332,9 @@ def test_socrata_adapter_falls_back_to_short_dataset_url_when_permalink_missing(
     pages = SocrataAdapter(fetch_json=fake_fetch_json).discover("https://data.cdc.gov")
 
     assert pages[0].url == "https://data.cdc.gov/d/wxyz-9876"
-    assert pages[0].distributions[0].url == "https://data.cdc.gov/resource/wxyz-9876.csv"
+    assert pages[0].distributions[0].url == (
+        "https://data.cdc.gov/resource/wxyz-9876.csv?%24limit=1000&%24offset=0&%24order=%3Aid"
+    )
 
 
 def test_data_json_adapter_detects_project_open_data_catalog():

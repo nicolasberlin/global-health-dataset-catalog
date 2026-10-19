@@ -9,6 +9,7 @@ from uuid import UUID
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
+from .application_lock import fence_worker_claim
 from .connection import Row, _fetchone
 
 Queue = Literal["search", "classification", "collection"]
@@ -18,6 +19,7 @@ async def read_worker_claim(
     connection: AsyncConnection[DictRow], token: UUID, queue: Queue,
 ) -> Row | None:
     """Call inside a transaction, before taking any task row locks."""
+    await fence_worker_claim(connection)
     await connection.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
         (f"worker-claim:{token}",),

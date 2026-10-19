@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
-from app import classification_worker, collection_worker, vote_store
+from app import vote_store
+from app.auth.security import APIPrincipal
 from app.db import classification_votes as votes
 from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.connection import _require_database_pool
@@ -19,12 +20,13 @@ from app.db.task_retries import schedule_llm_retry
 from app.quota_policy import QuotaExceeded
 from app.retry_policy import RetryPolicy, enforce_retry_date, plan_retry
 from app.routes.collector import search_progress
-from app.security import APIPrincipal
+from app.workers import classification as classification_worker
+from app.workers import collection as collection_worker
 from fastapi import Response
-from schema_helpers import restore_schema_eight
-from test_classifier_factory import MODELS, PAGE, _response
-from test_collection_workflow import candidate_for, decision
-from test_vote_persistence import transport  # noqa: F401 - provider fixture
+from helpers.classification import MODELS, PAGE
+from helpers.classification import response as _response
+from helpers.collection import mortality_dataset as _mortality_dataset
+from helpers.workflows import candidate_for, decision
 
 from collector.diagnostics import Diagnostic, PersistenceFailure
 from collector.storage.models import CollectionReport, CollectionResult
@@ -150,10 +152,10 @@ def install_collection(monkeypatch):
 @pytest.mark.parametrize("failure", ["timeout", "invalid"])
 async def test_automatic_retry_preserves_successes_and_survives_restart(
     database,
-    transport,  # noqa: F811
+    transport,
     monkeypatch,
     kind,
-    failure,  # noqa: F811
+    failure,
 ):
     await database.init_database()
     candidate, item = await setup_work(database, kind)
@@ -205,7 +207,7 @@ async def test_automatic_retry_preserves_successes_and_survives_restart(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("failure,max_calls", [("timeout", 3), ("invalid", 2), ("auth", 1)])
-async def test_retry_exhaustion_is_terminal(database, transport, failure, max_calls):  # noqa: F811
+async def test_retry_exhaustion_is_terminal(database, transport, failure, max_calls):
     from urllib.error import HTTPError
 
     await database.init_database()
@@ -317,8 +319,6 @@ async def test_stale_worker_and_conflicting_vote_writes_are_rejected(database):
 
 @pytest.mark.anyio
 async def test_incomplete_collection_recovery_is_owned_idempotent_and_preserves_results(database):
-    from test_database import _mortality_dataset
-
     await database.init_database()
     candidate, job = await setup_work(database, "page")
     result = CollectionResult(
@@ -347,7 +347,7 @@ async def test_incomplete_collection_recovery_is_owned_idempotent_and_preserves_
 
 
 @pytest.mark.anyio
-async def test_migration_eight_preserves_votes(database):
+async def test_reinitialization_preserves_votes_and_retry_counters(database):
     from app.db.schema import CURRENT_SCHEMA_VERSION
 
     await database.init_database()
@@ -359,12 +359,14 @@ async def test_migration_eight_preserves_votes(database):
     await votes.finish_vote(
         run, "a", vote["attempt_token"], response={"accepted": False}, candidate_id=candidate["id"]
     )
-    await restore_schema_eight()
+    previous = (await sql("SELECT * FROM classification_votes"))[0]
+    await database.close_database_pool()
+    await database.open_database_pool()
     await database.init_database()
     await database.init_database()
     saved = (await sql("SELECT * FROM classification_votes"))[0]
     assert saved["response"] == {"accepted": False} and saved["attempts"] == 1
-    assert saved["cycle_attempts"] == 0
+    assert saved == previous
     assert (await sql("SELECT max(version) AS v FROM schema_migrations"))[0][
         "v"
     ] == CURRENT_SCHEMA_VERSION
@@ -439,9 +441,20 @@ async def test_provider_deadline_blocks_vote_even_in_new_manual_cycle(database):
 @pytest.mark.anyio
 @pytest.mark.parametrize("kind", ["repository", "page"])
 async def test_manual_http_retry_honors_provider_deadline_and_owner(database, monkeypatch, kind):
-    from app.main import app
-    from app.security import require_api_principal
+    from app.routes.collector import router
+    from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
+
+    # Route-contract tests own their app; production runtime state is exercised
+    # separately by lifespan tests and must never leak between these cases.
+    app = FastAPI()
+    app.include_router(router)
+    tokens = {
+        owner: f"synthetic-{owner}-recovery-token-at-least-thirty-two-characters"
+        for owner in ("alice", "bob")
+    }
+    monkeypatch.setenv("API_AUTH_MODE", "token")
+    monkeypatch.setenv("API_ACCESS_TOKENS", json.dumps(tokens))
 
     await database.init_database()
     candidate, item = await setup_work(database, kind)
@@ -457,12 +470,14 @@ async def test_manual_http_retry_honors_provider_deadline_and_owner(database, mo
     else:
         await database.mark_collection_job_error(item["id"], "limited", errors=errors)
         url = f"/collector/collection-jobs/{item['id']}/retry"
-    principal = APIPrincipal("bob")
-    monkeypatch.setitem(app.dependency_overrides, require_api_principal, lambda: principal)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        assert (await client.post(url, headers={"Idempotency-Key": "blocked"})).status_code == 404
-        principal = APIPrincipal("alice")
-        response = await client.post(url, headers={"Idempotency-Key": "blocked"})
+        assert (await client.post(url, headers={"Idempotency-Key": "blocked"})).status_code == 401
+        assert (await client.post(url, headers={
+            "Authorization": f"Bearer {tokens['bob']}", "Idempotency-Key": "blocked",
+        })).status_code == 404
+        response = await client.post(url, headers={
+            "Authorization": f"Bearer {tokens['alice']}", "Idempotency-Key": "blocked",
+        })
         assert response.status_code == 429
         assert 3500 <= int(response.headers["Retry-After"]) <= 3600
     assert await sql("SELECT * FROM api_commands") == []
@@ -471,7 +486,7 @@ async def test_manual_http_retry_honors_provider_deadline_and_owner(database, mo
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("kind", ["repository", "page"])
-async def test_expired_queued_retry_does_not_invoke_models(database, transport, monkeypatch, kind):  # noqa: F811
+async def test_expired_queued_retry_does_not_invoke_models(database, transport, monkeypatch, kind):
     await database.init_database()
     candidate, item = await setup_work(database, kind)
     install_collection(monkeypatch)

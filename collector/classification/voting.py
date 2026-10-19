@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
 from collector.diagnostics import Diagnostic, voter_diagnostics
+from collector.execution import (
+    BoundedThreadExecutor,
+    check_execution_active,
+    execution_control,
+    wait_for_future,
+)
 
 ClassifierT = TypeVar("ClassifierT")
 ClassificationT = TypeVar("ClassificationT")
@@ -39,6 +44,7 @@ def run_voters(
         return []
 
     def invoke(voter: tuple[str, ClassifierT]) -> VoteOutcome[VoteT]:
+        check_execution_active()
         voter_id, classifier = voter
         try:
             classification = classify(classifier)
@@ -51,6 +57,10 @@ def run_voters(
             vote=make_vote(voter_id, classification),
         )
 
-    with ThreadPoolExecutor(max_workers=len(voters)) as executor:
+    executor = BoundedThreadExecutor(max_workers=len(voters), thread_name_prefix="voter")
+    try:
         futures = [executor.submit(copy_context().run, invoke, voter) for voter in voters]
-        return [future.result() for future in futures]
+        return [wait_for_future(future) for future in futures]
+    finally:
+        control = execution_control.get()
+        executor.shutdown(wait=control is None or not control.stopped.is_set(), cancel_futures=True)

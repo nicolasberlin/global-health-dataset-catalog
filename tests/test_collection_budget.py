@@ -7,13 +7,13 @@ import threading
 from dataclasses import replace
 
 import pytest
-from app import collection_worker
+from app.auth.security import APIPrincipal
 from app.db.connection import _require_database_pool
 from app.routes.collector import search_progress
-from app.security import APIPrincipal
+from app.workers import collection as collection_worker
 from fastapi import Response
-from test_collection_workflow import candidate_for, decision, wait_until
-from test_collector_pipeline import DATASET_HTML, AcceptingPageClassifier
+from helpers.collection import DATASET_HTML, AcceptingPageClassifier
+from helpers.workflows import candidate_for, decision, wait_until
 
 from collector.budget import (
     CollectionBudgetExceeded,
@@ -99,6 +99,48 @@ def test_nested_collection_inherits_deadline_and_context_is_cleared(clock):
     assert active_collection_budget() is None
     with collection_budget(seconds=5):
         check_collection_budget()
+
+
+def test_cancellation_after_discovery_stops_before_first_page_request():
+    from unittest.mock import Mock
+
+    from collector.execution import ExecutionControl, ExecutionStopped, execution_control
+
+    control = ExecutionControl()
+    token = execution_control.set(control)
+    fetch = Mock()
+
+    def discover(_):
+        control.abort()
+        return [page()]
+
+    try:
+        with pytest.raises(ExecutionStopped):
+            collect_source_with_report(
+                "https://example.org", discover=discover, fetch_html=fetch,
+                classifier=AcceptingPageClassifier(),
+            )
+    finally:
+        execution_control.reset(token)
+    fetch.assert_not_called()
+
+
+def test_cancelled_collection_does_not_start_body_read_without_a_time_budget():
+    from unittest.mock import Mock
+
+    from collector.budget import read_with_budget
+    from collector.execution import ExecutionControl, ExecutionStopped, execution_control
+
+    response = Mock()
+    control = ExecutionControl()
+    control.abort()
+    token = execution_control.set(control)
+    try:
+        with pytest.raises(ExecutionStopped):
+            read_with_budget(response, 1024)
+    finally:
+        execution_control.reset(token)
+    response.read.assert_not_called()
 
 
 def test_expiry_during_discovery_is_incomplete_even_without_candidates(clock):

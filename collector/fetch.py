@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import socket
 import ssl
+from contextlib import nullcontext
 from dataclasses import dataclass
-from http.client import HTTPConnection
+from email.message import Message
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import (
@@ -18,10 +20,26 @@ from urllib.request import (
     build_opener,
 )
 
-from collector.budget import check_collection_budget, read_with_budget, remaining_timeout
+from collector.budget import (
+    check_collection_budget,
+    check_request_budget,
+    read_with_budget,
+    remaining_timeout,
+    request_budget,
+)
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic, PipelineFailure
+from collector.execution import check_execution_active
 from collector.network_policy import is_public_address
+from collector.resolver import resolve_addresses
+from collector.transport import DeadlineHTTPConnection
+
+
+def is_timeout_error(exception: Exception) -> bool:
+    """Recognize direct timeouts and those wrapped by URL transport errors."""
+    return isinstance(exception, (TimeoutError, socket.timeout)) or isinstance(
+        getattr(exception, "reason", None), (TimeoutError, socket.timeout)
+    )
 
 
 class PageFetchError(PipelineFailure):
@@ -71,17 +89,26 @@ def fetch_public_html(
             content_type = response.headers.get("Content-Type", "")
             body = read_with_budget(response, max_bytes + 1)
             if len(body) > max_bytes:
-                raise PageFetchError("HTML response is too large for collection.")
+                raise PageFetchError(
+                    "HTML response is too large for collection.", code="extraction_limit_exceeded",
+                )
+            try:
+                html = _decode_html(body, content_type)
+            except ValueError as exception:
+                raise PageFetchError(
+                    "HTML response could not be decoded.", code="extraction_invalid_content",
+                ) from exception
             return FetchedPage(
                 url=url,
                 final_url=response.geturl(),
-                html=_decode_html(body, content_type),
+                html=html,
                 status_code=response.status,
                 content_type=content_type,
             )
     except HTTPError as exception:
-        check_collection_budget()
-        raise PageFetchError(f"URL returned HTTP {exception.code}.") from exception
+        with exception if exception.fp is not None else nullcontext():
+            check_collection_budget()
+            raise PageFetchError(f"URL returned HTTP {exception.code}.") from exception
     except (TimeoutError, URLError, OSError) as exception:
         check_collection_budget()
         raise PageFetchError(f"Could not fetch URL: {exception}") from exception
@@ -115,9 +142,17 @@ def _ensure_public_http_url(url: str) -> None:
 def _connect_public(host: str, port: int, timeout: float) -> socket.socket:
     """Connect only to numeric addresses from one fully validated DNS answer."""
 
-    check_collection_budget()
-    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
-    check_collection_budget()
+    with request_budget(seconds=timeout):
+        return _connect_public_with_budget(host, port, timeout)
+
+
+def _connect_public_with_budget(host: str, port: int, timeout: float) -> socket.socket:
+
+    check_request_budget()
+    addresses = resolve_addresses(
+        host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP, timeout=timeout,
+    )
+    check_request_budget()
     if not addresses:
         raise OSError("DNS returned no addresses.")
     for family, _, _, _, sockaddr in addresses:
@@ -128,28 +163,28 @@ def _connect_public(host: str, port: int, timeout: float) -> socket.socket:
 
     last_error = OSError("No public address could be reached.")
     for family, socktype, proto, _, sockaddr in addresses:
-        check_collection_budget()
+        check_request_budget()
         connection = None
         try:
             connection = socket.socket(family, socktype, proto)
             connection.settimeout(remaining_timeout(timeout))
             # sockaddr contains a numeric IP, never the hostname. No second DNS lookup.
             connection.connect(sockaddr)
-            check_collection_budget()
+            check_request_budget()
             return connection
         except OSError as exception:
             last_error = exception
             if connection is not None:
                 connection.close()
-            check_collection_budget()
-        except Exception:
+            check_request_budget()
+        except BaseException:
             if connection is not None:
                 connection.close()
             raise
     raise last_error
 
 
-class _PublicHTTPConnection(HTTPConnection):
+class _PublicHTTPConnection(DeadlineHTTPConnection):
     def connect(self):
         if self._tunnel_host:
             raise ValueError("HTTP tunnels are not supported.")
@@ -167,8 +202,8 @@ class _PublicHTTPSConnection(_PublicHTTPConnection):
         try:
             self.sock.settimeout(remaining_timeout(self.timeout))
             self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
-            check_collection_budget()
-        except Exception:
+            check_request_budget()
+        except BaseException:
             self.close()
             raise
 
@@ -188,7 +223,7 @@ class _PublicHTTPRedirectHandler(HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         try:
-            check_collection_budget()
+            check_request_budget()
             _ensure_public_http_url(newurl)
             redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
             if redirected is not None and req.get_method() == "HEAD":
@@ -209,24 +244,43 @@ def open_public_http_url(request: Request, *, timeout: float):
     URL validation and opener errors intentionally propagate so callers can
     either convert them to a rejected probe or abort their operation.
     """
+    check_execution_active()
     _ensure_public_http_url(request.full_url)
     if request.has_proxy() or request._tunnel_host:
         raise ValueError("Explicit proxies are not supported for public URL fetching.")
-    timeout = remaining_timeout(timeout)
-    return build_opener(
-        ProxyHandler({}),
-        _PublicHTTPHandler(),
-        _PublicHTTPSHandler(),
-        _PublicHTTPRedirectHandler(),
-    ).open(request, timeout=timeout)
+    with request_budget(seconds=timeout) as budget:
+        response = build_opener(
+            ProxyHandler({}),
+            _PublicHTTPHandler(),
+            _PublicHTTPSHandler(),
+            _PublicHTTPRedirectHandler(),
+        ).open(request, timeout=remaining_timeout(timeout))
+        try:
+            budget.remaining()
+        except BaseException:
+            response.close()
+            raise
+        return response
 
 
 def _decode_html(body: bytes, content_type: str) -> str:
-    charset = "utf-8"
-    for part in content_type.split(";"):
-        part = part.strip()
-        if part.lower().startswith("charset="):
-            charset = part.split("=", 1)[1].strip()
-            break
+    return decode_text_body(body, content_type)
 
-    return body.decode(charset, errors="replace")
+
+def decode_text_body(body: bytes, content_type: str) -> str:
+    """Normalize remote encoding errors without exposing provider header values."""
+    message = Message()
+    message["Content-Type"] = content_type
+    charset = message.get_content_charset() or "utf-8"
+    try:
+        return body.decode(charset, errors="replace")
+    except (LookupError, ValueError) as exception:
+        raise ValueError("Response text encoding is invalid.") from exception
+
+
+def decode_json_body(body: bytes) -> object:
+    """Treat invalid bytes and excessive JSON nesting as controlled remote failures."""
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exception:
+        raise ValueError("Response is not valid JSON.") from exception

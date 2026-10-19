@@ -19,3 +19,14 @@ dist/
 key.txt
 
 !.env.api.example
+!.env.api-client.example
+
+# Private research evidence and removable development-tool outputs.
+/Host ai-commons
+/research/evidence/
+/research/api/outputs/
+/research/api/sessions/
+/search_lab/data/evidence/
+/search_lab/data/captures/
+/search_lab/frontend/dist/
+/search_lab/frontend/test-results/

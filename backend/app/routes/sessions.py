@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, Request, Response
 
-from app.security import enforce_session_creation_quota, require_public_session_bootstrap
-from app.visitor_sessions import (
+from app.auth.security import enforce_session_creation_quota, require_public_session_bootstrap
+from app.auth.sessions import (
     SESSION_MAX_AGE_SECONDS,
     new_visitor_cookie,
     visitor_owner_id,

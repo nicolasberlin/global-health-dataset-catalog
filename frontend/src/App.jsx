@@ -78,7 +78,8 @@ export default function App() {
         repositorySearchAbortRef.current?.abort();
         repositorySearchAbortRef.current = null;
         try {
-            const data = await requestJson('/collector/searches/latest', { session: requestSession });
+            const path = manual ? '/collector/searches/latest?with_candidates=true' : '/collector/searches/latest';
+            const data = await requestJson(path, { session: requestSession });
             if (!requestSession.isCurrent() || repositorySearchRunRef.current !== runId) return;
             if (typeof data?.search_id !== 'string' || typeof data.query !== 'string' ||
                 !Array.isArray(data.items) || data.items.some(item => item.search_id !== data.search_id ||

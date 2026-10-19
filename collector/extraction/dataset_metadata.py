@@ -17,10 +17,6 @@ DATASET_METADATA_KEYS = (
 MISSING_DATASET_METADATA_VALUE = "NA"
 
 
-def empty_dataset_metadata() -> dict[str, str]:
-    return build_dataset_metadata()
-
-
 def normalize_dataset_metadata(
     metadata: Mapping[str, object] | None,
 ) -> dict[str, str]:
@@ -57,17 +53,6 @@ def build_dataset_metadata(
             "Modality of data": _values(modality_of_data),
             "Description of dataset": description_of_dataset,
         }
-    )
-
-
-def dataset_metadata_text(metadata: Mapping[str, object]) -> str:
-    normalized_metadata = normalize_dataset_metadata(metadata)
-    return " ".join(
-        value
-        for key in DATASET_METADATA_KEYS
-        if (
-            value := normalized_metadata.get(key, "")
-        ) and value != MISSING_DATASET_METADATA_VALUE
     )
 
 

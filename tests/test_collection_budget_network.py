@@ -73,7 +73,7 @@ def test_expiry_during_dns_prevents_socket_creation(clock, monkeypatch):
         _connect_public("public.example", 443, 10)
 
 
-@pytest.mark.parametrize("request_timeout, expected", [(10, 3), (2, 2)])
+@pytest.mark.parametrize("request_timeout, expected", [(10, 3), (4, 2)])
 def test_connect_timeout_uses_remaining_budget_after_dns(
     clock,
     monkeypatch,

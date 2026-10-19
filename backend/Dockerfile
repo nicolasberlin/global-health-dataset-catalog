@@ -22,6 +22,9 @@ COPY backend /app/backend
 COPY collector /app/collector
 RUN uv sync --locked --no-dev --no-editable --no-cache
 
+# Build tools in the base interpreter are not part of the application runtime.
+RUN /usr/local/bin/python -m pip uninstall --yes setuptools wheel
+
 WORKDIR /app/backend
 
 EXPOSE 8001

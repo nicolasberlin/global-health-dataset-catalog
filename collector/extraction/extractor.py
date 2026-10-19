@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-import json
 import re
 from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
+from collector.budget import check_collection_budget
+from collector.extraction.errors import ExtractionError
+from collector.extraction.graph import select_dataset_scope
+from collector.extraction.limits import (
+    DEFAULT_EXTRACTION_LIMITS,
+    ExtractionLimits,
+    enforce_limit,
+    json_objects,
+    load_json_ld,
+)
 from collector.source_identity import identify_source
 from collector.storage.metadata import normalize_doi
 from collector.storage.models import LinkCandidate, PageSnapshot
@@ -13,11 +22,75 @@ from collector.url_utils import canonicalize_url, same_domain, select_dataset_ur
 
 SKIP_TEXT_TAGS = {"script", "style", "noscript", "svg"}
 BLOCKED_LINK_SCHEMES = {"mailto", "tel", "javascript"}
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+             "param", "source", "track", "wbr"}
 
 
-class _PageHTMLParser(HTMLParser):
-    def __init__(self, url: str) -> None:
+class _BoundedHTMLParser(HTMLParser):
+    def __init__(self, limits: ExtractionLimits) -> None:
         super().__init__(convert_charrefs=True)
+        self.limits = limits
+        self.stack: list[str] = []
+        self.nodes = self.evidence_chars = 0
+
+    def _node(self) -> None:
+        check_collection_budget()
+        self.nodes += 1
+        enforce_limit(self.nodes, self.limits.max_html_nodes, "HTML node limit exceeded.")
+
+    def _retain(self, text: str) -> str:
+        self.evidence_chars += len(text)
+        enforce_limit(self.evidence_chars, self.limits.max_evidence_chars,
+                      "Extraction evidence size limit exceeded.")
+        return text
+
+    def _start(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._node()
+        for name, value in attrs:
+            enforce_limit(len(name) + len(value or ""), self.limits.max_attribute_chars,
+                          "HTML attribute size limit exceeded.")
+            self._retain(name + (value or ""))
+        if tag not in VOID_TAGS:
+            enforce_limit(len(self.stack) + 1, self.limits.max_html_depth,
+                          "HTML nesting limit exceeded.")
+            self.stack.append(tag)
+
+    def _end(self, tag: str) -> None:
+        check_collection_budget()
+        if tag in self.stack:
+            last_index = len(self.stack) - 1 - self.stack[::-1].index(tag)
+            del self.stack[last_index:]
+
+    def handle_decl(self, decl: str) -> None:
+        self._node()
+
+    def handle_comment(self, data: str) -> None:
+        self._node()
+
+    def unknown_decl(self, data: str) -> None:
+        # Declarations are not dataset evidence. HTMLParser versions differ in
+        # which malformed declarations they ignore or reject before this hook.
+        self._node()
+
+
+def _feed_html(parser: _BoundedHTMLParser, html: str) -> None:
+    enforce_limit(len(html), parser.limits.max_html_chars, "HTML size limit exceeded.")
+    try:
+        check_collection_budget()
+        # Callbacks check the budget per node. Splitting feed arbitrarily also
+        # splits text tokens, which would insert spaces inside words downstream.
+        parser.feed(html)
+        parser.close()
+        check_collection_budget()
+    except ExtractionError:
+        raise
+    except (AssertionError, NotImplementedError, RecursionError, ValueError) as error:
+        raise ExtractionError("HTML content could not be parsed.") from error
+
+
+class _PageHTMLParser(_BoundedHTMLParser):
+    def __init__(self, url: str, limits: ExtractionLimits) -> None:
+        super().__init__(limits)
         self.url = url
         self.stack: list[str] = []
         self.title_parts: list[str] = []
@@ -35,10 +108,11 @@ class _PageHTMLParser(HTMLParser):
         self.geography: list[str] = []
         self._active_link: dict[str, object] | None = None
         self._active_json_ld_parts: list[str] | None = None
+        self._json_ld_chars = self._json_ld_scripts = self._link_count = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
-        self.stack.append(tag)
+        self._start(tag, attrs)
         attributes = {name.lower(): value or "" for name, value in attrs}
 
         if tag == "link":
@@ -52,16 +126,27 @@ class _PageHTMLParser(HTMLParser):
 
         if tag == "a" and attributes.get("href"):
             href = attributes["href"].strip()
-            scheme = urlsplit(href).scheme.lower()
+            self._link_count += 1
+            enforce_limit(self._link_count, self.limits.max_links, "HTML link limit exceeded.")
+            try:
+                scheme = urlsplit(href).scheme.lower()
+            except ValueError:
+                return  # A malformed link must not discard unrelated usable evidence.
             if scheme not in BLOCKED_LINK_SCHEMES:
                 resolved_url = canonicalize_url(href, self.url)
+                path_size = sum(len(part) + 1 for part in self.stack)
+                enforce_limit(path_size, self.limits.max_dom_path_chars,
+                              "HTML link path size limit exceeded.")
                 self._active_link = {
                     "url": resolved_url,
                     "anchor_parts": [],
-                    "dom_path": "/".join(self.stack),
+                    "dom_path": self._retain("/".join(self.stack)),
                 }
 
         if tag == "script" and "ld+json" in attributes.get("type", "").lower():
+            self._json_ld_scripts += 1
+            enforce_limit(self._json_ld_scripts, self.limits.max_json_ld_scripts,
+                          "JSON-LD script limit exceeded.")
             self._active_json_ld_parts = []
 
     def handle_endtag(self, tag: str) -> None:
@@ -86,12 +171,14 @@ class _PageHTMLParser(HTMLParser):
             self._parse_json_ld("".join(self._active_json_ld_parts))
             self._active_json_ld_parts = None
 
-        if tag in self.stack:
-            last_index = len(self.stack) - 1 - self.stack[::-1].index(tag)
-            del self.stack[last_index:]
+        self._end(tag)
 
     def handle_data(self, data: str) -> None:
+        self._node()
         if self._active_json_ld_parts is not None:
+            self._json_ld_chars += len(data)
+            enforce_limit(self._json_ld_chars, self.limits.max_json_ld_chars,
+                          "JSON-LD size limit exceeded.")
             self._active_json_ld_parts.append(data)
             return
 
@@ -100,25 +187,25 @@ class _PageHTMLParser(HTMLParser):
             return
 
         if self._active_link is not None:
-            self._active_link["anchor_parts"].append(text)
+            self._active_link["anchor_parts"].append(self._retain(text))
 
         if "title" in self.stack:
-            self.title_parts.append(text)
+            self.title_parts.append(self._retain(text))
 
         if "h1" in self.stack:
-            self.h1_parts.append(text)
+            self.h1_parts.append(self._retain(text))
 
         if self.stack and self.stack[-1] in {"h2", "h3"}:
-            self.heading_parts.append(text)
+            self.heading_parts.append(self._retain(text))
 
         if not any(tag in SKIP_TEXT_TAGS for tag in self.stack):
-            self.text_parts.append(text)
+            self.text_parts.append(self._retain(text))
 
     def _handle_meta(self, attributes: dict[str, str]) -> None:
         name = attributes.get("name", "").lower()
         property_name = attributes.get("property", "").lower()
         itemprop = attributes.get("itemprop", "").lower()
-        content = html_to_text(attributes.get("content", ""))
+        content = html_to_text(attributes.get("content", ""), limits=self.limits)
 
         if not content:
             return
@@ -163,10 +250,7 @@ class _PageHTMLParser(HTMLParser):
             self.geography.extend(_country_values(content))
 
     def _parse_json_ld(self, script_text: str) -> None:
-        try:
-            parsed = json.loads(script_text.strip())
-        except json.JSONDecodeError:
-            return
+        parsed = load_json_ld(script_text.strip(), self.limits)
 
         if isinstance(parsed, list):
             self.json_ld.extend(parsed)
@@ -174,20 +258,29 @@ class _PageHTMLParser(HTMLParser):
             self.json_ld.append(parsed)
 
 
-def extract_page(url: str, html: str) -> PageSnapshot:
-    parser = _PageHTMLParser(url)
-    parser.feed(html)
+def extract_page(
+    url: str, html: str, *, limits: ExtractionLimits = DEFAULT_EXTRACTION_LIMITS,
+    expected_identity: dict[str, str] | None = None,
+) -> PageSnapshot:
+    parser = _PageHTMLParser(url, limits)
+    _feed_html(parser, html)
+    if parser._active_json_ld_parts is not None:
+        raise ExtractionError("JSON-LD script was not closed.")
     canonical_url = select_dataset_url(url, parser.canonical_href)
+    scope = select_dataset_scope(
+        parser.json_ld, url, canonical_url, citation_doi=parser.doi,
+        expected_identity=expected_identity, limits=limits,
+    )
+    scoped_json = list(scope.nodes)
     source_identity = identify_source(canonical_url)
     publisher = (
-        parser.publisher
-        or _publisher_from_json_ld(parser.json_ld)
-        or source_identity.publisher
+        _publisher_from_json_ld(scoped_json)
+        or (parser.publisher or source_identity.publisher if not scope.nodes else "")
     )
     geography = _dedupe(
         [
-            *parser.geography,
-            *_geography_from_json_ld(parser.json_ld),
+            *(parser.geography if not scope.nodes else []),
+            *_geography_from_json_ld(scoped_json),
         ]
     )
 
@@ -195,38 +288,50 @@ def extract_page(url: str, html: str) -> PageSnapshot:
     h1 = _normalize_text(" ".join(parser.h1_parts))
     description = parser.meta_description or parser.og_description
     text = _normalize_text(" ".join(parser.text_parts))
+    if scope.multiple and scope.nodes:
+        selected = scope.nodes[0]
+        title = _metadata_text(selected.get("name"))
+        h1 = ""
+        description = _metadata_text(selected.get("description"))
+        text = _normalize_text(" ".join((title, description)))
+    if scope.ambiguous:
+        title = h1 = description = publisher = text = ""
+        geography = []
     return PageSnapshot(
         url=url,
         canonical_url=canonical_url,
         title=title,
         h1=h1,
-        meta_description=parser.meta_description,
-        og_title=parser.og_title,
-        og_description=parser.og_description,
-        headings=tuple(dict.fromkeys(parser.heading_parts)),
+        meta_description=description if not scope.ambiguous else "",
+        og_title=parser.og_title if not scope.multiple else "",
+        og_description=parser.og_description if not scope.multiple else "",
+        headings=tuple(dict.fromkeys(parser.heading_parts)) if not scope.multiple else (),
         text=text,
         publisher=publisher,
         hosting_platform=source_identity.hosting_platform,
         uploader=source_identity.uploader,
         geography=tuple(geography),
-        date_of_publication=_date_from_json_ld(parser.json_ld),
-        doi=parser.doi or _doi_from_json_ld(parser.json_ld),
+        date_of_publication=_date_from_json_ld(scoped_json),
+        doi=(_doi_from_json_ld(scoped_json) or parser.doi) if not scope.ambiguous else "",
         dataset_url=canonical_url,
-        diseases=tuple(_diseases_from_text(" ".join([title, h1, description, text]))),
-        size_of_dataset=_size_from_json_ld(parser.json_ld),
+        diseases=tuple(_diseases_from_text(" ".join([title, h1, description, text])))
+        if not scope.ambiguous else (),
+        size_of_dataset=_size_from_json_ld(scoped_json),
         demographic_information=tuple(
             _demographics_from_text(" ".join([title, h1, description, text]))
-        ),
-        sharing_license=_license_from_json_ld(parser.json_ld),
-        modality_of_data=tuple(_modalities_from_json_ld(parser.json_ld)),
+        ) if not scope.ambiguous else (),
+        sharing_license=_license_from_json_ld(scoped_json),
+        modality_of_data=tuple(_modalities_from_json_ld(scoped_json)),
         description_of_dataset=description,
-        links=tuple(parser.links),
+        links=tuple(parser.links) if not scope.multiple else (),
         json_ld=tuple(parser.json_ld),
+        dataset_json_ld=scope.nodes,
+        dataset_metadata_ambiguous=scope.ambiguous,
     )
 
 
 def _publisher_from_json_ld(json_ld_items: list[object]) -> str:
-    for item in _iter_json_objects(json_ld_items):
+    for item in _root_objects(json_ld_items):
         publisher = item.get("publisher")
         if isinstance(publisher, dict):
             name = publisher.get("name")
@@ -240,7 +345,7 @@ def _publisher_from_json_ld(json_ld_items: list[object]) -> str:
 
 def _geography_from_json_ld(json_ld_items: list[object]) -> list[str]:
     geography: list[str] = []
-    for item in _iter_json_objects(json_ld_items):
+    for item in _root_objects(json_ld_items):
         for key in (
             "spatialCoverage",
             "spatial",
@@ -258,7 +363,7 @@ def _geography_from_json_ld(json_ld_items: list[object]) -> list[str]:
 
 
 def _date_from_json_ld(json_ld_items: list[object]) -> str:
-    for item in _iter_json_objects(json_ld_items):
+    for item in _root_objects(json_ld_items):
         for key in ("datePublished", "publicationDate", "dct:issued", "issued"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
@@ -268,7 +373,7 @@ def _date_from_json_ld(json_ld_items: list[object]) -> str:
 
 
 def _license_from_json_ld(json_ld_items: list[object]) -> str:
-    for item in _iter_json_objects(json_ld_items):
+    for item in _root_objects(json_ld_items):
         value = item.get("license")
         if isinstance(value, str) and value.strip():
             return _normalize_text(value)
@@ -282,7 +387,7 @@ def _license_from_json_ld(json_ld_items: list[object]) -> str:
 
 
 def _size_from_json_ld(json_ld_items: list[object]) -> str:
-    for item in _iter_json_objects(json_ld_items):
+    for item in _root_objects(json_ld_items):
         for key in ("size", "contentSize", "content_size"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
@@ -293,7 +398,7 @@ def _size_from_json_ld(json_ld_items: list[object]) -> str:
 
 def _modalities_from_json_ld(json_ld_items: list[object]) -> list[str]:
     values: list[str] = []
-    for item in _iter_json_objects(json_ld_items):
+    for item in _root_objects(json_ld_items):
         for key in ("encodingFormat", "fileFormat", "format"):
             value = item.get(key)
             if isinstance(value, str):
@@ -391,17 +496,15 @@ def _country_values(value: object) -> list[str]:
 
 
 def _iter_json_objects(value: object) -> list[dict[str, object]]:
-    objects: list[dict[str, object]] = []
+    return list(json_objects(value))
 
-    if isinstance(value, dict):
-        objects.append(value)
-        for nested in value.values():
-            objects.extend(_iter_json_objects(nested))
-    elif isinstance(value, list):
-        for item in value:
-            objects.extend(_iter_json_objects(item))
 
-    return objects
+def _root_objects(value: list[object]):
+    return (item for item in value if isinstance(item, dict))
+
+
+def _metadata_text(value: object) -> str:
+    return html_to_text(value) if isinstance(value, str) else ""
 
 
 def _normalize_text(value: str) -> str:
@@ -412,37 +515,37 @@ def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
-def html_to_text(value: str) -> str:
+def html_to_text(value: str, *, limits: ExtractionLimits = DEFAULT_EXTRACTION_LIMITS) -> str:
+    enforce_limit(len(value), limits.max_html_chars, "HTML text size limit exceeded.")
+    check_collection_budget()
     if "<" not in value and "&" not in value:
+        enforce_limit(len(value), limits.max_evidence_chars, "HTML text evidence limit exceeded.")
         return _normalize_text(value)
 
-    parser = _TextHTMLParser()
-    parser.feed(unescape(value))
+    parser = _TextHTMLParser(limits)
+    _feed_html(parser, unescape(value))
     return _normalize_text(" ".join(parser.text_parts))
 
 
-class _TextHTMLParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.stack: list[str] = []
+class _TextHTMLParser(_BoundedHTMLParser):
+    def __init__(self, limits: ExtractionLimits) -> None:
+        super().__init__(limits)
         self.text_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.stack.append(tag.lower())
+        self._start(tag.lower(), attrs)
 
     def handle_endtag(self, tag: str) -> None:
-        tag = tag.lower()
-        if tag in self.stack:
-            last_index = len(self.stack) - 1 - self.stack[::-1].index(tag)
-            del self.stack[last_index:]
+        self._end(tag.lower())
 
     def handle_data(self, data: str) -> None:
+        self._node()
         if any(tag in SKIP_TEXT_TAGS for tag in self.stack):
             return
 
         text = _normalize_text(data)
         if text:
-            self.text_parts.append(text)
+            self.text_parts.append(self._retain(text))
 
 
 def _url_extension(url: str) -> str:
@@ -452,7 +555,7 @@ def _url_extension(url: str) -> str:
 
 
 def _doi_from_json_ld(json_ld_items: list[object]) -> str:
-    for item in _iter_json_objects(json_ld_items):
+    for item in _root_objects(json_ld_items):
         types = item.get("@type", [])
         if isinstance(types, str):
             types = [types]

@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from uuid import UUID
 
 import pytest
-from app import workers
+from app.workers import runtime as workers
 
 from collector import observability
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
@@ -118,3 +118,53 @@ def test_logging_configuration_is_idempotent(monkeypatch):
     assert len(logger.handlers) == 1
     assert logger.level == logging.INFO
     assert logger.propagate is False
+
+
+def test_queue_error_categories_are_allowlisted_and_search_context_is_scoped(events):
+    search_id = UUID("00000000-0000-0000-0000-000000000001")
+    with observability.operation_context(search_id=search_id, queue="search"):
+        observability.emit_event("worker_poll", outcome="failed", error_category="storage")
+        observability.emit_event("worker_poll", outcome="failed", error_category="secret-exception")
+    observability.emit_event("after_search", outcome="success")
+    records = events()
+    assert records[0] == {"event": "worker_poll", "outcome": "failed", "queue": "search",
+                          "search_id": str(search_id), "error_category": "storage"}
+    assert "error_category" not in records[1]
+    assert "search_id" not in records[2] and "queue" not in records[2]
+
+
+def test_broken_operation_stream_does_not_print_current_exception_traceback(monkeypatch, capsys):
+    class BrokenStream:
+        def write(self, message):
+            raise OSError("stream is unavailable")
+
+        def flush(self):
+            pass
+
+    isolated = logging.Logger("isolated-stream", level=logging.INFO)
+    isolated.addHandler(observability.OperationalStreamHandler(BrokenStream()))
+    isolated.propagate = False
+    monkeypatch.setattr(observability, "logger", isolated)
+    try:
+        raise RuntimeError("SQL private-secret")
+    except RuntimeError:
+        observability.emit_event("persistence_retry", outcome="retry")
+    assert capsys.readouterr().err == ""
+
+
+def test_configured_handler_does_not_print_traceback_when_captured_stream_closes(
+    monkeypatch, capsys,
+):
+    import io
+
+    isolated = logging.Logger("closed-stream")
+    monkeypatch.setattr(observability, "logger", isolated)
+    observability.configure_operational_logging()
+    stream = io.StringIO()
+    isolated.handlers[0].setStream(stream)
+    stream.close()
+    try:
+        raise RuntimeError("SQL private-secret")
+    except RuntimeError:
+        observability.emit_event("persistence_retry", outcome="retry")
+    assert capsys.readouterr().err == ""

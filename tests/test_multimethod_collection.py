@@ -244,6 +244,23 @@ def test_diagnostic_urls_remove_access_credentials():
     )
 
 
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        (
+            "https://user:secret@[2001:db8::1]:8443/file?token=secret&id=123#private",
+            "https://[2001:db8::1]:8443/file?id=123",
+        ),
+        ("https://[2001:db8::1]/file", "https://[2001:db8::1]/file"),
+        ("https://user:secret@192.0.2.1:8443/file", "https://192.0.2.1:8443/file"),
+        ("https://example.org/file?format=csv&key=secret", "https://example.org/file?format=csv"),
+    ],
+)
+def test_diagnostic_urls_are_valid_and_idempotent_for_ipv6_and_other_hosts(url, expected):
+    assert public_url(url) == expected
+    assert public_url(expected) == expected
+
+
 def test_observation_callback_records_started_and_finished_steps():
     observations = []
     collect_repository_candidate_with_report(

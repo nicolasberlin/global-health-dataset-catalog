@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import io
 import json
+import socket
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError
 
 import pytest
@@ -13,6 +16,7 @@ from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.failures import CollectionTransportError
 from collector.collection.http import JsonResponse
 from collector.config import DEFAULT_CONFIG
+from collector.diagnostics import Diagnostic
 from collector.fetch import FetchedPage
 from collector.main import collect_repository_candidate_with_report
 from collector.storage.models import ValidationResult
@@ -25,6 +29,70 @@ API = "https://dataverse.harvard.edu/api/v1/files/:persistentId?persistentId="
 class Accept:
     def classify(self, page, resources):
         return PageClassification(True)
+
+
+def test_retry_after_prevents_fallback_requests_to_same_repository():
+    def limited(_):
+        error = CollectionTransportError("repository_http_error", "fetch", http_status=429)
+        error.diagnostics = [Diagnostic(
+            "repository_http_error", "collection",
+            retry_at=(datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(),
+        )]
+        raise error
+
+    result = collect_repository_candidate_with_report(
+        "https://zenodo.org/records/123", fetch_json=limited,
+        fetch_html=lambda _: pytest.fail("Fallback must respect provider deadline"),
+        classifier=Accept(),
+    )
+    assert len(result.report.method_attempts) == 1
+    assert result.report.method_attempts[0]["http_status"] == 429
+    assert result.report.errors[0].retry_at is not None
+
+
+def test_html_socket_timeout_is_classified_as_timeout():
+    def slow(_):
+        from collector.fetch import PageFetchError
+
+        raise PageFetchError("transport failed") from socket.timeout()
+
+    result = collect_repository_candidate_with_report(
+        "https://example.org/dataset", fetch_html=slow, classifier=Accept(),
+    )
+    assert result.report.method_attempts[0]["code"] == "repository_timeout"
+
+
+def test_default_metadata_transport_uses_configured_policy(monkeypatch):
+    import collector.collection.orchestrator as orchestrator
+
+    calls = []
+
+    def fetch(url, **kwargs):
+        calls.append(kwargs)
+        raise CollectionTransportError("repository_http_error", "fetch", http_status=404)
+
+    monkeypatch.setattr(orchestrator, "fetch_record_json", fetch)
+    monkeypatch.setattr(
+        orchestrator, "fetch_public_html",
+        lambda url, **kwargs: FetchedPage(url, url, "<html>No files</html>", 200, "text/html"),
+    )
+    config = replace(
+        DEFAULT_CONFIG, record_request_timeout_seconds=25,
+        record_max_attempts=2, record_retry_max_wait_seconds=15,
+    )
+    collect_repository_candidate_with_report(
+        "https://zenodo.org/records/123", config=config, classifier=Accept(),
+    )
+    assert calls == [{
+        "timeout": 25, "max_attempts": 2, "max_retry_wait": 15,
+        "user_agent": config.user_agent,
+    }]
+
+
+@pytest.mark.parametrize("value,expected", [(2, 2), (True, None), (61, None), ("2", None)])
+def test_metadata_request_count_is_sanitized(value, expected):
+    clean = safe_observation({"request_attempts": value})
+    assert clean.get("request_attempts") == expected
 
 
 def test_dataverse_file_endpoints_preserve_record_and_version_scope():

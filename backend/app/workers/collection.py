@@ -1,0 +1,151 @@
+"""Bounded single-process execution of collection jobs persisted in PostgreSQL."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from concurrent.futures import Executor
+from contextvars import copy_context
+from dataclasses import replace
+from datetime import datetime
+from functools import partial
+
+from app.collection_trace_store import PostgresCollectionTrace
+from app.database import (
+    claim_pending_collection_job,
+    complete_collection_job,
+    mark_collection_job_error,
+)
+from app.db.task_retries import schedule_llm_retry
+from app.persistence import persist_with_retry
+from app.retry_policy import TRANSIENT
+from app.vote_store import PostgresVoteStore
+from app.workers.jobs import CollectionJob
+from app.workers.runtime import persisted_workers
+from collector.budget import collection_budget
+from collector.classification.factory import build_default_page_classifier
+from collector.collection.browser import configured_browser
+from collector.config import (
+    DEFAULT_CONFIG,
+    configured_collection_budget_seconds,
+    configured_record_transport,
+    configured_repository_connectors,
+)
+from collector.diagnostics import Diagnostic, exception_diagnostics
+from collector.main import collect_repository_candidate_with_report, collect_source_with_report
+from collector.observability import emit_event, measure_operation, operation_context
+
+
+def _collect_record_job(url, *, classifier, observe):
+    hosts = tuple(
+        x.strip()
+        for x in os.getenv(
+            "COLLECTION_DATAVERSE_HOSTS", ",".join(DEFAULT_CONFIG.dataverse_hosts),
+        ).split(",")
+        if x.strip()
+    )
+    zenodo_hosts = tuple(
+        x.strip()
+        for x in os.getenv("COLLECTION_ZENODO_HOSTS", "zenodo.org").split(",")
+        if x.strip()
+    )
+    config = replace(
+        DEFAULT_CONFIG, dataverse_hosts=hosts, zenodo_hosts=zenodo_hosts,
+        **configured_repository_connectors(),
+        **configured_record_transport(),
+    )
+    with configured_browser(config, source_url=url) as browser:
+        return collect_repository_candidate_with_report(
+            url, config=config, classifier=classifier, observe=observe, browser=browser
+        )
+
+
+async def _run_collection_job(job: CollectionJob, executor: Executor) -> None:
+    """Execute an already claimed job using its authoritative persisted inputs."""
+
+    job_id = int(job["id"])
+    version = datetime.fromisoformat(str(job["updated_at"]))
+    with operation_context(job_id=job_id), measure_operation("collection_finished") as measurement:
+        emit_event("collection_started", outcome="started")
+        saving = False
+        try:
+            with collection_budget(
+                seconds=configured_collection_budget_seconds(),
+                deadline_at=job.get("collection_deadline_at"),
+            ):
+                loop = asyncio.get_running_loop()
+                vote_store = PostgresVoteStore(
+                    loop, job_id=job_id, expected_updated_at=version,
+                )
+                classifier = build_default_page_classifier(vote_store=vote_store)
+                if job["kind"] == "repository_candidate":
+                    observe = PostgresCollectionTrace(loop, job_id, version)
+                    collect = partial(_collect_record_job, classifier=classifier, observe=observe)
+                else:
+                    collect = partial(collect_source_with_report, classifier=classifier)
+
+                result = await loop.run_in_executor(
+                    executor, copy_context().run, collect,
+                    str(job["source_url"]),
+                )
+            saving = True
+            await persist_with_retry(
+                lambda: complete_collection_job(
+                    job_id,
+                    result,
+                    expected_updated_at=version,
+                ), retry_storage_failures=True,
+            )
+        except Exception as exception:  # noqa: BLE001 - preserve the job's terminal failure.
+            measurement["outcome"] = "failed"
+            emit_event("collection_execution", outcome="failed")
+            error = str(exception) or exception.__class__.__name__
+            diagnostics = (
+                [Diagnostic("persistence_failed", "collection")]
+                if saving
+                else exception_diagnostics(exception, "collection")
+            )
+            if not saving and any(
+                item.code in TRANSIENT | {"llm_invalid_response"} for item in diagnostics
+            ):
+                scheduled, diagnostics = await persist_with_retry(
+                    lambda: schedule_llm_retry(
+                        job_id,
+                        version,
+                        diagnostics,
+                        collection=True,
+                    )
+                )
+                if scheduled:
+                    return
+            await persist_with_retry(
+                lambda: mark_collection_job_error(
+                    job_id,
+                    error,
+                    errors=[item.to_dict() for item in diagnostics],
+                    expected_updated_at=version,
+                ), retry_storage_failures=True, retry_unexpected=True
+            )
+
+
+async def _recover_collection(job):
+    return await mark_collection_job_error(
+        int(job["id"]), "Collection could not be finalized.",
+        errors=[Diagnostic("persistence_failed", "collection").to_dict()],
+        expected_updated_at=datetime.fromisoformat(str(job["updated_at"])),
+    )
+
+
+def collection_workers(*, concurrency: int | None = None, poll_interval: float = 1.0):
+    return persisted_workers(
+        claim=claim_pending_collection_job,
+        execute=_run_collection_job,
+        recover=_recover_collection,
+        concurrency=(
+            int(os.getenv("COLLECTION_MAX_CONCURRENCY", "2"))
+            if concurrency is None
+            else concurrency
+        ),
+        name="collection",
+        poll_interval=poll_interval,
+    )

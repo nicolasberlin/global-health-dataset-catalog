@@ -126,3 +126,23 @@ def test_repository_rejection_tie_uses_conservative_label():
     assert result.reason == "mismatch"
     assert result.missing_information == []
     assert summary["decision_voter_ids"] == ["negative", "uncertain"]
+
+
+def test_cancelled_ensemble_cannot_start_a_new_model_invocation():
+    from unittest.mock import Mock
+
+    from collector.execution import ExecutionControl, ExecutionStopped, execution_control
+
+    control = ExecutionControl()
+    control.abort()
+    token = execution_control.set(control)
+    classify = Mock()
+    try:
+        with pytest.raises(ExecutionStopped):
+            run_voters(
+                [("a", object()), ("b", object())], classify=classify,
+                make_vote=lambda voter, decision: decision, handled_errors=(ValueError,),
+            )
+    finally:
+        execution_control.reset(token)
+    classify.assert_not_called()
