@@ -2,8 +2,8 @@
 
 The backend owns discovery, classification, collection, quotas and durable state.
 A client submits a command and may disconnect immediately after acceptance.
-Reading progress is optional and never schedules work. React, Node.js and the
-existing frontend are not needed to run or integrate the API.
+Reading progress is optional and never schedules work. Any HTTP client can run
+and integrate the API.
 
 ## Run API + PostgreSQL
 
@@ -427,7 +427,7 @@ Follow progress and fetch the saved dataset IDs. The alias accepts an optional
 `Idempotency-Key`; without one, each POST receives a new server-generated key and
 creates a new submission. Use `/collector/searches` and a saved client key for
 new integrations and network retries.
-The frontend does not need to be installed, built, open or polling.
+Processing continues without a connected or polling client.
 
 `tests/test_async_searches.py` verifies admission/replay concurrency, ownership,
 queue and public quotas, SQL rollback, lost commit acknowledgement, migration,

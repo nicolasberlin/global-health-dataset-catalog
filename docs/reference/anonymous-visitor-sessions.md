@@ -1,8 +1,8 @@
 # Anonymous visitor sessions
 
 The backend can recognize a browser without asking its visitor to supply an API
-token. The frontend initializes the session automatically in public mode, and
-the backend limits workload. The default remains `API_AUTH_MODE=token`.
+token. An independent browser client initializes the session in public mode,
+and the backend limits workload. The default remains `API_AUTH_MODE=token`.
 Internet rollout requires HTTPS, trusted proxy configuration, and general
 traffic limits at the reverse proxy. The internal EPFL deployment uses the
 explicit HTTP mode described below, with no planned migration to HTTPS.
@@ -18,11 +18,11 @@ explicit HTTP mode described below, with no planned migration to HTTPS.
 | `API_ALLOW_INSECURE_HTTP_SESSIONS` | Defaults to `false`. Set to `true` for the internal EPFL HTTP deployment. Other values than `true`/`false` are rejected (case-insensitive). |
 
 Startup rejects missing or invalid settings. `API_ACCESS_TOKENS` is not required
-in public mode. Never put the session secret in a `VITE_*` variable or a browser
-response. Changing it invalidates all existing visitor cookies. The public
+in public mode. Never expose the session secret in a browser bundle, public
+configuration or response. Changing it invalidates all existing visitor cookies. The public
 origin is configured explicitly rather than inferred from forwarded headers.
 
-Use one origin for the frontend and API. TLS may terminate at the trusted
+Use one origin for the browser client and API. TLS may terminate at the trusted
 reverse proxy; the API does not need to terminate TLS itself. Local development
 can continue using the existing loopback-only `local` mode.
 
@@ -32,8 +32,8 @@ HTTP is the intended mode for this internal deployment. It requires no TLS
 certificate or HTTPS redirect. Keep the HTTP option enabled for this site;
 HTTPS remains supported for other hosting environments.
 
-For `http://catalog.example.org:1312/ai-commons/`, replace the example hostname
-with your deployment hostname and explicitly set:
+For an API served at `http://catalog.example.org:1312/ai-commons/api`, explicitly
+set the following, replacing the example hostname with your deployment hostname:
 
 ```dotenv
 PUBLIC_HOST=catalog.example.org
@@ -43,11 +43,11 @@ API_PUBLIC_ORIGIN=http://catalog.example.org:1312
 API_SESSION_SECRET=<random server-only secret of at least 32 characters>
 ```
 
-Keep existing database and provider secrets. Compose passes `API_AUTH_MODE` to
-the frontend build as `VITE_API_AUTH_MODE`, with `/ai-commons/api` as the API base.
-Rebuild the frontend when changing modes. No session secret is a build argument.
-Outside Compose, set `VITE_API_AUTH_MODE=public` and a same-origin API base when
-building. Public mode rejects a cross-origin API URL before sending requests.
+Keep existing database and provider secrets. Compose configures the API's
+`API_AUTH_MODE`; configure your independent browser client for cookie sessions
+and the same-origin `/ai-commons/api` base path. Keep the signing secret on the
+server. The repository provides the API contract rather than a production
+website deployment.
 
 When the configured origin is HTTP and the HTTP option is enabled, the cookie is
 `global-health-session`, without `Secure` or the `__Host-` prefix. It retains
@@ -76,10 +76,10 @@ new visitor sessions; transferring ownership of HTTP searches is not implemented
 3. Send the cookie with subsequent collector requests. Search, progress reads,
    and retries resolve it to the existing `APIPrincipal.owner_id`.
 4. A protected request with a missing or expired cookie returns `401` and does
-   not create another session or start work. The frontend stops tracking that
-   session and offers an explicit Continue action. Recovery creates/reuses a
-   cookie but does not replay the failed POST. Old results are cleared and the
-   user's typed query is retained.
+   not create another session or start work. The client should stop protected
+   reads and offer an explicit reconnect action. Recovery creates or reuses a
+   cookie; it must not automatically replay the failed POST. Clear private
+   results when replacing the visitor identity.
 
 In HTTPS mode, the cookie is named `__Host-global-health-session`, with `Secure`,
 `HttpOnly`, `SameSite=Lax`, `Path=/`, and no `Domain` attribute. Internal HTTP uses
@@ -111,13 +111,13 @@ Cookie creation and state-changing session requests require an exact allowed
 as authorization. Successful session issuance and protected responses carry
 `Cache-Control: no-store`.
 
-The public frontend waits for bootstrap before protected operations, while the
-catalog remains available. It ignores stored Bearer tokens, handles the empty
-`204`, and sends same-origin cookies. Concurrent initializations in a mounted
-application (including React StrictMode) share an in-flight bootstrap. A `403`
-does not trigger a session refresh. `429` responses expose `Retry-After`; the
-client defers repeat requests to that operation and polling respects that delay.
-Search/classification/collection POST requests are never automatically replayed.
+A browser client must finish bootstrap before protected operations; the
+catalogue remains public. Use same-origin cookies without bearer credentials,
+and handle the empty `204` response. Share any concurrent bootstrap operation
+to avoid competing cookie writes. Treat `403` as an origin or access failure,
+rather than a reason to create another session. Honor `Retry-After` on `429`
+responses and preserve uncertain command keys. Do not automatically replay
+search, classification or collection POST requests.
 
 No database migration or user table is needed: the signed identity becomes a
 namespaced `visitor:<random-id>` owner in the current schema. IP and global
@@ -203,34 +203,9 @@ IP/global budgets, whole-batch rollback, queue capacity across concurrent reques
 and retries that charge only once. External providers are stubbed; tests incur
 no LLM charges.
 
-Browser regression tests exercise the real session route and authentication
-dependency over HTTPS in Chromium, Firefox and WebKit, without supplying `Origin`
-or cookies manually. Same-origin `fetch()` POST must create an HttpOnly cookie
-and authenticate subsequent GET/POST requests. A form POST from a foreign origin
-must receive an actual backend `403`, not merely a CORS error.
-Only quota persistence is simulated in this harness; PostgreSQL tests
-above cover quotas and ownership. This is a session-contract test, not yet a
-test of the frontend search interface.
-
-After installing the Python dependencies, run from `frontend/`:
-
-```sh
-npm ci
-npx playwright install --with-deps chromium firefox webkit
-npm run test:browser
-```
-
-The harness requires OpenSSL and port 9443, generates a temporary self-signed
-certificate and binds only to loopback. Playwright accepts that test certificate;
-browser origin and cookie security checks remain enabled. CI runs this suite
-as a separate validation job. The suite also serves the real public frontend
-under `/ai-commons/` over HTTP and mounts the production session and collector
-routers under `/ai-commons/api`. Persistence is replaced with controlled fixtures
-for local dataset search; no workers or external providers run. It checks search
-without a token, cookie reuse after reload and foreign-origin rejection. HTTP
-flags are asserted explicitly because browsers treat loopback specially.
-
-Unit tests additionally cover failed bootstrap, session expiration, no automatic
-POST replay and quota cooldowns. The local harness does not certify the remote
-Traefik routing, network isolation or forwarded client address: follow the
-checks in [Deployment on EPFL](../DEPLOYMENT.md) before enabling internal access.
+`tests/test_api_cors.py` verifies configured browser origins and response
+headers. These HTTP-level checks do not execute a real browser. When connecting
+a browser client, verify actual cookie behavior over the intended HTTP or HTTPS
+origin, bootstrap reuse, expiration, foreign-origin rejection and explicit retry
+handling. Check the deployed Traefik routing, network isolation and forwarded
+client address using [deployment verification](../DEPLOYMENT.md#verify-the-deployed-infrastructure).

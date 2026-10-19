@@ -1,7 +1,7 @@
 # Global Health Dataset Catalog
 
-A FastAPI and PostgreSQL application for finding, classifying and cataloguing
-global health datasets, with an optional React interface.
+A FastAPI and PostgreSQL API for finding, classifying and cataloguing
+global health datasets.
 
 It searches the local catalogue first, uses external repositories when needed,
 and runs background classification and collection. It stores **metadata and
@@ -9,7 +9,7 @@ links**, with bounded access checks rather than complete dataset downloads.
 
 ## Quick start
 
-Try the complete API locally before connecting a frontend. You need:
+Try the complete API locally. You need:
 
 - Python 3.11 or later;
 - Docker running, with the `docker compose` command available;
@@ -81,7 +81,7 @@ Always specify the Compose file for your workflow:
 | File | Purpose |
 | --- | --- |
 | [`docker-compose.api.yml`](docker-compose.api.yml) | API and PostgreSQL; use this for the quick start above |
-| [`docker-compose.local.yml`](docker-compose.local.yml) | PostgreSQL only; run Python and the optional React interface manually using [onboarding](docs/ONBOARDING.md#start-locally) |
+| [`docker-compose.local.yml`](docker-compose.local.yml) | PostgreSQL only; run Python manually using [onboarding](docs/ONBOARDING.md#start-locally) |
 | [`docker-compose.yml`](docker-compose.yml) | Internal EPFL deployment behind existing Traefik infrastructure; requires the [deployment configuration](docs/DEPLOYMENT.md) |
 
 ## Stop and resume
@@ -131,7 +131,7 @@ you need to integrate, change or deploy it:
 | Guide | Use it to |
 | --- | --- |
 | [API integration](docs/api-integration.md) | Build your own client: commands, progress, authentication, results and retries |
-| [Developer onboarding](docs/ONBOARDING.md) | Run Python and the optional React interface outside Docker, change code and run tests |
+| [Developer onboarding](docs/ONBOARDING.md) | Run Python outside Docker, change code and run tests |
 | [Architecture](docs/technical-design-document.md) | Understand modules, persistence, collection and safety constraints |
 | [Deployment](docs/DEPLOYMENT.md) | Configure a server, proxy, database operations and maintenance |
 
@@ -145,13 +145,12 @@ explain generated reports and optional investigation templates.
 backend/app/       FastAPI routes, PostgreSQL access and background workers
 collector/         Repository discovery, classification and bounded validation
 browser/           Isolated browser service for collection fallback
-frontend/          Optional React interface
 deploy/            Example Traefik proxy configuration
 scripts/           Local API configuration helper and HTTP client
 tests/             Python unit and integration tests
 docs/              Integration, development, architecture and deployment guides
 research/          Private generated API reports and investigation templates
-search_lab/        Optional laboratory with its own setup and local data
+search_lab/        Optional laboratory with its own small interface and local data
 ```
 
 ## Current limits

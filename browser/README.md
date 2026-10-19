@@ -1,7 +1,7 @@
 # Isolated collection browser
 
 See [browser recovery and deployment](../docs/reference/collection.md#optional-browser).
-This service is optional and separate from the application's frontend/browser.
+This optional service renders collection targets independently of API clients.
 
 For a local macOS development run, install dependencies and Chromium:
 
@@ -13,7 +13,7 @@ cd ..
 ```
 
 Use a private random token of at least 32 characters in both service and backend
-environments. Never put this token in a frontend `VITE_*` variable. Start the
+environments. Never put this token in a browser bundle or public settings. Start the
 DNS-pinned proxy in one terminal:
 
 ```sh
@@ -29,9 +29,9 @@ node browser/service.cjs
 
 Start the backend with its existing environment plus
 `COLLECTION_BROWSER_URL=http://127.0.0.1:8002` and the same
-`COLLECTION_BROWSER_TOKEN`. The frontend remains at port 5173, the backend at
-8001, the renderer at 8002 and its outgoing HTTPS proxy at 8899. The frontend
-communicates only with the backend.
+`COLLECTION_BROWSER_TOKEN`. The API uses port 8001, the renderer uses 8002 and
+its outgoing HTTPS proxy uses 8899. Independent API clients communicate only
+with the API.
 
 On macOS, the renderer child runs under an outer `sandbox-exec` policy denying
 home-directory access except its code, dependency and Chromium directories, and

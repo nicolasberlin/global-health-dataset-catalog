@@ -16,21 +16,20 @@ or independent worker service is required.
 
 | Component | Responsibility | Source |
 | --- | --- | --- |
-| Optional local React frontend | Submit commands, restore searches, display progress and catalogue results | [frontend/src](../frontend/src) |
 | Optional Search Lab | Explore provider results with an independent local interface | [search_lab](../search_lab) |
 | FastAPI backend | Authentication, validation, admission, workers and public responses | [backend/app](../backend/app) |
 | Collector | Discovery, record extraction, LLM classification and resource checks | [collector](../collector) |
 | PostgreSQL | Durable queues, ownership, receipts, votes, history and catalogue | [backend/app/db](../backend/app/db) |
 | Optional browser service | Render selected pages and probe resources within browser sessions | [browser](../browser) |
 
-Within the backend, `routes/` defines HTTP handlers, `auth/` owns authentication
-and visitor sessions, `workers/` executes background jobs, and `db/` owns SQL
-and transactions. `quota_policy.py` supplies admission rules shared by HTTP
-and database operations. `database.py` and `routes/collector.py` retain
-compatibility exports; new imports should target the module that owns the code.
+Within the backend, `routes/` owns HTTP handlers, `auth/` owns authentication
+and visitor sessions, `workers/` executes background jobs, and `db/` owns SQL and
+transactions. `workers/runtime.py` and `workers/state.py` share worker lifecycle
+and health; `quota_policy.py` supplies admission rules used by HTTP and database
+operations.
 
-The frontend is an API client. Any other client, including
-[scripts/test_api.py](../scripts/test_api.py), can run the same workflow independently.
+Any HTTP client, including [scripts/test_api.py](../scripts/test_api.py), can
+submit searches and follow the persisted workflow independently.
 The browser service is a collection fallback, separate from the user interface.
 
 ## End-to-end flow
@@ -79,11 +78,6 @@ Search, classification and collection have separate PostgreSQL queues and bounde
 executors. Consumers claim committed work with row locking; worker receipts and
 attempt/version checks prevent an uncertain SQL acknowledgement from creating
 another claim or allowing stale completion to overwrite a newer attempt.
-
-The queue executors live in `workers/search.py`, `workers/classification.py`
-and `workers/collection.py`. `workers/runtime.py` shares the consumer and shutdown
-mechanics; `workers/state.py` tracks their state and `workers/jobs.py` defines
-persisted task inputs.
 
 The client submits a command and may disconnect immediately. Polling neither
 starts nor advances work. Owner-scoped idempotency receipts bind command keys to
@@ -194,7 +188,7 @@ Technical access and LLM relevance do not establish source authority, acceptable
 licensing, absence of sensitive data, or permission to publish. Static tokens do
 not provide account management or institutional identity. Real-provider testing,
 capacity planning and deployment review remain necessary for the intended use.
-Frontend-specific behavior belongs to [developer onboarding](ONBOARDING.md#optional-frontend).
+Client integration belongs to the [API guide](api-integration.md).
 
 ## Optional technical references
 

@@ -65,7 +65,7 @@ def configuration():
         'config', '--format', 'json',
     ], env=env, text=True, stderr=subprocess.PIPE))
     http = {'routers': {}, 'middlewares': {}, 'services': {}}
-    for name in ('ai-commons', 'ai-commons-api'):
+    for name in ('ai-commons-api',):
         labels = compose['services'][name]['labels']
         router = f'traefik.http.routers.{name}.'
         chain = labels[router + 'middlewares'].split(',')
@@ -103,9 +103,13 @@ def proxy(tmp_path, request):
     (tmp_path / 'server.py').write_text(SERVER)
     config = configuration()
     # Test-only readiness route exercises Traefik and the upstream without
-    # consuming either application bucket, even when startup needs retries.
+    # consuming the API bucket, even when startup needs retries.
     config['http']['routers']['test-readiness'] = {
         'rule': 'Path(`/stats`)', 'entryPoints': ['web'],
+        'service': 'ai-commons-api',
+    }
+    config['http']['routers']['test-backend-limit'] = {
+        'rule': 'Path(`/backend-limit`)', 'entryPoints': ['web'],
         'service': 'ai-commons-api',
     }
     if getattr(request, 'param', None) == 'slow-refill':
@@ -169,7 +173,7 @@ async def test_request_body_limit_rejects_before_upstream(proxy):
 async def test_same_ip_polling(proxy, visitors):
     async with httpx.AsyncClient(base_url=proxy, headers={'Host': 'test.invalid'},
                                 timeout=10, limits=httpx.Limits(max_connections=100)) as client:
-        before = (await client.get('/ai-commons/api/stats')).json()['count']
+        before = (await client.get('/stats')).json()['count']
         pending = []
         started = time.monotonic()
         # Distinct cookies do not create separate proxy buckets. Ten seconds drains
@@ -195,23 +199,13 @@ async def test_same_ip_polling(proxy, visitors):
             assert rejected
         # Refill before diagnostic read; rejected requests never reached origin.
         await asyncio.sleep(1)
-        after = (await client.get('/ai-commons/api/stats')).json()['count']
+        after = (await client.get('/stats')).json()['count']
         assert after - before == len(accepted)
         print(f'\n{visitors} visitors / same IP: {len(accepted)} origin, '
               f'{len(rejected)} Traefik 429, {elapsed:.2f}s')
         backend = await client.get('/ai-commons/api/backend-limit')
         assert backend.status_code == 429
         assert backend.headers['x-test-origin'] == 'backend'
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize('proxy', ['slow-refill'], indirect=True)
-async def test_frontend_bucket_does_not_consume_api_budget(proxy):
-    async with httpx.AsyncClient(base_url=proxy, headers={'Host': 'test.invalid'},
-                                timeout=10) as client:
-        responses = await asyncio.gather(*[client.get('/ai-commons/') for _ in range(300)])
-        assert any(r.status_code == 429 for r in responses)
-        assert (await client.get('/ai-commons/api/poll')).status_code == 200
 
 
 @pytest.mark.anyio
@@ -223,7 +217,7 @@ async def test_shared_ip_bucket_exhaustion(proxy, visitors):
         # Repeated readiness probes must leave the full 400-token burst intact.
         for _ in range(5):
             assert (await client.get('/stats')).status_code == 200
-        before = (await client.get('/ai-commons/stats')).json()['count']
+        before = (await client.get('/stats')).json()['count']
         responses = []
         started = time.monotonic()
         # 420 requests exceed the unchanged 400-token API burst. Slow refill
@@ -243,10 +237,10 @@ async def test_shared_ip_bucket_exhaustion(proxy, visitors):
         assert rejected, 'Same-IP cookies/forwarded headers must share the API bucket'
         assert all('x-test-origin' not in r.headers for r in rejected)
         assert all(r.text == 'Too Many Requests' for r in rejected)
-        # Independent frontend bucket permits inspection without refilling API.
-        after = (await client.get('/ai-commons/stats')).json()['count']
+        # The test-only diagnostic route permits inspection without refilling API.
+        after = (await client.get('/stats')).json()['count']
         assert after - before == len(accepted)
-        backend = await client.get('/ai-commons/backend-limit')
+        backend = await client.get('/backend-limit')
         assert backend.status_code == 429
         assert backend.headers['x-test-origin'] == 'backend'
         print(f'\n{visitors} visitors / shared IP, slow refill: '
@@ -257,7 +251,4 @@ def test_deployed_rate_limit_defaults():
     middlewares = configuration()['http']['middlewares']
     assert middlewares['limit-ai-commons-api']['rateLimit'] == {
         'average': 200, 'period': '1s', 'burst': 400,
-    }
-    assert middlewares['limit-ai-commons']['rateLimit'] == {
-        'average': 50, 'period': '1s', 'burst': 100,
     }

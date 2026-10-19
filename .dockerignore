@@ -9,9 +9,10 @@
 **/__pycache__
 **/*.pyc
 backend/*.db
-frontend/dist
-frontend/node_modules
+/frontend
 browser/node_modules
 research
 search_lab
 Host ai-commons
+
+.codex-build

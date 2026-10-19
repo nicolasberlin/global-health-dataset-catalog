@@ -1,6 +1,7 @@
 # Developer onboarding
 
-Use this guide to change the Python API, collector or optional React interface.
+Use this guide to change the Python API or collector. The optional
+[Search Lab](../search_lab/README.md) has its own interface and setup.
 To try the API without installing development tools, follow the
 [README quick start](../README.md#quick-start). HTTP contracts belong in the
 [API guide](api-integration.md); infrastructure settings belong in
@@ -10,8 +11,9 @@ To try the API without installing development tools, follow the
 
 ### Requirements and dependencies
 
-Use Python 3.11, uv 0.12.17, Docker with Compose, and Node.js 22.12+ for frontend work
-(or a newer supported LTS release).
+Use Python 3.11, uv 0.12.17 and Docker with Compose. Node.js 22.12+ (or a newer
+supported LTS release) is needed only for the optional Search Lab interface or
+collection browser service.
 These match the checked-in development and CI configuration. Python 3.11 is the
 minimum supported version. Actual classifications need EPFL laboratory access and credentials
 for all three configured RCP models. Use the keys provided through your laboratory
@@ -32,10 +34,9 @@ From the repository root:
 
 ```sh
 uv sync --locked --extra dev
-npm --prefix frontend ci
 ```
 
-Skip npm if you only change Python. `pyproject.toml` and `uv.lock` own Python
+`pyproject.toml` and `uv.lock` own Python
 dependencies. Normal installs use `--locked`. When changing a dependency, update
 `pyproject.toml`, refresh the lock with `uv lock`, then sync and validate. Use
 `uv lock --upgrade-package PACKAGE` only when deliberately upgrading that package.
@@ -53,16 +54,14 @@ export RCP_DEEPSEEK_API_KEY="replace-with-your-deepseek-credential"
 export RCP_GEMMA_MEDITRON_API_KEY="replace-with-your-gemma-meditron-credential"
 export RCP_APERTUS_MEDITRON_API_KEY="replace-with-your-apertus-meditron-credential"
 export API_AUTH_MODE="local"
-export VITE_API_AUTH_MODE="local"
-export VITE_API_BASE_URL="http://127.0.0.1:8001"
 ```
 
 Each voter reads its own credential variable. Obtain credentials authorized for
 each configured model; the application does not substitute another voter's key.
 Default model IDs are defined in `collector/classification/providers/epfl_rcp.py`;
 set the corresponding `RCP_*_MODEL` variable only when overriding a default.
-Never commit the populated file or put model keys or access tokens in `VITE_*`
-variables: Vite exposes those values to the browser.
+Never commit the populated file or put model keys or private access tokens in
+browser bundles, public configuration or URLs.
 
 ### Database and API
 
@@ -94,23 +93,10 @@ ownership, worker and model configuration readiness. Readiness does not call a
 model or prove provider access. Interactive API docs are at `/docs`.
 Real searches consume model quota and can save catalogue records.
 
-### Optional React interface
-
-In another terminal, from the repository root:
-
-```sh
-source .env.local
-npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 --strictPort
-```
-
-Open `http://127.0.0.1:5173/`. Local mode needs no token and works only in the
-development build. For token authentication or a website served with visitor
-cookies, follow [API integration](api-integration.md) and
-[deployment](DEPLOYMENT.md) instead of exposing local mode.
-
-Stop the API and frontend with Ctrl+C in their terminals. Stop the development
-database with `docker compose -f docker-compose.local.yml stop postgres` from
-the repository root; this preserves its data volume.
+Stop the API with Ctrl+C in its terminal. Stop the development database with
+`docker compose -f docker-compose.local.yml stop postgres` from the repository
+root; this preserves its data volume. Use the [API guide](api-integration.md) to
+connect an independent client with the appropriate authentication mode.
 
 ## Choose the owning module
 
@@ -123,12 +109,11 @@ the repository root; this preserves its data volume.
 | Prompts, voters and classification parsing | `collector/classification/` |
 | Distribution access checks | `collector/validation/downloads.py` |
 | HTTP deadlines and destination policy | `collector/transport.py`, `collector/fetch.py` |
-| Search, classification and collection execution | `backend/app/workers/search.py`, `classification.py`, `collection.py` |
-| Worker lifecycle, state and persisted inputs | `backend/app/workers/runtime.py`, `state.py`, `jobs.py` |
+| Search, classification and collection execution | `backend/app/workers/search.py`, `backend/app/workers/classification.py`, `backend/app/workers/collection.py` |
+| Worker lifecycle, state and persisted inputs | `backend/app/workers/runtime.py`, `backend/app/workers/state.py`, `backend/app/workers/jobs.py` |
 | Authentication and visitor sessions | `backend/app/auth/security.py`, `backend/app/auth/sessions.py` |
 | Quotas and work admission | `backend/app/quota_policy.py`, `backend/app/db/api_quotas.py` |
 | API response mapping | `backend/app/routes/collector_presenters.py`, `collector_schemas.py` |
-| Website search, session and catalogue state | [Optional frontend](#optional-frontend) below |
 
 The [architecture guide](technical-design-document.md) explains module boundaries.
 The [collection guide](reference/collection.md) owns extraction, validation, timeouts and
@@ -139,11 +124,6 @@ Implement database changes in the relevant `backend/app/db/` module.
 new code should import the owning `app.db` module. Similarly,
 `backend/app/routes/collector.py` assembles the routers and keeps compatibility
 exports; HTTP handlers belong in the topic-specific route modules above.
-
-`backend/app/workers/` owns background execution; its `runtime.py` shares claiming,
-shutdown and recovery mechanics across the three queues. `backend/app/auth/`
-owns caller authentication and signed visitor sessions. Quota policy stays
-separate because HTTP admission and database commands both use it.
 
 ### Follow a search through the code
 
@@ -173,8 +153,6 @@ From the repository root, after installing development dependencies:
 ```sh
 .venv/bin/ruff check .
 .venv/bin/pytest tests search_lab/tests
-npm --prefix frontend test
-npm --prefix frontend run build
 git diff --check
 ```
 
@@ -207,44 +185,17 @@ are removed when it stops; no application volume is reused.
 | Ownership, errors or recovery | `tests/test_standalone_api_failures.py`, relevant worker/database tests |
 | Process startup/restart | `tests/test_standalone_api_runtime.py`, with the disposable test database |
 | Connector | Its contract fixtures; see [connector development](reference/collection-connectors.md#adding-a-connector) |
-| Website lifecycle | Hook/component tests, build and browser suite below |
+| Browser session or CORS contract | `tests/test_visitor_sessions.py`, `tests/test_security.py`, `tests/test_api_cors.py` |
 | Browser collection service | `npm --prefix browser ci`, then `npm --prefix browser test` |
 | Laboratory | [Its own test instructions](../search_lab/README.md#test-and-remove) |
 
-Install browser engines once before running the frontend browser suite:
-
-```sh
-cd frontend
-npx playwright install --with-deps chromium firefox webkit
-npm run test:browser
-```
-
-The browser harness uses isolated test servers and simulated services. The
-[CI workflow](../.github/workflows/ci.yml) also defines the Python/PostgreSQL,
-frontend, browser, firewall and proxy jobs. Some infrastructure or throughput
-checks are opt-in locally. Report skipped checks and the tested revision;
-simulated providers do not prove that real models or a deployment work.
-
-## Optional frontend
-
-The local React interface is an API client. Its setup is [above](#optional-react-interface);
-HTTP commands, authentication, retries and progress contracts belong to
-[API integration](api-integration.md). The public API-only repository excludes
-this main interface; the independent [Search Lab](../search_lab/README.md) remains included.
-
-| Module under `frontend/src/` | Responsibility |
-| --- | --- |
-| `App.jsx` | Search submission, restoration and navigation |
-| `jobs/useSearchProgress.js` | Search snapshots, polling and downstream commands |
-| `auth/useApiSession.js` | Identity, cancellation and visitor bootstrap |
-| `api/client.js`, `api/commands.js` | Transport, authentication, cooldowns and command keys |
-| `catalog/` | Catalogue pagination, refresh ordering and saved details |
-| `hooks/useCollectionHistory.js` | Paginated collection diagnostics |
-
-Keep server work independent of browser tracking: reading progress, opening a
-card or reconnecting must not submit another job. Closing the interface does not
-cancel server work. On identity changes, abort obsolete reads and discard private
-state. Regression tests live beside their hooks and in `frontend/src/App.*.test.jsx`.
+The [CI workflow](../.github/workflows/ci.yml) defines Python/PostgreSQL,
+Search Lab interface, collection browser, firewall and proxy checks. Some
+infrastructure or throughput checks are opt-in locally. Report skipped checks
+and the tested revision; simulated providers do not prove that real models or a
+deployment work. Validate real browser integration separately when connecting a
+client; the [visitor session contract](reference/anonymous-visitor-sessions.md)
+defines cookie and origin requirements.
 
 ## Troubleshooting
 

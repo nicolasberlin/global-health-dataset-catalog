@@ -1,8 +1,11 @@
 .venv/
 node_modules/
-frontend/test-results/
-frontend/playwright-report/
-frontend/dist-browser/
+# The main interface is maintained separately from this API repository.
+/frontend/
+/tests/browser/
+.vscode/
+.idea/
+*.log
 __pycache__/
 .pytest_cache/
 .ruff_cache/

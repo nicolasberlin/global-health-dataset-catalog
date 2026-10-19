@@ -96,9 +96,9 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-Open `http://<your-hostname>:1312/ai-commons/`.
-Both application routers use `web` and the configured `Host` rule. The API
-router keeps its higher priority so `/ai-commons/api` reaches port 8001.
+Open `http://<your-hostname>:1312/ai-commons/api/docs`.
+The API router uses `web` and the configured `Host` rule. Requests under
+`/ai-commons/api` reach the API on port 8001.
 There is no TLS, HSTS, or HTTPS redirect middleware in this deployment.
 
 ### API prefix behind Traefik
@@ -107,8 +107,8 @@ The main Compose file starts `ai-commons-api` with
 `--root-path /ai-commons/api`, matching the prefix removed by Traefik. Keep both
 values aligned when changing the public API path. This makes `Location`,
 `progress_url`, Swagger and OpenAPI URLs include the external prefix; a client
-can follow a returned URL without adding the prefix again. The frontend build
-argument `VITE_API_BASE_URL` must use that same external path.
+can follow a returned URL without adding the prefix again. Configure independent
+clients to use that same external API path.
 
 The standalone API at `http://127.0.0.1:8001` keeps an empty root path by default.
 For a different proxy deployment, follow the explicit
@@ -165,11 +165,7 @@ preserved. Finalization is guarded by the claim's exact
 cannot duplicate finalization or overwrite a newer explicitly retried attempt.
 
 Acquisition also retries transient SQL failures, using one internal UUID per
-consumer acquisition. An acquisition error outside those transient retries makes
-readiness and new admission return 503 while polling continues. A successful
-poll, including an empty one, clears that acquisition failure; other readiness
-checks must also pass before the application becomes available again.
-The task transition and its `worker_claims` receipt commit
+consumer acquisition. The task transition and its `worker_claims` receipt commit
 together. After a lost commit acknowledgement,
 the same token retrieves the same running attempt without changing its deadline
 or spending another admission. An obsolete receipt cannot acquire another task.
@@ -388,15 +384,15 @@ to remove its process-level database exception entirely.
 After deploying to the internal EPFL host:
 
 ```bash
-curl -I "http://${PUBLIC_HOST}:1312/ai-commons/"
+curl --fail --show-error --silent -o /dev/null "http://${PUBLIC_HOST}:1312/ai-commons/api/docs"
 curl --fail --show-error --silent "http://${PUBLIC_HOST}:1312/ai-commons/api/health"
 curl --fail --show-error --silent --max-time 3 "http://${PUBLIC_HOST}:1312/ai-commons/api/ready"
 docker compose port postgres 5432
 docker compose exec ai-commons-api nft list table inet collector_egress
 ```
 
-Expect a successful frontend response without an HTTPS redirect, a successful
-health and readiness responses, and no published PostgreSQL port. If curl succeeds but the
+Expect successful API documentation, health and readiness responses without an
+HTTPS redirect, and no published PostgreSQL port. If curl succeeds but the
 browser still redirects, clear its cached redirect/site data and retry the
 explicit HTTP URL. The firewall inspection uses `docker exec` as the trusted container
 administrator; the application process itself has no capabilities. Verify
@@ -555,19 +551,17 @@ can run while the API serves; applying a policy requires the API stopped.
 
 ## Traffic limits and shared EPFL addresses
 
-Application labels attach two independent per-IP token buckets to the existing
-Traefik routers, before prefix stripping. No change to shared Traefik static
-configuration is required.
+Application labels attach a per-IP token bucket to the existing Traefik API
+router before prefix stripping. No change to shared Traefik static configuration
+is required.
 
 | Router | Average | Period | Burst |
 | --- | ---: | --- | ---: |
 | API (`/ai-commons/api`) | 200 | 1s | 400 |
-| Frontend (`/ai-commons`) | 50 | 1s | 100 |
 
-Optional deployment variables are `TRAEFIK_API_RATE_AVERAGE`,
-`TRAEFIK_API_RATE_BURST`, `TRAEFIK_FRONTEND_RATE_AVERAGE` and
-`TRAEFIK_FRONTEND_RATE_BURST`. Use positive integers; an average of zero disables
-Traefik limiting. Recreate the application containers after changing labels.
+Optional deployment variables are `TRAEFIK_API_RATE_AVERAGE` and
+`TRAEFIK_API_RATE_BURST`. Use positive integers; an average of zero disables
+Traefik limiting. Recreate the API container after changing labels.
 
 `API_MAX_REQUEST_BODY_BYTES` defaults to 65536 bytes and must be an integer from
 1024 to 1048576. The API counts received bytes before JSON parsing, including
@@ -599,16 +593,16 @@ configuring `ipStrategy`; `FORWARDED_ALLOW_IPS` only controls Uvicorn's trust of
 Traefik, not Traefik's own source selection. Limits are per Traefik instance and
 reset when it restarts; these are traffic guards, not durable workload budgets.
 
-The current frontend requests one progress snapshot about every two seconds per
-followed search, after the previous response completes. Twenty visitors following
-one search each therefore offer at most roughly 10 regular progress reads/second,
-plus other API activity. Multiple tabs and searches increase that traffic.
+A client polling one progress snapshot every two seconds offers roughly half
+a request per second per followed search. Twenty clients following one search
+each would therefore offer about 10 regular progress reads/second, plus other
+API activity. Multiple tabs and searches increase that traffic.
 
 The opt-in synthetic benchmark below models 14 requests/second per identity:
 5 identities offer 70 req/s, 10 offer 140, and 20 offer 280. In that benchmark,
 the initial burst can hide overload for roughly five seconds before sustained
-traffic receives 429s. This assumption describes the benchmark, not the current
-frontend's polling behavior. The 200/400 setting is an initial traffic policy,
+traffic receives 429s. This assumption describes the benchmark rather than a
+required client polling rate. The 200/400 setting is an initial traffic policy,
 not measured application capacity; measure representative use before changing it.
 
 Backend quotas remain independent: 20 new sessions/minute/IP, 10 searches/minute/
@@ -621,8 +615,8 @@ For a 429, inspect the existing Traefik access log (when enabled by infrastructu
 `DownstreamStatus=429` with no upstream request/`OriginStatus` indicates a proxy
 rejection, whereas `OriginStatus=429` identifies the backend. Backend quota
 responses carry JSON `detail` and `Retry-After`; Traefik normally returns plain
-text. The frontend handles both, respects `Retry-After`, and never automatically
-replays a costly POST. Correlate logs when diagnosing live traffic; body format
+text. Clients should handle both, respect `Retry-After`, and avoid automatically
+replaying a costly POST. Correlate logs when diagnosing live traffic; body format
 alone is not a permanent identification contract.
 
 Run the isolated proxy tests with:
@@ -634,8 +628,8 @@ TRAEFIK_TEST_IMAGE=traefik:v3.7.5 .venv/bin/pytest tests/test_traefik_rate_limit
 These tests load the Compose router/middleware labels into an isolated Traefik
 with a counting upstream and 5/10/20 identities from one source IP. They verify
 the configured defaults, then lengthen only the test refill period to one hour
-to exercise burst exhaustion and frontend/API isolation. They do not mount the
-Docker socket, read production `.env`, or call model providers. Backend session,
+to exercise burst exhaustion and verify that diagnostics do not consume the API
+bucket. They do not mount the Docker socket, read production `.env`, or call model providers. Backend session,
 admission and polling quotas are covered by `tests/test_public_quotas.py` against
 PostgreSQL. Neither suite certifies the live forwarding chain or throughput.
 

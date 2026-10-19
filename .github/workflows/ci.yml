@@ -55,54 +55,40 @@ jobs:
           test -n "$TEST_DATABASE_URL"
           .venv/bin/pytest --ignore=tests/test_container_egress.py -ra
 
-  frontend:
+  browser-contracts:
+    name: Collection browser contracts
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: frontend
+        working-directory: browser
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: browser/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  search-lab-ui:
+    name: Search Lab interface
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: search_lab/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: search_lab/frontend/package-lock.json
       - run: npm ci
       - run: npm test
       - run: npm run build
-
-      - name: Browser service contract tests
-        working-directory: browser
-        run: |
-          npm ci
-          npm test
-
-  browser-sessions:
-    name: HTTP frontend and HTTPS sessions (Chromium, Firefox, WebKit)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: '0.12.17'
-          enable-cache: true
-      - run: uv sync --locked --extra dev --python '3.11'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-        working-directory: frontend
-      - run: npx playwright install --with-deps chromium firefox webkit
-        working-directory: frontend
-      - run: npm run test:browser
-        working-directory: frontend
 
   container-egress:
     name: Backend image and firewall

@@ -1,29 +1,4 @@
 services:
-  ai-commons:
-    build:
-      context: ./frontend
-      args:
-        VITE_API_BASE_URL: /ai-commons/api
-        VITE_PUBLIC_BASE: /ai-commons/
-        VITE_API_AUTH_MODE: ${API_AUTH_MODE:-token}
-    depends_on:
-      - ai-commons-api
-    networks:
-      - traefik
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=traefik
-      - traefik.http.routers.ai-commons.entrypoints=web
-      - traefik.http.routers.ai-commons.rule=Host(`${PUBLIC_HOST:?Set PUBLIC_HOST before starting the application}`) && PathPrefix(`/ai-commons`)
-      - traefik.http.routers.ai-commons.priority=10
-      - traefik.http.middlewares.strip-ai-commons.stripprefix.prefixes=/ai-commons
-      # Default source criterion is the direct client IP seen by Traefik.
-      - traefik.http.middlewares.limit-ai-commons.ratelimit.average=${TRAEFIK_FRONTEND_RATE_AVERAGE:-50}
-      - traefik.http.middlewares.limit-ai-commons.ratelimit.period=1s
-      - traefik.http.middlewares.limit-ai-commons.ratelimit.burst=${TRAEFIK_FRONTEND_RATE_BURST:-100}
-      - traefik.http.routers.ai-commons.middlewares=limit-ai-commons,strip-ai-commons
-      - traefik.http.services.ai-commons.loadbalancer.server.port=5173
-
   ai-commons-api:
     build:
       context: .
