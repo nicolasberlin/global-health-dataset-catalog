@@ -8,8 +8,7 @@ research/
 ├── api/
 │   ├── outputs/       JSON reports from scripts/test_api.py
 │   └── sessions/      Private client cookies in public-session mode
-├── search-diagnostics.md   Optional manual investigation guide
-└── templates/             Blank trace and report templates
+└── search-diagnostics.md   Guide to interpreting reports and diagnostic evidence
 ```
 
 Generated reports and session files are private and excluded from Git. They
@@ -46,11 +45,9 @@ not in reports or investigation notes.
 
 ## Investigate a result
 
-The optional [search diagnostics guide](search-diagnostics.md) and its blank
-[report](templates/search-report.md) and [trace](templates/search-trace.json)
-templates help maintainers record evidence and compare attempts. They are
-independent of the client-generated JSON report and do not need to be completed
-to use the API.
+The [search diagnostics guide](search-diagnostics.md) explains how to interpret
+the generated report and inspect the available API evidence. No manual forms
+are required to run or investigate a search.
 
 The [Search Lab](../search_lab/README.md) is a separate optional tool. Its code,
 guides and private observations live together in `search_lab/`; it does not

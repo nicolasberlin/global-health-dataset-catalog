@@ -137,7 +137,7 @@ you need to integrate, change or deploy it:
 
 The optional [Search Lab](search_lab/README.md) has its own interface and private
 observations; it is independent of the API quick start. [Research files](research/README.md)
-explain generated reports and optional investigation templates.
+explain generated reports and how to interpret diagnostic evidence.
 
 ## Project layout
 
@@ -149,7 +149,7 @@ deploy/            Example Traefik proxy configuration
 scripts/           Local API configuration helper and HTTP client
 tests/             Python unit and integration tests
 docs/              Integration, development, architecture and deployment guides
-research/          Private generated API reports and investigation templates
+research/          Private generated API reports and diagnostic-reading guide
 search_lab/        Optional laboratory with its own small interface and local data
 ```
 
