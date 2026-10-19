@@ -9,21 +9,33 @@ links**, with bounded access checks rather than complete dataset downloads.
 
 ## Quick start
 
-Try the complete API locally. You need:
+To run the project locally, you need:
 
-- Python 3.11 or later;
-- Docker running, with the `docker compose` command available;
-- EPFL laboratory access with credentials for all three configured RCP models:
-  DeepSeek, Gemma Meditron and Apertus Meditron. Use the keys provided through
-  your laboratory access; credentials are not included in the project.
+- **Python 3.11 or later** — [installation](https://www.python.org/downloads/).
+- **Docker with Docker Compose 2.3.0 or later** — [Docker installation](https://docs.docker.com/get-started/get-docker/) · [Compose installation](https://docs.docker.com/compose/install/).
+- **EPFL laboratory access and API keys** for the three configured RCP models.
+- An internet connection.
 
-Without model credentials, you can still run the [automated checks](docs/ONBOARDING.md#validation)
-after installing development dependencies. Tests simulate providers; database and
-infrastructure checks need the separate setup described in that guide.
+Docker installs PostgreSQL and the application dependencies automatically.
 
-Docker builds the API and runs PostgreSQL. This path does not require Node.js,
-uv or a separate PostgreSQL installation. Run these commands from the repository
-root after cloning it.
+Check your installation before continuing:
+
+```sh
+python3 --version
+docker compose version
+docker info
+```
+
+If you have not downloaded the project yet, [install Git](https://git-scm.com/install/)
+and clone it:
+
+```sh
+git clone https://github.com/nicolasberlin/global-health-dataset-catalog.git
+cd global-health-dataset-catalog
+```
+
+You can also download and extract the repository's ZIP from GitHub without Git.
+Run the following commands from the repository root.
 
 ### 1. Prepare your configuration
 
@@ -106,6 +118,7 @@ explicit [retry](docs/api-integration.md#explicit-retries); saved results remain
 | Problem | What to check |
 | --- | --- |
 | Docker is unavailable | Start Docker, then retry the startup command |
+| Compose rejects the top-level `name` field or is older than 2.3.0 | Install the current Compose plugin and use `docker compose`; see the [Linux installation guide](https://docs.docker.com/compose/install/linux/) |
 | Connection refused or readiness fails | Inspect the service status and logs below; check the database and all three model settings |
 | Model calls fail | Verify each RCP key has access to its configured model; readiness checks configuration, not provider availability |
 | Schema validation fails after updating | This release uses one initial schema for a fresh database; earlier pre-release volumes are not upgraded automatically. Follow [schema operations](docs/DEPLOYMENT.md#schema-validation-and-retired-source-administration) |

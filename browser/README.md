@@ -3,7 +3,10 @@
 See [browser recovery and deployment](../docs/reference/collection.md#optional-browser).
 This optional service renders collection targets independently of API clients.
 
-For a local macOS development run, install dependencies and Chromium:
+For a local macOS development run, use Node.js 22.12 or later within 22.x,
+matching the major version used in CI. Follow the
+[project's Python setup](../docs/ONBOARDING.md#requirements-and-dependencies),
+then install dependencies and Chromium:
 
 ```sh
 npm --prefix browser ci

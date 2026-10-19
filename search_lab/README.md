@@ -35,7 +35,9 @@ Keep credentials in the private `.env`, not in `example.env`. The startup script
 loads this lab configuration; it does not require the project's `.env.local`.
 The main API does not read the lab's configuration.
 
-Use Node.js 22.12+ (or a newer supported LTS release) for the lab interface.
+Use Node.js 22.12 or later within 22.x for the lab interface, matching the major
+version used in CI. Other accepted versions are declared in
+[`frontend/package.json`](frontend/package.json).
 Use the same Python setup as the main project; see
 [requirements and uv installation](../docs/ONBOARDING.md#requirements-and-dependencies).
 From the repository root, install the locked development dependencies into

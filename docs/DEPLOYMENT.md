@@ -6,6 +6,10 @@ Use HTTPS for deployments outside the internal EPFL environment described below.
 Module responsibilities are explained in the
 [architecture guide](technical-design-document.md).
 
+Use Docker with a current Compose plugin, **minimum 2.3.0** (`docker compose`). Legacy
+`docker-compose` 1.x is not supported. See the [quick-start version checks](../README.md#quick-start)
+and the [Linux plugin installation guide](https://docs.docker.com/compose/install/linux/).
+
 ## Internal EPFL deployment
 
 The main `docker-compose.yml` targets an existing Traefik on the external

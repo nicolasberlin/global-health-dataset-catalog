@@ -11,11 +11,21 @@ To try the API without installing development tools, follow the
 
 ### Requirements and dependencies
 
-Use Python 3.11, uv 0.12.17 and Docker with Compose. Node.js 22.12+ (or a newer
-supported LTS release) is needed only for the optional Search Lab interface or
-collection browser service.
-These match the checked-in development and CI configuration. Python 3.11 is the
-minimum supported version. Actual classifications need EPFL laboratory access and credentials
+Use these versions to match the checked-in development and CI configuration:
+
+- Python **3.11**, selected by `.python-version` and tested in CI. The package
+  requires Python 3.11 or later; newer versions are not currently tested in CI.
+- uv **0.12.17**, also used in CI and the backend image.
+- Docker with a **current Compose plugin (minimum 2.3.0)**, invoked as `docker compose`.
+  Legacy `docker-compose` 1.x is not supported; see the
+  [quick-start version checks](../README.md#quick-start) and
+  [Linux plugin installation](https://docs.docker.com/compose/install/linux/).
+- Node.js **22.12 or later within 22.x**, recommended for the optional Search Lab
+  interface or collection browser service. CI uses Node.js 22; the lab's
+  `frontend/package.json` also declares other accepted Node.js versions.
+
+Compose starts PostgreSQL **16**; a separate database installation is not needed.
+Actual classifications need EPFL laboratory access and credentials
 for all three configured RCP models. Use the keys provided through your laboratory
 access. Unit tests use simulated providers and need no model credentials.
 
@@ -36,8 +46,10 @@ From the repository root:
 uv sync --locked --extra dev
 ```
 
-`pyproject.toml` and `uv.lock` own Python
-dependencies. Normal installs use `--locked`. When changing a dependency, update
+`pyproject.toml` and `uv.lock` own Python dependencies; each Node.js component has
+its own `package.json` and `package-lock.json`. These files record library
+versions, so they are not duplicated in this guide. Normal Python installs use
+`--locked`; Node.js installs use `npm ci`. When changing a Python dependency, update
 `pyproject.toml`, refresh the lock with `uv lock`, then sync and validate. Use
 `uv lock --upgrade-package PACKAGE` only when deliberately upgrading that package.
 
@@ -221,4 +233,4 @@ Never include credentials, raw pages or private cookies in a shared report.
 - Validate the changed component and describe skipped/limited checks.
 - Update the guide that owns the changed contract and link to it elsewhere.
 - Review the selected diff for local configuration/generated evidence. The
-  laboratory stays optional. Maintainer priorities are in [TODO.txt](../TODO.txt).
+  laboratory stays optional.
