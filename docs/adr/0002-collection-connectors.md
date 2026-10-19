@@ -56,8 +56,7 @@ New record platforms require a connector and registry registration rather than
 branches in the collector. Existing classifiers, validator and persistence remain
 shared. No automatic cross-repository deduplication or exhaustive harvesting is
 provided. Run one API process and instance per database schema; the current
-ownership fence does not provide distributed queue leases. Future work belongs
-in the [maintainer backlog](../../TODO.txt), rather than this accepted decision.
+ownership fence does not provide distributed queue leases.
 
 ## References
 
