@@ -9,14 +9,16 @@ cannot establish whether an operation ran or why it failed.
 
 ## Start with the generated report
 
-1. Open `research/api/outputs/api-test.json`, or the path passed with `--output`.
+1. Open `research/api/outputs/search-report.json`.
 2. Inspect `progress`: it contains the current state, warnings and errors.
    A top-level `error` instead describes a client or HTTP failure.
 3. When tracking finishes, inspect `diagnostics` and `datasets`. Those fields
    can be absent if the client stopped early; available server evidence can
    still be retrieved through the endpoints below.
-4. Resume the saved search with `--search-id` rather than submitting another
-   query. Use a different `--output` path to preserve the earlier report.
+4. Retrieve the most recent search with `--latest` rather than submitting another
+   query. Copy the report first if it needs to be preserved. If another search
+   was created in the meantime, use the original ID through the HTTP endpoints
+   below to inspect the earlier search.
 5. For saved observations, notes and comparisons, use the optional
    [Search Lab](../search_lab/README.md).
 

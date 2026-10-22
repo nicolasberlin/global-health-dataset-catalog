@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from datetime import datetime, timezone
 
@@ -249,16 +248,16 @@ async def test_job_http_access_and_public_view_use_real_owner_associations(datab
     reservation = await database.reserve_repository_candidate_collection_job(alice["id"], "alice")
     job_id = reservation.job["id"]
     private_error = "internal-only: database credential and worker traceback"
-    monkeypatch.setenv("API_AUTH_MODE", "token")
-    monkeypatch.setenv("API_ACCESS_TOKENS", json.dumps({
-        owner: f"{owner}-test-token-with-at-least-thirty-two-characters"
-        for owner in ("alice", "bob", "charlie")
-    }))
+    monkeypatch.setenv("API_AUTH_MODE", "local")
+    from helpers.access import inject_owners
+
     app = FastAPI()
     app.include_router(router)
 
+    inject_owners(app)
+
     def headers(owner):
-        return {"Authorization": f"Bearer {owner}-test-token-with-at-least-thirty-two-characters"}
+        return {"X-Test-Owner": owner}
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         url = f"/collector/collection-jobs/{job_id}"
@@ -308,7 +307,9 @@ async def test_reinitialization_preserves_jobs_and_owner_associations(database):
     assert [(row["job_id"], str(row["candidate_id"])) for row in links] == [
         (job_id, str(first["id"])),
     ]
-    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [
+        {"version": 1},
+    ]
 
 
 async def _assert_schema_constraints_are_enforced(database, suffix: str = "") -> None:
@@ -511,7 +512,9 @@ async def test_init_database_creates_current_schema_with_integrity(database):
     await database.init_database()
 
     assert db_schema.CURRENT_SCHEMA_VERSION == 1
-    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [
+        {"version": 1},
+    ]
     assert set(SCHEMA_TABLES) == await _table_names(database)
     indexes = await _fetchall(
         database,
@@ -781,7 +784,50 @@ async def test_failed_initialization_rolls_back_schema_and_allows_retry(database
     await database.init_database()
     assert set(SCHEMA_TABLES) == await _table_names(database)
     assert await database.list_collected_datasets() == []
-    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [
+        {"version": 1},
+    ]
+
+
+async def test_reinitialization_preserves_searches_and_receipts(database):
+    await database.init_database()
+    async with db_connection._require_database_pool().connection() as connection:
+        for mode in (None, "local", "public"):
+            await connection.execute(
+                """INSERT INTO search_sessions (id, owner_id, query, access_mode, client_key)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (uuid.uuid4(), "alice", "health", mode, "ip-hash" if mode == "public" else None),
+            )
+        await connection.execute("""
+            INSERT INTO api_commands (owner_id, command_key, operation, fingerprint, result)
+            VALUES ('alice', 'saved-command', 'search_create', 'saved-fingerprint', '{}')
+        """)
+    dataset_id = await _insert_minimal_dataset(database, "-upgrade")
+    searches = await _fetchall(database, "SELECT * FROM search_sessions ORDER BY id")
+    receipts = await _fetchall(database, "SELECT * FROM api_commands")
+
+    await database.init_database()
+    await database.init_database()
+    assert await _schema_version(database) == 1
+    assert await _fetchall(database, "SELECT * FROM search_sessions ORDER BY id") == searches
+    assert await _fetchall(database, "SELECT * FROM api_commands") == receipts
+    assert await _fetchall(database, "SELECT id FROM collected_datasets") == [{"id": dataset_id}]
+    with pytest.raises(psycopg.errors.CheckViolation):
+        await _execute(database, "UPDATE search_sessions SET access_mode = 'unknown'")
+    assert await _fetchall(database, "SELECT * FROM search_sessions ORDER BY id") == searches
+
+
+@pytest.mark.parametrize("access_mode", ["token", "unknown"])
+async def test_current_database_rejects_unsupported_access_modes(database, access_mode):
+    await database.init_database()
+    with pytest.raises(psycopg.errors.CheckViolation):
+        await _execute(
+            database,
+            """INSERT INTO search_sessions (id, owner_id, query, access_mode)
+               VALUES (%s, 'alice', 'health', %s)""",
+            (uuid.uuid4(), access_mode),
+        )
+    assert not await _fetchall(database, "SELECT * FROM search_sessions")
 
 
 async def test_concurrent_fresh_initialization_creates_one_complete_baseline(database):
@@ -790,7 +836,9 @@ async def test_concurrent_fresh_initialization_creates_one_complete_baseline(dat
     )
 
     assert set(SCHEMA_TABLES) == await _table_names(database)
-    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [
+        {"version": 1},
+    ]
     await _assert_schema_constraints_are_enforced(database, "-concurrent")
 
 
@@ -819,7 +867,9 @@ async def test_validate_database_schema_only_reads_and_preserves_data(database, 
         await database.validate_database_schema()
 
     assert (await database.list_collected_datasets())[0].database_id == dataset_id
-    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [{"version": 1}]
+    assert await _fetchall(database, "SELECT version FROM schema_migrations") == [
+        {"version": 1},
+    ]
 
 
 async def test_business_operations_do_not_apply_schema_migrations(database):

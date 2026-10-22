@@ -1,25 +1,25 @@
 # Research reports and investigation tools
 
-This directory holds reports generated while testing the API. Start with the
+This directory holds reports generated while using the API. Start with the
 [README quick start](../README.md#quick-start) to run your first search.
 
 ```text
 research/
 ├── api/
-│   ├── outputs/       JSON reports from scripts/test_api.py
-│   └── sessions/      Private client cookies in public-session mode
+│   ├── outputs/       JSON reports from scripts/api_client.py
+│   └── sessions/      Private public-session cookies, recovery state and client lock
 └── search-diagnostics.md   Guide to interpreting reports and diagnostic evidence
 ```
 
 Generated reports and session files are private and excluded from Git. They
-appear when you run your own tests. Accepted dataset records also remain in
+appear when you run searches with the client. Accepted dataset records also remain in
 PostgreSQL; neither the reports nor the database contain complete dataset files.
 
 ## Read a client report
 
-The default file is `api/outputs/api-test.json`, relative to this directory.
-The client updates it during the run and replaces it on the next run. Use the
-client's `--output` option to keep a separate file for each investigation.
+The default file is `api/outputs/search-report.json`, relative to this directory.
+The client updates it during the run and replaces it on the next run. Copy the
+report manually if you want to keep it for an investigation.
 
 | JSON field | Meaning |
 | --- | --- |
@@ -31,17 +31,25 @@ client's `--output` option to keep a separate file for each investigation.
 
 A completed search with no accepted datasets differs from a failed step. Read
 `progress` and `diagnostics` before drawing a conclusion. Fields can be absent
-if tracking stops early or `--no-wait` is used. Resume the existing search with
-`--latest` or `--search-id`; submitting another query creates a new operation.
+if retrieval stops early. Retrieve the most recent search with `--latest`,
+which never restarts failed work. After acceptance, submitting another query
+creates a new operation.
 See the [API integration guide](../docs/api-integration.md) for client options.
 
 ## Session files
 
-`api/sessions/api.cookies` is created only with `--auth public`. It preserves the
+`api/sessions/api.cookies` is created only with `API_CLIENT_MODE=public`. It preserves the
 visitor identity needed to retrieve that visitor's searches. The normal local
-quick start uses the token from `.env.api-client` and does not create this cookie.
+quick start uses loopback access as `local-user` and does not create this cookie.
 Session cookies are private access credentials. RCP keys belong in `.env.api`,
 not in reports or investigation notes.
+
+`api/sessions/pending-search.json` stores the key, query and context of a request
+whose acceptance is not yet confirmed. After an uncertain submission, rerun the
+same `--query` with the same server and session; the key is reused automatically.
+`--latest` does not erase this file. An acknowledged or rejected request clears
+it. Do not remove it to bypass recovery, as doing so could create duplicate work.
+The adjacent process lock prevents concurrent clients from overwriting these files.
 
 ## Investigate a result
 

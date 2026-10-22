@@ -7,13 +7,13 @@ import ComparisonView from './components/ComparisonView.jsx';
 
 afterEach(() => vi.unstubAllGlobals());
 
-it('reads diagnostics without cookies and passes the explicit session token', async () => {
+it('reads local diagnostics without cookies or access tokens', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [] }) });
     vi.stubGlobal('fetch', fetch);
     const controller = new AbortController();
-    await client('private-token')('/searches?q=HIV', { signal: controller.signal });
+    await client()('/searches?q=HIV', { signal: controller.signal });
     expect(fetch.mock.calls[0][0]).toBe('/lab/searches?q=HIV');
-    expect(fetch.mock.calls[0][1]).toMatchObject({ credentials: 'omit', headers: { Authorization: 'Bearer private-token' } });
+    expect(fetch.mock.calls[0][1]).toMatchObject({ credentials: 'omit', headers: {} });
     expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
 });
 

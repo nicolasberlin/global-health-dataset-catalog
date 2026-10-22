@@ -75,15 +75,18 @@ async def test_migration_deadlines_are_local_and_runtime_generation_starts_empty
     database, monkeypatch,
 ):
     pool = await configured_pool(database, monkeypatch)
-    actual_migration = db_schema._migration_for_version(0)
+    actual_migration = db_schema._migration_for_version
     observed = []
 
-    async def migration(connection):
-        observed.append(await settings(connection))
-        await actual_migration(connection)
+    def migration_for_version(version):
+        async def migration(connection):
+            observed.append(await settings(connection))
+            await actual_migration(version)(connection)
+        return migration
 
-    monkeypatch.setattr(db_schema, "_migration_for_version", lambda version: migration)
+    monkeypatch.setattr(db_schema, "_migration_for_version", migration_for_version)
     await database.init_database()
+    assert len(observed) == 1
     assert observed[0]["statement"] == "2min" and observed[0]["lock"] == "30s"
     async with pool.connection() as connection:
         restored = await settings(connection)

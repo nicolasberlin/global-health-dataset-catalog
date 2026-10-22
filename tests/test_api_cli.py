@@ -16,8 +16,8 @@ from urllib.request import Request
 
 import pytest
 
-import scripts.test_api as api_cli
-from scripts.test_api import (
+import scripts.api_client as api_cli
+from scripts.api_client import (
     APIError,
     Client,
     _HTTPConnection,
@@ -35,6 +35,10 @@ OTHER_ID = "00000000-0000-0000-0000-000000000002"
 def isolated_client_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(api_cli, "DEFAULT_ENV_FILE", tmp_path / ".env.api-client")
     monkeypatch.setattr(api_cli, "STARTUP_WAIT_SECONDS", 0)
+    monkeypatch.setattr(api_cli, "POLL_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr(api_cli, "DEFAULT_OUTPUT_FILE", tmp_path / "report.json")
+    monkeypatch.setattr(api_cli, "DEFAULT_COOKIE_FILE", tmp_path / "cookies")
+    monkeypatch.setattr(api_cli, "DEFAULT_PENDING_FILE", tmp_path / "pending-search.json")
     for key in api_cli.CLIENT_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
 
@@ -63,22 +67,36 @@ def api_server():
                 payload = {"status": "ok"}
             elif path == "/session":
                 status, payload = 204, None
-                headers["Set-Cookie"] = "visitor=test-owner; Path=/; HttpOnly"
+                headers["Set-Cookie"] = (
+                    f"visitor={state.get('visitor', 'test-owner')}; Path=/; HttpOnly"
+                )
             elif path == "/collector/searches" or path.endswith("/retry"):
                 if state["reject"]:
-                    status, payload = 429, {"detail": self.headers.get("Authorization")}
+                    status, payload = 429, {"detail": self.headers.get("Cookie")}
                     headers["Retry-After"] = "60"
                 else:
-                    status, payload = 202, {
-                        "search_id": SEARCH_ID, "attempt": 2 if path.endswith("/retry") else 1,
-                        "execution_status": "queued",
-                        "progress_url": f"/api/collector/searches/{SEARCH_ID}/progress",
-                    }
+                    status, payload = (
+                        202,
+                        {
+                            "search_id": SEARCH_ID,
+                            "attempt": 2 if path.endswith("/retry") else 1,
+                            "execution_status": "queued",
+                            "progress_url": f"/api/collector/searches/{SEARCH_ID}/progress",
+                        },
+                    )
                 if state.pop("lose_command_once", False):
                     self.connection.shutdown(socket.SHUT_RDWR)
                     self.connection.close()
                     return
-            elif path.endswith("/progress") or path.endswith("/latest"):
+            elif path.endswith("/latest"):
+                payload = {
+                    "search_id": SEARCH_ID,
+                    "execution_status": "running",
+                    "polling_required": True,
+                    "outcome": None,
+                    "dataset_ids": [],
+                }
+            elif path.endswith("/progress"):
                 state["polls"] += 1
                 active = state["polls"] == 1
                 payload = {
@@ -91,11 +109,15 @@ def api_server():
                 payload.update(state.get("snapshot", {}))
             elif path.endswith("/diagnostics"):
                 payload = {
-                    "schema_version": "1.0", "document_type": "search_diagnostic_trace",
+                    "schema_version": "1.0",
+                    "document_type": "search_diagnostic_trace",
                     "context": {"search_id": SEARCH_ID},
                     "summary": {
-                        "search_id": SEARCH_ID, "execution_status": "finished",
-                        "polling_required": False, "outcome": "results", "dataset_ids": [],
+                        "search_id": SEARCH_ID,
+                        "execution_status": "finished",
+                        "polling_required": False,
+                        "outcome": "results",
+                        "dataset_ids": [],
                     },
                     "collections": [],
                 }
@@ -139,7 +161,9 @@ def api_server():
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(
-        target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True,
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.02},
+        daemon=True,
     )
     thread.start()
     try:
@@ -151,16 +175,22 @@ def api_server():
         thread.join()
 
 
+def configure(url, *, mode="local", origin=""):
+    api_cli.DEFAULT_ENV_FILE.write_text(
+        f"API_BASE_URL={url}\nAPI_CLIENT_MODE={mode}\nAPI_PUBLIC_ORIGIN={origin}\n"
+    )
+
+
 def arguments(url, tmp_path, *extra):
-    return ["--base-url", url, "--auth", "local", "--output", str(tmp_path / "report.json"),
-            "--interval", "0.001", *extra]
+    configure(url)
+    return list(extra)
 
 
 def test_public_pipeline_and_cookie_resume(api_server, tmp_path):
     url, calls, _ = api_server
     output, cookies = tmp_path / "report.json", tmp_path / "cookies"
-    common = ["--base-url", url, "--auth", "public", "--origin", "https://catalog.test",
-              "--cookie-file", str(cookies), "--output", str(output), "--interval", "0.001"]
+    configure(url, mode="public", origin="https://catalog.test")
+    common = []
     assert main(["--query", "malaria", *common]) == 0
     report = json.loads(output.read_text())
     assert report["progress"]["outcome"] == "results"
@@ -181,16 +211,21 @@ def test_public_pipeline_and_cookie_resume(api_server, tmp_path):
 
 
 def test_quota_error_preserves_command_key_without_secrets(
-    api_server, tmp_path, monkeypatch, capsys,
+    api_server,
+    tmp_path,
+    monkeypatch,
+    capsys,
 ):
     url, calls, state = api_server
     state["reject"] = True
-    monkeypatch.setenv("API_TOKEN", "private-test-token")
     output = tmp_path / "report.json"
-    assert main(["--query", "malaria", "--base-url", url, "--key", "saved-key",
-                 "--output", str(output)]) == 1
+    assert (
+        main(["--query", "malaria", *arguments(url, tmp_path)])
+        == 1
+    )
     report = json.loads(output.read_text())
-    assert report["idempotency_key"] == "saved-key"
+    assert report["idempotency_key"]
+    assert not api_cli.DEFAULT_PENDING_FILE.exists()
     assert report["command_state"] == "rejected"
     assert report["http_status"] == 429
     assert report["retry_after"] == "60"
@@ -199,45 +234,147 @@ def test_quota_error_preserves_command_key_without_secrets(
     assert len([call for call in calls if call[0] == "POST"]) == 1
 
 
-def test_no_wait_saves_id_without_polling(api_server, tmp_path):
-    url, calls, _ = api_server
-    assert main(["--query", "malaria", *arguments(url, tmp_path), "--no-wait"]) == 0
-    assert json.loads((tmp_path / "report.json").read_text())["search_id"] == SEARCH_ID
-    assert not any("/progress" in call[1] for call in calls)
-
-
-def test_lost_command_response_keeps_key_for_explicit_replay(api_server, tmp_path):
+def test_lost_command_response_reuses_saved_key_even_after_latest(api_server, tmp_path):
     url, calls, state = api_server
     state["lose_command_once"] = True
-    common = ["--query", "malaria", *arguments(url, tmp_path), "--no-wait"]
+    common = ["--query", "malaria", *arguments(url, tmp_path)]
     assert main(common) == 1
-    report = json.loads((tmp_path / "report.json").read_text())
+    report = json.loads(api_cli.DEFAULT_OUTPUT_FILE.read_text())
     assert report["command_state"] == "uncertain"
-    assert main([*common, "--key", report["idempotency_key"]]) == 0
+    pending = api_cli.DEFAULT_PENDING_FILE.read_bytes()
+    assert api_cli.DEFAULT_PENDING_FILE.stat().st_mode & 0o777 == 0o600
+    assert main(["--latest"]) == 0
+    assert api_cli.DEFAULT_PENDING_FILE.read_bytes() == pending
+    assert main(common) == 0
     commands = [call for call in calls if call[1] == "/api/collector/searches"]
     assert len(commands) == 2
     assert commands[0][2]["Idempotency-Key"] == commands[1][2]["Idempotency-Key"]
     assert commands[0][3] == commands[1][3]
-
-
-def test_retry_is_explicit_and_preserves_search_identity(api_server, tmp_path):
-    url, calls, _ = api_server
-    assert main(["--search-id", SEARCH_ID, "--retry", "--key", "retry-key",
-                 *arguments(url, tmp_path), "--no-wait"]) == 0
-    command = next(call for call in calls if call[1].endswith("/retry"))
-    assert command[2]["Idempotency-Key"] == "retry-key"
-    assert json.loads(command[3]) == {}
-    report = json.loads((tmp_path / "report.json").read_text())
-    assert report["command_action"] == "retry"
-    assert report["command"]["attempt"] == 2
+    assert not api_cli.DEFAULT_PENDING_FILE.exists()
 
 
 def test_resume_does_not_require_workers_ready(api_server, tmp_path):
     url, calls, state = api_server
     state["overrides"]["/ready"] = {"status": 503}
-    assert main(["--search-id", SEARCH_ID, *arguments(url, tmp_path)]) == 0
+    assert main(["--latest", *arguments(url, tmp_path)]) == 0
     assert not any(call[1].endswith("/ready") for call in calls)
     assert not any(call[0] == "POST" for call in calls)
+
+
+def test_confirmed_repeated_query_uses_a_new_key(api_server):
+    url, calls, _ = api_server
+    configure(url)
+    assert main(["--query", "malaria"]) == 0
+    assert main(["--query", "malaria"]) == 0
+    commands = [call for call in calls if call[1] == "/api/collector/searches"]
+    assert len(commands) == 2
+    assert commands[0][2]["Idempotency-Key"] != commands[1][2]["Idempotency-Key"]
+
+
+@pytest.mark.parametrize("change", ["query", "server", "session", "renewed_session"])
+def test_uncertain_search_cannot_be_replayed_with_another_context(api_server, change):
+    url, calls, state = api_server
+    configure(url, mode="public", origin="https://catalog.test")
+    state["lose_command_once"] = True
+    assert main(["--query", "malaria"]) == 1
+    saved = api_cli.DEFAULT_PENDING_FILE.read_bytes()
+    searches = len([c for c in calls if c[1] == "/api/collector/searches"])
+    query = "malaria"
+    if change == "query":
+        query = "diabetes"
+    elif change == "server":
+        configure(url.replace("127.0.0.1", "localhost"), mode="public", origin="https://catalog.test")
+    elif change == "session":
+        api_cli.DEFAULT_COOKIE_FILE.unlink()
+    else:
+        state["visitor"] = "another-session"
+    assert main(["--query", query]) == 1
+    assert api_cli.DEFAULT_PENDING_FILE.read_bytes() == saved
+    assert len([c for c in calls if c[1] == "/api/collector/searches"]) == searches
+    assert "unknown acceptance" in api_cli.DEFAULT_OUTPUT_FILE.read_text()
+    assert "test-owner" not in saved.decode()
+
+
+@pytest.mark.parametrize("status", [408, 499, 500, 503])
+def test_uncertain_http_errors_preserve_the_key_for_a_later_replay(api_server, status):
+    url, calls, state = api_server
+    configure(url)
+    state["overrides"]["/collector/searches"] = {"status": status}
+    assert main(["--query", "malaria"]) == 1
+    pending = json.loads(api_cli.DEFAULT_PENDING_FILE.read_text())
+    state["overrides"].clear()
+    assert main(["--query", "malaria"]) == 0
+    commands = [call for call in calls if call[1] == "/api/collector/searches"]
+    assert len(commands) == 2
+    assert {c[2]["Idempotency-Key"] for c in commands} == {pending["key"]}
+
+
+def test_corrupt_recovery_state_is_preserved_without_submitting(api_server):
+    url, calls, _ = api_server
+    configure(url)
+    api_cli.DEFAULT_PENDING_FILE.write_text("not-json")
+    assert main(["--query", "malaria"]) == 1
+    assert api_cli.DEFAULT_PENDING_FILE.read_text() == "not-json"
+    assert not calls
+
+
+def test_concurrent_client_cannot_overwrite_shared_state(api_server):
+    url, calls, _ = api_server
+    configure(url)
+    api_cli.DEFAULT_OUTPUT_FILE.write_text("preserve existing report")
+    with api_cli.client_lock():
+        assert main(["--query", "malaria"]) == 1
+    assert api_cli.DEFAULT_OUTPUT_FILE.read_text() == "preserve existing report"
+    assert not calls
+
+
+@pytest.mark.parametrize("phase", ["/health", "/collector/searches", "/progress"])
+def test_interrupt_messages_match_what_was_submitted(api_server, monkeypatch, phase):
+    url, _, _ = api_server
+    configure(url)
+    request = Client.request
+
+    def interrupt(client, method, path, **options):
+        if path.endswith(phase):
+            raise KeyboardInterrupt
+        return request(client, method, path, **options)
+
+    monkeypatch.setattr(Client, "request", interrupt)
+    assert main(["--query", "malaria"]) == 130
+    report = json.loads(api_cli.DEFAULT_OUTPUT_FILE.read_text())
+    if phase == "/health":
+        assert "No search request was submitted" in report["error"]
+        assert not api_cli.DEFAULT_PENDING_FILE.exists()
+    elif phase == "/collector/searches":
+        assert "Acceptance is unknown" in report["error"]
+        assert api_cli.DEFAULT_PENDING_FILE.exists()
+    else:
+        assert "The search is not cancelled" in report["error"]
+        assert report["command_state"] == "acknowledged"
+        assert not api_cli.DEFAULT_PENDING_FILE.exists()
+
+
+def test_tracking_timeout_resumes_latest_without_submitting_again(
+    api_server, tmp_path, monkeypatch,
+):
+    url, calls, state = api_server
+    state["snapshot"] = {
+        "execution_status": "running", "polling_required": True,
+        "outcome": None, "dataset_ids": [],
+    }
+    assert main(["--query", "malaria", "--timeout", "0.03", *arguments(url, tmp_path)]) == 1
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["command_state"] == "acknowledged"
+    assert report["search_id"] == SEARCH_ID
+    assert "deadline" in report["error"]
+    assert not any(call[1].endswith("/retry") for call in calls)
+
+    state["snapshot"] = {}
+    assert main(["--latest", *arguments(url, tmp_path)]) == 0
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["search_id"] == SEARCH_ID
+    assert len(report["datasets"]) == 101
+    assert len([call for call in calls if call[0] == "POST"]) == 1
 
 
 @pytest.mark.parametrize("snapshot", [
@@ -248,14 +385,14 @@ def test_resume_does_not_require_workers_ready(api_server, tmp_path):
 def test_invalid_progress_is_rejected_before_dataset_fetch(api_server, tmp_path, snapshot):
     url, calls, state = api_server
     state["snapshot"] = snapshot
-    assert main(["--search-id", SEARCH_ID, *arguments(url, tmp_path)]) == 1
+    assert main(["--latest", *arguments(url, tmp_path)]) == 1
     assert not any("by-id?" in call[1] for call in calls)
 
 
 def test_datasets_must_match_progress_ids(api_server, tmp_path):
     url, _, state = api_server
     state["bad_datasets"] = True
-    assert main(["--search-id", SEARCH_ID, *arguments(url, tmp_path)]) == 1
+    assert main(["--latest", *arguments(url, tmp_path)]) == 1
     assert "requested IDs" in json.loads((tmp_path / "report.json").read_text())["error"]
 
 
@@ -269,7 +406,7 @@ def test_incomplete_and_failed_are_distinct_from_client_errors(
     state["snapshot"] = {
         "execution_status": execution, "outcome": outcome, "polling_required": False,
     }
-    assert main(["--search-id", SEARCH_ID, *arguments(url, tmp_path)]) == 2
+    assert main(["--latest", *arguments(url, tmp_path)]) == 2
     report = json.loads((tmp_path / "report.json").read_text())
     assert "diagnostics" in report
     assert "error" not in report
@@ -311,7 +448,7 @@ def test_tls_uses_only_the_budget_remaining_after_tcp(monkeypatch, tcp_elapsed):
             now[0] += 0.5
             return connected
 
-    monkeypatch.setattr("scripts.test_api.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("scripts.api_client.time.monotonic", lambda: now[0])
     monkeypatch.setattr(http.client.HTTPConnection, "connect", connect)
     connection = _HTTPSConnection("catalog.test", timeout=30, deadline=30)
     connection._context = Context()
@@ -366,9 +503,9 @@ def test_each_dns_address_uses_remaining_budget(monkeypatch, first_elapsed):
 
     addresses = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (host, 80))
                  for host in ("192.0.2.1", "192.0.2.2")]
-    monkeypatch.setattr("scripts.test_api.time.monotonic", lambda: now[0])
-    monkeypatch.setattr("scripts.test_api.socket.getaddrinfo", lambda *args: addresses)
-    monkeypatch.setattr("scripts.test_api.socket.socket", Socket)
+    monkeypatch.setattr("scripts.api_client.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("scripts.api_client.socket.getaddrinfo", lambda *args: addresses)
+    monkeypatch.setattr("scripts.api_client.socket.socket", Socket)
     connection = _HTTPConnection("catalog.test", deadline=30, timeout=30)
     if first_elapsed == 30:
         with pytest.raises(TimeoutError):
@@ -391,9 +528,9 @@ def test_expired_dns_budget_prevents_any_connection(monkeypatch):
     def unexpected_socket(*args):
         pytest.fail("DNS exhausted the budget; no socket may be created")
 
-    monkeypatch.setattr("scripts.test_api.time.monotonic", lambda: now[0])
-    monkeypatch.setattr("scripts.test_api.socket.getaddrinfo", resolve)
-    monkeypatch.setattr("scripts.test_api.socket.socket", unexpected_socket)
+    monkeypatch.setattr("scripts.api_client.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("scripts.api_client.socket.getaddrinfo", resolve)
+    monkeypatch.setattr("scripts.api_client.socket.socket", unexpected_socket)
     connection = _HTTPConnection("catalog.test", deadline=30, timeout=30)
     with pytest.raises(TimeoutError):
         connection._create_connection(("catalog.test", 80), 30)
@@ -401,7 +538,7 @@ def test_expired_dns_budget_prevents_any_connection(monkeypatch):
 
 def test_json_response_size_is_bounded(api_server, monkeypatch):
     url, _, state = api_server
-    monkeypatch.setattr("scripts.test_api.MAX_RESPONSE_BYTES", 64)
+    monkeypatch.setattr("scripts.api_client.MAX_RESPONSE_BYTES", 64)
     state["overrides"]["/health"] = {"raw": b"x" * 65}
     with pytest.raises(APIError, match="too large"):
         Client(url).request("GET", "/health")
@@ -418,24 +555,25 @@ def test_malformed_json_is_controlled(api_server, raw):
 def test_redirect_is_not_followed_and_error_body_is_not_exposed(api_server, monkeypatch):
     url, calls, state = api_server
     state["overrides"]["/health"] = {
-        "status": 302, "headers": {"Location": url + "/receiver"},
+        "status": 302,
+        "headers": {"Location": url + "/receiver"},
         "payload": {"secret": "private-test-token"},
     }
     with pytest.raises(APIError, match="HTTP 302") as error:
-        Client(url, token="private-test-token").request("GET", "/health")
+        Client(url).request("GET", "/health")
     assert len(calls) == 1
     assert "private-test-token" not in str(error.value)
 
 
-def test_report_redacts_credentials_echoed_in_success(api_server, tmp_path, monkeypatch):
+def test_report_redacts_session_cookies_echoed_in_success(api_server, tmp_path):
     url, _, state = api_server
-    monkeypatch.setenv("API_TOKEN", "private-test-token")
-    state["overrides"]["/health"] = {
-        "payload": {"status": "ok", "echo": "private-test-token", "private-test-token": True},
+    state["overrides"]["/ready"] = {
+        "payload": {"status": "ok", "echo": "test-owner", "test-owner": True},
     }
-    assert main(["--query", "malaria", "--no-wait", "--base-url", url,
-                 "--output", str(tmp_path / "report.json")]) == 0
-    assert "private-test-token" not in (tmp_path / "report.json").read_text()
+    configure(url, mode="public", origin="https://catalog.test")
+    assert main(["--query", "malaria"]) == 0
+    assert main(["--query", "malaria"]) == 0
+    assert "test-owner" not in (tmp_path / "report.json").read_text()
 
 
 @pytest.mark.parametrize("change", [
@@ -449,7 +587,7 @@ def test_invalid_command_ack_remains_uncertain(api_server, tmp_path, change):
         "progress_url": f"/collector/searches/{SEARCH_ID}/progress", **change,
     }
     state["overrides"]["/collector/searches"] = {"payload": payload}
-    assert main(["--query", "malaria", *arguments(url, tmp_path), "--no-wait"]) == 1
+    assert main(["--query", "malaria", *arguments(url, tmp_path)]) == 1
     report = json.loads((tmp_path / "report.json").read_text())
     assert report["command_state"] == "uncertain"
     assert report["idempotency_key"]
@@ -469,7 +607,7 @@ def test_diagnostics_of_another_search_are_rejected(api_server, tmp_path):
         "payload": {"schema_version": "1.0", "document_type": "search_diagnostic_trace",
                     "context": {"search_id": OTHER_ID}},
     }
-    assert main(["--search-id", SEARCH_ID, *arguments(url, tmp_path)]) == 1
+    assert main(["--latest", *arguments(url, tmp_path)]) == 1
 
 
 def test_http_error_stream_is_closed_without_reading_body(monkeypatch):
@@ -495,81 +633,73 @@ def test_chunked_http_json_uses_the_same_deadline_reader(api_server):
     assert Client(url).request("GET", "/health") == {"v": 1}
 
 
-def test_output_symlinks_and_hardlinked_cookie_report_are_rejected(tmp_path):
+def test_output_symlinks_and_hardlinked_cookie_report_are_rejected(tmp_path, monkeypatch):
     original = tmp_path / "original"
     original.write_text("untouched")
     target = tmp_path / "report"
     target.symlink_to(original)
+    monkeypatch.setattr(api_cli, "DEFAULT_OUTPUT_FILE", target)
     with pytest.raises(SystemExit):
-        parse_args(["--query", "x", "--auth", "local", "--output", str(target)])
+        parse_args(["--query", "x"])
     target.unlink()
     os.link(original, target)
+    monkeypatch.setattr(api_cli, "DEFAULT_COOKIE_FILE", original)
     with pytest.raises(SystemExit):
-        parse_args(["--query", "x", "--auth", "local", "--output", str(target),
-                    "--cookie-file", str(original)])
+        parse_args(["--query", "x"])
     assert original.read_text() == "untouched"
 
 
 @pytest.mark.parametrize("extra", [
-    ["--http-timeout", "nan"], ["--timeout", "inf"], ["--interval", "0"],
-    ["--base-url", "http://user:secret@localhost"], ["--base-url", "http://localhost:bad"],
-    ["--base-url", "http://localhost/\nsecret"], ["--retry"],
-    ["--base-url", "http://[invalid"],
+    ["--search-id", SEARCH_ID], ["--latest"], ["--retry"], ["--no-wait"],
+    ["--http-timeout", "30"], ["--interval", "3"], ["--key", "manual"],
+    ["--base-url", "http://localhost"], ["--auth", "local"], ["--origin", "https://catalog.test"],
+    ["--env-file", "other.env"], ["--cookie-file", "other.cookies"], ["--output", "other.json"],
+    ["--timeout", "inf"], ["--timeout", "nan"], ["--timeout", "0"],
 ])
-def test_invalid_options_fail_before_any_request(extra):
+def test_invalid_or_removed_options_fail_before_any_request(extra):
     with pytest.raises(SystemExit):
-        parse_args(["--query", "x", "--auth", "local", *extra])
+        parse_args(["--query", "x", *extra])
 
 
-def test_default_config_runs_without_exports_from_another_directory(
+@pytest.mark.parametrize("url", [
+    "http://user:secret@localhost", "http://localhost:bad", "http://localhost/\nsecret",
+    "http://[invalid", "https://remote.test", "http://localhost:0", "ftp://localhost",
+])
+def test_invalid_configured_address_is_rejected(url):
+    configure(url)
+    with pytest.raises(SystemExit):
+        parse_args(["--query", "x"])
+
+
+def test_default_config_runs_without_tokens_from_another_directory(
     api_server, tmp_path, monkeypatch,
 ):
     url, calls, _ = api_server
-    api_cli.DEFAULT_ENV_FILE.write_text(
-        f'API_BASE_URL={url}\nAPI_TOKEN="private-file-token" # backend token\n',
-        encoding="utf-8",
-    )
+    configure(url)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    output = tmp_path / "report.json"
-    assert main(["--query", "pneumonia", "--no-wait", "--output", str(output)]) == 0
-    command = next(call for call in calls if call[0] == "POST")
-    assert command[2]["Authorization"] == "Bearer private-file-token"
-    assert "private-file-token" not in output.read_text()
+    assert main(["--query", "pneumonia"]) == 0
+    assert api_cli.DEFAULT_OUTPUT_FILE.is_file()
+    assert not (elsewhere / "research").exists()
+    assert all("Authorization" not in call[2] for call in calls)
 
 
-def test_config_precedence_and_explicit_file(tmp_path, monkeypatch):
-    config = tmp_path / "custom.env"
-    config.write_text("API_BASE_URL=http://file.test\nAPI_TOKEN=file-token\n", encoding="utf-8")
-    monkeypatch.setenv("API_BASE_URL", "http://environment.test")
-    monkeypatch.setenv("API_TOKEN", "environment-token")
-    common = ["--env-file", str(config), "--query", "pneumonia"]
-    args = parse_args(common)
-    assert args.base_url == "http://environment.test"
-    assert args.token == "environment-token"
-    args = parse_args([*common, "--base-url", "http://command.test"])
-    assert args.base_url == "http://command.test"
+def test_environment_overrides_the_fixed_configuration_file(monkeypatch):
+    configure("http://localhost:8001")
+    monkeypatch.setenv("API_BASE_URL", "http://localhost:8002")
+    assert parse_args(["--query", "pneumonia"]).base_url == "http://localhost:8002"
 
 
 @pytest.mark.parametrize("content", [
-    "API_TOKEN='unclosed-secret", "API_TOKEN=secret one", "API_TOKNE=secret",
-    "API_TOKEN=secret\nAPI_TOKEN=duplicate", "API_TEST_AUTH=secret",
+    "API_BASE_URL='unclosed-secret", "API_BASE_URL=secret one", "UNKNOWN_SETTING=secret",
+    "API_CLIENT_MODE=local\nAPI_CLIENT_MODE=secret", "API_CLIENT_MODE=secret",
 ])
 def test_invalid_config_is_actionable_without_echoing_secrets(content, capsys):
     api_cli.DEFAULT_ENV_FILE.write_text(content, encoding="utf-8")
     with pytest.raises(SystemExit):
         parse_args(["--query", "pneumonia"])
     assert "secret" not in capsys.readouterr().err
-
-
-def test_explicit_missing_file_and_missing_token_have_clear_errors(tmp_path, capsys):
-    with pytest.raises(SystemExit):
-        parse_args(["--query", "pneumonia", "--env-file", str(tmp_path / "absent")])
-    assert "could not be found" in capsys.readouterr().err
-    with pytest.raises(SystemExit):
-        parse_args(["--query", "pneumonia"])
-    assert ".env.api-client.example" in capsys.readouterr().err
 
 
 def test_startup_waits_for_workers_without_submitting_work(monkeypatch):
@@ -616,15 +746,6 @@ def test_startup_expiry_does_not_claim_a_search_is_running(monkeypatch):
         api_cli.startup_checks(UnavailableAPI(), processing=True)
     message = str(error.value)
     assert "No search command was submitted" in message
-    assert "docker compose" in message
+    assert "scripts/start_api.py" in message
     assert "server processing continues" not in message
     assert calls == [("GET", "/health")]
-
-
-def test_default_api_files_stay_in_their_own_area_from_any_directory(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    args = parse_args(["--query", "pneumonia", "--auth", "local"])
-    area = api_cli.PROJECT_ROOT / "research" / "api"
-    assert args.output == area / "outputs" / "api-test.json"
-    assert args.cookie_file == area / "sessions" / "api.cookies"
-    assert args.output.is_absolute() and args.cookie_file.is_absolute()

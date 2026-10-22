@@ -1,4 +1,3 @@
-import json
 from uuid import UUID, uuid4
 
 import httpx
@@ -82,14 +81,9 @@ async def test_lab_refuses_unrelated_browser_origins(application, origin):
     assert response.status_code == 403
 
 
-async def test_token_owner_cannot_read_another_owners_search(application, monkeypatch):
-    monkeypatch.setenv("API_AUTH_MODE", "token")
-    token = "bob-test-token-with-at-least-32-characters"
-    monkeypatch.setenv("API_ACCESS_TOKENS", json.dumps({"bob": token}))
+async def test_laboratory_rejects_public_mode(application, monkeypatch):
+    monkeypatch.setenv("API_AUTH_MODE", "public")
     transport = httpx.ASGITransport(app=application, client=("127.0.0.1", 1234))
     async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8003") as client:
-        assert (await client.get(f"/lab/searches/{SEARCH}")).status_code == 401
-        response = await client.get(
-            f"/lab/searches/{SEARCH}", headers={"Authorization": "Bearer " + token}
-        )
-        assert response.status_code == 404
+        response = await client.get(f"/lab/searches/{SEARCH}")
+    assert response.status_code == 503

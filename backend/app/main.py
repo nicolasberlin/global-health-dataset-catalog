@@ -9,7 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg.errors import LockNotAvailable, QueryCanceled
 
-from app.auth.security import api_cors_origins, validate_api_security_configuration
+from app.auth.security import (
+    api_cors_origins,
+    configure_access_openapi,
+    validate_api_security_configuration,
+)
 from app.database import (
     close_database_pool,
     init_database,
@@ -116,6 +120,7 @@ app.add_middleware(
 
 app.include_router(collector_router)
 app.include_router(sessions_router)
+configure_access_openapi(app)
 
 
 @app.exception_handler(QueryCanceled)

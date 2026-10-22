@@ -1,8 +1,7 @@
-export function client(token = '') {
+export function client() {
     return async (path, options = {}) => {
         const response = await fetch(`/lab${path}`, {
             ...options, credentials: 'omit', headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 ...(options.body ? { 'Content-Type': 'application/json' } : {}),
             },
         });

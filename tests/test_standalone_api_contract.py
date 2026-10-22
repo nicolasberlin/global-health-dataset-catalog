@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from urllib.parse import urljoin
 from uuid import UUID
 
@@ -12,30 +11,29 @@ from app.quota_policy import QuotaExceeded, QuotaUnavailable
 from app.routes import searches
 from app.routes.collector import router
 from fastapi import FastAPI
+from helpers.access import inject_owners
 from httpx import ASGITransport, AsyncClient
 
 from collector.storage.models import CollectedDataset
 
 pytestmark = pytest.mark.anyio
 SEARCH_ID = UUID("11111111-1111-4111-8111-111111111111")
-TOKEN = "standalone-contract-test-token-at-least-thirty-two-characters"
 
 
 @pytest.fixture
 def contract_api(monkeypatch):
-    monkeypatch.setenv("API_AUTH_MODE", "token")
-    monkeypatch.setenv("API_ACCESS_TOKENS", json.dumps({"alice": TOKEN}))
+    monkeypatch.setenv("API_AUTH_MODE", "local")
     application = FastAPI()
     application.include_router(router)
-    return application
+    return inject_owners(application)
 
 
 def authorized(key="saved-command-key"):
-    return {"Authorization": f"Bearer {TOKEN}", "Idempotency-Key": key}
+    return {"X-Test-Owner": "alice", "Idempotency-Key": key}
 
 
 @pytest.mark.parametrize("prefix", ["", "/gateway/api"])
-@pytest.mark.parametrize("command", ["searches", "search-datasets", f"searches/{SEARCH_ID}/retry"])
+@pytest.mark.parametrize("command", ["searches", f"searches/{SEARCH_ID}/retry"])
 async def test_location_is_followable_after_creation_retry_and_replay(
     contract_api, monkeypatch, prefix, command
 ):
@@ -80,10 +78,6 @@ async def test_location_is_followable_after_creation_retry_and_replay(
         assert restored.json()["search_id"] == str(SEARCH_ID)
         assert restored.headers["cache-control"] == "no-store"
         assert accepted.headers["cache-control"] == "no-store"
-        if command == "search-datasets":
-            assert accepted.headers["link"] == (
-                f'<{prefix}/collector/searches>; rel="successor-version"'
-            )
 
 
 @pytest.mark.parametrize(
@@ -189,7 +183,16 @@ def test_openapi_describes_authentication_commands_and_bounded_result_reads(cont
     paths = schema["paths"]
     create = paths["/collector/searches"]["post"]
     assert set(create["responses"]) >= {
-        "200", "202", "400", "401", "403", "409", "413", "422", "429", "503"
+        "200",
+        "202",
+        "400",
+        "401",
+        "403",
+        "409",
+        "413",
+        "422",
+        "429",
+        "503",
     }
     for status in ("200", "202"):
         assert "Location" in create["responses"][status]["headers"]
@@ -199,12 +202,15 @@ def test_openapi_describes_authentication_commands_and_bounded_result_reads(cont
     }
     key = next(item for item in create["parameters"] if item["name"] == "Idempotency-Key")
     assert key["required"] and key["schema"]["maxLength"] == 128
-    assert {"HTTPBearer": []} in create["security"]
-    assert schema["components"]["securitySchemes"]["HTTPBearer"]["scheme"] == "bearer"
+    assert "HTTPBearer" not in schema["components"]["securitySchemes"]
     assert "security" not in paths["/collector/collected-datasets"]["get"]
     lookup = paths["/collector/collected-datasets/by-id"]["get"]["parameters"][0]
     assert lookup["schema"]["minItems"] == 1 and lookup["schema"]["maxItems"] == 100
     progress = schema["components"]["schemas"]["CollectorSearchProgressResponse"]
     assert set(progress["properties"]["execution_status"]["enum"]) == {
-        "queued", "running", "waiting_retry", "finished", "failed"
+        "queued",
+        "running",
+        "waiting_retry",
+        "finished",
+        "failed",
     }

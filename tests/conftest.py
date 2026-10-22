@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 import os
 import uuid
 from functools import partial
@@ -11,6 +10,7 @@ import psycopg
 import pytest
 from app.routes.collector import router
 from fastapi import FastAPI
+from helpers.access import inject_owners
 from helpers.classification import KEY_VARIABLES, KEYS
 
 from collector.classification import factory
@@ -84,19 +84,10 @@ async def database(monkeypatch, test_database_url):
 
 @pytest.fixture
 def api(monkeypatch):
-    monkeypatch.setenv("API_AUTH_MODE", "token")
-    monkeypatch.setenv(
-        "API_ACCESS_TOKENS",
-        json.dumps(
-            {
-                owner: f"{owner}-test-token-with-at-least-thirty-two-characters"
-                for owner in ("alice", "bob")
-            }
-        ),
-    )
+    monkeypatch.setenv("API_AUTH_MODE", "local")
     app = FastAPI()
     app.include_router(router)
-    return app
+    return inject_owners(app)
 
 
 @pytest.fixture

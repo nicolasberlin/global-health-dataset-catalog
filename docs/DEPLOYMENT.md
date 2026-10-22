@@ -46,8 +46,7 @@ Configure the [internal EPFL HTTP session option](reference/anonymous-visitor-se
 before rebuilding the app. It is disabled by default. The API base path is
 `/ai-commons/api`; configure the exact external origin, for example
 `http://catalog.example.org:1312`, without a path. Replace the example hostname
-with your deployment's hostname. Public mode does not require `API_ACCESS_TOKENS`;
-token mode still validates them at backend startup.
+with your deployment's hostname. Public mode uses anonymous sessions.
 
 Before deployment, inspect only the network information (no credentials):
 
@@ -82,12 +81,25 @@ compatible with any existing database volume. Local `.env.api` and `.env.local`
 are not automatically loaded by these commands; keep server credentials and data
 separate from local tests.
 
-Choose authentication explicitly in that server file. For browser visitor access,
-set `API_AUTH_MODE=public`, `API_SESSION_SECRET` and `API_PUBLIC_ORIGIN`, plus the
-[internal HTTP opt-in](reference/anonymous-visitor-sessions.md#internal-epfl-http-access)
-for this deployment. For token integrations, use `API_AUTH_MODE=token` with a
-private `API_ACCESS_TOKENS` mapping, as defined by
-[API authentication](api-integration.md#authentication-and-client-origins).
+Both API container templates explicitly select public anonymous sessions. Set
+`API_SESSION_SECRET` and `API_PUBLIC_ORIGIN`; the main Compose deployment also
+requires the [internal HTTP opt-in](reference/anonymous-visitor-sessions.md#internal-epfl-http-access)
+for its existing HTTP infrastructure. Internet hosting requires HTTPS instead.
+The `.env.public.example` template can be copied to a private server file. Generate
+a stable secret once (for example `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`).
+Keep it private and stable across restarts. Preserve any existing database password.
+
+For the standalone public container:
+
+```sh
+docker compose --env-file .env.public -f docker-compose.api.yml up -d --build
+```
+
+It publishes the API to host loopback by default. A public rollout must provide
+HTTPS and a correctly configured trusted proxy. Do not turn on insecure HTTP
+sessions for Internet visitors. Both Compose templates forward all seven public
+quota settings from the configuration. For personal use choose the native local
+launcher, not public cookies or a relaxed local IP check in Docker.
 
 Set the deployment-specific hostname and optional network exclusions:
 
@@ -218,9 +230,9 @@ A changed input or ensemble configuration starts a separate classification run.
 Startup marks interrupted votes as failed without discarding completed votes.
 The CLI has no persistent vote store; this recovery applies to backend workers.
 
-Clients must use the asynchronous command/progress contract, including when
-calling the deprecated `/collector/search-datasets` alias. An accepted search
-continues after client disconnection. See
+Clients must use `POST /collector/searches` with an `Idempotency-Key` and follow
+the asynchronous command/progress contract. An accepted search continues after
+client disconnection. See
 [API compatibility](api-integration.md#restart-and-compatibility) before deploying
 changes alongside an existing client.
 
@@ -468,11 +480,11 @@ References: [Python TLS](https://docs.python.org/3.11/library/ssl.html),
 
 ## Schema validation and retired source administration
 
-The database has one initial migration, version 1, in
-`backend/app/db/migrations/v001.py`. It creates the complete schema only in an
-empty database. Earlier pre-release schemas are not converted automatically;
-prepare a fresh database for this baseline and retain any existing database until
-its data is no longer needed. Startup does not erase or rebuild an existing schema.
+The single database schema baseline is version 1.
+`backend/app/db/migrations/v001.py` creates the complete schema in an empty
+database, including the local/public search access constraint. Repeated startup
+preserves owners, command receipts and result records. Earlier pre-release
+schemas are unsupported. Startup does not convert, erase or rebuild them.
 
 With `DATABASE_MIGRATE_ON_STARTUP=true` (the default), startup initializes or
 validates the schema before serving requests or starting workers. With `false`,
@@ -485,8 +497,8 @@ The initialized state belongs to the current database pool and is cleared
 on close/reopen or failed initialization. Business operations use this in-memory
 guard without repeating schema-version queries. Scripts that reopen a pool must
 call `init_database()` or `validate_database_schema()` before business operations.
-Live external schema changes are not monitored per request. Subsequent releases
-can add migrations when preserving existing installations becomes necessary.
+Live external schema changes are not monitored per request. New schema changes
+use subsequent versioned migrations rather than editing already applied migrations.
 
 To initialize or validate independently of API startup, stop the API first and
 keep PostgreSQL running. From an operator checkout with the intended

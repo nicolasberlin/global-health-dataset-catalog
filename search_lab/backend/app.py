@@ -8,9 +8,8 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import httpx
-from app.auth.security import APIPrincipal, api_auth_mode, require_api_principal
+from app.auth.security import APIPrincipal, api_auth_mode
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from .attempts import group_attempts
@@ -19,14 +18,12 @@ from .history import History
 from .settings import Settings
 from .snapshots import Snapshots
 
-bearer = HTTPBearer(auto_error=False)
 ORIGINS = {"http://127.0.0.1:5174", "http://localhost:5174"}
 
 
 async def principal(
     request: Request,
     response: Response,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ):
     if (
         request.client is None
@@ -37,11 +34,9 @@ async def principal(
         or request.headers.get("x-forwarded-for")
     ):
         raise HTTPException(403, "Local laboratory access only.")
-    if api_auth_mode() == "local":
-        return APIPrincipal("local-user")
-    if api_auth_mode() != "token":
-        raise HTTPException(503, "The laboratory supports local or token authentication only.")
-    return await require_api_principal(credentials, request, response)
+    if api_auth_mode() != "local":
+        raise HTTPException(503, "The laboratory requires local access.")
+    return APIPrincipal("local-user")
 
 
 Owner = Annotated[APIPrincipal, Depends(principal)]
@@ -59,8 +54,8 @@ class Notes(BaseModel):
 def create_app(settings=None):
     @asynccontextmanager
     async def lifespan(application):
-        if api_auth_mode() not in {"local", "token"}:
-            raise RuntimeError("Run the laboratory with local or token authentication.")
+        if api_auth_mode() != "local":
+            raise RuntimeError("Run the laboratory with API_AUTH_MODE=local.")
         config = settings or Settings.configured()
         history = History(config.database_url)
         await history.open()
@@ -115,14 +110,10 @@ def create_app(settings=None):
         history = request.app.state.history
         if not await history.owns_search(owner.owner_id, search_id):
             raise HTTPException(404, "Search not found.")
-        headers = {}
-        if api_auth_mode() == "token":
-            headers["Authorization"] = request.headers.get("authorization", "")
         try:
             async with request.app.state.client.stream(
                 "GET",
                 f"/collector/searches/{search_id}/diagnostics",
-                headers=headers,
             ) as response:
                 if response.status_code != 200:
                     raise HTTPException(

@@ -9,6 +9,8 @@ import socket
 import subprocess
 import sys
 import time
+from contextlib import asynccontextmanager
+from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 
 import httpx
@@ -17,12 +19,11 @@ from app.db.connection import _require_database_pool
 
 pytestmark = pytest.mark.anyio
 ROOT = Path(__file__).resolve().parents[1]
-ALICE_TOKEN = "fixture-alice-token-0000000000000000"
-BOB_TOKEN = "fixture-bob-token-000000000000000000"
+SESSION_SECRET = "fixture-public-session-secret-0000000000000000"
 
 
 class APIProcess:
-    def __init__(self, database_url, directory, *, gate=None):
+    def __init__(self, database_url, directory, *, gate=None, mode="public"):
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             self.port = sock.getsockname()[1]
@@ -33,8 +34,10 @@ class APIProcess:
             "PYTHONPATH": os.pathsep.join([str(ROOT / "backend"), str(ROOT / "tests"), str(ROOT)]),
             "PYTHONDONTWRITEBYTECODE": "1",
             "DATABASE_URL": database_url,
-            "API_AUTH_MODE": "token",
-            "API_ACCESS_TOKENS": json.dumps({"alice": ALICE_TOKEN, "bob": BOB_TOKEN}),
+            "API_AUTH_MODE": "public",
+            "API_SESSION_SECRET": SESSION_SECRET,
+            "API_PUBLIC_ORIGIN": self.base_url,
+            "API_ALLOW_INSECURE_HTTP_SESSIONS": "true",
             "API_CORS_ORIGINS": "http://frontend.example",
             "RCP_DEEPSEEK_API_KEY": "synthetic-fixture-key",
             "RCP_GEMMA_MEDITRON_API_KEY": "synthetic-fixture-key",
@@ -47,16 +50,37 @@ class APIProcess:
         }
         if gate:
             self.env["API_FIXTURE_COLLECTION_GATE"] = str(gate)
+        self.mode = mode
+        if mode == "local":
+            self.env["API_AUTH_MODE"] = "local"
+        self.directory = directory
+        self.client_env = directory / "client.env"
+        self.client_env.write_text(
+            f"API_BASE_URL={self.base_url}\nAPI_CLIENT_MODE={mode}\n"
+            f"API_PUBLIC_ORIGIN={self.base_url}\n"
+        )
         self.process = None
         self.log_file = None
 
     async def start(self):
         self.log_file = self.log_path.open("ab")
         self.process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "api_verification_harness:app",
-             "--host", "127.0.0.1", "--port", str(self.port), "--no-access-log",
-             "--no-proxy-headers"],
-            cwd=ROOT, env=self.env, stdout=self.log_file, stderr=subprocess.STDOUT,
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "api_verification_harness:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(self.port),
+                "--no-access-log",
+                "--no-proxy-headers",
+            ],
+            cwd=ROOT,
+            env=self.env,
+            stdout=self.log_file,
+            stderr=subprocess.STDOUT,
         )
         try:
             async with httpx.AsyncClient(base_url=self.base_url, trust_env=False) as client:
@@ -90,12 +114,32 @@ class APIProcess:
             self.log_file.close()
             self.log_file = None
 
-    def client(self, *, owner="alice"):
-        token = ALICE_TOKEN if owner == "alice" else BOB_TOKEN
-        return httpx.AsyncClient(
-            base_url=self.base_url, headers={"Authorization": f"Bearer {token}"},
-            trust_env=False, timeout=3,
-        )
+    @asynccontextmanager
+    async def client(self, *, owner="alice"):
+        if self.mode == "local":
+            async with httpx.AsyncClient(
+                base_url=self.base_url, trust_env=False, timeout=3
+            ) as client:
+                yield client
+            return
+        path = self.directory / f"{owner}.cookies"
+        jar = MozillaCookieJar(str(path))
+        if path.exists():
+            jar.load(ignore_discard=True)
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            headers={"Origin": self.base_url},
+            cookies=jar,
+            trust_env=False,
+            timeout=3,
+        ) as client:
+            response = await client.post("/session")
+            assert response.status_code == 204
+            yield client
+            for cookie in client.cookies.jar:
+                jar.set_cookie(cookie)
+            path.touch(mode=0o600, exist_ok=True)
+            jar.save(ignore_discard=True)
 
 
 async def wait_for_completion(client, progress_url):
@@ -121,17 +165,32 @@ async def submit(client, key="runtime-first"):
     return response.json()
 
 
-async def run_standalone_client(server, output, *arguments):
+async def run_standalone_client(server, output, *arguments, expected_returncode=0):
+    # Inject isolated fixed paths without adding configuration flags to the real CLI.
+    entrypoint = (
+        "import sys; from pathlib import Path; from scripts import api_client as client; "
+        "client.DEFAULT_ENV_FILE = Path(sys.argv[1]); "
+        "client.DEFAULT_OUTPUT_FILE = Path(sys.argv[2]); "
+        "client.DEFAULT_COOKIE_FILE = Path(sys.argv[3]); "
+        "client.DEFAULT_PENDING_FILE = Path(sys.argv[4]); "
+        "client.POLL_INTERVAL_SECONDS = 0.05; "
+        "sys.exit(client.main(sys.argv[5:]))"
+    )
     result = await asyncio.to_thread(
         subprocess.run,
-        [sys.executable, str(ROOT / "scripts" / "test_api.py"),
-         "--base-url", server.base_url, "--output", str(output),
-         "--interval", "0.05", "--timeout", "15", *arguments],
-        env={"PATH": os.environ.get("PATH", ""), "API_TOKEN": ALICE_TOKEN},
-        cwd=ROOT, capture_output=True, text=True, timeout=20,
+        [
+            sys.executable, "-c", entrypoint,
+            str(server.client_env), str(output), str(server.directory / "alice.cookies"),
+            str(server.directory / "pending-search.json"), *arguments,
+        ],
+        env={"PATH": os.environ.get("PATH", "")},
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert ALICE_TOKEN not in result.stdout + result.stderr + output.read_text()
+    assert result.returncode == expected_returncode, result.stdout + result.stderr
+    assert SESSION_SECRET not in result.stdout + result.stderr + output.read_text()
     assert output.stat().st_mode & 0o777 == 0o600
     return json.loads(output.read_text())
 
@@ -144,7 +203,7 @@ async def test_real_server_collects_without_client_then_restores_after_restart(d
     try:
         accepted = await run_standalone_client(
             server, tmp_path / "accepted.json", "--query", "malaria",
-            "--key", "runtime-first", "--no-wait",
+            "--timeout", "0.03", expected_returncode=1,
         )
         assert accepted["command_state"] == "acknowledged"
         command = accepted["command"]
@@ -188,7 +247,7 @@ async def test_real_server_collects_without_client_then_restores_after_restart(d
         await server.stop()
         await server.start()
         report = await run_standalone_client(
-            server, tmp_path / "restored.json", "--search-id", command["search_id"],
+            server, tmp_path / "restored.json", "--latest",
         )
         assert report["progress"]["dataset_ids"] == completed["dataset_ids"]
         assert len(report["datasets"]) == 1
@@ -201,7 +260,7 @@ async def test_real_server_collects_without_client_then_restores_after_restart(d
             assert restored["dataset_ids"] == completed["dataset_ids"]
             replay = await client.post(
                 "/collector/searches", json={"query": "malaria"},
-                headers={"Idempotency-Key": "runtime-first"},
+                headers={"Idempotency-Key": accepted["idempotency_key"]},
             )
             assert replay.status_code == 200
             assert replay.json()["search_id"] == command["search_id"]
@@ -258,5 +317,29 @@ async def test_process_crash_during_collection_can_be_retried_over_http(database
                 headers={"Idempotency-Key": "runtime-retry-after-crash"},
             )
             assert replay.status_code == 202 and replay.json()["job"]["status"] == "done"
+    finally:
+        await server.stop()
+
+
+async def test_native_local_api_and_python_client_need_no_credentials(database, tmp_path):
+    server = APIProcess(os.environ["DATABASE_URL"], tmp_path, mode="local")
+    await server.start()
+    try:
+        report = await run_standalone_client(server, tmp_path / "local.json", "--query", "malaria")
+        assert report["command_state"] == "acknowledged"
+        assert report["progress"]["outcome"] == "results"
+        async with server.client() as client:
+            assert (await client.get("/session")).status_code == 405
+            schema = (await client.get("/openapi.json")).json()
+            assert "security" not in schema["paths"]["/collector/searches"]["post"]
+            replay = await client.post(
+                "/collector/searches",
+                json={"query": "malaria"},
+                headers={"Idempotency-Key": report["idempotency_key"]},
+            )
+            assert replay.status_code == 200
+        async with _require_database_pool().connection() as connection:
+            cursor = await connection.execute("SELECT DISTINCT owner_id FROM search_sessions")
+            assert await cursor.fetchall() == [{"owner_id": "local-user"}]
     finally:
         await server.stop()

@@ -2,7 +2,7 @@
 
 The backend can recognize a browser without asking its visitor to supply an API
 token. An independent browser client initializes the session in public mode,
-and the backend limits workload. The default remains `API_AUTH_MODE=token`.
+and the backend limits workload. Local use defaults to `API_AUTH_MODE=local` and requires no cookie or API token.
 Internet rollout requires HTTPS, trusted proxy configuration, and general
 traffic limits at the reverse proxy. The internal EPFL deployment uses the
 explicit HTTP mode described below, with no planned migration to HTTPS.
@@ -17,8 +17,7 @@ explicit HTTP mode described below, with no planned migration to HTTPS.
 | `API_PUBLIC_ORIGIN` | The browser's origin, including any non-default port, without a path or trailing slash. HTTPS by default; HTTP is allowed with the explicit internal HTTP option below. |
 | `API_ALLOW_INSECURE_HTTP_SESSIONS` | Defaults to `false`. Set to `true` for the internal EPFL HTTP deployment. Other values than `true`/`false` are rejected (case-insensitive). |
 
-Startup rejects missing or invalid settings. `API_ACCESS_TOKENS` is not required
-in public mode. Never expose the session secret in a browser bundle, public
+Startup rejects missing or invalid settings. API access tokens are unsupported. Never expose the session secret in a browser bundle, public
 configuration or response. Changing it invalidates all existing visitor cookies. The public
 origin is configured explicitly rather than inferred from forwarded headers.
 
@@ -98,11 +97,11 @@ does not delete existing searches, collected datasets, or running jobs.
 
 The existing ownership filters and per-owner PostgreSQL quotas continue to
 apply. Catalog endpoints remain public. Existing collector operations use the
-visitor owner in public mode; neither a client-supplied owner ID nor a Bearer
-header can select a different identity. Public mode accepts only visitor
-cookies, token mode accepts only configured Bearer tokens, and local mode keeps
-its existing loopback checks. OpenAPI documents both credential schemes with
-their corresponding deployment modes. `/session` returns `404` outside public
+visitor owner in public mode; a client-supplied owner ID cannot select a different
+identity. Public mode derives ownership only from visitor cookies, and local
+mode keeps its loopback checks. Authorization headers do not select an identity
+or override the cookie. OpenAPI documents the active cookie in public mode and no required
+credentials in local mode. `/session` returns `404` outside public
 mode.
 
 Cookie creation and state-changing session requests require an exact allowed
@@ -112,7 +111,7 @@ as authorization. Successful session issuance and protected responses carry
 `Cache-Control: no-store`.
 
 A browser client must finish bootstrap before protected operations; the
-catalogue remains public. Use same-origin cookies without bearer credentials,
+catalogue remains public. Use same-origin cookies,
 and handle the empty `204` response. Share any concurrent bootstrap operation
 to avoid competing cookie writes. Treat `403` as an origin or access failure,
 rather than a reason to create another session. Honor `Retry-After` on `429`
@@ -140,7 +139,7 @@ operational settings, to be adjusted for traffic and provider capacity:
 | `API_PUBLIC_MAX_ACTIVE_WORK_ITEMS` | 100 | Queued/running classifications plus pending/running collections |
 | `API_PUBLIC_MAX_CANDIDATES_PER_SEARCH` | 10 | Unique candidates admitted from one public search |
 
-Owner limits also apply in token/local mode. The other settings apply only to
+Owner limits also apply in local mode. The other settings apply only to
 public sessions. Startup validates them before accepting traffic. Existing
 classification and collection worker concurrency settings still control how
 many jobs execute at once; the active-work limit also bounds the waiting queue.

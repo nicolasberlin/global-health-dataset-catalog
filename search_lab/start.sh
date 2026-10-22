@@ -6,6 +6,11 @@ if [ -f search_lab/.env ]; then
   . ./search_lab/.env
   set +a
 fi
+export API_AUTH_MODE="${API_AUTH_MODE:-local}"
+if [ "$API_AUTH_MODE" != local ]; then
+  echo "The laboratory requires API_AUTH_MODE=local." >&2
+  exit 1
+fi
 export PYTHONPATH="backend:.${PYTHONPATH:+:$PYTHONPATH}"
 python_bin="$PWD/.venv/bin/python"
 if [ ! -x "$python_bin" ]; then

@@ -37,8 +37,7 @@ curl -LsSf https://astral.sh/uv/0.12.17/install.sh | sh
 ```
 
 Open a new terminal if needed, then check `uv --version`. Use uv for Python
-dependencies in both the main application and the optional Search Lab. The
-Docker-only quick start does not require installing uv on your computer.
+dependencies in both the main application and the optional Search Lab. The local quick start uses uv for the Python API and Docker for PostgreSQL.
 
 From the repository root:
 
@@ -53,62 +52,62 @@ versions, so they are not duplicated in this guide. Normal Python installs use
 `pyproject.toml`, refresh the lock with `uv lock`, then sync and validate. Use
 `uv lock --upgrade-package PACKAGE` only when deliberately upgrading that package.
 
-### Local environment
+### Local environment and startup
 
-Create the ignored `.env.local` at the repository root. Replace each credential
-placeholder; choose a random database password containing only URL-safe characters
-so it can also appear in `DATABASE_URL`.
+Use the same setup as the [README quick start](../README.md#quick-start):
 
 ```sh
-export POSTGRES_PASSWORD="replace-with-a-random-local-password"
-export DATABASE_URL="postgresql://global_health:${POSTGRES_PASSWORD}@127.0.0.1:5432/global_health"
-export RCP_DEEPSEEK_API_KEY="replace-with-your-deepseek-credential"
-export RCP_GEMMA_MEDITRON_API_KEY="replace-with-your-gemma-meditron-credential"
-export RCP_APERTUS_MEDITRON_API_KEY="replace-with-your-apertus-meditron-credential"
-export API_AUTH_MODE="local"
+uv run --locked python scripts/setup_api.py
+# Fill the three RCP_*_API_KEY values in .env.api.
+uv run --locked python scripts/start_api.py
 ```
 
-Each voter reads its own credential variable. Obtain credentials authorized for
-each configured model; the application does not substitute another voter's key.
-Default model IDs are defined in `collector/classification/providers/epfl_rcp.py`;
-set the corresponding `RCP_*_MODEL` variable only when overriding a default.
-Never commit the populated file or put model keys or private access tokens in
-browser bundles, public configuration or URLs.
-
-### Database and API
-
-Load your environment, then start PostgreSQL:
+In another terminal:
 
 ```sh
-source .env.local
-docker compose -f docker-compose.local.yml up -d postgres
+uv run --locked python scripts/api_client.py --query "malaria"
 ```
 
-Wait for PostgreSQL to become healthy. In the same terminal, start the API:
+The private `.env.api` is the canonical local server configuration. The launcher
+loads it as literal settings, never as executable shell code. It constructs the
+host-side `DATABASE_URL` from its PostgreSQL settings, starts the existing Compose
+database and runs Uvicorn on loopback with one worker and proxy headers disabled.
+The client loads `.env.api-client`, containing only a base URL and local mode.
+`.env.local` is not loaded by these scripts; manually exported settings should be
+migrated deliberately. The optional laboratory has its own configuration.
+
+For manual Python startup, load the required environment and run from the root:
 
 ```sh
-cd backend
-PYTHONPATH=.. ../.venv/bin/python -m uvicorn app.main:app \
-  --reload --reload-dir . --reload-dir ../collector \
-  --host 127.0.0.1 --no-proxy-headers --port 8001
+uv run --locked uvicorn app.main:app --app-dir backend \
+  --host 127.0.0.1 --port 8001 --workers 1 --no-proxy-headers
 ```
 
-The API applies its single initial migration to an empty database on startup.
-Earlier pre-release schemas require a fresh database; startup does not convert
-them. Keep one API process and instance per application database/schema; do not
-add Uvicorn workers.
-Local mode accepts loopback clients and the supported development origins only.
+Local requests need no token or session. They must come from loopback, use a
+local hostname and satisfy the existing origin/forwarding-header checks.
 All local searches share the `local-user` owner and its quotas.
 
-Check `http://127.0.0.1:8001/health` for liveness and `/ready` for database,
-ownership, worker and model configuration readiness. Readiness does not call a
-model or prove provider access. Interactive API docs are at `/docs`.
-Real searches consume model quota and can save catalogue records.
+`/health` is a liveness check. `/ready` also checks database, runtime and model
+configuration. Neither endpoint proves provider access. A real search uses
+provider/model quotas and can persist catalogue records.
 
-Stop the API with Ctrl+C in its terminal. Stop the development database with
-`docker compose -f docker-compose.local.yml stop postgres` from the repository
-root; this preserves its data volume. Use the [API guide](api-integration.md) to
-connect an independent client with the appropriate authentication mode.
+### Existing installations
+
+The API accepts `API_AUTH_MODE=local` or `public`. The Python client uses
+`API_CLIENT_MODE` in `.env.api-client`. For local use, select `local` and preserve
+the generated API address, database password and model keys. Public deployment
+uses signed anonymous sessions and the exact website origin described in
+[deployment](DEPLOYMENT.md).
+
+The single schema baseline is version 1. It creates the complete database with
+local/public search access modes directly. Repeated startup validates the schema
+without rewriting owners or deleting records. Earlier pre-release schemas are
+unsupported; startup does not convert or erase them.
+
+An existing Docker-only API database uses a different volume from the native
+local PostgreSQL setup. Starting the launcher does not transfer that data. Keep
+the old volume and password and back up/restore deliberately before changing
+installations. No setup script moves or deletes database volumes.
 
 ## Choose the owning module
 

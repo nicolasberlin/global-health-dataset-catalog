@@ -7,8 +7,6 @@ import ComparisonView from './components/ComparisonView.jsx';
 const emptyNotes = { label: '', expected_result: '', suspected_cause: '', change_tested: '', learned: '' };
 export default function App() {
     const [mode, setMode] = useState(null);
-    const [token, setToken] = useState('');
-    const [tokenInput, setTokenInput] = useState('');
     const [selected, setSelected] = useState('');
     const [data, setData] = useState(null);
     const [candidateId, setCandidateId] = useState('');
@@ -19,13 +17,12 @@ export default function App() {
     const [snapshots, setSnapshots] = useState([]);
     const [capturing, setCapturing] = useState(false);
     const [message, setMessage] = useState('');
-    const [sessionEpoch, setSessionEpoch] = useState(0);
-    const api = useMemo(() => client(token), [token]);
+    const api = useMemo(() => client(), []);
     const currentApi = useRef(api);
     const workspace = useRef(null);
     currentApi.current = api;
     const candidate = data?.trace.summary.items?.find(item => item.candidate_id === candidateId) || data?.trace.summary.items?.[0];
-    const ready = mode === 'local' || (mode === 'token' && Boolean(token));
+    const ready = mode === 'local';
     useEffect(() => { client()('/config').then(config => setMode(config.auth_mode)).catch(error => setError(error.message)); }, []);
     useEffect(() => {
         if (!ready) return;
@@ -64,21 +61,12 @@ export default function App() {
             if (currentApi.current === requestApi) download(snapshot);
         } catch (error) { if (currentApi.current === requestApi) setError(error.message); }
     }
-    function clearSession() {
-        setData(null); setCandidateId(''); setSelected(''); setSnapshots([]); setError('');
-        setCapturing(false); setMessage(''); setNotes(emptyNotes);
-        setSessionEpoch(value => value + 1);
-    }
     return <>
         <header><div className="eyebrow">GLOBAL HEALTH · LOCAL RESEARCH TOOL</div><h1>Search laboratory</h1>
             <p>Inspect searches, understand failures, preserve evidence.</p><span className="badge">Observation mode · no collection is launched here</span></header>
-        {mode === 'token' && <form className="token" onSubmit={event => { event.preventDefault(); setToken(tokenInput); clearSession(); }}>
-            <label>API access token<input type="password" value={tokenInput} onChange={event => setTokenInput(event.target.value)} autoComplete="off" /></label><button>Connect</button>
-            {token && <button type="button" onClick={() => { setToken(''); setTokenInput(''); clearSession(); }}>Disconnect</button>}
-        </form>}
         {error && <p role="alert" className="error global-error">{error}</p>}
         {!mode && !error && <p>Connecting to the local laboratory…</p>}
-        {ready && <main><SearchHistory key={sessionEpoch} api={api} selected={selected} onSelect={id => {
+        {ready && <main><SearchHistory api={api} selected={selected} onSelect={id => {
             setSelected(id); setCandidateId(''); setNotes(emptyNotes); setMessage('');
             requestAnimationFrame(() => workspace.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
         }} />
@@ -90,7 +78,7 @@ export default function App() {
                         <div className="notes-grid">{Object.entries({ label: 'Snapshot label', expected_result: 'Expected result', suspected_cause: 'Suspected cause', change_tested: 'Change tested', learned: 'What I learned' }).map(([key, label]) => <label key={key}>{label}<textarea maxLength={key === 'label' ? 150 : 2000} value={notes[key]} onChange={event => setNotes(current => ({ ...current, [key]: event.target.value }))} /></label>)}</div>
                         <button disabled={capturing || !candidate} onClick={capture}>{capturing ? 'Saving…' : 'Save this candidate'}</button>{message && <p role="status">{message}</p>}
                     </section></>}
-                <ComparisonView key={sessionEpoch} api={api} snapshots={snapshots} candidateUrl={candidate?.url} />
+                <ComparisonView api={api} snapshots={snapshots} candidateUrl={candidate?.url} />
                 {snapshots.length > 0 && <section className="panel"><h2>Saved evidence</h2><ul>{snapshots.map(item => <li key={item.id}>{item.scope === 'candidate' ? item.candidate.title : 'Whole search (older snapshot)'} · {item.label || item.query} · {date(item.captured_at)} <button className="small" onClick={() => downloadSnapshot(item.id)}>Download JSON</button></li>)}</ul></section>}
             </div></main>}
         <footer>Optional search laboratory · local evidence is stored with this tool.</footer>

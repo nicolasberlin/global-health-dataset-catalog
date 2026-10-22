@@ -30,7 +30,6 @@ from app.routes.searches import (
     create_search,
     latest_search,
     retry_search,
-    search_datasets,
     search_progress,
 )
 from app.routes.searches import (
@@ -52,7 +51,6 @@ __all__ = [
     "create_search",
     "latest_search",
     "retry_search",
-    "search_datasets",
     "search_progress",
     "classify_repository_result",
     "read_latest_repository_analysis",

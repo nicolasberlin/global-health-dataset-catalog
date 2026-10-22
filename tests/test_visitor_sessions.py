@@ -41,7 +41,6 @@ def public_api(monkeypatch):
     monkeypatch.setenv("API_AUTH_MODE", "public")
     monkeypatch.setenv("API_SESSION_SECRET", SECRET)
     monkeypatch.setenv("API_PUBLIC_ORIGIN", ORIGIN)
-    monkeypatch.delenv("API_ACCESS_TOKENS", raising=False)
     monkeypatch.delenv("API_ALLOW_INSECURE_HTTP_SESSIONS", raising=False)
     validate_api_security_configuration()
     app = FastAPI()
@@ -146,14 +145,22 @@ async def test_cookie_is_not_transmitted_over_http(public_api):
         assert (await client.get("http://health.example/identity")).status_code == 401
 
 
-async def test_public_mode_does_not_fall_back_from_bearer_to_cookie(public_api):
+async def test_public_identity_uses_only_the_cookie_when_authorization_is_present(public_api):
     async with browser(public_api) as client:
+        headers = {"Authorization": "unused"}
+        assert (await client.get("/identity", headers=headers)).status_code == 401
         await bootstrap(client)
-        response = await client.get("/identity", headers={"Authorization": "Bearer invalid"})
-        assert response.status_code == 401
+        identity = (await client.get("/identity")).json()
+        response = await client.get("/identity", headers=headers)
+        assert response.status_code == 200
+        assert response.json() == identity
+        forbidden = await client.post(
+            "/identity", headers={**headers, "Origin": "https://other.example"},
+        )
+        assert forbidden.status_code == 403
 
 
-@pytest.mark.parametrize("mode", ["token", "local"])
+@pytest.mark.parametrize("mode", ["local"])
 async def test_bootstrap_is_unavailable_in_existing_modes(public_api, monkeypatch, mode):
     monkeypatch.setenv("API_AUTH_MODE", mode)
     async with browser(public_api) as client:
@@ -162,11 +169,11 @@ async def test_bootstrap_is_unavailable_in_existing_modes(public_api, monkeypatc
         assert "set-cookie" not in response.headers
 
 
-async def test_default_token_mode_does_not_accept_a_visitor_cookie(public_api, monkeypatch):
+async def test_default_local_mode_does_not_accept_remote_visitor_cookie(public_api, monkeypatch):
     async with browser(public_api) as client:
         await bootstrap(client)
         monkeypatch.delenv("API_AUTH_MODE")
-        assert (await client.get("/identity")).status_code == 401
+        assert (await client.get("/identity")).status_code == 403
         assert (await client.post("/session", headers={"Origin": ORIGIN})).status_code == 404
 
 

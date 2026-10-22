@@ -58,7 +58,7 @@ def test_startup_loads_only_its_own_optional_configuration(tmp_path, has_private
         **os.environ,
         "PATH": str(commands) + os.pathsep + os.environ["PATH"],
         "LAB_DATABASE_URL": "postgresql://localhost/manual-export",
-        "API_AUTH_MODE": "token",
+        "API_AUTH_MODE": "local",
         "PYTHONPATH": "existing-package-path",
         "STARTUP_PYTHON_OUTPUT": str(python_output),
         "STARTUP_NPM_OUTPUT": str(npm_output),
@@ -72,7 +72,7 @@ def test_startup_loads_only_its_own_optional_configuration(tmp_path, has_private
         "lab-private" if has_private_config else "manual-export"
     )
     assert backend["database"] == frontend["database"] == expected_database
-    assert backend["auth"] == frontend["auth"] == ("local" if has_private_config else "token")
+    assert backend["auth"] == frontend["auth"] == "local"
     assert backend["cwd"] == str(root)
     assert backend["pythonpath"] == "backend:.:existing-package-path"
     assert backend["args"][:3] == ["-m", "uvicorn", "search_lab.backend.app:app"]

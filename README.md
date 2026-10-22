@@ -9,132 +9,112 @@ links**, with bounded access checks rather than complete dataset downloads.
 
 ## Quick start
 
-To run the project locally, you need:
+Run the Python API on your machine and PostgreSQL in Docker. No API access token,
+account, frontend or Node.js installation is required.
 
-- **Python 3.11 or later** — [installation](https://www.python.org/downloads/).
-- **Docker with Docker Compose 2.3.0 or later** — [Docker installation](https://docs.docker.com/get-started/get-docker/) · [Compose installation](https://docs.docker.com/compose/install/).
-- **EPFL laboratory access and API keys** for the three configured RCP models.
-- An internet connection.
-
-Docker installs PostgreSQL and the application dependencies automatically.
-
-Check your installation before continuing:
-
-```sh
-python3 --version
-docker compose version
-docker info
-```
-
-If you have not downloaded the project yet, [install Git](https://git-scm.com/install/)
-and clone it:
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/getting-started/installation/),
+Docker with Compose 2.3.0+, and credentials for all three configured EPFL RCP
+models. Model-provider credentials are separate from access to this API.
 
 ```sh
 git clone https://github.com/nicolasberlin/global-health-dataset-catalog.git
 cd global-health-dataset-catalog
+uv sync --locked --python 3.11
+uv run --locked python scripts/setup_api.py
 ```
 
-You can also download and extract the repository's ZIP from GitHub without Git.
-Run the following commands from the repository root.
+Fill in `RCP_DEEPSEEK_API_KEY`, `RCP_GEMMA_MEDITRON_API_KEY` and
+`RCP_APERTUS_MEDITRON_API_KEY` in the generated, Git-ignored `.env.api`.
+The helper generates a PostgreSQL password and a local client configuration.
+Rerunning it preserves existing files and secrets.
 
-### 1. Prepare your configuration
+Start PostgreSQL and the API:
 
 ```sh
-python3 scripts/setup_api.py
+uv run --locked python scripts/start_api.py
 ```
 
-The helper creates two private, Git-ignored files:
-
-| File | What you need to do |
-| --- | --- |
-| `.env.api` | Fill in the three RCP keys below; other settings are generated |
-| `.env.api-client` | Nothing: the local address and matching API token are generated |
-
-### 2. Add your model credentials
-
-Open `.env.api` and replace these values with your own keys:
-
-```dotenv
-RCP_DEEPSEEK_API_KEY=your-deepseek-key
-RCP_GEMMA_MEDITRON_API_KEY=your-gemma-key
-RCP_APERTUS_MEDITRON_API_KEY=your-apertus-key
-```
-
-The database password and API access token are already configured. Rerunning the
-helper preserves existing files and reports conflicts without replacing secrets.
-The `.env.local` and laboratory settings are for other workflows and are not
-loaded by these commands.
-
-### 3. Start the API and run a search
+The launcher uses `docker-compose.local.yml`, waits for PostgreSQL and runs one
+API process on `127.0.0.1:8001` with proxy headers disabled. Keep this terminal open.
+In another terminal:
 
 ```sh
-docker compose --env-file .env.api -f docker-compose.api.yml up -d --build
-python3 scripts/test_api.py --query "pneumonia"
+uv run --locked python scripts/api_client.py --query "pneumonia"
 ```
 
-The first build can take a few minutes. The client waits up to 60 seconds for
-initial API readiness, submits a search, follows its progress, then fetches the
-saved datasets and diagnostics. Real searches consume provider/model quotas.
+The client submits one keyed search, tracks it and fetches saved datasets and
+diagnostics. Real searches consume model/provider quotas.
 
 - API: `http://127.0.0.1:8001`
-- Interactive API documentation: `http://127.0.0.1:8001/docs`
-- Report: `research/api/outputs/api-test.json`
+- Interactive documentation: `http://127.0.0.1:8001/docs`
+- Report: `research/api/outputs/search-report.json`
 
-The report is updated during the run, and a new search replaces the default
-report. To keep separate reports, pass
-`--output research/api/outputs/pneumonia.json`. Accepted dataset records also
-remain in PostgreSQL. See [reading reports](research/README.md) for the fields
-and the difference between an empty result and a failed step.
+All local searches belong to `local-user`. If submission acceptance is unknown
+after a connection failure, repeat the same `--query`: the client reuses its
+saved idempotency key automatically. After acceptance, retrieve the most recent
+search without submitting another query:
 
-## Choose a Docker configuration
+```sh
+uv run --locked python scripts/api_client.py --latest
+```
 
-Always specify the Compose file for your workflow:
+Only `--query`, `--latest` and optional `--timeout SECONDS` are exposed. The client
+waits up to 15 minutes by default, checks progress every 3 seconds and uses a
+30-second deadline per HTTP request. Stopping retrieval does not cancel accepted
+work. Latest always refers to the most recent search and does not restart failures.
+The default setup uses port `8001` without writing `API_PORT` or `API_BASE_URL`
+into the local configuration files. These overrides are only needed for a
+custom address. Connection settings live in `.env.api-client`: `API_BASE_URL`, `API_CLIENT_MODE`
+(default `local`) and, for public sessions, `API_PUBLIC_ORIGIN`. The file and
+session/report paths are loaded automatically. See the
+[client guide](docs/api-integration.md#python-client-without-the-interface).
 
-| File | Purpose |
+
+## Access and deployment
+
+| Configuration | Purpose |
 | --- | --- |
-| [`docker-compose.api.yml`](docker-compose.api.yml) | API and PostgreSQL; use this for the quick start above |
-| [`docker-compose.local.yml`](docker-compose.local.yml) | PostgreSQL only; run Python manually using [onboarding](docs/ONBOARDING.md#start-locally) |
-| [`docker-compose.yml`](docker-compose.yml) | Internal EPFL deployment behind existing Traefik infrastructure; requires the [deployment configuration](docs/DEPLOYMENT.md) |
+| `local` (default) | Personal instance on loopback; no credentials sent to the API |
+| `public` | Anonymous visitors identified by signed cookies, with IP and workload limits |
 
-## Stop and resume
+Public visitors use anonymous sessions and do not need accounts.
+Use [anonymous sessions](docs/reference/anonymous-visitor-sessions.md) and review
+[deployment](docs/DEPLOYMENT.md) before exposing an instance.
 
-```sh
-docker compose --env-file .env.api -f docker-compose.api.yml down
-```
-
-This keeps the database volume. Adding `--volumes` deletes that volume and its
-saved data. To resume later, run the same startup command from step 3 and follow
-your latest search without submitting another:
-
-```sh
-python3 scripts/test_api.py --latest
-```
-
-This resumes tracking only. Tasks interrupted during shutdown can require an
-explicit [retry](docs/api-integration.md#explicit-retries); saved results remain.
-
-## Troubleshooting
-
-| Problem | What to check |
+| Compose file | Purpose |
 | --- | --- |
-| Docker is unavailable | Start Docker, then retry the startup command |
-| Compose rejects the top-level `name` field or is older than 2.3.0 | Install the current Compose plugin and use `docker compose`; see the [Linux installation guide](https://docs.docker.com/compose/install/linux/) |
-| Connection refused or readiness fails | Inspect the service status and logs below; check the database and all three model settings |
-| Model calls fail | Verify each RCP key has access to its configured model; readiness checks configuration, not provider availability |
-| Schema validation fails after updating | This release uses one initial schema for a fresh database; earlier pre-release volumes are not upgraded automatically. Follow [schema operations](docs/DEPLOYMENT.md#schema-validation-and-retired-source-administration) |
-| HTTP 401 | Check that the tokens in `.env.api` and `.env.api-client` match; rerun the setup helper to detect conflicts |
-| Old client settings take precedence | Previously exported `API_TOKEN` and `API_BASE_URL` override `.env.api-client`; unset them before retrying |
-| Port 8001 is occupied | For a new setup, use `python3 scripts/setup_api.py --port 8002`; for existing files, align `API_PORT` and the client `API_BASE_URL` |
+| `docker-compose.local.yml` | Local PostgreSQL, used by `scripts/start_api.py` |
+| `docker-compose.api.yml` | Public-session API and PostgreSQL; requires public-session configuration |
+| `docker-compose.yml` | Public-session API behind the existing internal Traefik deployment |
+
+The public container templates are not the local quick start. Container traffic
+may reach the API through a bridge address rather than loopback; do not weaken
+local address checks to accommodate it. Internet deployment requires HTTPS,
+a stable signing secret, trusted proxy configuration and traffic limits.
+`.env.public.example` lists public configuration and quota settings.
+
+## Stop, resume and troubleshoot
+
+Ctrl+C stops the Python API. PostgreSQL remains running. To stop it without
+removing data:
 
 ```sh
-docker compose --env-file .env.api -f docker-compose.api.yml ps
-docker compose --env-file .env.api -f docker-compose.api.yml logs --tail=100 api
+docker compose --env-file .env.api -f docker-compose.local.yml stop postgres
 ```
 
-For an existing configuration with several token owners, run the setup helper
-with `--owner OWNER`. Keep the existing database password when reusing its volume.
-The [API guide](docs/api-integration.md) covers client options, authentication,
-retry rules and connecting to an API deployed elsewhere.
+Run `scripts/start_api.py` again to resume. Do not remove database volumes unless
+you explicitly intend to delete their contents.
+
+| Problem | Action |
+| --- | --- |
+| Docker unavailable | Start Docker; inspect `docker compose --env-file .env.api -f docker-compose.local.yml logs postgres` |
+| Port occupied | For a new setup, use `scripts/setup_api.py --port 8002`; preserve the existing PostgreSQL port and volume |
+| Model/readiness failure | Check all three provider keys; readiness validates configuration, not provider availability |
+| Existing database authentication failure | Preserve the password used to initialize its volume; generating another password does not change PostgreSQL |
+
+The native local process keeps the application destination checks, but does not
+use the container's kernel egress firewall. The public container runtime retains
+that firewall and privilege drop.
 
 ## Next steps
 
@@ -146,6 +126,7 @@ you need to integrate, change or deploy it:
 | [API integration](docs/api-integration.md) | Build your own client: commands, progress, authentication, results and retries |
 | [Developer onboarding](docs/ONBOARDING.md) | Run Python outside Docker, change code and run tests |
 | [Architecture](docs/technical-design-document.md) | Understand modules, persistence, collection and safety constraints |
+| [Python function index](docs/reference/python-function-index.md) | Find function and method signatures, with links to their source code |
 | [Deployment](docs/DEPLOYMENT.md) | Configure a server, proxy, database operations and maintenance |
 
 The optional [Search Lab](search_lab/README.md) has its own interface and private

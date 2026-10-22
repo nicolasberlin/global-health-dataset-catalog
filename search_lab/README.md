@@ -27,9 +27,8 @@ Edit **search_lab/.env**:
 - Set `LAB_DATABASE_URL` to the target API's PostgreSQL database, preferably using
   a SELECT-only database role.
 - Set `LAB_API_BASE_URL` to that same API's local address (port 8001 by default).
-- Match `API_AUTH_MODE` to the target API. In token mode, configure the same
-  `API_ACCESS_TOKENS` owner mapping and enter its access token in the lab UI.
-  Local mode uses `local-user`; public visitor-cookie mode is unsupported.
+- Use `API_AUTH_MODE=local` with a local target API. Both use `local-user`.
+  The laboratory has no login or access token; public visitor mode is unsupported.
 
 Keep credentials in the private `.env`, not in `example.env`. The startup script
 loads this lab configuration; it does not require the project's `.env.local`.
@@ -50,7 +49,7 @@ sh search_lab/start.sh
 ```
 
 Open **http://127.0.0.1:5174**. The separate lab API listens on **127.0.0.1:8003**.
-In token mode, the entered API access token is held only in UI memory.
+The laboratory uses local loopback access and has no login or access token.
 The tool is restricted to loopback clients and laboratory origins.
 
 1. Filter **Search history** to **External repositories** and select a search.

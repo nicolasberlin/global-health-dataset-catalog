@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
-import json
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, Response
-from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyCookie
 
 from app.auth.sessions import (
     HTTP_SESSION_COOKIE_NAME,
@@ -39,7 +39,6 @@ APIQuotaOperation = Literal[
     "repository_classification",
 ]
 
-_bearer_scheme = HTTPBearer(auto_error=False, description="Used when API_AUTH_MODE=token.")
 _visitor_scheme = APIKeyCookie(
     name=SESSION_COOKIE_NAME,
     auto_error=False,
@@ -55,7 +54,7 @@ _http_visitor_scheme = APIKeyCookie(
 
 @dataclass(frozen=True)
 class APIPrincipal:
-    """Authenticated API caller used to own searches and consume quotas."""
+    """Server-derived caller identity used to own searches and consume quotas."""
 
     owner_id: str
     client_key: str | None = None
@@ -65,18 +64,12 @@ def validate_api_security_configuration() -> None:
     """Fail startup when authentication or quota configuration is unsafe."""
 
     mode = api_auth_mode()
-    if mode == "token":
-        _configured_access_tokens()
-    elif mode == "public":
+    if mode == "public":
         visitor_session_settings()
     validate_quota_configuration(public=mode == "public")
 
 
 async def require_api_principal(
-    credentials: Annotated[
-        HTTPAuthorizationCredentials | None,
-        Depends(_bearer_scheme),
-    ],
     request: Request,
     response: Response,
     visitor_cookie: Annotated[str | None, Depends(_visitor_scheme)] = None,
@@ -89,8 +82,6 @@ async def require_api_principal(
         settings = visitor_session_settings()
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             _require_session_origin(request, settings)
-        if request.headers.get("authorization") is not None:
-            raise HTTPException(status_code=401, detail="Public access requires a visitor session.")
         owner_id = visitor_owner_id(visitor_cookie if settings.secure else http_cookie, settings)
         if owner_id is None:
             raise HTTPException(status_code=401, detail="Visitor session is missing or expired.")
@@ -111,32 +102,7 @@ async def require_api_principal(
             raise HTTPException(status_code=403, detail="Local access only.")
         return APIPrincipal(owner_id="local-user")
 
-    if (
-        credentials is None
-        or credentials.scheme.lower() != "bearer"
-        or not 1 <= len(credentials.credentials) <= 512
-    ):
-        raise _authentication_error()
-
-    try:
-        configured_tokens = _configured_access_tokens()
-    except RuntimeError as exception:
-        raise HTTPException(
-            status_code=503,
-            detail="API authentication is not configured.",
-        ) from exception
-
-    matched_owner = None
-    for owner_id, expected_token in configured_tokens.items():
-        if hmac.compare_digest(
-            credentials.credentials.encode("utf-8"),
-            expected_token.encode("utf-8"),
-        ):
-            matched_owner = owner_id
-
-    if matched_owner is None:
-        raise _authentication_error()
-    return APIPrincipal(owner_id=matched_owner)
+    raise RuntimeError("Unsupported access mode.")
 
 
 async def enforce_api_quota(
@@ -199,9 +165,9 @@ def quota_http_errors() -> Iterator[None]:
 
 
 def api_auth_mode() -> str:
-    mode = os.environ.get("API_AUTH_MODE", "token")
-    if mode not in {"token", "local", "public"}:
-        raise RuntimeError("API_AUTH_MODE must be token, local or public.")
+    mode = os.environ.get("API_AUTH_MODE", "local")
+    if mode not in {"local", "public"}:
+        raise RuntimeError("API_AUTH_MODE must be local or public.")
     return mode
 
 
@@ -221,50 +187,8 @@ def _require_session_origin(request: Request, settings: VisitorSessionSettings) 
         raise HTTPException(status_code=403, detail="Request origin is not allowed.")
 
 
-def _configured_access_tokens() -> dict[str, str]:
-    raw_value = os.environ.get("API_ACCESS_TOKENS", "")
-    if not raw_value:
-        raise RuntimeError(
-            "API_ACCESS_TOKENS must be a JSON object mapping owner IDs to Bearer tokens."
-        )
-
-    try:
-        parsed = json.loads(raw_value)
-    except json.JSONDecodeError as exception:
-        raise RuntimeError("API_ACCESS_TOKENS must contain valid JSON.") from exception
-
-    if not isinstance(parsed, dict) or not parsed:
-        raise RuntimeError("API_ACCESS_TOKENS must contain at least one owner and token.")
-
-    configured_tokens: dict[str, str] = {}
-    for owner_value, token_value in parsed.items():
-        if not isinstance(owner_value, str) or not owner_value.strip():
-            raise RuntimeError("API access-token owner IDs must be non-empty strings.")
-        if owner_value != owner_value.strip() or len(owner_value) > 200:
-            raise RuntimeError(
-                "API access-token owner IDs must be trimmed and at most 200 characters."
-            )
-        if not isinstance(token_value, str) or token_value != token_value.strip():
-            raise RuntimeError("API access tokens must be trimmed strings.")
-        if not 32 <= len(token_value) <= 512:
-            raise RuntimeError("API access tokens must contain between 32 and 512 characters.")
-        if token_value in configured_tokens.values():
-            raise RuntimeError("Each API access token must identify exactly one owner.")
-        configured_tokens[owner_value] = token_value
-
-    return configured_tokens
-
-
-def _authentication_error() -> HTTPException:
-    return HTTPException(
-        status_code=401,
-        detail="Valid Bearer authentication is required.",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
 def api_cors_origins() -> list[str]:
-    """Explicit browser integrations; tokens and HTTP clients need no frontend process."""
+    """Validate the explicit browser origins allowed to call this API."""
     value = os.getenv("API_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     origins = list(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
     for origin in origins:
@@ -282,3 +206,29 @@ def api_cors_origins() -> list[str]:
                 "API_CORS_ORIGINS must contain explicit HTTP(S) origins without paths."
             )
     return origins
+
+
+def configure_access_openapi(application) -> None:
+    """Describe the credential actually accepted by this deployment."""
+    original_openapi = application.openapi
+
+    def openapi():
+        schema = deepcopy(original_openapi())
+        scheme = None
+        if api_auth_mode() == "public":
+            scheme = "APIKeyCookie" if visitor_session_settings().secure else "InternalHTTPSession"
+        for path in schema["paths"].values():
+            for operation in path.values():
+                if not isinstance(operation, dict) or "security" not in operation:
+                    continue
+                if scheme is None:
+                    operation.pop("security")
+                else:
+                    operation["security"] = [{scheme: []}]
+        schemes = schema.get("components", {}).get("securitySchemes", {})
+        for name in list(schemes):
+            if name != scheme:
+                del schemes[name]
+        return schema
+
+    application.openapi = openapi

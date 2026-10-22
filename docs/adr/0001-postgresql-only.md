@@ -15,7 +15,9 @@ connection pool.
 
 The application manages its current schema and records the version in
 `schema_migrations`. One initial migration creates the complete version 1 schema
-in an empty database. Earlier pre-release databases are not converted automatically.
+in an empty database. Version 2 restricts search access modes to local/public
+without rewriting existing identities or result records. Earlier pre-release
+databases outside this migration history are not converted automatically.
 Unsupported, partial or hand-modified schemas are rejected rather than repaired
 by guessing. Current operations are documented in
 [schema migration and validation](../DEPLOYMENT.md#schema-validation-and-retired-source-administration).

@@ -8,7 +8,7 @@ and integrate the API.
 ## Run API + PostgreSQL
 
 Follow the [README quick start](../README.md#quick-start) to prepare the private
-configuration, start the API and PostgreSQL in Docker, and submit your first
+configuration, start the native Python API and Docker PostgreSQL, and submit your first
 search. It also covers stopping, resuming and troubleshooting. This guide is for
 integrating a client once the API is running.
 
@@ -22,29 +22,23 @@ recovery. Stop the previous API before starting its replacement.
 `SEARCH_MAX_CONCURRENCY` (default 1) controls discovery concurrency;
 `SEARCH_MAX_ACTIVE` (default 100) caps queued and running asynchronous discoveries.
 Classification and collection retain their separate worker and quota settings.
-The database has one initial migration, version 1, for an empty database. Earlier
-pre-release schemas are not converted automatically; use a fresh database for this
-baseline. `DATABASE_MIGRATE_ON_STARTUP=false` validates an initialized version 1
-schema without DDL. The explicit `app.migrate` command, including `--check`,
+The single database schema baseline is version 1. It initializes an empty
+database with local/public search access modes directly. Repeated startup
+preserves records and owners. Earlier pre-release schemas are unsupported.
+`DATABASE_MIGRATE_ON_STARTUP=false` validates an initialized version 1 schema
+without DDL. The explicit `app.migrate` command, including `--check`,
 takes ownership and requires the API to be stopped. See
 [operating contracts](DEPLOYMENT.md#schema-validation-and-retired-source-administration).
 
 ### Later: deploy the same API
 
-The API code, Compose file and HTTP routes used locally can also run on a host.
-Use a separate private environment file and database for that deployment, with
-fresh database/API credentials and the host's RCP keys. Do not reuse or publish
-the local test configuration. For Internet access, put the API behind an HTTPS
-proxy and configure its upstream to this port. `API_BIND_ADDRESS` defaults to
-loopback; change it only to the bind address appropriate for your deployment.
-Do not expose PostgreSQL. Update the client's `API_BASE_URL` and `API_TOKEN` to
-test the deployed API. See [deployment instructions](DEPLOYMENT.md) for the
-existing EPFL environment and operational constraints, and the proxy details below
-for other hosting environments.
-
-A website's application server can call the same routes with a private API token.
-A public browser client uses the visitor-session mode described below; never
-bundle a shared API token or an RCP key in JavaScript sent to visitors.
+The same routes, database model and workers support local and public access.
+For a public deployment, use a separate environment file and database, a stable
+session signing secret and the host's RCP credentials. Do not reuse the local
+configuration. Put Internet deployments behind HTTPS and configure the trusted
+proxy peers. Do not expose PostgreSQL. Configure the Python client with
+`API_CLIENT_MODE=public`, the API address and its exact website origin in
+`.env.api-client`. The cookie file is managed automatically. See [deployment](DEPLOYMENT.md).
 
 ### Reverse proxy with a URL prefix
 
@@ -82,7 +76,7 @@ services:
 Then pass both Compose files when starting or updating the API:
 
 ```sh
-docker compose --env-file .env.api -f docker-compose.api.yml \
+docker compose --env-file .env.public -f docker-compose.api.yml \
   -f docker-compose.api.proxy.yml up -d --build
 ```
 
@@ -101,9 +95,8 @@ the configured API prefix a second time. For example,
 The live contract is available at `/openapi.json`, with interactive documentation
 at `/docs` (both under the external prefix when configured). Search command
 responses describe acceptance/replay, expected errors, and the `Location` and
-`Retry-After` headers. Swagger's Bearer authorization applies to protected
-endpoints; the enabled authentication mode is selected by the server, not by
-the caller. `GET /health` is a basic process liveness check. `GET /ready` also
+`Retry-After` headers. OpenAPI describes the active anonymous cookie in public mode and no required
+credential locally. The access mode is selected by the server. `GET /health` is a basic process liveness check. `GET /ready` also
 checks ownership, worker health, local model settings and database availability;
 503 indicates the API cannot currently accept processing work.
 
@@ -125,126 +118,127 @@ the API does not automatically repeat a command in its HTTP handler.
 
 ## Authentication and client origins
 
-The standalone deployment uses `API_AUTH_MODE=token`. Configure
-`API_ACCESS_TOKENS` as a JSON object mapping stable integration owner names to
-random tokens of at least 32 characters. Send `Authorization: Bearer <token>`.
-The owner is derived on the server; a request cannot choose another owner.
-Rotating a token while retaining its owner name preserves access to that owner's
-searches. Search and job endpoints return 404 for another owner's resources.
-The dataset catalogue remains publicly readable, as in the existing API.
+The API supports `local` (default) and `public`. Public access uses anonymous
+visitor sessions. Local mode accepts only loopback clients, local hostnames and allowed
+browser origins, and rejects forwarding headers. All local work belongs to
+`local-user`. Use the launcher in the README; no client credential is required.
 
-Set `API_CORS_ORIGINS` to a comma-separated list of exact browser origins, for
-example `https://catalog.example.org,http://localhost:3000`. An empty value disables
-cross-origin browser access. Allowed origins can read the `Retry-After` and
-`Location` response headers for retry scheduling and accepted-resource URLs.
-CORS is not needed for server-to-server calls. Keep a
-shared integration token on your application server; for a public browser client,
-use the existing visitor-session mode described in [deployment](DEPLOYMENT.md).
-Visitor sessions also own durable searches, but an expired or lost session cannot
-restore that identity. The API stores only the derived owner and quota context,
-never the bearer token or session cookie in a search task.
+Public mode obtains a signed anonymous identity through `POST /session`. The
+browser or Python client retains the cookie and sends the configured exact
+`Origin` on state-changing requests. Searches, jobs and diagnostics remain
+owner-scoped; the saved dataset catalogue is public. Expired/lost cookies do not
+recover the original visitor identity. See [anonymous sessions](reference/anonymous-visitor-sessions.md).
+
+Set `API_CORS_ORIGINS` to exact origins only when a separate browser origin is
+needed. An empty setting disables cross-origin browser access. Same-origin
+hosting is simplest. CORS does not authorize requests or replace origin checks.
+The server stores the owner and quota context with work, never the session cookie.
+OpenAPI describes no required credentials locally and the active cookie publicly.
 
 ## Submit, disconnect, restore
 
 ### Python client without the interface
 
-`scripts/test_api.py` uses only the Python standard library (Python 3.11+).
-After the [README quick start](../README.md#quick-start), the client is already
-configured. Run:
+`scripts/api_client.py` launches real searches, using only the Python standard
+library (Python 3.11+). After the [README quick start](../README.md#quick-start),
+the client is configured for the local API. Its entire command interface is:
 
 ```sh
-python3 scripts/test_api.py --query "malaria mortality in East Africa"
+python3 scripts/api_client.py --query "malaria mortality in East Africa"
+python3 scripts/api_client.py --latest
+# Optional: wait up to 30 minutes instead of the default 15 minutes.
+python3 scripts/api_client.py --query "malaria" --timeout 1800
 ```
 
-For an API already running elsewhere, prepare a client configuration. If
-`.env.api-client` already exists, edit it instead of copying over it:
+Choose exactly one of `--query` and `--latest`. A query submits a new search,
+follows the pipeline, then retrieves datasets in batches of 100 and bounded
+diagnostics. These are real operations that consume provider/model quotas and
+can persist catalogue records. `--latest` retrieves the most recent search for
+the current owner, waits if necessary, and fetches its results. It never restarts
+failed work. Another search created in the meantime changes what latest means.
+There are no client flags for selecting an older UUID, retrying work or returning
+immediately after submission; those integrations remain possible through the
+HTTP API described below.
 
-```sh
-cp .env.api-client.example .env.api-client
+The client loads `.env.api-client` from the repository root, regardless of its
+working directory. It does not read the server's `.env.api` or `.env.local`.
+Environment variables override file values, which override local defaults:
+
+```dotenv
+API_CLIENT_MODE=local
 ```
 
-Edit `.env.api-client`: set `API_BASE_URL` to the running API's address and
-`API_TOKEN` to the backend access token provided by its operator. If running the
-standalone Docker deployment yourself, use a token **value** from
-`API_ACCESS_TOKENS` in `.env.api`, not the entire JSON mapping or an RCP key.
-The standalone Docker deployment always uses token authentication.
-The completed client file is excluded from Git. Run the same test command above.
+The address defaults to `http://127.0.0.1:8001`. Standard local setup omits
+`API_PORT` from the server file and `API_BASE_URL` from the client file; only
+custom ports or remote deployments need these overrides.
 
-The default API address is `http://127.0.0.1:8001`; override it with
-`--base-url` or `API_BASE_URL`, including any proxy prefix. The client checks
-health and readiness, submits one keyed command, follows the entire pipeline,
-then retrieves datasets in batches of 100 and the bounded search diagnostics
-snapshot. It saves a JSON report to `research/api/outputs/api-test.json` (override
-with `--output`). These are real searches and can consume provider/model quotas
-and persist datasets on the server. No frontend process is required. The
-[research files guide](../research/README.md) describes API client files. The
-optional [laboratory](../search_lab/README.md) keeps its code and private
-data under `search_lab/`; it is not needed for this client.
+The installation helper preserves the configured local address and port. Local
+access needs no token or cookie and only allows a loopback API address. Settings
+use literal `KEY=value` lines with optional quotes and comments, without shell
+evaluation or variable substitution. Unknown settings in the client file are
+rejected without echoing their values.
 
-```sh
-# Submit and disconnect; the server keeps processing.
-python3 scripts/test_api.py --query "malaria" --no-wait
-# Resume using the same authentication identity.
-python3 scripts/test_api.py --search-id SEARCH_UUID
-python3 scripts/test_api.py --latest
-# Explicit discovery retry after an eligible failed/incomplete search.
-python3 scripts/test_api.py --search-id SEARCH_UUID --retry
-# Public deployment: retain the cookie file to retain ownership.
-python3 scripts/test_api.py --auth public --origin https://catalog.example.org \
-  --base-url https://catalog.example.org/api --query "malaria"
-# Backend configured with API_AUTH_MODE=local.
-python3 scripts/test_api.py --auth local --query "malaria"
+To use this Python script with a public API, configure the same client file:
+
+```dotenv
+API_BASE_URL=https://catalog.example.org/api
+API_CLIENT_MODE=public
+API_PUBLIC_ORIGIN=https://catalog.example.org
 ```
 
-The client automatically loads `.env.api-client` from the repository root,
-regardless of the working directory; `--env-file PATH` selects another file.
-It does not load the server's `.env.api` or `.env.local` files.
-Settings use literal `KEY=value` lines with optional quotes and comments,
-without shell evaluation or variable substitution. Supported keys are
-`API_BASE_URL`, `API_TOKEN`, `API_TEST_AUTH` (default `token`) and `API_PUBLIC_ORIGIN`.
-Command options override environment variables, which override file values,
-which override defaults. Tokens are accepted only from the file or environment,
-never as command arguments or Python source edits. Exporting `API_TOKEN` still
-works and takes precedence over the file; no export is needed for file-based use.
-Public mode uses the server's `API_PUBLIC_ORIGIN` value (`--origin` or the
-configuration), and saves its session cookie with private permissions in
-`research/api/sessions/api.cookies` (`--cookie-file` to override). This session
-file is only used in public mode, not for the default local token setup. Tokens and cookies
-are excluded from the JSON report. Session expiry still loses visitor ownership.
+`API_PUBLIC_ORIGIN` must match the server's website origin. The client obtains
+and saves a visitor cookie automatically, with private permissions, in
+`research/api/sessions/api.cookies`. Preserve that cookie to retain access to
+the visitor's searches; an expired or missing identity cannot access the old
+owner's data. Cookies are excluded from the report. A future web interface will
+call the API directly and manage its browser session; it does not run this script.
+Server deployment uses `.env.public` separately; see [deployment](DEPLOYMENT.md).
 
-The command key is printed and saved **before** submission. After an uncertain
-creation response, resend the same query with `--key SAVED_KEY` and the same
-identity to avoid creating duplicate work. For an uncertain retry response,
-reuse `--search-id SEARCH_UUID --retry --key SAVED_KEY`. The report records
-`command_action` and `command_state` (`uncertain`, `acknowledged` or `rejected`)
-so a lost response is distinguishable from an explicit rejection. Save an earlier
-report before reusing its output path: each invocation atomically replaces the
-report with owner-only permissions. The client does not automatically resend
-failed HTTP requests; HTTP 429 reports `Retry-After`.
+The fixed report path is `research/api/outputs/search-report.json`. The report
+is updated during retrieval and replaced at the next invocation; copy it manually
+if it needs to be retained. Earlier `api-test.json` files are left untouched.
+Only one invocation may use the shared client files at a time. The process lock
+is released automatically when that client exits, including after a crash.
 
-`--retry` admits real work when eligible and can consume provider/model quotas.
-After an uncertain retry response, use the saved search UUID; `--latest` can
-refer to another search created in the meantime.
+Before a search is submitted, its generated idempotency key, query and server/
+session context are saved privately in `research/api/sessions/pending-search.json`.
+If acceptance is unknown after a connection failure, run the **same `--query`**
+again, with the same configuration and session: the saved key is reused to avoid
+duplicate work. The client does not resend automatically within one invocation.
+A different query, server or session is blocked until the uncertain request is
+resolved; its recovery information is preserved. `--latest` never removes it.
+A validated acceptance or explicit rejection resolves the pending request.
+After acceptance, another `--query` creates a new operation with a fresh key,
+even if the text is identical. Use `--latest` to retrieve accepted work instead.
+The report records `command_state` (`not_submitted`, `uncertain`, `acknowledged`
+or `rejected`) and `idempotency_key`; the key is not an access credential.
+These recovery rules apply to requests submitted by this simplified client;
+older uncertain reports can still be recovered using their saved key through
+the HTTP contract below.
 
-`--interval` defaults to 3 seconds, `--timeout` to 900 seconds of progress
-tracking, and `--http-timeout` to a 30-second deadline per HTTP request, including
-status, headers and body. This standalone standard-library CLI still resolves DNS
-on the calling thread; its HTTP timeout cannot interrupt a stuck OS lookup. The
-server collector uses a separate bounded resolver. A tracking timeout
-or Ctrl+C does not cancel server work. Exit codes: 0 for successful retrieval
-(including an empty result) or accepted `--no-wait`; 1 for HTTP/network/client
-errors or tracking timeout; 2 for a failed/incomplete pipeline; 130 for Ctrl+C.
-Diagnostics are a bounded snapshot; use the paged endpoints below for older history.
+Progress is checked every 3 seconds. Result retrieval has a 900-second default
+budget, adjustable with `--timeout`; each HTTP request has a fixed 30-second
+budget covering status, headers and body. The standard-library client resolves
+DNS on the calling thread, so that budget cannot interrupt a stuck OS lookup.
+The server collector uses a separate bounded resolver. A retrieval timeout or
+Ctrl+C does not cancel an accepted search. Messages distinguish interruption
+before submission, uncertain acceptance and retrieval of a known search.
+Exit codes: 0 for successful retrieval (including empty results); 1 for network,
+client or timeout errors; 2 for a failed/incomplete pipeline; 130 for Ctrl+C.
+Diagnostics are bounded; use the paged endpoints below for older history.
+See the [research files guide](../research/README.md) for report contents.
 
 ### HTTP commands
 
+These examples target local loopback access. Public clients must first obtain a
+session and attach its cookie; state-changing requests also need the exact Origin.
+The Python client handles this automatically when configured with `API_CLIENT_MODE=public`.
+
 ```sh
 export API_BASE_URL=http://127.0.0.1:8001
-# Set API_TOKEN privately to the integration token configured on the server.
 # Save this key before the request; reuse it after any uncertain network response.
 export SEARCH_COMMAND_KEY="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 curl --fail-with-body "$API_BASE_URL/collector/searches" \
-  -H "Authorization: Bearer $API_TOKEN" \
   -H "Idempotency-Key: $SEARCH_COMMAND_KEY" \
   -H 'Content-Type: application/json' \
   --data '{"query":"malaria mortality in East Africa"}'
@@ -270,8 +264,7 @@ pipeline. Later, follow the returned `Location` against the response URL, or
 restore the owner's most recently created search through the configured API base URL:
 
 ```sh
-curl --fail-with-body "$API_BASE_URL/collector/searches/latest" \
-  -H "Authorization: Bearer $API_TOKEN"
+curl --fail-with-body "$API_BASE_URL/collector/searches/latest"
 ```
 
 `GET /collector/searches/{search_id}/progress` and `/searches/latest` return the
@@ -344,7 +337,7 @@ External calls themselves are not guaranteed exactly once across process crashes
 | 202 | Save the search ID, then follow `Location`; the server owns execution. |
 | 200 on a command | The saved key has already been accepted; follow the existing search. |
 | 400 / 422 | Correct the query, request fields or pagination bounds before resubmitting. `detail` is a string for 400 and a validation-error list for 422. |
-| 401 | Correct or renew the credential for this deployment's authentication mode. Token mode also sends `WWW-Authenticate: Bearer`. |
+| 401 | Bootstrap or renew the public visitor session. |
 | 403 | Check the visitor request origin, or the local-mode host/client restrictions. |
 | 404 | The resource is absent or belongs to another owner; neither case reveals its existence. |
 | 408 | The upload exceeded its deadline before command admission. Check the connection before resending with the same command key. |
@@ -366,7 +359,6 @@ To retry initial discovery, send an empty body (or no body) with a new key:
 ```sh
 curl --fail-with-body -X POST \
   "$API_BASE_URL/collector/searches/$SEARCH_ID/retry" \
-  -H "Authorization: Bearer $API_TOKEN" \
   -H "Idempotency-Key: $RETRY_COMMAND_KEY"
 ```
 
@@ -419,14 +411,10 @@ Shutdown stops all consumers and gives them one shared drain budget,
 20 seconds for container shutdown. An expired drain budget or forced process stop
 can lose results held only in memory; committed model votes and datasets survive.
 
-`POST /collector/search-datasets` remains as a **deprecated asynchronous alias**
-of `/collector/searches`. Its response contract changes for older synchronous
-clients: a new command returns 202, a keyed replay returns 200, and the body is a
-command response with `Location`/`progress_url`, rather than final `items`.
-Follow progress and fetch the saved dataset IDs. The alias accepts an optional
-`Idempotency-Key`; without one, each POST receives a new server-generated key and
-creates a new submission. Use `/collector/searches` and a saved client key for
-new integrations and network retries.
+Use `POST /collector/searches` to submit a search. Every submission requires an
+`Idempotency-Key`. Save the key before sending the request and reuse it with the
+same payload for network retries, so a repeated request does not create another
+search. Follow `Location`/`progress_url` and fetch the saved dataset IDs when ready.
 Processing continues without a connected or polling client.
 
 `tests/test_async_searches.py` verifies admission/replay concurrency, ownership,
@@ -457,8 +445,7 @@ Another owner's resource returns 404. Supply `limit=1..200` (default 100) and
 
 ```sh
 curl --fail-with-body \
-  "$API_BASE_URL/collector/collection-jobs/$JOB_ID/classification-history?limit=100&offset=0" \
-  -H "Authorization: Bearer $API_TOKEN"
+  "$API_BASE_URL/collector/collection-jobs/$JOB_ID/classification-history?limit=100&offset=0"
 ```
 
 Fetch `next_offset` when present. A page selects recent entries and returns them
@@ -511,7 +498,7 @@ provider credentials required:
 .venv/bin/python -m pytest tests/test_api_cli.py
 ```
 
-Launching `scripts/test_api.py` against a normally configured API is a separate live
+Launching `scripts/api_client.py` against a normally configured API is a separate live
 integration check: it can consume provider quotas and save datasets. A successful
 simulated suite does not prove that an external provider is currently available,
 or establish production capacity under load.

@@ -1,9 +1,8 @@
-"""Prepare private configuration for a local API test, without extra Python packages."""
+"""Prepare private local API settings without access tokens or extra packages."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import secrets
@@ -40,9 +39,13 @@ def _parse_values(content, filename):
             parts = shlex.split(raw, comments=True)
         except ValueError:
             parts = [None, None]
-        if (not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
-                or key in values or len(parts) > 1):
-            raise SetupError(f"{filename} : line {number} is invalid (expected KEY=value).")
+        if (
+            not separator
+            or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+            or key in values
+            or len(parts) > 1
+        ):
+            raise SetupError(f"{filename}: line {number} is invalid (expected KEY=value).")
         values[key] = parts[0] if parts else ""
     return values
 
@@ -81,108 +84,87 @@ def _create_private(path, content):
         handle.write(content)
 
 
-def initialize(root, *, owner="local-test", port=None):
-    """Create matching configuration files, preserving all existing credentials."""
+def validate_local(values):
+    """Validate before starting services or changing an existing configuration."""
+    if values.get("API_AUTH_MODE", "local") != "local":
+        raise SetupError(
+            "Local setup requires API_AUTH_MODE=local. Existing files were preserved."
+        )
+    if values.get("API_BIND_ADDRESS", "127.0.0.1") not in {"127.0.0.1", "::1"}:
+        raise SetupError("The local API must bind to 127.0.0.1 or ::1.")
+    password = values.get("POSTGRES_PASSWORD", "")
+    if not password or password.startswith("replace-"):
+        raise SetupError("Set POSTGRES_PASSWORD in .env.api before continuing.")
+    _port(values.get("API_PORT", "8001"))
+    _port(values.get("POSTGRES_PORT", "5432"))
+
+
+def initialize(root, *, port=None):
+    """Prepare a local server and client, preserving existing files and database secrets."""
     root = Path(root)
-    if not isinstance(owner, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", owner):
-        raise SetupError("--owner accepts 1-100 characters from A-Z a-z 0-9 . _ : -.")
     requested_port = _port(port) if port is not None else None
     backend, client = root / ".env.api", root / ".env.api-client"
-    backend_exists = backend.exists() or backend.is_symlink()
-    client_exists = client.exists() or client.is_symlink()
-    if client_exists and not backend_exists:
+    if (client.exists() or client.is_symlink()) and not backend.exists():
         raise SetupError(
-            ".env.api-client exists without .env.api. Existing settings were preserved; "
-            "check the files before preparing a new local test."
+            ".env.api-client exists without .env.api; existing settings were preserved."
         )
     new_backend = None
-    if backend_exists:
+    if backend.exists() or backend.is_symlink():
         values = _read_values(backend)
     else:
         template = root / ".env.api.example"
         _read_values(template)
-        try:
-            new_backend = _replace_settings(template.read_text(encoding="utf-8"), {
+        new_backend = _replace_settings(
+            template.read_text(encoding="utf-8"),
+            {
                 "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
-                "API_ACCESS_TOKENS": json.dumps({owner: secrets.token_urlsafe(32)}),
-                "API_PORT": requested_port or 8001,
-                "API_BIND_ADDRESS": "127.0.0.1",
-            })
-        except (OSError, UnicodeError):
-            raise SetupError("Could not read .env.api.example.") from None
+            },
+        )
+        if requested_port is not None and requested_port != 8001:
+            new_backend += f"API_PORT={requested_port}\n"
         values = _parse_values(new_backend, ".env.api")
+    validate_local(values)
     actual_port = _port(values.get("API_PORT", "8001"))
     if requested_port is not None and requested_port != actual_port:
-        raise SetupError(
-            "--port differs from API_PORT in .env.api; existing settings were preserved."
-        )
-    bind = values.get("API_BIND_ADDRESS", "127.0.0.1")
-    if bind not in {"127.0.0.1", "0.0.0.0", "::1", "::"}:
-        raise SetupError("The existing configuration does not point to a local test setup.")
-    address = "[::1]" if ":" in bind else "127.0.0.1"
+        raise SetupError("--port differs from API_PORT; existing settings were preserved.")
+    address = "[::1]" if values.get("API_BIND_ADDRESS") == "::1" else "127.0.0.1"
     base_url = f"http://{address}:{actual_port}"
-    password = values.get("POSTGRES_PASSWORD", "")
-    if not password or password.startswith("replace-"):
-        raise SetupError("Set POSTGRES_PASSWORD in .env.api before continuing.")
-    try:
-        tokens = json.loads(values.get("API_ACCESS_TOKENS", ""))
-    except ValueError:
-        raise SetupError(
-            "API_ACCESS_TOKENS in .env.api must be a valid JSON object."
-        ) from None
-    if not isinstance(tokens, dict) or owner not in tokens:
-        raise SetupError(
-            "The requested owner is missing from API_ACCESS_TOKENS. "
-            "Use --owner with an existing owner name; no token was replaced."
-        )
-    token = tokens[owner]
-    if (not isinstance(token, str) or not 32 <= len(token) <= 512
-            or token != token.strip() or token.startswith("replace-")
-            or any(ord(char) < 32 or ord(char) > 126 for char in token)):
-        raise SetupError("The selected token in .env.api must contain 32-512 valid characters.")
+    client_exists = client.exists() or client.is_symlink()
     if client_exists:
         existing = _read_values(client)
-        if (existing.get("API_BASE_URL", "").rstrip("/") != base_url
-                or existing.get("API_TOKEN") != token
-                or existing.get("API_TEST_AUTH", "token") != "token"):
+        if (
+            existing.get("API_CLIENT_MODE", "local") != "local"
+            or existing.get("API_BASE_URL", "http://127.0.0.1:8001").rstrip("/") != base_url
+        ):
             raise SetupError(
-                ".env.api-client contains different settings. "
-                "The file was preserved; check its address, authentication mode and token."
+                ".env.api-client uses different local settings. "
+                "The file was preserved; follow docs/ONBOARDING.md."
             )
     if new_backend is not None:
         _create_private(backend, new_backend)
     if not client_exists:
-        _create_private(client, (
-            "# Generated for local testing. Keep this file private.\n"
-            f"API_BASE_URL={base_url}\n"
-            f"API_TOKEN={shlex.quote(token)}\n"
-        ))
+        client_content = "API_CLIENT_MODE=local\n"
+        if base_url != "http://127.0.0.1:8001":
+            client_content += f"API_BASE_URL={base_url}\n"
+        _create_private(client, client_content)
     return backend, client
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--owner", default="local-test", help="Token owner name")
-    parser.add_argument(
-        "--port", type=int, help="Local port (default: 8001 for a new configuration)",
-    )
+    parser.add_argument("--port", type=int, help="Local port (default: 8001)")
     args = parser.parse_args(argv)
     try:
-        backend, _ = initialize(PROJECT_ROOT, owner=args.owner, port=args.port)
+        backend, _ = initialize(PROJECT_ROOT, port=args.port)
     except (SetupError, OSError) as exc:
-        detail = (
-            str(exc) if isinstance(exc, SetupError) else "Could not write the configuration."
-        )
+        detail = str(exc) if isinstance(exc, SetupError) else "Could not prepare the configuration."
         print(f"Error: {detail}", file=sys.stderr)
         return 1
-    print(f"Configuration files prepared: {backend}")
-    print("Open .env.api and fill in the three RCP keys (RCP_*_API_KEY).")
-    print("The PostgreSQL password and client access token are already configured.")
-    print("Existing files and credentials are preserved.")
-    print("\nStart the API and PostgreSQL locally:")
-    print("docker compose --env-file .env.api -f docker-compose.api.yml up -d --build")
-    print("\nThen run a search:")
-    print('python3 scripts/test_api.py --query "pneumonia"')
+    print(f"Local configuration prepared: {backend}")
+    print("Fill in the three RCP model keys in .env.api. No API access token is needed.")
+    print("Existing values and database credentials are preserved.")
+    print("Start: uv run --locked python scripts/start_api.py")
+    print('Search: uv run --locked python scripts/api_client.py --query "pneumonia"')
     return 0
 
 

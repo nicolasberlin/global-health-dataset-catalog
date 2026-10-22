@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 import pytest
 from app.auth.security import public_client_key, validate_api_security_configuration
@@ -111,10 +112,18 @@ async def test_ip_search_quota_cannot_be_reset_by_minting_a_new_cookie(public_ap
         await bootstrap(alice)
         await bootstrap(bob)
         assert (
-            await alice.post("/collector/search-datasets", json={"query": "malaria"})
+            await alice.post(
+                "/collector/searches",
+                headers={"Idempotency-Key": str(uuid4())},
+                json={"query": "malaria"},
+            )
         ).status_code == 202
         await execute_next_search()
-        denied = await bob.post("/collector/search-datasets", json={"query": "malaria"})
+        denied = await bob.post(
+            "/collector/searches",
+            headers={"Idempotency-Key": str(uuid4())},
+            json={"query": "malaria"},
+        )
         assert denied.status_code == 429
         assert len(await rows("SELECT * FROM search_sessions")) == 1
         owners = await rows("SELECT * FROM api_rate_limits WHERE owner_id LIKE 'visitor:%'")
@@ -141,10 +150,18 @@ async def test_daily_online_budget_blocks_providers_across_visitors_and_ips(
         await bootstrap(alice)
         await bootstrap(bob)
         assert (
-            await alice.post("/collector/search-datasets", json={"query": "malaria"})
+            await alice.post(
+                "/collector/searches",
+                headers={"Idempotency-Key": str(uuid4())},
+                json={"query": "malaria"},
+            )
         ).status_code == 202
         await execute_next_search()
-        queued = await bob.post("/collector/search-datasets", json={"query": "diabetes"})
+        queued = await bob.post(
+            "/collector/searches",
+            headers={"Idempotency-Key": str(uuid4())},
+            json={"query": "diabetes"},
+        )
         assert queued.status_code == 202
         await execute_next_search()
         denied = await bob.get(queued.headers["location"])
@@ -166,7 +183,11 @@ async def test_public_candidate_cap_deduplicates_before_charging(public_api, mon
     )
     async with browser(public_api) as client:
         await bootstrap(client)
-        response = await client.post("/collector/search-datasets", json={"query": "malaria"})
+        response = await client.post(
+            "/collector/searches",
+            headers={"Idempotency-Key": str(uuid4())},
+            json={"query": "malaria"},
+        )
         assert response.status_code == 202
         await execute_next_search()
         progress = await client.get(response.headers["location"])
@@ -349,7 +370,11 @@ async def test_local_results_remain_available_when_external_budget_is_exhausted(
     monkeypatch.setattr("app.workers.search.search_repository_metadata", forbidden)
     async with browser(public_api) as client:
         await bootstrap(client)
-        response = await client.post("/collector/search-datasets", json={"query": "malaria"})
+        response = await client.post(
+            "/collector/searches",
+            headers={"Idempotency-Key": str(uuid4())},
+            json={"query": "malaria"},
+        )
         assert response.status_code == 202
         await execute_next_search()
         progress = await client.get(response.headers["location"])
@@ -410,7 +435,11 @@ async def test_shared_ip_sessions_candidate_admission_and_polling(
         searches = []
         for client in clients:
             searches.append(
-                await client.post("/collector/search-datasets", json={"query": "malaria"})
+                await client.post(
+                    "/collector/searches",
+                    headers={"Idempotency-Key": str(uuid4())},
+                    json={"query": "malaria"},
+                )
             )
         assert all(response.status_code == 202 for response in searches)
         for _ in searches:

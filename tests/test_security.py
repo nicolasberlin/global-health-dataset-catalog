@@ -1,120 +1,100 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 from app.auth.security import (
     APIPrincipal,
+    configure_access_openapi,
     enforce_api_quota,
     require_api_principal,
     validate_api_security_configuration,
 )
 from app.quota_policy import QuotaExceeded, QuotaLimit
-from fastapi import HTTPException, Request, Response
-from fastapi.security import HTTPAuthorizationCredentials
+from app.routes.collector import router
+from fastapi import FastAPI, HTTPException, Request, Response
 
 pytestmark = pytest.mark.anyio
 
-VALID_TOKEN = "test-token-with-at-least-thirty-two-characters"
+
+def _request(host="127.0.0.1", origin=None, hostname="127.0.0.1", extra=()):
+    headers = [(b"host", hostname.encode()), *extra]
+    if origin is not None:
+        headers.append((b"origin", origin.encode()))
+    return Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "path": "/",
+            "query_string": b"",
+            "client": (host, 1234),
+            "server": ("127.0.0.1", 8001),
+            "headers": headers,
+        }
+    )
 
 
-def _request(host="127.0.0.1", origin="http://127.0.0.1:5173", hostname="127.0.0.1"):
-    return Request({
-        "type": "http", "scheme": "http", "path": "/", "query_string": b"",
-        "client": (host, 1234), "server": ("127.0.0.1", 8001),
-        "headers": [(b"host", hostname.encode()), (b"origin", origin.encode())],
-    })
-
-
-async def test_local_access_needs_no_token(monkeypatch):
-    monkeypatch.setenv("API_AUTH_MODE", "local")
-    monkeypatch.delenv("API_ACCESS_TOKENS", raising=False)
+async def test_local_access_is_default_and_needs_no_token(monkeypatch):
+    monkeypatch.delenv("API_AUTH_MODE", raising=False)
     validate_api_security_configuration()
-    assert await require_api_principal(None, _request(), Response()) == APIPrincipal("local-user")
-
-
-@pytest.mark.parametrize("overrides", [
-    {"host": "192.168.1.10"}, {"origin": "https://evil.example"},
-    {"hostname": "evil.example"},
-])
-async def test_local_access_rejects_remote_clients_and_browser_origins(monkeypatch, overrides):
-    monkeypatch.setenv("API_AUTH_MODE", "local")
-    with pytest.raises(HTTPException) as error:
-        await require_api_principal(None, _request(**overrides), Response())
-    assert error.value.status_code == 403
-
-
-def _configure_access_token(monkeypatch) -> None:
-    monkeypatch.setenv(
-        "API_ACCESS_TOKENS",
-        json.dumps({"test-user": VALID_TOKEN}),
-    )
-
-
-async def test_bearer_token_authenticates_configured_owner(monkeypatch):
-    _configure_access_token(monkeypatch)
-
-    principal = await require_api_principal(
-        HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_TOKEN),
-        _request(), Response(),
-    )
-
-    assert principal == APIPrincipal(owner_id="test-user")
+    assert await require_api_principal(_request(), Response()) == APIPrincipal("local-user")
 
 
 @pytest.mark.parametrize(
-    "credentials",
+    "overrides",
     [
-        None,
-        HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong-token"),
+        {"host": "192.168.1.10"},
+        {"origin": "https://evil.example"},
+        {"hostname": "evil.example"},
+        {"origin": "null"},
+        {"extra": [(b"x-forwarded-for", b"127.0.0.1")]},
+        {"extra": [(b"forwarded", b"for=127.0.0.1")]},
     ],
 )
-async def test_bearer_token_rejects_missing_or_invalid_credentials(
-    monkeypatch,
-    credentials,
-):
-    _configure_access_token(monkeypatch)
-
+async def test_local_access_rejects_remote_clients_and_browser_origins(monkeypatch, overrides):
+    monkeypatch.setenv("API_AUTH_MODE", "local")
     with pytest.raises(HTTPException) as error:
-        await require_api_principal(credentials, _request(), Response())
-
-    assert error.value.status_code == 401
-    assert error.value.headers == {"WWW-Authenticate": "Bearer"}
+        await require_api_principal(_request(**overrides), Response())
+    assert error.value.status_code == 403
 
 
-def test_security_configuration_rejects_duplicate_tokens(monkeypatch):
-    monkeypatch.setenv(
-        "API_ACCESS_TOKENS",
-        json.dumps({"first-user": VALID_TOKEN, "second-user": VALID_TOKEN}),
-    )
-
-    with pytest.raises(RuntimeError, match="exactly one owner"):
+@pytest.mark.parametrize("mode", ["unknown", ""])
+def test_unsupported_access_modes_fail_startup(monkeypatch, mode):
+    monkeypatch.setenv("API_AUTH_MODE", mode)
+    with pytest.raises(RuntimeError, match="local or public"):
         validate_api_security_configuration()
 
 
-def test_costly_and_mutating_routes_document_both_deployment_authentication_schemes():
-    from app.main import app
-
-    openapi = app.openapi()
-    assert "/session" in openapi["paths"]
-    protected_operations = (
-        ("/collector/collection-jobs/{job_id}/retry", "post"),
-        ("/collector/search-datasets", "post"),
-        ("/collector/repository-candidates/{candidate_id}/classify", "post"),
-        ("/collector/collection-jobs/{job_id}", "get"),
-    )
-
-    for path, method in protected_operations:
-        assert openapi["paths"][path][method]["security"] == [
-            {"HTTPBearer": []}, {"APIKeyCookie": []}, {"InternalHTTPSession": []},
-        ]
+async def test_local_access_uses_peer_and_origin_even_with_an_authorization_header(monkeypatch):
+    monkeypatch.setenv("API_AUTH_MODE", "local")
+    extra = [(b"authorization", b"unused")]
+    principal = await require_api_principal(_request(extra=extra), Response())
+    assert principal == APIPrincipal("local-user")
+    with pytest.raises(HTTPException) as error:
+        await require_api_principal(_request(host="192.168.1.10", extra=extra), Response())
+    assert error.value.status_code == 403
 
 
-def test_security_configuration_requires_access_tokens(monkeypatch):
-    monkeypatch.delenv("API_ACCESS_TOKENS", raising=False)
-
-    with pytest.raises(RuntimeError, match="API_ACCESS_TOKENS"):
-        validate_api_security_configuration()
+@pytest.mark.parametrize(
+    "mode,origin,scheme",
+    [
+        ("local", None, None),
+        ("public", "https://health.example", "APIKeyCookie"),
+        ("public", "http://health.example", "InternalHTTPSession"),
+    ],
+)
+def test_openapi_describes_only_the_active_access_mechanism(monkeypatch, mode, origin, scheme):
+    monkeypatch.setenv("API_AUTH_MODE", mode)
+    monkeypatch.setenv("API_SESSION_SECRET", "test-only-session-secret-at-least-32-characters")
+    monkeypatch.setenv("API_ALLOW_INSECURE_HTTP_SESSIONS", "true")
+    if origin:
+        monkeypatch.setenv("API_PUBLIC_ORIGIN", origin)
+    application = FastAPI()
+    application.include_router(router)
+    configure_access_openapi(application)
+    schema = application.openapi()
+    security = schema["paths"]["/collector/searches"]["post"].get("security")
+    assert security == ([{scheme: []}] if scheme else None)
+    assert set(schema["components"].get("securitySchemes", {})) == ({scheme} if scheme else set())
+    assert "security" not in schema["paths"]["/collector/collected-datasets"]["get"]
 
 
 async def test_api_quota_returns_retry_after_when_limit_is_exhausted(monkeypatch):

@@ -85,15 +85,11 @@ async def test_invalid_credentials_cannot_read_or_enqueue_owned_work(
             ("GET", "/collector/searches/latest"),
             ("GET", "/collector/repository-analyses/latest"),
             ("POST", "/collector/searches"),
-            ("POST", "/collector/search-datasets"),
         ]
         for method, path in paths:
-            options = {"json": {"query": "mortality"}} if path in {
-                "/collector/searches", "/collector/search-datasets",
-            } else {}
+            options = {"json": {"query": "mortality"}} if path == "/collector/searches" else {}
             response = await client.request(method, path, headers=request_headers, **options)
             assert response.status_code == 401, (method, path, response.text)
-            assert response.headers["www-authenticate"] == "Bearer"
     assert await persisted_state() == before
 
 

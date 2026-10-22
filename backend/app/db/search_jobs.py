@@ -34,7 +34,7 @@ async def admit_search(
     retry_search_id: UUID | None = None,
 ):
     owner_id = _normalized_owner_id(owner_id)
-    if access_mode not in {"local", "token", "public"}:
+    if access_mode not in {"local", "public"}:
         raise ValueError("Unsupported access mode.")
     if (access_mode == "public") != (client_key is not None):
         raise ValueError("Public discovery requires its server-derived quota key.")

@@ -43,7 +43,7 @@ async def admit(key="first", **kwargs):
     return await search_jobs.admit_search(
         "alice",
         key,
-        access_mode="token",
+        access_mode="local",
         client_key=None,
         **kwargs,
     )
@@ -530,3 +530,12 @@ async def test_http_retry_replay_and_operation_conflict(database, api):
         ).status_code == 409
     assert len(await rows("SELECT * FROM api_commands")) == 2
     assert (await rows("SELECT * FROM api_rate_limits"))[0]["request_count"] == 2
+
+
+async def test_unsupported_search_access_mode_is_rejected(database):
+    await database.init_database()
+    with pytest.raises(ValueError, match="Unsupported access mode"):
+        await search_jobs.admit_search(
+            "alice", "unsupported-mode", query="health", access_mode="unknown", client_key=None,
+        )
+    assert not await rows("SELECT * FROM search_sessions")

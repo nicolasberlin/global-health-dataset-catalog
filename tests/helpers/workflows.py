@@ -90,7 +90,7 @@ async def wait_until(check):
 
 
 def headers(owner="alice"):
-    return {"Authorization": f"Bearer {owner}-test-token-with-at-least-thirty-two-characters"}
+    return {"X-Test-Owner": owner}
 
 
 async def read(search_id, owner="alice"):

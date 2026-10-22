@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, Response
 
@@ -15,7 +15,6 @@ from app.db.search_results import latest_search_id
 from app.routes.collector_presenters import public_search_progress
 from app.routes.collector_schemas import (
     CollectorHTTPError,
-    CollectorRepositorySearchRequest,
     CollectorSearchCommandResponse,
     CollectorSearchCreateRequest,
     CollectorSearchProgressResponse,
@@ -43,7 +42,10 @@ _COMMAND_RESPONSES = {
         "headers": _COMMAND_HEADERS,
     },
     400: {"model": CollectorHTTPError, "description": "Search query is blank."},
-    401: {"model": CollectorHTTPError, "description": "Missing or invalid deployment credential."},
+    401: {
+        "model": CollectorHTTPError,
+        "description": "Missing or invalid visitor session.",
+    },
     403: {"model": CollectorHTTPError, "description": "Visitor origin or local access rejected."},
     409: {"model": CollectorHTTPError, "description": "Command key or retry state conflicts."},
     413: {"model": CollectorHTTPError, "description": "Request body exceeds the configured limit."},
@@ -67,40 +69,6 @@ CommandKey = Annotated[
     str,
     Header(alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
 ]
-
-
-@router.post(
-    "/search-datasets",
-    status_code=202,
-    deprecated=True,
-    responses=_COMMAND_RESPONSES,
-)
-async def search_datasets(
-    payload: CollectorRepositorySearchRequest,
-    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
-    response: Response,
-    request: Request,
-    idempotency_key: Annotated[
-        str | None,
-        Header(
-            alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"
-        ),
-    ] = None,
-) -> CollectorSearchCommandResponse:
-    """Deprecated alias of /searches; discovery always runs in the shared worker queue.
-
-    Returns an accepted command and Location, not final dataset results. Legacy
-    callers without a command key receive a new server-generated key per POST.
-    """
-
-    response.headers["Link"] = f'<{request.url_for("create_search").path}>; rel="successor-version"'
-    return await _admit_search_command(
-        payload,
-        principal,
-        response,
-        idempotency_key or f"legacy:{uuid4().hex}",
-        request,
-    )
 
 
 @router.post(

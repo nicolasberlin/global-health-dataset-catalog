@@ -449,12 +449,10 @@ async def test_manual_http_retry_honors_provider_deadline_and_owner(database, mo
     # separately by lifespan tests and must never leak between these cases.
     app = FastAPI()
     app.include_router(router)
-    tokens = {
-        owner: f"synthetic-{owner}-recovery-token-at-least-thirty-two-characters"
-        for owner in ("alice", "bob")
-    }
-    monkeypatch.setenv("API_AUTH_MODE", "token")
-    monkeypatch.setenv("API_ACCESS_TOKENS", json.dumps(tokens))
+    from helpers.access import inject_owners
+
+    monkeypatch.setenv("API_AUTH_MODE", "local")
+    inject_owners(app)
 
     await database.init_database()
     candidate, item = await setup_work(database, kind)
@@ -473,10 +471,10 @@ async def test_manual_http_retry_honors_provider_deadline_and_owner(database, mo
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.post(url, headers={"Idempotency-Key": "blocked"})).status_code == 401
         assert (await client.post(url, headers={
-            "Authorization": f"Bearer {tokens['bob']}", "Idempotency-Key": "blocked",
+            "X-Test-Owner": "bob", "Idempotency-Key": "blocked",
         })).status_code == 404
         response = await client.post(url, headers={
-            "Authorization": f"Bearer {tokens['alice']}", "Idempotency-Key": "blocked",
+            "X-Test-Owner": "alice", "Idempotency-Key": "blocked",
         })
         assert response.status_code == 429
         assert 3500 <= int(response.headers["Retry-After"]) <= 3600

@@ -17,12 +17,23 @@ dist/
 *.db
 .DS_Store
 ~$*.pptx
+# Local slide decks, presentation sources and build artifacts.
+*.ppt
+*.pptx
+*.odp
+/.presentation-build/
+/presentation/
+/presentations/
+/slides/
+# Generated slide decks, documentation PDFs and source diagrams.
+/output/
 .env
 .env.*
 key.txt
 
 !.env.api.example
 !.env.api-client.example
+!.env.public.example
 
 # Private research evidence and removable development-tool outputs.
 /Host ai-commons

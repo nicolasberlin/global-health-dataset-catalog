@@ -28,7 +28,7 @@ transactions. `workers/runtime.py` and `workers/state.py` share worker lifecycle
 and health; `quota_policy.py` supplies admission rules used by HTTP and database
 operations.
 
-Any HTTP client, including [scripts/test_api.py](../scripts/test_api.py), can
+Any HTTP client, including [scripts/api_client.py](../scripts/api_client.py), can
 submit searches and follow the persisted workflow independently.
 The browser service is a collection fallback, separate from the user interface.
 
@@ -148,15 +148,16 @@ without making provider evidence authoritative over identified page/adapter evid
 The catalogue is shared and publicly readable; search state, candidate decisions,
 job reads and diagnostic histories are owner-scoped. Catalogue deduplication does
 not provide comprehensive DOI, mirror or version equivalence. One initial
-migration creates the complete version 1 schema in an empty database. Earlier
-pre-release schemas require a fresh database; there is no automatic conversion.
+migration creates the complete version 1 baseline in an empty database,
+including local/public search access modes. Repeated initialization preserves
+records and owners. Earlier pre-release schemas are unsupported.
 Retention is explicit, dry-run by default, and must preserve the chosen
 idempotency window.
 
 ## Security, errors and operating limits
 
-Deployment selects one authentication mode: configured bearer tokens, signed
-expiring visitor cookies, or restricted loopback access. The server derives
+Deployment selects one access mode: local loopback identity or signed,
+expiring anonymous visitor cookies. The server derives
 ownership; clients cannot supply it. Visitor writes require the configured origin.
 Quotas, queue capacity, bounded bodies and field validation protect admission;
 CORS permits configured origins but does not replace authentication.
@@ -185,8 +186,8 @@ a bounded resolver; OS lookups themselves cannot be killed. See
 [collection budget](reference/collection.md#attempt-budget).
 
 Technical access and LLM relevance do not establish source authority, acceptable
-licensing, absence of sensitive data, or permission to publish. Static tokens do
-not provide account management or institutional identity. Real-provider testing,
+licensing, absence of sensitive data, or permission to publish. Anonymous sessions
+do not provide account management or institutional identity. Real-provider testing,
 capacity planning and deployment review remain necessary for the intended use.
 Client integration belongs to the [API guide](api-integration.md).
 

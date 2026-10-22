@@ -16,8 +16,7 @@ from .migrations.v001 import (
 )
 from .migrations.v001 import MANAGED_TABLES
 
-# This pre-release baseline deliberately starts afresh; historical databases are
-# rejected, never rewritten or deleted during startup.
+# One complete baseline initializes an empty database; existing data is preserved.
 CURRENT_SCHEMA_VERSION = 1
 OBSOLETE_COLLECTED_DATASET_COLUMNS = (
     "dataset_probability",

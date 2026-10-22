@@ -198,7 +198,7 @@ CREATE TABLE search_sessions (
     local_result_count INTEGER CHECK(local_result_count >= 0),
     discovery_complete BOOLEAN,
     execution_mode TEXT NOT NULL DEFAULT 'inline' CHECK(execution_mode IN ('inline', 'worker')),
-    access_mode TEXT CHECK(access_mode IN ('token', 'local', 'public')),
+    access_mode TEXT CHECK(access_mode IN ('local', 'public')),
     client_key TEXT,
     attempt_number INTEGER NOT NULL DEFAULT 1 CHECK(attempt_number >= 1),
     attempt_token UUID,
