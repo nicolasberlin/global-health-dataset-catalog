@@ -1,8 +1,7 @@
 .venv/
 node_modules/
 # The main interface is maintained separately from this API repository.
-/frontend/
-/tests/browser/
+/interface_web/
 .vscode/
 .idea/
 *.log

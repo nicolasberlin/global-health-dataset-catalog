@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
 from app.auth.security import APIPrincipal, api_auth_mode, quota_http_errors, require_api_principal
 from app.db.commands import CommandConflict
@@ -18,7 +18,6 @@ from app.routes.collector_schemas import (
     CollectorSearchCommandResponse,
     CollectorSearchCreateRequest,
     CollectorSearchProgressResponse,
-    CollectorSearchRetryRequest,
 )
 
 router = APIRouter(tags=["collector"])
@@ -95,43 +94,6 @@ async def _admit_search_command(payload, principal, response, idempotency_key, r
                 principal.owner_id,
                 idempotency_key,
                 query=payload.query,
-                access_mode=api_auth_mode(),
-                client_key=principal.client_key,
-            )
-    except CommandConflict as exception:
-        raise HTTPException(status_code=409, detail=str(exception)) from exception
-    return await _search_command_response(row, replayed, principal, response, request)
-
-
-@router.post(
-    "/searches/{search_id}/retry",
-    status_code=202,
-    responses={
-        **{status: spec for status, spec in _COMMAND_RESPONSES.items() if status != 400},
-        404: {
-            "model": CollectorHTTPError,
-            "description": "Search absent or owned by another caller.",
-        },
-    },
-)
-async def retry_search(
-    search_id: UUID,
-    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
-    response: Response,
-    idempotency_key: CommandKey,
-    request: Request,
-    payload: Annotated[CollectorSearchRetryRequest | None, Body()] = None,
-) -> CollectorSearchCommandResponse:
-    del payload
-    # Check access before revealing whether a command key or state is eligible.
-    if await read_search_progress(search_id, principal.owner_id) is None:
-        raise HTTPException(status_code=404, detail="Search not found")
-    try:
-        with quota_http_errors():
-            row, replayed = await admit_search(
-                principal.owner_id,
-                idempotency_key,
-                retry_search_id=search_id,
                 access_mode=api_auth_mode(),
                 client_key=principal.client_key,
             )

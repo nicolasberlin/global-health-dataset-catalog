@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 
 import pytest
 from app.db import task_retries
-from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.connection import _require_database_pool
 from app.db.schema import CURRENT_SCHEMA_VERSION
 from helpers.workflows import candidate_for, decision
@@ -106,47 +104,6 @@ async def test_interruption_without_new_attempt_does_not_extend_deadline(
     assert resumed["collection_deadline_at"] == job["collection_deadline_at"]
     row = (await sql("SELECT * FROM collection_jobs WHERE id = %s", (job["id"],)))[0]
     assert row["retry_round"] == 0
-
-
-async def test_manual_retry_gets_new_budget_with_owner_and_replay_guards(database):
-    await database.init_database()
-    pending = await owned_job(database)
-    job = await database.claim_pending_collection_job()
-    assert pending["id"] == job["id"]
-    await database.mark_collection_job_error(
-        job["id"],
-        "Collection timed out.",
-        errors=[Diagnostic("collection_budget_exhausted", "collection").to_dict()],
-    )
-    assert await retry_collection_job_for_owner(job["id"], "bob", idempotency_key="retry") is None
-    assert (await database.get_collection_job(job["id"]))["collection_deadline_at"] == (
-        job["collection_deadline_at"]
-    )
-    first, second = await asyncio.gather(
-        *(
-            retry_collection_job_for_owner(job["id"], "alice", idempotency_key="retry")
-            for _ in range(2)
-        )
-    )
-    assert first["collection_deadline_at"] is None and second["collection_deadline_at"] is None
-    resumed = await database.claim_pending_collection_job()
-    assert resumed["collection_deadline_at"] > job["collection_deadline_at"]
-    replay = await retry_collection_job_for_owner(job["id"], "alice", idempotency_key="retry")
-    assert replay["collection_deadline_at"] == resumed["collection_deadline_at"]
-    assert replay["status"] == "running"
-    # An old worker cannot requeue this new cycle or modify its deadline.
-    scheduled, _ = await task_retries.schedule_llm_retry(
-        job["id"],
-        datetime.fromisoformat(job["updated_at"]),
-        [Diagnostic("llm_timeout", "classification")],
-        collection=True,
-    )
-    assert scheduled
-    assert (await database.get_collection_job(job["id"]))["collection_deadline_at"] == (
-        resumed["collection_deadline_at"]
-    )
-    row = (await sql("SELECT * FROM collection_jobs WHERE id = %s", (job["id"],)))[0]
-    assert row["retry_round"] == 0 and row["status"] == "running"
 
 
 @pytest.mark.parametrize("offset", [-1, 0, 1])

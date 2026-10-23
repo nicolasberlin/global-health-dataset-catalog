@@ -10,10 +10,9 @@ from app.db import connection as db_connection
 from app.db import schema as db_schema
 from app.db import serialization as db_serialization
 from app.db.repository_candidates import _complete_candidate_classification
-from fastapi import FastAPI
 from helpers.collection import mortality_dataset as _mortality_dataset
+from helpers.inspection import stored_candidate, stored_datasets
 from helpers.workflows import start_candidate as _start_candidate
-from httpx import ASGITransport, AsyncClient
 from psycopg import sql as pg_sql
 
 from collector.classification.repository import RepositoryClassification
@@ -235,54 +234,6 @@ async def test_shared_job_reservation_serializes_two_owners_on_separate_connecti
     assert len(jobs) == 1
     assert {row["candidate_id"] for row in links} == {item[0] for item in candidates}
     assert {row["job_id"] for row in links} == {jobs[0]["id"]}
-
-
-async def test_job_http_access_and_public_view_use_real_owner_associations(database, monkeypatch):
-    from app.routes.collector import router
-
-    await database.init_database()
-    _, alice = await _create_repository_candidate(database, owner_id="alice")
-    _, bob = await _create_repository_candidate(database, owner_id="bob")
-    await _accept_repository_candidate(database, alice["id"], "alice")
-    await _accept_repository_candidate(database, bob["id"], "bob")
-    reservation = await database.reserve_repository_candidate_collection_job(alice["id"], "alice")
-    job_id = reservation.job["id"]
-    private_error = "internal-only: database credential and worker traceback"
-    monkeypatch.setenv("API_AUTH_MODE", "local")
-    from helpers.access import inject_owners
-
-    app = FastAPI()
-    app.include_router(router)
-
-    inject_owners(app)
-
-    def headers(owner):
-        return {"X-Test-Owner": owner}
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        url = f"/collector/collection-jobs/{job_id}"
-        assert (await client.get(url)).status_code == 401
-        assert (await client.get(url, headers=headers("bob"))).status_code == 404
-        await database.reserve_repository_candidate_collection_job(bob["id"], "bob")
-        await database.mark_collection_job_error(job_id, private_error)
-        for owner in ("alice", "bob"):
-            response = await client.get(url, headers=headers(owner))
-            assert response.status_code == 200
-            job = response.json()["job"]
-            assert job["status"] == "error"
-            assert job["error_code"] == "collection_failed"
-            assert job["error"] == "Collection failed."
-            assert "repository_candidate_id" not in job
-            assert str(alice["id"]) not in response.text
-            assert private_error not in response.text
-        inaccessible = await client.get(url, headers=headers("charlie"))
-        absent = await client.get("/collector/collection-jobs/999999", headers=headers("charlie"))
-        assert inaccessible.status_code == absent.status_code == 404
-        assert inaccessible.json() == absent.json() == {"detail": "Collection job not found"}
-
-    stored = await database.get_collection_job(job_id)
-    assert stored["repository_candidate_id"] == alice["id"]
-    assert stored["error"] == private_error
 
 
 async def test_reinitialization_preserves_jobs_and_owner_associations(database):
@@ -779,11 +730,11 @@ async def test_failed_initialization_rolls_back_schema_and_allows_retry(database
     assert await _table_names(database) == set()
     assert await _schema_version(database) == 0
     with pytest.raises(RuntimeError, match="Run init_database"):
-        await database.list_collected_datasets()
+        await stored_datasets(database)
 
     await database.init_database()
     assert set(SCHEMA_TABLES) == await _table_names(database)
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
     assert await _fetchall(database, "SELECT version FROM schema_migrations") == [
         {"version": 1},
     ]
@@ -848,7 +799,7 @@ async def test_validate_database_schema_does_not_initialize_an_empty_database(da
 
     assert await _table_names(database) == set()
     with pytest.raises(RuntimeError, match="Run init_database"):
-        await database.list_collected_datasets()
+        await stored_datasets(database)
 
 
 async def test_validate_database_schema_only_reads_and_preserves_data(database, monkeypatch):
@@ -866,7 +817,7 @@ async def test_validate_database_schema_only_reads_and_preserves_data(database, 
         patch.setattr(psycopg.AsyncConnection, "execute", read_only_execute)
         await database.validate_database_schema()
 
-    assert (await database.list_collected_datasets())[0].database_id == dataset_id
+    assert (await stored_datasets(database))[0].database_id == dataset_id
     assert await _fetchall(database, "SELECT version FROM schema_migrations") == [
         {"version": 1},
     ]
@@ -874,7 +825,7 @@ async def test_validate_database_schema_only_reads_and_preserves_data(database, 
 
 async def test_business_operations_do_not_apply_schema_migrations(database):
     with pytest.raises(RuntimeError, match="Run init_database"):
-        await database.list_collected_datasets()
+        await stored_datasets(database)
 
     assert await _table_names(database) == set()
     assert await _schema_version(database) == 0
@@ -905,7 +856,7 @@ async def test_save_and_list_collected_datasets(database):
     assert saved[0].database_id is not None
     assert saved[0].source_url == "https://catalog.example.org/"
 
-    collected = await database.list_collected_datasets()
+    collected = await stored_datasets(database)
     assert len(collected) == 1
     assert collected[0].dataset_url == "https://catalog.example.org/dataset/mortality"
     assert collected[0].geography == ("France",)
@@ -950,7 +901,7 @@ async def test_save_and_list_collected_datasets(database):
         [updated_dataset],
     )
 
-    collected = await database.list_collected_datasets()
+    collected = await stored_datasets(database)
     assert len(collected) == 1
     assert collected[0].title == "Updated mortality health dataset"
     assert collected[0].geography == ("Germany", "France")
@@ -1142,7 +1093,7 @@ async def test_save_preserves_every_dataset_discovery_observation(database):
         [updated_dataset],
     )
 
-    collected = (await database.list_collected_datasets())[0]
+    collected = (await stored_datasets(database))[0]
     observations = await database.list_dataset_discovery_observations(
         saved[0].database_id
     )
@@ -1201,7 +1152,7 @@ async def test_save_does_not_replace_known_metadata_with_empty_values(database):
         [incomplete_dataset],
     )
 
-    collected = (await database.list_collected_datasets())[0]
+    collected = (await stored_datasets(database))[0]
 
     assert collected.title == "Mortality health dataset"
     assert collected.description == "Official mortality health data."
@@ -1344,7 +1295,7 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         [updated_dataset],
     )
 
-    collected = (await database.list_collected_datasets())[0]
+    collected = (await stored_datasets(database))[0]
     distributions_by_url = {
         distribution.url: distribution for distribution in collected.distributions
     }
@@ -1400,7 +1351,7 @@ async def test_distribution_upsert_preserves_unseen_rows_and_seen_timestamps(dat
         [unchecked_dataset],
     )
 
-    collected = (await database.list_collected_datasets())[0]
+    collected = (await stored_datasets(database))[0]
     current_distribution = next(
         distribution
         for distribution in collected.distributions
@@ -1454,7 +1405,7 @@ async def test_validation_results_match_distribution_by_url_and_format(database)
 
     validation_by_format = {
         validation.format: validation
-        for validation in (await database.list_collected_datasets())[0].validation_results
+        for validation in (await stored_datasets(database))[0].validation_results
     }
     assert validation_by_format["CSV"].http_status == 201
     assert validation_by_format["CSV"].final_url == f"{shared_url}?format=csv"
@@ -1501,7 +1452,7 @@ async def test_duplicate_validation_results_fail_clearly(database):
     with pytest.raises(ValueError, match="Duplicate validation result"):
         await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
 
 
 async def test_orphan_validation_result_fails_clearly(database):
@@ -1536,7 +1487,7 @@ async def test_orphan_validation_result_fails_clearly(database):
     with pytest.raises(ValueError, match="does not match any distribution"):
         await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
 
 
 async def test_save_collected_distribution_without_validation_result(database):
@@ -1562,7 +1513,7 @@ async def test_save_collected_distribution_without_validation_result(database):
 
     await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    collected = await database.list_collected_datasets()
+    collected = await stored_datasets(database)
     assert len(collected) == 1
     assert [distribution.url for distribution in collected[0].distributions] == [
         "https://catalog.example.org/files/unvalidated.csv"
@@ -1624,7 +1575,7 @@ async def test_corrupted_stored_signals_fail_when_listing_datasets(database):
         db_serialization.StoredJSONError,
         match="collected_datasets.dataset_signals",
     ):
-        await database.list_collected_datasets()
+        await stored_datasets(database)
 
 
 async def test_discovery_methods_json_errors_are_explicit():
@@ -1761,7 +1712,7 @@ async def test_non_json_serializable_signals_do_not_leave_partial_rows(database)
     with pytest.raises(db_serialization.StoredJSONError):
         await database.save_collected_datasets("https://catalog.example.org/", [dataset])
 
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
     assert await database.list_dataset_discovery_observations() == []
 
 
@@ -1813,7 +1764,7 @@ async def test_repository_search_session_persists_original_query_and_candidates(
     await database.init_database()
 
     session, candidate = await _create_repository_candidate(database)
-    stored = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
+    stored = await stored_candidate(candidate["id"], TEST_OWNER_ID)
 
     assert session["status"] == "running"
     assert candidate["search_session_id"] == session["id"]
@@ -1830,30 +1781,6 @@ async def test_repository_search_session_persists_original_query_and_candidates(
     assert session_rows[0]["origin"] == "online"
     assert session_rows[0]["status"] == "completed"
     assert session_rows[0]["finished_at"] is not None
-
-
-async def test_repository_candidate_is_visible_only_to_its_search_owner(database):
-    await database.init_database()
-    _, candidate = await _create_repository_candidate(database)
-
-    assert (
-        await database.get_repository_candidate(candidate["id"], "different-user")
-        is None
-    )
-    assert (
-        await _start_candidate(database,
-            candidate["id"],
-            "different-user",
-        )
-        is None
-    )
-
-    accepted = await _accept_repository_candidate(database, candidate["id"])
-    with pytest.raises(ValueError, match="not found"):
-        await database.reserve_repository_candidate_collection_job(
-            accepted["id"],
-            "different-user",
-        )
 
 
 async def test_api_rate_limit_is_atomic_and_scoped_by_owner_and_operation(database):
@@ -1905,29 +1832,6 @@ async def test_interrupted_search_session_is_closed_on_recovery(database):
     assert rows[0]["finished_at"] is not None
 
 
-async def test_repository_candidate_classification_reservation_is_atomic(database):
-    await database.init_database()
-    _, candidate = await _create_repository_candidate(database)
-
-    reservations = await asyncio.gather(
-        *(
-            database.enqueue_candidate_classification(candidate["id"], TEST_OWNER_ID)
-            for _request in range(4)
-        )
-    )
-
-    assert sum(reservation is not None for reservation in reservations) == 1
-    # SKIP LOCKED may legitimately skip a row while another enqueue is finishing.
-    # Verify admission first, then worker ownership once those transactions have ended.
-    stored = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
-    assert stored["classification_status"] == "queued"
-    claimed = await database.claim_candidate_classification()
-    assert claimed["id"] == candidate["id"]
-    assert await database.claim_candidate_classification() is None
-    stored = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
-    assert stored["classification_status"] == "classifying"
-
-
 async def test_repository_candidate_batch_rolls_back_on_invalid_metadata(database):
     await database.init_database()
     session = await database.create_search_session("malaria mortality", TEST_OWNER_ID)
@@ -1966,29 +1870,6 @@ async def test_repository_candidate_batch_rolls_back_on_invalid_metadata(databas
     assert session_rows[0]["status"] == "running"
 
 
-async def test_repository_candidate_error_requires_explicit_retry(database):
-    await database.init_database()
-    _, candidate = await _create_repository_candidate(database)
-    await _start_candidate(database, candidate["id"], TEST_OWNER_ID)
-    failed = await database.fail_candidate_classification(
-        candidate["id"],
-        TEST_OWNER_ID,
-        "DeepSeek unavailable",
-    )
-
-    assert failed["classification_status"] == "error"
-    assert (
-        await _start_candidate(database, candidate["id"], TEST_OWNER_ID)
-        is None
-    )
-    retried = await _start_candidate(database,
-        candidate["id"],
-        TEST_OWNER_ID,
-        retry=True,
-    )
-    assert retried is not None
-    assert retried["classification_status"] == "classifying"
-    assert retried["error"] == ""
 
 
 async def test_interrupted_candidate_classification_is_made_retryable(database):
@@ -1997,7 +1878,7 @@ async def test_interrupted_candidate_classification_is_made_retryable(database):
     await _start_candidate(database, candidate["id"], TEST_OWNER_ID)
 
     recovered_count = await database.mark_interrupted_candidate_classifications_error()
-    recovered = await database.get_repository_candidate(candidate["id"], TEST_OWNER_ID)
+    recovered = await stored_candidate(candidate["id"], TEST_OWNER_ID)
 
     assert recovered_count == 1
     assert recovered["classification_status"] == "error"
@@ -2255,7 +2136,7 @@ async def test_complete_collection_job_saves_refined_distribution_formats(databa
 
     assert completed["status"] == "done"
     assert completed["saved_count"] == 1
-    saved = (await database.list_collected_datasets())[0]
+    saved = (await stored_datasets(database))[0]
     assert len(saved.distributions) == len(saved.validation_results) == 1
     assert saved.distributions[0].format == saved.validation_results[0].format == "JSON"
     assert saved.distributions[0].url == saved.validation_results[0].url == resource_url
@@ -2292,7 +2173,7 @@ async def test_complete_collection_job_rolls_back_datasets_when_one_save_fails(d
             ),
         )
 
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
     assert (await database.get_collection_job(job_id))["status"] == "running"
 
 
@@ -2309,7 +2190,7 @@ async def test_complete_collection_job_uses_source_url_from_job(database):
         CollectionResult(datasets=[_mortality_dataset()]),
     )
 
-    collected = (await database.list_collected_datasets())[0]
+    collected = (await stored_datasets(database))[0]
     observations = await database.list_dataset_discovery_observations(
         collected.database_id
     )
@@ -2368,7 +2249,7 @@ async def test_business_operations_do_not_reread_schema_version(database, monkey
         raise AssertionError("Business operations must use the initialized pool state.")
 
     monkeypatch.setattr(db_schema, "_schema_version", unexpected_schema_query)
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
     await database.create_search_session("mortality", "alice")
     await database.create_collection_job("https://example.org/data")
     assert (await database.claim_pending_collection_job())["status"] == "running"
@@ -2379,9 +2260,9 @@ async def test_reopened_pool_requires_schema_validation(database):
     await database.close_database_pool()
     await database.open_database_pool()
     with pytest.raises(RuntimeError, match="Run init_database"):
-        await database.list_collected_datasets()
+        await stored_datasets(database)
     await database.init_database()
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
 
 
 async def test_failed_schema_validation_clears_initialized_state(database):
@@ -2391,8 +2272,8 @@ async def test_failed_schema_validation_clears_initialized_state(database):
     with pytest.raises(RuntimeError, match="newer than supported"):
         await database.init_database()
     with pytest.raises(RuntimeError, match="Run init_database"):
-        await database.list_collected_datasets()
+        await stored_datasets(database)
     await _execute(database, "DELETE FROM schema_migrations WHERE version = %s",
                    (db_schema.CURRENT_SCHEMA_VERSION + 1,))
     await database.init_database()
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []

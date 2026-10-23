@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.auth.security import APIPrincipal
 from app.db.connection import _fetchall, _require_database_pool
-from app.routes.collector import search_progress
+from app.routes.searches import search_progress
 from fastapi import Response
 
 from collector.classification.repository import RepositoryClassification
@@ -53,10 +53,18 @@ def classification_decision(accepted=True):
     return decision(accepted, reason="Matches the persisted query.", voter_reason="Matches.")
 
 
-async def start_candidate(database, candidate_id, owner_id, *, retry=False):
-    queued = await database.enqueue_candidate_classification(candidate_id, owner_id, retry=retry)
-    if queued is None:
-        return None
+async def start_candidate(database, candidate_id, owner_id):
+    """Prepare an initial worker claim without using the optional command API."""
+    async with _require_database_pool().connection() as connection:
+        row = await connection.execute(
+            "UPDATE repository_candidates AS candidate SET classification_status = 'queued' "
+            "FROM search_sessions AS session WHERE candidate.id = %s "
+            "AND candidate.search_session_id = session.id AND session.owner_id = %s "
+            "AND candidate.classification_status = 'pending' RETURNING candidate.id",
+            (candidate_id, owner_id),
+        )
+        if await row.fetchone() is None:
+            return None
     return await database.claim_candidate_classification()
 
 

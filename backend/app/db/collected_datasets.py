@@ -81,56 +81,6 @@ async def save_collected_datasets(
             ]
 
 
-async def list_collected_datasets(
-    *, limit: int = 20, before_id: int | None = None,
-    query: str = "", country: str = "", format: str = "",
-) -> list[CollectedDataset]:
-    """Read a bounded catalog page, newest inserted IDs first.
-
-    Allow one lookahead row for the API cursor. Updates cannot move an existing
-    dataset between pages. Filters run before LIMIT, across the whole catalog.
-    """
-    if not 1 <= limit <= 101:
-        raise ValueError("limit must be between 1 and 101.")
-    if before_id is not None and before_id < 1:
-        raise ValueError("before_id must be positive.")
-    clauses = []
-    parameters: list[object] = []
-    if before_id is not None:
-        clauses.append("dataset.id < %s")
-        parameters.append(before_id)
-    if query.strip():
-        clauses.append(
-            f"dataset.search_vector @@ websearch_to_tsquery("
-            f"'{DATASET_SEARCH_TEXT_CONFIGURATION}', %s)"
-        )
-        parameters.append(normalize_dataset_search_query(query))
-    if country.strip():
-        clauses.append("""EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(dataset.geography) AS area
-            WHERE lower(area) = lower(%s)
-        )""")
-        parameters.append(country.strip())
-    if format.strip():
-        clauses.append("""EXISTS (
-            SELECT 1 FROM collected_distributions AS distribution
-            WHERE distribution.dataset_id = dataset.id
-              AND upper(distribution.format) = upper(%s)
-        )""")
-        parameters.append(format.strip())
-    where = " WHERE " + " AND ".join(clauses) if clauses else ""
-    parameters.append(limit)
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        rows = await _fetchall(
-            connection,
-            "SELECT dataset.* FROM collected_datasets AS dataset" + where
-            + " ORDER BY dataset.id DESC LIMIT %s",
-            tuple(parameters),
-        )
-        return await _datasets_with_distributions(connection, rows)
-
-
 async def get_collected_datasets(dataset_ids: list[int]) -> list[CollectedDataset]:
     """Resolve explicit public catalog IDs independently of catalog pagination."""
     if len(dataset_ids) > 100 or any(value < 1 for value in dataset_ids):

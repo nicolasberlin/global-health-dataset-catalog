@@ -6,69 +6,14 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Response
 
 from app.auth.security import APIPrincipal, require_api_principal
-from app.db.classification_votes import read_candidate_vote_history, read_collection_vote_history
+from app.db.classification_votes import read_candidate_vote_history
 from app.db.collection_traces import read_collection_trace
 from app.routes.searches import search_progress
 
 router = APIRouter(tags=["collector"])
-
-
-@router.get("/repository-candidates/{candidate_id}/classification-history")
-async def candidate_classification_history(
-    candidate_id: UUID,
-    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
-    response: Response,
-    limit: Annotated[int, Query(ge=1, le=200)] = 100,
-    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
-):
-    history = await read_candidate_vote_history(
-        candidate_id,
-        principal.owner_id,
-        limit=limit,
-        offset=offset,
-    )
-    if history is None:
-        raise HTTPException(status_code=404, detail="Repository candidate not found")
-    response.headers["Cache-Control"] = "no-store"
-    return history
-
-
-@router.get("/collection-jobs/{job_id}/classification-history")
-async def collection_classification_history(
-    job_id: int,
-    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
-    response: Response,
-    limit: Annotated[int, Query(ge=1, le=200)] = 100,
-    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
-):
-    history = await read_collection_vote_history(
-        job_id,
-        principal.owner_id,
-        limit=limit,
-        offset=offset,
-    )
-    if history is None:
-        raise HTTPException(status_code=404, detail="Collection job not found")
-    response.headers["Cache-Control"] = "no-store"
-    return history
-
-
-@router.get("/collection-jobs/{job_id}/diagnostics")
-async def collection_diagnostics(
-    job_id: int,
-    principal: Annotated[APIPrincipal, Depends(require_api_principal)],
-    response: Response,
-    limit: Annotated[int, Query(ge=1, le=200)] = 100,
-    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
-):
-    trace = await read_collection_trace(job_id, principal.owner_id, limit=limit, offset=offset)
-    if trace is None:
-        raise HTTPException(status_code=404, detail="Collection job not found")
-    response.headers["Cache-Control"] = "no-store"
-    return trace
 
 
 @router.get("/searches/{search_id}/diagnostics")

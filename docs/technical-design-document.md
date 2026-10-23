@@ -203,3 +203,21 @@ These contracts are for contributors changing a specific subsystem:
 | [Visitor sessions](reference/anonymous-visitor-sessions.md) | Browser identity, cookie/origin policy and quotas |
 
 [Architecture decisions](adr) retain the rationale for accepted design choices.
+
+## Dependency boundary for the private web interface
+
+The installable core contains `backend/app` and `collector`; it imports no
+`interface_web` module. `app.main.create_app()` constructs a fresh core application,
+and readiness uses the actual request application. The locally maintained web
+interface can construct a core application and register additional routes; its
+frontend, handlers, exclusive SQL and tests are all excluded from this repository.
+
+Shared transaction/owner guards, quotas, vote history and collection traces remain
+in the core because automatic processing and the full search diagnostic export
+need them. Response models used in core progress remain in
+`backend/app/routes/collector_schemas.py`.
+
+Search Lab, its interface, scenarios and tests remain versioned in `search_lab/`.
+It observes the core API and PostgreSQL without executing application workers.
+Neither public component imports the private web interface. The public test suites
+and CI run without the private directory.

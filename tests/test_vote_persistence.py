@@ -7,24 +7,19 @@ import io
 import json
 import threading
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
 from app.db import classification_votes as votes
-from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.connection import _fetchall, _require_database_pool
 from app.vote_store import PostgresVoteStore
-from app.workers import classification as classification_worker
-from app.workers import collection as collection_worker
 from helpers.classification import KEYS, MODELS, PAGE
 from helpers.classification import response as _response
-from helpers.workflows import candidate_for, decision, rows, wait_until
+from helpers.workflows import candidate_for, rows, wait_until
 
 from collector.classification import factory
 from collector.classification.page import PageClassificationError
 from collector.diagnostics import PersistenceFailure
-from collector.storage.models import CollectionReport, CollectionResult
 
 pytestmark = pytest.mark.anyio
 
@@ -140,43 +135,6 @@ async def test_fast_votes_are_saved_before_slowest_model_finishes(database, tran
         await task
 
 
-async def test_restart_and_attempt_tokens_preserve_successes(database):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    await database.complete_candidate_classification(candidate["id"], "alice", decision())
-    job = await database.claim_pending_collection_job()
-    scope = {"job_id": job["id"]}
-    snapshot = {"configuration": [{"voter_id": "a"}, {"voter_id": "b"}], "payload": {}}
-    run = await votes.prepare_vote_run(snapshot, **scope)
-    first = await votes.claim_vote(run, "a", **scope)
-    await votes.finish_vote(run, "a", first["attempt_token"], response={"accepted": False}, **scope)
-    old = await votes.claim_vote(run, "b", **scope)
-    with pytest.raises(PersistenceFailure, match="already running"):
-        await votes.claim_vote(run, "b", **scope)
-    await votes.mark_interrupted_votes_error()
-    history = await rows("SELECT * FROM classification_vote_attempts WHERE voter_id = 'b'")
-    assert history[0]["status"] == "interrupted"
-    assert history[0]["error"] == "Vote interrupted by application restart."
-    await database.mark_interrupted_collection_jobs_error()
-    with pytest.raises(PersistenceFailure, match="no longer running"):
-        await votes.claim_vote(run, "a", **scope)
-    await retry_collection_job_for_owner(scope["job_id"], "alice")
-    await database.claim_pending_collection_job()
-    assert (await votes.claim_vote(run, "a", **scope))["response"] == {"accepted": False}
-    new = await votes.claim_vote(run, "b", **scope)
-    with pytest.raises(PersistenceFailure, match="no longer current"):
-        await votes.finish_vote(
-            run, "b", old["attempt_token"], response={"accepted": True}, **scope
-        )
-    await votes.finish_vote(run, "b", new["attempt_token"], response={"accepted": True}, **scope)
-    await votes.finish_vote(run, "b", new["attempt_token"], response={"accepted": True}, **scope)
-    history = await rows(
-        "SELECT * FROM classification_vote_attempts WHERE voter_id = 'b' ORDER BY attempt"
-    )
-    assert [h["status"] for h in history] == ["interrupted", "succeeded"]
-    assert new["attempts"] == 2
-
-
 @pytest.mark.parametrize("kind", ["repository", "page"])
 async def test_parent_recovery_prevents_late_vote_claim_and_finish_before_vote_cleanup(
     database, kind,
@@ -248,133 +206,6 @@ async def test_changed_inputs_or_configuration_start_fresh_run(
     await asyncio.to_thread(classify, "repository", scope, loop, page)
     assert len(calls) == 6
     assert len(await rows("SELECT id FROM classification_runs")) == 2
-
-
-async def test_finalization_retry_reuses_all_votes(database, transport, monkeypatch):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    candidate = await database.get_repository_candidate(candidate["id"], "alice")
-    candidate["owner_id"] = "alice"
-    calls = []
-
-    def request(req, timeout):
-        calls.append(req)
-        return _response("repository", True)
-
-    transport(request)
-    original = classification_worker.complete_candidate_classification
-
-    async def fail(*args, **kwargs):
-        raise RuntimeError("temporary finalization failure")
-
-    monkeypatch.setattr(classification_worker, "complete_candidate_classification", fail)
-    with ThreadPoolExecutor(1) as executor:
-        await classification_worker._run_classification(candidate, executor)
-        failed = await database.get_repository_candidate(candidate["id"], "alice")
-        assert failed["classification_status"] == "error"
-        assert failed["classification_progress"]["succeeded"] == 3
-        await database.enqueue_candidate_classification(candidate["id"], "alice", retry=True)
-        claimed = await database.claim_candidate_classification()
-        monkeypatch.setattr(classification_worker, "complete_candidate_classification", original)
-        await classification_worker._run_classification(claimed, executor)
-    assert len(calls) == 3
-    assert (await database.get_repository_candidate(candidate["id"], "alice"))[
-        "classification_status"
-    ] == "accepted"
-    assert len(await rows("SELECT id FROM collection_jobs")) == 1
-
-
-@pytest.mark.parametrize("failure", ["timeout", "invalid_signals"])
-async def test_collection_retry_is_owned_idempotent_and_reuses_votes(
-    database,
-    transport,
-    monkeypatch,
-    failure,
-):
-    monkeypatch.setenv("LLM_MAX_ATTEMPTS", "1")
-    monkeypatch.setenv("LLM_INVALID_MAX_ATTEMPTS", "1")
-    await database.init_database()
-    candidate = await candidate_for(database)
-    completion = await database.complete_candidate_classification(
-        candidate["id"], "alice", decision()
-    )
-    job_id = completion.collection.job["id"]
-    calls = Counter()
-
-    def request(req, timeout):
-        model = json.loads(req.data)["model"]
-        calls[model] += 1
-        if model == MODELS[2] and calls[model] == 1:
-            if failure == "timeout":
-                raise TimeoutError()
-            return io.BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps({
-                "accepted": True, "dataset_signals": {"reason": "dataset"},
-            })}}]}).encode())
-        return _response("page", True)
-
-    def collect(url, *, classifier, **options):
-        assert classifier.classify(PAGE, []).accepted
-        return CollectionResult(report=CollectionReport(verification_complete=True))
-
-    transport(request)
-    monkeypatch.setattr(collection_worker, "collect_repository_candidate_with_report", collect)
-    with ThreadPoolExecutor(1) as executor:
-        await collection_worker._run_collection_job(
-            await database.claim_pending_collection_job(), executor
-        )
-        assert (await database.get_collection_job(job_id))["status"] == "error"
-        assert await retry_collection_job_for_owner(job_id, "bob") is None
-        retried = await asyncio.gather(
-            *[retry_collection_job_for_owner(job_id, "alice") for _ in range(2)]
-        )
-        assert all(job["status"] == "pending" for job in retried)
-        await collection_worker._run_collection_job(
-            await database.claim_pending_collection_job(), executor
-        )
-    assert calls == {MODELS[0]: 1, MODELS[1]: 1, MODELS[2]: 2}
-    assert (await database.get_collection_job(job_id))["status"] == "done"
-    # An empty terminal collection now supports an explicit retry after adapting
-    # its resolver; successful page votes remain reusable.
-    assert (await retry_collection_job_for_owner(job_id, "alice"))["status"] == "pending"
-
-
-async def test_collection_retry_route_enforces_owner_and_quota(database, monkeypatch):
-    from app.auth.security import APIPrincipal
-    from app.routes.collector import retry_collection_job
-    from fastapi import HTTPException
-
-    await database.init_database()
-    candidate = await candidate_for(database)
-    completed = await database.complete_candidate_classification(
-        candidate["id"],
-        "alice",
-        decision(),
-    )
-    job_id = completed.collection.job["id"]
-    await database.mark_collection_job_running(job_id)
-    await database.mark_collection_job_error(job_id, "private provider detail")
-    monkeypatch.setenv("API_CLASSIFICATION_REQUESTS_PER_MINUTE", "1")
-    await database.consume_api_quota("alice", "repository_classification", limit=1)
-    with pytest.raises(HTTPException) as unknown:
-        await retry_collection_job(job_id, APIPrincipal("bob"))
-    assert unknown.value.status_code == 404
-    with pytest.raises(HTTPException) as denied:
-        await retry_collection_job(job_id, APIPrincipal("alice"))
-    assert denied.value.status_code == 429
-    assert (await database.get_collection_job(job_id))["status"] == "error"
-
-    monkeypatch.setenv("API_CLASSIFICATION_REQUESTS_PER_MINUTE", "2")
-    responses = await asyncio.gather(*(
-        retry_collection_job(job_id, APIPrincipal("alice")) for _ in range(4)
-    ))
-    response = responses[0]
-    assert response.job.status == "pending"
-    assert "private provider detail" not in response.model_dump_json()
-    assert "classification_progress" in response.model_dump_json()
-    await retry_collection_job(job_id, APIPrincipal("alice"))
-    async with _require_database_pool().connection() as connection:
-        quotas = await _fetchall(connection, "SELECT owner_id, request_count FROM api_rate_limits")
-    assert quotas == [{"owner_id": "alice", "request_count": 2}]
 
 
 async def test_new_internal_collection_job_inherits_partial_votes(database, transport):

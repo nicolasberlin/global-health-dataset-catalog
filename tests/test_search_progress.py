@@ -47,27 +47,6 @@ async def test_auth_and_shared_job_do_not_grant_access_to_another_search(databas
         assert job_id == first.collection.job["id"]
 
 
-async def test_waits_for_collection_and_stops_on_error_without_leaking_diagnostics(database):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    sid = candidate["search_session_id"]
-    await database.complete_search_session(sid, "alice", origin="online")
-    assert (await read(sid)).polling_required
-    completion = await database.complete_candidate_classification(
-        candidate["id"], "alice", decision(),
-    )
-    assert (await read(sid)).polling_required
-    job = await database.claim_pending_collection_job()
-    assert job["id"] == completion.collection.job["id"]
-    await database.mark_collection_job_error(job["id"], "private database password diagnostic")
-    result = await read(sid)
-    assert not result.polling_required
-    assert "private database" not in result.model_dump_json()
-    from app.db.collection_jobs import retry_collection_job_for_owner
-    await retry_collection_job_for_owner(job["id"], "alice")
-    assert (await read(sid)).polling_required
-
-
 async def test_pending_and_rejected_candidates_need_no_polling(database):
     await database.init_database()
     candidate = await candidate_for(database)
@@ -166,38 +145,3 @@ async def test_associated_job_and_dataset_ids_win_over_other_work_at_same_url(da
     assert collection.job.id == job_id
     assert collection.state == "error"
     assert collection.dataset_ids == collection.job.dataset_ids == [dataset_id]
-
-
-@pytest.mark.parametrize("match", ["direct", "observation", "both", "none"])
-async def test_unassociated_dataset_lookup_preserves_matches_order_and_ownership(database, match):
-    from app.db.repository_candidates import _complete_candidate_classification
-
-    await database.init_database()
-    candidate = await candidate_for(database)
-    async with _require_database_pool().connection() as connection:
-        await _complete_candidate_classification(connection, candidate["id"], "alice", decision())
-        ids = []
-        for index in range(3):
-            url = (candidate["url"] if index == 0 and match in ("direct", "both")
-                   else f"https://example.org/other/{index}")
-            row = await connection.execute(
-                "INSERT INTO collected_datasets (dataset_url, title) VALUES (%s, 'Data') "
-                "RETURNING id", (url,))
-            ids.append((await row.fetchone())["id"])
-        if match in ("observation", "both"):
-            for dataset_id in reversed(ids):
-                for _ in range(2):
-                    await connection.execute(
-                        "INSERT INTO dataset_discovery_observations (dataset_id, source_url) "
-                        "VALUES (%s, %s)", (dataset_id, candidate["url"]))
-    expected = ids if match in ("observation", "both") else ids[:1] if match == "direct" else []
-    individual = await database.get_candidate_collection(candidate["id"], "alice")
-    _, _, collections = await store.read_search_progress(candidate["search_session_id"], "alice")
-    assert individual.dataset_ids == collections[candidate["id"]].dataset_ids == tuple(expected)
-    assert individual.already_collected == bool(expected)
-    assert await database.get_candidate_collection(candidate["id"], "bob") is None
-    assert await store.read_search_progress(candidate["search_session_id"], "bob") is None
-    reserved = await database.reserve_repository_candidate_collection_job(candidate["id"], "alice")
-    assert reserved.already_collected == bool(expected)
-    assert reserved.dataset_ids == tuple(expected)
-    assert reserved.created == (not expected)

@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 from app.auth.security import APIPrincipal
 from app.db.connection import _require_database_pool
-from app.routes.collector import search_progress
+from app.routes.searches import search_progress
 from app.workers import collection as collection_worker
 from fastapi import Response
 from helpers.collection import DATASET_HTML, AcceptingPageClassifier

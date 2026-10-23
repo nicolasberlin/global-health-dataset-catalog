@@ -9,9 +9,9 @@
 **/__pycache__
 **/*.pyc
 backend/*.db
-/frontend
 browser/node_modules
 research
+interface_web
 search_lab
 Host ai-commons
 

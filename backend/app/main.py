@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg.errors import LockNotAvailable, QueryCanceled
@@ -101,30 +101,6 @@ async def _watch_ownership(application, ownership) -> None:
     request_worker_stop(force=True)
 
 
-app = FastAPI(title="Global Health API", version="0.1.0", lifespan=lifespan)
-
-app.add_middleware(ApplicationAvailabilityMiddleware)
-app.add_middleware(
-    RequestBodyLimitMiddleware,
-    max_body_bytes=configured_max_request_body_bytes(),
-    body_timeout_seconds=configured_request_body_timeout_seconds(),
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=api_cors_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Retry-After", "Location"],
-)
-
-app.include_router(collector_router)
-app.include_router(sessions_router)
-configure_access_openapi(app)
-
-
-@app.exception_handler(QueryCanceled)
-@app.exception_handler(LockNotAvailable)
 async def database_timeout(request, exception) -> JSONResponse:
     return JSONResponse(
         {"detail": "The database is temporarily busy. Please try again later."},
@@ -133,13 +109,12 @@ async def database_timeout(request, exception) -> JSONResponse:
     )
 
 
-@app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/ready", responses={503: {"description": "Temporarily unavailable"}})
-async def ready() -> JSONResponse:
+async def ready(request: Request) -> JSONResponse:
+    app = request.app
     available = False
     if getattr(app.state, "ready", False) and workers_ready():
         try:
@@ -164,3 +139,36 @@ async def ready() -> JSONResponse:
         status_code=200 if available else 503,
         headers={"Cache-Control": "no-store"},
     )
+
+
+def create_app() -> FastAPI:
+    """Construct an independent core API; optional routes are registered by extensions."""
+    application = FastAPI(title="Global Health API", version="0.1.0", lifespan=lifespan)
+    application.add_middleware(ApplicationAvailabilityMiddleware)
+    application.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=configured_max_request_body_bytes(),
+        body_timeout_seconds=configured_request_body_timeout_seconds(),
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=api_cors_origins(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Retry-After", "Location"],
+    )
+    application.include_router(collector_router)
+    application.include_router(sessions_router)
+    application.add_exception_handler(QueryCanceled, database_timeout)
+    application.add_exception_handler(LockNotAvailable, database_timeout)
+    application.add_api_route("/health", health, methods=["GET"])
+    application.add_api_route(
+        "/ready", ready, methods=["GET"],
+        responses={503: {"description": "Temporarily unavailable"}},
+    )
+    configure_access_openapi(application)
+    return application
+
+
+app = create_app()

@@ -22,7 +22,7 @@ Use these versions to match the checked-in development and CI configuration:
   [Linux plugin installation](https://docs.docker.com/compose/install/linux/).
 - Node.js **22.12 or later within 22.x**, recommended for the optional Search Lab
   interface or collection browser service. CI uses Node.js 22; the lab's
-  `frontend/package.json` also declares other accepted Node.js versions.
+  `search_lab/frontend/package.json` also declares other accepted Node.js versions.
 
 Compose starts PostgreSQL **16**; a separate database installation is not needed.
 Actual classifications need EPFL laboratory access and credentials
@@ -155,7 +155,8 @@ identified repository candidate.
 
 ## Validation
 
-Shared pytest fixtures belong in `tests/conftest.py`; reusable builders and
+Shared pytest fixtures belong in `tests/fixtures.py`, registered by the root
+`conftest.py`; reusable builders and
 simulated provider responses belong in `tests/helpers/`. Import those helpers
 directly instead of importing from another `test_*.py` module.
 
@@ -163,7 +164,8 @@ From the repository root, after installing development dependencies:
 
 ```sh
 .venv/bin/ruff check .
-.venv/bin/pytest tests search_lab/tests
+.venv/bin/pytest tests
+.venv/bin/pytest search_lab/tests
 git diff --check
 ```
 
@@ -178,7 +180,8 @@ docker run --name global-health-test-db --rm -d \
   -p 127.0.0.1:55432:5432 postgres:16
 docker exec global-health-test-db pg_isready -U global_health_test -d global_health_test
 export TEST_DATABASE_URL="postgresql://global_health_test:local-test-only@127.0.0.1:55432/global_health_test"
-.venv/bin/pytest tests search_lab/tests
+.venv/bin/pytest tests
+.venv/bin/pytest search_lab/tests
 ```
 
 Wait until `pg_isready` reports that it accepts connections before running tests.
@@ -233,3 +236,14 @@ Never include credentials, raw pages or private cookies in a shared report.
 - Update the guide that owns the changed contract and link to it elsewhere.
 - Review the selected diff for local configuration/generated evidence. The
   laboratory stays optional.
+
+## Public and private components
+
+The published repository includes the core API, collector, collection browser
+service and [Search Lab](../search_lab/README.md). The main web interface and its
+extra API handlers are maintained locally in the Git-ignored `interface_web/`
+directory. Installation, tests and CI must work without that directory.
+
+Shared database/provider fixtures are registered by the root `conftest.py` from
+`tests/fixtures.py`. Run `.venv/bin/pytest tests search_lab/tests` for the public
+Python suites. The private web interface keeps its own tests and instructions.

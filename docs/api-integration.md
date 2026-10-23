@@ -5,6 +5,19 @@ A client submits a command and may disconnect immediately after acceptance.
 Reading progress is optional and never schedules work. Any HTTP client can run
 and integrate the API.
 
+## Published API
+
+`app.main:app` exposes the eight core paths: `/health`, `/ready`, `/session`,
+`/collector/searches`, `/collector/searches/latest`,
+`/collector/searches/{search_id}/progress`, `/collector/searches/{search_id}/diagnostics`
+and `/collector/collected-datasets/by-id`. This is the complete Python client path.
+Discovery, classification and collection run automatically in the same workers.
+
+The main web interface and its additional routes are maintained locally in the
+Git-ignored `interface_web/` directory. They are not included in this repository's
+API, Docker images or Python wheel. The public [Search Lab](../search_lab/README.md)
+uses the core API independently.
+
 ## Run API + PostgreSQL
 
 Follow the [README quick start](../README.md#quick-start) to prepare the private
@@ -156,9 +169,9 @@ diagnostics. These are real operations that consume provider/model quotas and
 can persist catalogue records. `--latest` retrieves the most recent search for
 the current owner, waits if necessary, and fetches its results. It never restarts
 failed work. Another search created in the meantime changes what latest means.
-There are no client flags for selecting an older UUID, retrying work or returning
-immediately after submission; those integrations remain possible through the
-HTTP API described below.
+The script always waits for the selected search. To retrieve an older search
+with another HTTP client, use its saved progress URL. Manual retry commands belong
+to the separately maintained web integration and are not published by this API.
 
 The client loads `.env.api-client` from the repository root, regardless of its
 working directory. It does not read the server's `.env.api` or `.env.local`.
@@ -225,7 +238,8 @@ Ctrl+C does not cancel an accepted search. Messages distinguish interruption
 before submission, uncertain acceptance and retrieval of a known search.
 Exit codes: 0 for successful retrieval (including empty results); 1 for network,
 client or timeout errors; 2 for a failed/incomplete pipeline; 130 for Ctrl+C.
-Diagnostics are bounded; use the paged endpoints below for older history.
+Diagnostics are bounded and may omit older evidence; this API does not expose
+separate history pagination routes.
 See the [research files guide](../research/README.md) for report contents.
 
 ### HTTP commands
@@ -303,7 +317,7 @@ empty and failed searches; it returns 404 only if the owner has no search.
 
 ## Idempotency and failures
 
-`Idempotency-Key` is required on search creation and discovery retry. Use a UUID
+`Idempotency-Key` is required on search creation. Use a UUID
 or another unique value of 1–128 characters from `A-Z a-z 0-9 . _ : -`.
 Keys are scoped to the authenticated owner across all supported command types.
 
@@ -312,7 +326,7 @@ Keys are scoped to the authenticated owner across all supported command types.
   replays return HTTP 200. The response is not a byte-for-byte historical replay.
 - Same key with another operation or payload: HTTP 409. Query leading/trailing
   whitespace is ignored when comparing creation commands.
-- A genuinely new search or retry requires a new key.
+- A new search requires a new key.
 - Concurrent submissions with one key create one durable command.
 - HTTP 429 before acceptance means quota/capacity rejection; respect `Retry-After`.
   This transaction creates neither a task nor a receipt. HTTP 503 denotes quota
@@ -336,12 +350,12 @@ External calls themselves are not guaranteed exactly once across process crashes
 | --- | --- |
 | 202 | Save the search ID, then follow `Location`; the server owns execution. |
 | 200 on a command | The saved key has already been accepted; follow the existing search. |
-| 400 / 422 | Correct the query, request fields or pagination bounds before resubmitting. `detail` is a string for 400 and a validation-error list for 422. |
+| 400 / 422 | Correct the query or request fields before resubmitting. `detail` is a string for 400 and a validation-error list for 422. |
 | 401 | Bootstrap or renew the public visitor session. |
 | 403 | Check the visitor request origin, or the local-mode host/client restrictions. |
 | 404 | The resource is absent or belongs to another owner; neither case reveals its existence. |
 | 408 | The upload exceeded its deadline before command admission. Check the connection before resending with the same command key. |
-| 409 | A command key was reused with another payload/operation, or the requested retry is ineligible. Inspect progress before choosing a new command. |
+| 409 | A command key was reused with another payload/operation. Inspect the original request before choosing a new command key. |
 | 413 | Reduce the request body; retrying the identical body will not help. |
 | 429 | Wait for the `Retry-After` number of seconds. Keep the same key if this is still the same intended command. |
 | 503 | Processing, authentication configuration or quota storage is unavailable. For uncertain command responses, retain the key and check progress or replay the same command after recovery. |
@@ -352,44 +366,17 @@ not cancel work; reconnect with the same owner and search ID. Display an
 incomplete outcome separately from a conclusive empty result, and keep any
 returned dataset IDs available to the user.
 
-## Explicit retries
-
-To retry initial discovery, send an empty body (or no body) with a new key:
-
-```sh
-curl --fail-with-body -X POST \
-  "$API_BASE_URL/collector/searches/$SEARCH_ID/retry" \
-  -H "Idempotency-Key: $RETRY_COMMAND_KEY"
-```
-
-Only asynchronous discoveries that failed, or concluded incompletely, **before
-publishing candidates or local results** can start a new discovery attempt.
-A command against already queued/running discovery acknowledges the existing
-attempt without another quota charge. Completed discovery or published results
-return 409; retry the failing downstream task instead. Search quota `retry_at`
-is enforced. Successful retries retain the search ID and increment `attempt`.
-
-Existing downstream commands accept an optional `Idempotency-Key`; integrations
-should always provide one:
-
-- `POST /collector/repository-candidates/{candidate_id}/classify?retry=true`
-- `POST /collector/collection-jobs/{job_id}/retry`
-
-Reuse that key only to resend that exact command. Successful model votes remain
-available through the existing vote store. Retrying a whole search does not
-reset or replay downstream work. Failed collections and completed collections with
-`outcome=incomplete` or `outcome=empty` can be retried while retaining saved dataset
-IDs, unless all diagnostics declare that recovery is unsupported.
+## Automatic recovery and attempt budgets
 
 Transient model failures receive bounded automatic retries, reusing valid
 positive and negative votes. While waiting, `execution_status=waiting_retry`,
 `outcome=null`, and `polling_required=true`; diagnostics include `retry_at`,
-`attempt`, and `max_attempts`. Both explicit retry commands honor provider deadlines
-and can return HTTP 429 with `Retry-After`. See [LLM recovery](reference/collection.md#model-retries-and-checkpoints).
+`attempt`, and `max_attempts`. See
+[LLM recovery](reference/collection.md#model-retries-and-checkpoints).
 Each claimed collection attempt has a 300-second execution budget by default.
-Automatic retries start a fresh window; replaying a command or recovering the
-same attempt cannot extend its deadline. Expiry produces an incomplete outcome
-with `collection_budget_exhausted`, retaining saved dataset IDs. See
+Automatic retries start a fresh window; recovering the same attempt cannot extend
+its deadline. Expiry produces an incomplete outcome with
+`collection_budget_exhausted`, retaining saved dataset IDs. See
 [attempt budgets](reference/collection.md#attempt-budget) for configuration and
 [collection behavior](reference/collection.md) for extraction limits, resource
 validation and paginated Socrata access.
@@ -397,9 +384,10 @@ validation and paginated Socrata access.
 ## Restart and compatibility
 
 Queued work survives restarts. Work interrupted while running is marked with
-`processing_interrupted` and can be retried explicitly through the relevant
-command. Durable votes and saved datasets remain available. Attempt tokens
-prevent an old discovery from overwriting a newer retry. Temporary failures while
+`processing_interrupted`. Its progress, durable votes and saved datasets remain
+available; the Python client can retrieve them with `--latest`. Submit a new
+search to run the pipeline again. Manual repair commands belong to the private
+web integration. Attempt tokens fence stale worker completions. Temporary failures while
 saving discovery results retry persistence without recalling the provider.
 Repairable storage failures such as PostgreSQL `DiskFull` retain computed outcomes
 in their worker slot; a failure to save a terminal error also retains that slot.
@@ -430,36 +418,9 @@ snapshot of the search and its accessible classification/collection history.
 Raw exception text, HTML, cookies and invalid model bodies are excluded. Model
 attempts contain controlled `errors` diagnostics rather than raw technical errors.
 
-Use the dedicated endpoints for paged history:
-
-| Endpoint | Entries |
-| --- | --- |
-| `/collector/collection-jobs/{job_id}/diagnostics` | Collection-method attempts and resource checks |
-| `/collector/collection-jobs/{job_id}/classification-history` | Model attempts for the job's retry lineage |
-| `/collector/repository-candidates/{candidate_id}/classification-history` | Model attempts for the owned candidate |
-
-All use `GET`, the existing owner authentication, and `Cache-Control: no-store`.
-Another owner's resource returns 404. Supply `limit=1..200` (default 100) and
-`offset=0..10000` (default 0). The response includes `limit`, `offset`,
-`history_truncated` and `next_offset`:
-
-```sh
-curl --fail-with-body \
-  "$API_BASE_URL/collector/collection-jobs/$JOB_ID/classification-history?limit=100&offset=0"
-```
-
-Fetch `next_offset` when present. A page selects recent entries and returns them
-chronologically; new entries between requests can shift offsets. At the offset
-cap, `next_offset` can be null while `history_truncated` remains true. Method
-pages also cap checks at 100 per method and 2000 per page, reporting
-`checks_truncated` when necessary.
-
-Method-page offsets and vote-history offsets are independent. The job diagnostics
-response embeds the default first model-history page, and the aggregate search
-export uses bounded default pages. Fetch older vote pages through the dedicated
-classification-history endpoint. Missing or removed evidence cannot be
-reconstructed. Imported snapshots may contain only a recoverable vote, without
-the earlier attempts or their start times.
+The export embeds bounded default pages and reports truncation. Missing or
+removed evidence cannot be reconstructed through this API. Imported snapshots
+may contain only a recoverable vote, without earlier attempts or their start times.
 
 ## Reproduce the interface-independent checks
 
@@ -478,18 +439,16 @@ simulate provider/model responses and do not make paid model calls:
   tests/test_diagnostic_routes.py
 ```
 
-The contract suite checks the API's published authentication and response schema,
+The contract suite checks the published authentication and response schemas,
 accepted versus replayed commands, followable proxy-prefixed `Location` URLs,
-controlled admission errors, bounded history reads, and catalogue pagination when
-new datasets are inserted between requests. The failure suites cover ownership,
-durable retries, provider failures and retaining partial results. Contract and
-failure checks exercise FastAPI directly through ASGI. The runtime suite starts
-real Uvicorn processes and HTTP sockets against the disposable database; only
-external provider transports are simulated. It verifies the real worker/vote/
-extraction/validation pipeline after client disconnection, restoration after
-restart, local catalogue reuse, and recovery/retry after a process dies during a
-collection. These runtime checks need permission to bind local sockets and
-launch child processes.
+controlled admission errors and dataset retrieval by ID. The failure suites cover
+ownership, provider failures and retaining partial results. Contract and failure
+checks exercise FastAPI directly through ASGI. The runtime suite starts real
+Uvicorn processes and HTTP sockets against the disposable database; only external
+provider transports are simulated. It verifies the worker/vote/extraction/
+validation pipeline after client disconnection, restoration after restart and
+local catalogue reuse. These runtime checks need permission to bind local sockets
+and launch child processes.
 
 The integration client has separate local HTTP tests, with neither PostgreSQL nor
 provider credentials required:

@@ -7,7 +7,6 @@ from .db.classification_completion import (
 )
 from .db.collected_datasets import (
     get_collected_datasets,
-    list_collected_datasets,
     list_dataset_discovery_observations,
     normalize_dataset_search_query,
     save_collected_datasets,
@@ -18,7 +17,6 @@ from .db.collection_jobs import (
     CollectionJobReservation,
     claim_pending_collection_job,
     create_collection_job,
-    get_candidate_collection,
     get_collection_job,
     get_collection_job_for_owner,
     mark_collection_job_done,
@@ -31,10 +29,7 @@ from .db.connection import close_database_pool, open_database_pool
 from .db.repository_candidates import (
     claim_candidate_classification,
     complete_search_session_with_repository_candidates,
-    enqueue_candidate_classification,
     fail_candidate_classification,
-    get_repository_candidate,
-    latest_repository_analysis,
     mark_interrupted_candidate_classifications_error,
     save_repository_candidates,
 )
@@ -63,13 +58,10 @@ __all__ = (
     "create_search_session",
     "fail_candidate_classification",
     "get_collection_job",
-    "get_candidate_collection",
     "get_collection_job_for_owner",
-    "get_repository_candidate",
     "init_database",
     "validate_database_schema",
     "get_collected_datasets",
-    "list_collected_datasets",
     "list_dataset_discovery_observations",
     "mark_interrupted_collection_jobs_error",
     "mark_interrupted_search_sessions_error",
@@ -83,7 +75,5 @@ __all__ = (
     "save_repository_candidates",
     "save_collected_datasets",
     "search_collected_datasets",
-    "enqueue_candidate_classification",
     "claim_candidate_classification",
-    "latest_repository_analysis",
 )

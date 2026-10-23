@@ -2,7 +2,8 @@ from dataclasses import replace
 
 import pytest
 from app.db.connection import _fetchone, _require_database_pool
-from app.routes.collector import _collector_validation
+from app.routes.collector_presenters import _collector_validation
+from helpers.inspection import stored_datasets
 
 from collector.classification.page import PageClassification
 from collector.discovery.adapters import DiscoveredPage
@@ -57,7 +58,7 @@ async def test_sampled_format_stays_consistent_through_collection_and_storage(
     assert len(result.datasets) == 1
     await database.init_database()
     await database.save_collected_datasets("https://example.org", result.datasets)
-    stored = (await database.list_collected_datasets())[0]
+    stored = (await stored_datasets(database))[0]
     assert stored.distributions[0].format == expected_format
     assert stored.validation_results[0].format == expected_format
     assert stored.validation_results[0].ok
@@ -88,7 +89,7 @@ async def test_plain_errors_at_download_urls_stay_unconfirmed_in_saved_audit(dat
     assert failure["status"] == "unconfirmed"
     assert failure["ok"] is False
     assert failure["reason"] == validation.reason
-    assert await database.list_collected_datasets() == []
+    assert await stored_datasets(database) == []
 
 
 async def test_validation_status_large_size_and_rejected_audit_are_persisted(database):
@@ -96,7 +97,7 @@ async def test_validation_status_large_size_and_rejected_audit_are_persisted(dat
     validation = ValidationResult(URL, URL, "CSV", True, 200, size_bytes=4_200_000_000,
                                   status="available", reason="Data sample confirmed.")
     await database.save_collected_datasets(URL, [dataset(validation)])
-    stored = (await database.list_collected_datasets())[0].validation_results[0]
+    stored = (await stored_datasets(database))[0].validation_results[0]
     assert stored == validation
 
     failure = replace(validation, status="restricted", reason="Authentication is required.")
@@ -133,7 +134,7 @@ async def test_access_diagnosis_survives_storage_and_public_conversion(
     )
     # Exercise serialization independently of the collector's publication filter.
     await database.save_collected_datasets(URL, [dataset(validation)])
-    stored = (await database.list_collected_datasets())[0].validation_results[0]
+    stored = (await stored_datasets(database))[0].validation_results[0]
     public = _collector_validation(stored)
     assert stored.status == public.status == validation.status == status
     assert stored.reason == public.reason == validation.reason

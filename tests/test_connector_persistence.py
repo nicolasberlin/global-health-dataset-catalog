@@ -5,7 +5,8 @@ from dataclasses import replace
 import pytest
 from app.db.connection import _fetchone, _require_database_pool
 from app.db.schema import CURRENT_SCHEMA_VERSION
-from app.routes.collector import _collector_collected_dataset
+from app.routes.collector_presenters import _collector_collected_dataset
+from helpers.inspection import stored_datasets
 
 from collector.storage.models import CollectedDataset
 
@@ -37,7 +38,7 @@ def record(url="https://zenodo.org/records/123", identity=None):
 async def test_identity_survives_save_reads_search_and_api_presentation(database):
     await database.init_database()
     await database.save_collected_datasets("https://zenodo.org", [record()])
-    stored = (await database.list_collected_datasets())[0]
+    stored = (await stored_datasets(database))[0]
     assert stored.record_identity == IDENTITY
     assert _collector_collected_dataset(stored).record_identity == IDENTITY
     searched = await database.search_collected_datasets("health survey")
@@ -48,7 +49,7 @@ async def test_fallback_without_identity_does_not_erase_a_previous_observation(d
     await database.init_database()
     await database.save_collected_datasets("https://zenodo.org", [record()])
     await database.save_collected_datasets("https://zenodo.org", [record(identity={})])
-    assert (await database.list_collected_datasets())[0].record_identity == IDENTITY
+    assert (await stored_datasets(database))[0].record_identity == IDENTITY
 
 
 async def test_reference_only_fallback_preserves_identity_fields_observed_by_api(database):
@@ -56,7 +57,7 @@ async def test_reference_only_fallback_preserves_identity_fields_observed_by_api
     await database.save_collected_datasets("https://zenodo.org", [record()])
     sparse_identity = {**IDENTITY, "persistent_id": "", "version": ""}
     await database.save_collected_datasets("https://zenodo.org", [record(identity=sparse_identity)])
-    assert (await database.list_collected_datasets())[0].record_identity == IDENTITY
+    assert (await stored_datasets(database))[0].record_identity == IDENTITY
 
 
 async def test_file_and_parent_record_remain_distinct(database):
@@ -72,7 +73,7 @@ async def test_file_and_parent_record_remain_distinct(database):
         },
     )
     await database.save_collected_datasets("https://zenodo.org", [record(), file])
-    saved = await database.list_collected_datasets()
+    saved = await stored_datasets(database)
     assert len(saved) == 2
     assert {item.record_identity["kind"] for item in saved} == {"file", "dataset"}
 
@@ -86,7 +87,7 @@ async def test_explicit_version_urls_remain_distinct(database):
         record_identity={**IDENTITY, "version": "2.0"},
     )
     await database.save_collected_datasets("https://dataverse.example.org", [first, second])
-    assert len(await database.list_collected_datasets()) == 2
+    assert len(await stored_datasets(database)) == 2
 
 
 async def test_reinitialization_preserves_datasets_and_record_identity(database):
@@ -96,7 +97,7 @@ async def test_reinitialization_preserves_datasets_and_record_identity(database)
     await database.open_database_pool()
     await database.init_database()
     await database.init_database()
-    stored = (await database.list_collected_datasets())[0]
+    stored = (await stored_datasets(database))[0]
     assert stored.title == "Health survey"
     assert stored.record_identity == IDENTITY
     async with _require_database_pool().connection() as connection:

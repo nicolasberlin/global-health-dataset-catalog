@@ -6,13 +6,11 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from app.auth.security import APIPrincipal
 from app.db import collection_jobs as job_store
 from app.db.connection import _require_database_pool
 from app.db.repository_candidates import _complete_candidate_classification
-from app.routes.collector import classify_repository_result
 from app.workers import collection as collection_worker
-from fastapi import Response
+from helpers.inspection import stored_candidate
 from helpers.workflows import SOURCE_URL, candidate_for, decision, rows, wait_until
 
 from collector.storage.models import CollectionResult
@@ -60,98 +58,13 @@ async def test_association_failure_rolls_back_decision_and_reservation(
     monkeypatch.setattr(job_store, "_associate_job_candidate", invalid_association)
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         await database.complete_candidate_classification(bob["id"], "bob", decision())
-    stored = await database.get_repository_candidate(bob["id"], "bob")
+    stored = await stored_candidate(bob["id"], "bob")
     assert stored["classification_status"] == "classifying"
     assert stored["classification"] is None
     assert await rows("SELECT id FROM collection_jobs") == ([{"id": existing_id}] if reuse else [])
     links = await rows("SELECT candidate_id FROM collection_job_candidates")
     assert len(links) == int(reuse)
     assert all(link["candidate_id"] != bob["id"] for link in links)
-
-
-@pytest.mark.parametrize("accepted", [False, True])
-async def test_rejected_or_already_collected_candidate_creates_no_job(database, accepted):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    if accepted:
-        async with _require_database_pool().connection() as connection:
-            await connection.execute(
-                "INSERT INTO collected_datasets (dataset_url, title) VALUES (%s, 'Mortality')",
-                (SOURCE_URL,),
-            )
-    result = await database.complete_candidate_classification(
-        candidate["id"], "alice", decision(accepted)
-    )
-    assert result.candidate["classification_status"] == ("accepted" if accepted else "rejected")
-    if accepted:
-        assert result.collection.already_collected
-        assert (await database.get_candidate_collection(candidate["id"], "alice")).already_collected
-    else:
-        assert result.collection is None
-    assert await rows("SELECT id FROM collection_jobs") == []
-
-
-async def test_atomic_completion_checks_owner_and_state(database):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    with pytest.raises(RuntimeError):
-        await database.complete_candidate_classification(candidate["id"], "bob", decision())
-    assert await rows("SELECT id FROM collection_jobs") == []
-    await database.complete_candidate_classification(candidate["id"], "alice", decision())
-    with pytest.raises(RuntimeError):
-        await database.complete_candidate_classification(candidate["id"], "alice", decision())
-    assert len(await rows("SELECT id FROM collection_jobs")) == 1
-    assert await database.get_candidate_collection(candidate["id"], "bob") is None
-
-
-@pytest.mark.parametrize("status", ["pending", "running", "done", "error"])
-async def test_repeated_accepted_classification_only_reads_its_job(database, monkeypatch, status):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    result = await database.complete_candidate_classification(candidate["id"], "alice", decision())
-    job_id = result.collection.job["id"]
-    if status in {"running", "done"}:
-        await database.mark_collection_job_running(job_id)
-    if status == "done":
-        await database.complete_collection_job(job_id, CollectionResult())
-    if status == "error":
-        await database.mark_collection_job_error(job_id, "test failure")
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("A repeated classification must not perform new work")
-
-    monkeypatch.setattr(job_store, "_reserve_repository_candidate_collection_job", forbidden)
-    for retry in (False, True):
-        response = await classify_repository_result(
-            candidate["id"], APIPrincipal("alice"), Response(), retry=retry
-        )
-        assert response.automatic_collection.job.id == job_id
-        assert response.automatic_collection.job.status == status
-    assert len(await rows("SELECT id FROM collection_jobs")) == 1
-    assert len(await rows("SELECT * FROM collection_job_candidates")) == 1
-
-
-async def test_followup_stays_on_associated_job_not_latest_url_job(database):
-    await database.init_database()
-    alice = await candidate_for(database)
-    first = await database.complete_candidate_classification(alice["id"], "alice", decision())
-    await database.mark_collection_job_error(first.collection.job["id"], "first attempt failed")
-    bob = await candidate_for(database, "bob")
-    second = await database.complete_candidate_classification(bob["id"], "bob", decision())
-    assert first.collection.job["id"] != second.collection.job["id"]
-    assert (await database.get_candidate_collection(alice["id"], "alice")).job[
-        "id"
-    ] == first.collection.job["id"]
-
-
-async def test_legacy_acceptance_without_job_does_not_silently_start_work(database):
-    await database.init_database()
-    candidate = await candidate_for(database)
-    async with _require_database_pool().connection() as connection:
-        await _complete_candidate_classification(connection, candidate["id"], "alice", decision())
-    response = await classify_repository_result(candidate["id"], APIPrincipal("alice"), Response())
-    assert response.automatic_collection.error_code == "collection_not_scheduled"
-    assert await rows("SELECT id FROM collection_jobs") == []
 
 
 async def test_claims_are_unique_and_ignore_uncommitted_jobs(database):

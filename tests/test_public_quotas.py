@@ -129,8 +129,10 @@ async def test_ip_search_quota_cannot_be_reset_by_minting_a_new_cookie(public_ap
         owners = await rows("SELECT * FROM api_rate_limits WHERE owner_id LIKE 'visitor:%'")
         assert len(owners) == 1  # Rejected multi-bucket reservations roll back all their counters.
         before = await rows("SELECT * FROM api_rate_limits ORDER BY owner_id, operation")
-        assert (await bob.get("/collector/collected-datasets")).status_code == 200
-        assert (await alice.get("/collector/repository-analyses/latest")).status_code == 404
+        assert (await bob.get("/collector/collected-datasets/by-id?ids=1")).status_code == 200
+        assert (
+            await alice.get("/collector/searches/latest?with_candidates=true")
+        ).status_code == 404
         assert await rows("SELECT * FROM api_rate_limits ORDER BY owner_id, operation") == before
     assert provider_calls == ["malaria"]
 
@@ -265,25 +267,6 @@ async def test_queue_capacity_includes_collections_and_refusal_charges_nothing(
         await batch(database, "alice")
     assert await rows("SELECT * FROM api_rate_limits") == []
     assert await rows("SELECT * FROM repository_candidates") == []
-
-
-async def test_concurrent_classification_retries_consume_one_reservation(database):
-    await database.init_database()
-    candidates = await batch(database, "alice")
-    item = candidates[0]
-    await database.claim_candidate_classification()
-    await database.fail_candidate_classification(item["id"], "alice", "Provider failed")
-    admission = classification_admission("alice", "public:ip:alice")
-    outcomes = await asyncio.gather(
-        *(
-            database.enqueue_candidate_classification(
-                item["id"], "alice", retry=True, admission=admission
-            )
-            for _ in range(6)
-        )
-    )
-    assert sum(value is not None for value in outcomes) == 1
-    assert await rows("SELECT request_count FROM api_rate_limits") == [{"request_count": 2}] * 3
 
 
 async def test_daily_counter_resets_at_the_next_utc_day(database, monkeypatch):
@@ -458,7 +441,7 @@ async def test_shared_ip_sessions_candidate_admission_and_polling(
         # Polling remains usable even for sessions refused costly work.
         responses = await asyncio.gather(
             *[
-                client.get("/collector/repository-analyses/latest")
+                client.get("/collector/searches/latest?with_candidates=true")
                 for client in clients
                 for _ in range(14)
             ]

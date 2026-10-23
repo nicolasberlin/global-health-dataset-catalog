@@ -40,9 +40,12 @@ def local_environment(values):
     return environment
 
 
-def start(root=PROJECT_ROOT):
+def start(root=PROJECT_ROOT, *, application="app.main:app"):
     config = root / ".env.api"
     environment = local_environment(_read_values(config))
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(root), environment.get("PYTHONPATH", "")) if part
+    )
     compose = [
         "docker",
         "compose",
@@ -85,7 +88,7 @@ def start(root=PROJECT_ROOT):
         sys.executable,
         "-m",
         "uvicorn",
-        "app.main:app",
+        application,
         "--app-dir",
         str(root / "backend"),
         "--host",

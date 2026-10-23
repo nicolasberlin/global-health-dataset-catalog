@@ -39,18 +39,11 @@ class CollectorDiagnostic(BaseModel):
     voter_id: str | None = None
 
 
-
 # Query-driven repository search endpoint.
 class CollectorRepositorySearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1, max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS)
-
-
-class CollectorRepositoryCandidateClassificationRequest(BaseModel):
-    """Empty body contract that rejects browser-supplied candidate metadata."""
-
-    model_config = ConfigDict(extra="forbid")
 
 
 RepositoryKeyword = Annotated[str, Field(max_length=MAX_REPOSITORY_KEYWORD_CHARS)]
@@ -324,21 +317,9 @@ class CollectorCollectedDataset(BaseModel):
     updated_at: str = ""
 
 
-class CollectorOnlineDatasetSearchResponse(BaseModel):
-    search_id: UUID
-    query: str
-    origin: Literal["online"] = "online"
-    items: list[CollectorRepositorySearchItem] = Field(default_factory=list)
-    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
-
-
 class CollectorCollectionResponse(BaseModel):
     next_cursor: int | None = None
     items: list[CollectorCollectedDataset]
-
-
-class CollectorCollectionJobResponse(BaseModel):
-    job: CollectorCollectionJob
 
 
 class CollectorSearchProgressResponse(BaseModel):
@@ -361,10 +342,6 @@ class CollectorSearchProgressResponse(BaseModel):
 
 
 class CollectorSearchCreateRequest(CollectorRepositorySearchRequest):
-    model_config = ConfigDict(extra="forbid")
-
-
-class CollectorSearchRetryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 

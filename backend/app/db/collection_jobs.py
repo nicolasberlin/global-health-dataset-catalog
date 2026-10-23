@@ -7,15 +7,11 @@ from uuid import UUID, uuid4
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from app.quota_policy import WorkAdmission
-from app.retry_policy import enforce_retry_date
 from collector.config import configured_collection_budget_seconds
 from collector.diagnostics import Diagnostic
 from collector.storage.models import CollectionReport
 from collector.url_utils import require_http_url
 
-from .api_quotas import lock_work_admission, reserve_work
-from .commands import read_command, record_command
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
 from .search_sessions import _normalized_owner_id
@@ -228,106 +224,6 @@ async def _job_dataset_ids(connection, job_id: int) -> list[int]:
     return [int(row["dataset_id"]) for row in rows]
 
 
-async def retry_collection_job_for_owner(
-    job_id: int,
-    owner_id: str,
-    *,
-    admission: WorkAdmission | None = None,
-    idempotency_key: str | None = None,
-) -> dict | None:
-    """Requeue an owned failed job, keeping its validated votes and associations."""
-    payload = {"job_id": job_id}
-    async with _require_database_pool().connection() as connection:
-        async with connection.transaction():
-            receipt = None
-            if idempotency_key is not None:
-                receipt = await read_command(
-                    connection, owner_id, idempotency_key, "collection_retry", payload
-                )
-            await lock_work_admission(connection, admission)
-            job = await _fetchone(
-                connection,
-                """
-                SELECT job.* FROM collection_jobs AS job
-                WHERE job.id = %s AND EXISTS (
-                    SELECT 1 FROM collection_job_candidates AS association
-                    JOIN repository_candidates AS candidate
-                      ON candidate.id = association.candidate_id
-                    JOIN search_sessions AS session ON session.id = candidate.search_session_id
-                    WHERE association.job_id = job.id AND session.owner_id = %s
-                )
-            """,
-                (job_id, _normalized_owner_id(owner_id)),
-            )
-            if job is None:
-                return None
-            if receipt is not None:
-                result = _collection_job_to_dict(job)
-                result["dataset_ids"] = await _job_dataset_ids(connection, job_id)
-                return result
-            await connection.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                (job["source_url"],),
-            )
-            job = await _fetchone(
-                connection, "SELECT * FROM collection_jobs WHERE id = %s FOR UPDATE", (job_id,)
-            )
-            if job["status"] in {"pending", "running"}:
-                if idempotency_key is not None:
-                    await record_command(
-                        connection,
-                        owner_id,
-                        idempotency_key,
-                        "collection_retry",
-                        payload,
-                        {"job_id": job_id},
-                    )
-                return _collection_job_to_dict(job)
-            if job["status"] != "error" and not (
-                job["status"] == "done" and job["outcome"] in {"incomplete", "empty"}
-            ):
-                raise ValueError("Only a failed, incomplete or empty collection can be retried.")
-            errors = job.get("errors", [])
-            if errors and all(item.get("recovery") == "none" for item in errors):
-                raise ValueError("This collection has no supported recovery action.")
-            enforce_retry_date(errors)
-            active = await _fetchone(
-                connection,
-                """
-                SELECT id FROM collection_jobs WHERE source_url = %s
-                AND status IN ('pending', 'running') AND id <> %s
-            """,
-                (job["source_url"], job_id),
-            )
-            if active:
-                raise ValueError("Another collection is already running for this page.")
-            await reserve_work(connection, admission, amount=1)
-            row = await _fetchone(
-                connection,
-                """
-                UPDATE collection_jobs SET status = 'pending', error = '',
-                    errors = '[]'::jsonb, outcome = NULL,
-                    collection_coverage = '{}'::jsonb, collection_method_summary = '[]'::jsonb,
-                    retry_cycle = gen_random_uuid(), retry_round = 0, retry_started_at = NULL,
-                    next_retry_at = NULL, collection_deadline_at = NULL,
-                    message = 'Collection pending.',
-                    finished_at = NULL, updated_at = NOW()
-                WHERE id = %s RETURNING *
-            """,
-                (job_id,),
-            )
-            if idempotency_key is not None:
-                await record_command(
-                    connection,
-                    owner_id,
-                    idempotency_key,
-                    "collection_retry",
-                    payload,
-                    {"job_id": job_id},
-                )
-            return _collection_job_to_dict(row)
-
-
 async def _existing_dataset_ids(connection, source_url: str) -> list[int]:
     rows = await _fetchall(
         connection,
@@ -427,46 +323,6 @@ async def claim_pending_collection_job(
                     row["updated_at"],
                 )
     return _collection_job_to_dict(row) if row else None
-
-
-async def get_candidate_collection(
-    candidate_id: UUID,
-    owner_id: str,
-) -> CollectionJobReservation | None:
-    """Read existing follow-up without reserving, associating, or retrying a job.
-
-    The latest job associated with this candidate wins over unrelated work at
-    the same URL. Legacy accepted candidates without follow-up stay explicit.
-    """
-
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        row = await _fetchone(
-            connection,
-            """
-            SELECT existing_job.*, candidate.url AS candidate_url
-            FROM repository_candidates AS candidate
-            JOIN search_sessions AS session ON session.id = candidate.search_session_id
-            LEFT JOIN LATERAL (
-                SELECT job.* FROM collection_jobs AS job
-                JOIN collection_job_candidates AS association ON association.job_id = job.id
-                WHERE association.candidate_id = candidate.id
-                ORDER BY job.id DESC LIMIT 1
-            ) AS existing_job ON TRUE
-            WHERE candidate.id = %s AND session.owner_id = %s
-              AND candidate.classification_status = 'accepted'
-            """,
-            (candidate_id, _normalized_owner_id(owner_id)),
-        )
-        if row is None:
-            return None
-        if row["id"] is not None:
-            ids = await _job_dataset_ids(connection, int(row["id"]))
-            job = _collection_job_to_dict(row)
-            job["dataset_ids"] = ids
-            return CollectionJobReservation(job, False, False, tuple(ids))
-        ids = await _existing_dataset_ids(connection, str(row["candidate_url"]))
-        return CollectionJobReservation(None, False, bool(ids), tuple(ids))
 
 
 async def _insert_collection_job(

@@ -10,7 +10,6 @@ from types import SimpleNamespace
 import psycopg
 import pytest
 from app.db import search_jobs
-from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.commands import CommandConflict
 from app.db.connection import _require_database_pool
 from app.quota_policy import QuotaExceeded
@@ -19,6 +18,7 @@ from app.workers import classification as classification_worker
 from app.workers import collection as collection_worker
 from app.workers import search as search_worker
 from app.workers.runtime import persist_with_retry
+from helpers.inspection import stored_candidate
 from helpers.workflows import candidate, headers, read, rows, wait_until
 from helpers.workflows import classification_decision as decision
 from httpx import ASGITransport, AsyncClient
@@ -58,6 +58,18 @@ async def run(job):
         await search_worker._run_search(job, executor)
 
 
+async def test_removed_repository_analysis_route_is_absent(api):
+    path = "/collector/repository-analyses/latest"
+    schema = api.openapi()
+    assert path not in schema["paths"]
+    assert "CollectorOnlineDatasetSearchResponse" not in schema["components"]["schemas"]
+    async with browser(api) as client:
+        for request_headers in ({}, headers()):
+            response = await client.get(path, headers=request_headers)
+            assert response.status_code == 404
+            assert response.json() == {"detail": "Not Found"}
+
+
 async def test_restore_external_analysis_skips_newer_local_search_and_preserves_owner(
     database, api,
 ):
@@ -72,6 +84,7 @@ async def test_restore_external_analysis_skips_newer_local_search_and_preserves_
     await database.complete_search_session(bob["id"], "bob", origin="database")
     async with browser(api) as client:
         latest = await client.get("/collector/searches/latest", headers=headers())
+        assert latest.status_code == 200
         assert latest.json()["search_id"] == str(local["id"])
         restored = await client.get(
             "/collector/searches/latest?with_candidates=true", headers=headers(),
@@ -79,73 +92,14 @@ async def test_restore_external_analysis_skips_newer_local_search_and_preserves_
         assert restored.status_code == 200
         assert restored.json()["search_id"] == str(external["search_session_id"])
         assert restored.json()["origin"] == "online"
+        assert "execution_status" in restored.json()
+        assert "polling_required" in restored.json()
         assert [item["candidate_id"] for item in restored.json()["items"]] == [str(external["id"])]
         assert (await client.get(
             "/collector/searches/latest?with_candidates=true", headers=headers("bob"),
         )).status_code == 404
     assert len(await rows("SELECT * FROM search_sessions")) == 3
     assert not await rows("SELECT * FROM collection_jobs")
-
-
-async def test_http_admission_is_idempotent_atomic_owned_and_does_no_provider_work(
-    database,
-    api,
-    monkeypatch,
-):
-    await database.init_database()
-    monkeypatch.setattr(
-        search_worker, "search_repository_metadata", lambda _: pytest.fail("provider")
-    )
-    async with browser(api) as client:
-        assert (
-            await client.post("/collector/searches", json={"query": "health"})
-        ).status_code == 401
-        assert (
-            await client.post("/collector/searches", headers=headers(), json={"query": "health"})
-        ).status_code == 422
-        h = {**headers(), "Idempotency-Key": "same-command"}
-        responses = await asyncio.gather(
-            *[
-                client.post("/collector/searches", headers=h, json={"query": "health"})
-                for _ in range(6)
-            ]
-        )
-        assert sorted(r.status_code for r in responses) == [200] * 5 + [202]
-        ids = {r.json()["search_id"] for r in responses}
-        assert len(ids) == 1
-        sid = ids.pop()
-        assert responses[0].json()["execution_status"] == "queued"
-        assert responses[0].headers["location"] == f"/collector/searches/{sid}/progress"
-        assert (
-            await client.post("/collector/searches", headers=h, json={"query": "different"})
-        ).status_code == 409
-        for extra in ({"owner_id": "bob"}, {"client_key": "fake"}, {"access_mode": "local"}):
-            assert (
-                await client.post(
-                    "/collector/searches", headers=h, json={"query": "health", **extra}
-                )
-            ).status_code == 422
-        latest = await client.get("/collector/searches/latest", headers=headers())
-        assert latest.json()["search_id"] == sid
-        assert latest.json()["polling_required"] and latest.json()["outcome"] is None
-        assert latest.json()["origin"] is None
-        for path in (f"/collector/searches/{sid}/progress", "/collector/searches/latest"):
-            assert (await client.get(path, headers=headers("bob"))).status_code == 404
-        assert (
-            await client.post(
-                f"/collector/searches/{sid}/retry",
-                headers={**headers("bob"), "Idempotency-Key": "retry"},
-            )
-        ).status_code == 404
-        other = await client.post(
-            "/collector/searches",
-            headers={**headers("bob"), "Idempotency-Key": "same-command"},
-            json={"query": "health"},
-        )
-        assert other.status_code == 202 and other.json()["search_id"] != sid
-    assert len(await rows("SELECT * FROM search_sessions")) == 2
-    quotas = await rows("SELECT * FROM api_rate_limits WHERE owner_id = 'alice'")
-    assert len(quotas) == 1 and quotas[0]["request_count"] == 1
 
 
 async def test_single_post_then_disconnected_client_completes_all_stages(
@@ -433,39 +387,6 @@ async def test_failed_downstream_admission_publishes_nothing(database, monkeypat
     assert (await read(session["id"])).execution_status == "running"
 
 
-async def test_legacy_keyed_classification_and_collection_replays_never_retry_again(database):
-    await database.init_database()
-    item = await candidate(database)
-    await database.enqueue_candidate_classification(item["id"], "alice", idempotency_key="classify")
-    await database.claim_candidate_classification()
-    await database.fail_candidate_classification(item["id"], "alice", "failure")
-    replay = await database.enqueue_candidate_classification(
-        item["id"], "alice", idempotency_key="classify"
-    )
-    assert replay["classification_status"] == "error"
-    with pytest.raises(CommandConflict):
-        await database.enqueue_candidate_classification(
-            item["id"], "alice", retry=True, idempotency_key="classify"
-        )
-    await database.enqueue_candidate_classification(
-        item["id"], "alice", retry=True, idempotency_key="classify-retry"
-    )
-    await database.claim_candidate_classification()
-    completed = await database.complete_candidate_classification(item["id"], "alice", decision())
-    job_id = completed.collection.job["id"]
-    await database.mark_collection_job_error(job_id, "failure")
-    await retry_collection_job_for_owner(job_id, "alice", idempotency_key="collect-retry")
-    await database.claim_pending_collection_job()
-    await database.mark_collection_job_error(job_id, "new failure")
-    replay = await retry_collection_job_for_owner(job_id, "alice", idempotency_key="collect-retry")
-    assert replay["status"] == "error"
-    assert (
-        await retry_collection_job_for_owner(job_id, "bob", idempotency_key="collect-retry") is None
-    )
-    with pytest.raises(CommandConflict):
-        await admit("collect-retry", query="different command")
-
-
 async def test_reinitialization_does_not_reschedule_completed_inline_search(database):
     await database.init_database()
     item = await candidate(database)
@@ -478,7 +399,7 @@ async def test_reinitialization_does_not_reschedule_completed_inline_search(data
     assert (await rows("SELECT execution_mode FROM search_sessions"))[0][
         "execution_mode"
     ] == "inline"
-    assert (await database.get_repository_candidate(item["id"], "alice"))["title"] == "Mortality"
+    assert (await stored_candidate(item["id"], "alice"))["title"] == "Mortality"
     assert not await rows("SELECT * FROM api_commands")
 
 
@@ -504,34 +425,6 @@ async def test_startup_consumes_queued_discovery_without_http(database, monkeypa
         await database.open_database_pool()
 
 
-async def test_http_retry_replay_and_operation_conflict(database, api):
-    await database.init_database()
-    session, _ = await admit(query="health")
-    job = await search_jobs.claim_search()
-    await search_jobs.fail_discovery(job, origin="online", error="private", diagnostics=[])
-    path = f"/collector/searches/{session['id']}/retry"
-    h = {**headers(), "Idempotency-Key": "retry"}
-    async with browser(api) as client:
-        assert (await client.post(path, headers=headers())).status_code == 422
-        assert (await client.post(path, headers=h, json={"query": "replace"})).status_code == 422
-        responses = await asyncio.gather(*[client.post(path, headers=h) for _ in range(4)])
-        assert sorted(r.status_code for r in responses) == [200, 200, 200, 202]
-        assert all(r.json()["attempt"] == 2 for r in responses)
-        await search_jobs.complete_discovery(
-            await search_jobs.claim_search(), DiscoveryResult("online")
-        )
-        replay = await client.post(path, headers=h)
-        assert replay.status_code == 200 and replay.json()["execution_status"] == "finished"
-        assert (
-            await client.post(path, headers={**headers(), "Idempotency-Key": "new"})
-        ).status_code == 409
-        assert (
-            await client.post("/collector/searches", headers=h, json={"query": "health"})
-        ).status_code == 409
-    assert len(await rows("SELECT * FROM api_commands")) == 2
-    assert (await rows("SELECT * FROM api_rate_limits"))[0]["request_count"] == 2
-
-
 async def test_unsupported_search_access_mode_is_rejected(database):
     await database.init_database()
     with pytest.raises(ValueError, match="Unsupported access mode"):
@@ -539,3 +432,58 @@ async def test_unsupported_search_access_mode_is_rejected(database):
             "alice", "unsupported-mode", query="health", access_mode="unknown", client_key=None,
         )
     assert not await rows("SELECT * FROM search_sessions")
+
+
+async def test_http_admission_is_idempotent_atomic_owned_and_does_no_provider_work(
+    database,
+    api,
+    monkeypatch,
+):
+    await database.init_database()
+    monkeypatch.setattr(
+        search_worker, "search_repository_metadata", lambda _: pytest.fail("provider")
+    )
+    async with browser(api) as client:
+        assert (
+            await client.post("/collector/searches", json={"query": "health"})
+        ).status_code == 401
+        assert (
+            await client.post("/collector/searches", headers=headers(), json={"query": "health"})
+        ).status_code == 422
+        h = {**headers(), "Idempotency-Key": "same-command"}
+        responses = await asyncio.gather(
+            *[
+                client.post("/collector/searches", headers=h, json={"query": "health"})
+                for _ in range(6)
+            ]
+        )
+        assert sorted(r.status_code for r in responses) == [200] * 5 + [202]
+        ids = {r.json()["search_id"] for r in responses}
+        assert len(ids) == 1
+        sid = ids.pop()
+        assert responses[0].json()["execution_status"] == "queued"
+        assert responses[0].headers["location"] == f"/collector/searches/{sid}/progress"
+        assert (
+            await client.post("/collector/searches", headers=h, json={"query": "different"})
+        ).status_code == 409
+        for extra in ({"owner_id": "bob"}, {"client_key": "fake"}, {"access_mode": "local"}):
+            assert (
+                await client.post(
+                    "/collector/searches", headers=h, json={"query": "health", **extra}
+                )
+            ).status_code == 422
+        latest = await client.get("/collector/searches/latest", headers=headers())
+        assert latest.json()["search_id"] == sid
+        assert latest.json()["polling_required"] and latest.json()["outcome"] is None
+        assert latest.json()["origin"] is None
+        for path in (f"/collector/searches/{sid}/progress", "/collector/searches/latest"):
+            assert (await client.get(path, headers=headers("bob"))).status_code == 404
+        other = await client.post(
+            "/collector/searches",
+            headers={**headers("bob"), "Idempotency-Key": "same-command"},
+            json={"query": "health"},
+        )
+        assert other.status_code == 202 and other.json()["search_id"] != sid
+    assert len(await rows("SELECT * FROM search_sessions")) == 2
+    quotas = await rows("SELECT * FROM api_rate_limits WHERE owner_id = 'alice'")
+    assert len(quotas) == 1 and quotas[0]["request_count"] == 1

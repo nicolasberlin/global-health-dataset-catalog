@@ -133,6 +133,13 @@ The optional [Search Lab](search_lab/README.md) has its own interface and privat
 observations; it is independent of the API quick start. [Research files](research/README.md)
 explain generated reports and how to interpret diagnostic evidence.
 
+## Separately maintained web interface
+
+The main frontend and its additional API routes, storage helpers and tests live
+locally in `interface_web/`. That whole directory is excluded from Git and the
+backend image; it is not part of this public repository. The core API and Python
+client do not depend on it. Search Lab remains versioned in `search_lab/`.
+
 ## Project layout
 
 ```text

@@ -206,7 +206,7 @@ external calls after a process crash.
   Deadline expiry or forced termination loses in-memory outcomes; committed
   datasets and valid positive or negative model votes survive.
 - A repeated classification reads its existing collection, including an empty
-  or failed result. `POST /collector/collection-jobs/{job_id}/retry` explicitly
+  or failed result. The separately maintained manual collection retry explicitly
   requeues an owned failed, incomplete or eligible empty job and consumes the
   existing classification quota. Jobs with no supported recovery are rejected.
 
@@ -664,3 +664,13 @@ correctness; it is not a CI gate. No production limit is increased for slower CI
 Search completeness and collection outcomes are included in the initial schema.
 Missing verification evidence is treated conservatively as incomplete; see
 [pipeline outcomes](reference/pipeline-outcomes.md).
+
+## Public API boundary
+
+The backend image and Compose files start `app.main:app`, the core API. They do
+not copy or import the private `interface_web/` directory. Search creation,
+progress, latest search, datasets by ID and full search diagnostics are available
+without a web interface. Manual retry and individual browsing/history routes
+belong to the separately maintained private interface and are not shipped here.
+Operational notes about persisted retry cycles describe shared worker state;
+they do not imply the core exposes a manual HTTP retry route.

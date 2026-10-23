@@ -276,51 +276,6 @@ async def test_real_server_collects_without_client_then_restores_after_restart(d
         await server.stop()
 
 
-async def test_process_crash_during_collection_can_be_retried_over_http(database, tmp_path):
-    gate = tmp_path / "hold-collection"
-    gate.touch()
-    server = APIProcess(os.environ["DATABASE_URL"], tmp_path, gate=gate)
-    await server.start()
-    try:
-        async with server.client() as client:
-            command = await submit(client)
-        deadline = time.monotonic() + 15
-        while not Path(str(gate) + ".started").exists() and time.monotonic() < deadline:
-            await asyncio.sleep(0.05)
-        assert Path(str(gate) + ".started").exists(), server.log_path.read_text()
-        await server.stop(crash=True)
-        gate.unlink()
-        await server.start()
-        async with server.client() as client:
-            interrupted = await wait_for_completion(client, command["progress_url"])
-            assert interrupted["errors"], interrupted
-            assert interrupted["dataset_ids"] == []
-            discovery_retry = await client.post(
-                f"/collector/searches/{command['search_id']}/retry", json={},
-                headers={"Idempotency-Key": "runtime-discovery-already-complete"},
-            )
-            assert discovery_retry.status_code == 409
-            job_id = interrupted["items"][0]["automatic_collection"]["job"]["id"]
-            retry = await client.post(
-                f"/collector/collection-jobs/{job_id}/retry",
-                headers={"Idempotency-Key": "runtime-retry-after-crash"},
-            )
-            assert retry.status_code == 202, retry.text
-            assert retry.json()["job"]["id"] == job_id
-            completed = await wait_for_completion(client, command["progress_url"])
-            assert completed["outcome"] == "results", completed
-            assert completed["attempt"] == 1
-            assert len(completed["dataset_ids"]) == 1
-            assert completed["items"][0]["classification_progress"]["succeeded"] == 3
-            replay = await client.post(
-                f"/collector/collection-jobs/{job_id}/retry",
-                headers={"Idempotency-Key": "runtime-retry-after-crash"},
-            )
-            assert replay.status_code == 202 and replay.json()["job"]["status"] == "done"
-    finally:
-        await server.stop()
-
-
 async def test_native_local_api_and_python_client_need_no_credentials(database, tmp_path):
     server = APIProcess(os.environ["DATABASE_URL"], tmp_path, mode="local")
     await server.start()

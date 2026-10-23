@@ -23,8 +23,6 @@ from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 from itsdangerous import TimestampSigner
 
-from collector.repository_search import RepositorySearchResult
-
 pytestmark = pytest.mark.anyio
 
 ORIGIN = "https://health.example"
@@ -194,44 +192,6 @@ def test_invalid_public_configuration_fails_startup(public_api, monkeypatch, nam
     monkeypatch.setenv(name, value)
     with pytest.raises(RuntimeError, match=name):
         validate_api_security_configuration()
-
-
-async def test_cookie_owner_is_passed_to_existing_collector_access_checks(public_api, monkeypatch):
-    recorded_owners = []
-
-    async def read_job(job_id, owner_id):
-        recorded_owners.append(owner_id)
-        return {"id": job_id, "source_url": "https://example.org/data", "status": "done",
-                "saved_count": 0}
-
-    monkeypatch.setattr("app.routes.collection_jobs.get_collection_job_for_owner", read_job)
-    async with browser(public_api) as client:
-        await bootstrap(client)
-        owner = (await client.get("/identity")).json()["owner_id"]
-        response = await client.get("/collector/collection-jobs/1")
-        assert response.status_code == 200
-        assert response.headers["cache-control"] == "no-store"
-        assert recorded_owners == [owner]
-
-
-async def test_anonymous_ownership_is_enforced_by_database(public_api, database):
-    await database.init_database()
-    async with browser(public_api) as alice, browser(public_api) as bob:
-        await bootstrap(alice)
-        await bootstrap(bob)
-        owner = (await alice.get("/identity")).json()["owner_id"]
-        search = await database.create_search_session("mortality", owner)
-        items = await database.save_repository_candidates(search["id"], owner, [
-            RepositorySearchResult(title="Mortality", url="https://example.org/data",
-                                   source="DataCite"),
-        ])
-        path = f"/collector/repository-candidates/{items[0]['id']}"
-        assert (await alice.get(path)).status_code == 200
-        assert (await bob.get(path)).status_code == 404
-        denied = await bob.post(f"{path}/classify", headers={"Origin": ORIGIN})
-        assert denied.status_code == 404
-        stored = await database.get_repository_candidate(items[0]["id"], owner)
-        assert stored["classification_status"] == "pending"
 
 
 @pytest.mark.parametrize("enabled", [None, "false", "yes", "1"])

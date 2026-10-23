@@ -82,7 +82,7 @@ async def enqueue(database, queue):
         return item
     session = await database.create_search_session("mortality", "alice")
     item = (
-        await database.save_repository_candidates(
+        await database.complete_search_session_with_repository_candidates(
             session["id"],
             "alice",
             [
@@ -92,9 +92,9 @@ async def enqueue(database, queue):
                     source="test",
                 )
             ],
+            status="completed",
         )
     )[0]
-    await database.enqueue_candidate_classification(item["id"], "alice")
     if queue == "classification":
         return item
     claimed = await repository_candidates.claim_candidate_classification()
@@ -216,20 +216,6 @@ async def fail(database, queue, item):
         await database.mark_collection_job_error(item["id"], "Interrupted.")
 
 
-async def manual_retry(database, queue, item):
-    await fail(database, queue, item)
-    if queue == "search":
-        await search_jobs.admit_search(
-            "alice",
-            uuid4().hex,
-            access_mode="local",
-            client_key=None,
-            retry_search_id=item["id"],
-        )
-    elif queue == "classification":
-        await database.enqueue_candidate_classification(item["id"], "alice", retry=True)
-    else:
-        await collection_jobs.retry_collection_job_for_owner(item["id"], "alice")
 
 
 @pytest.mark.parametrize("queue", QUEUES)
@@ -333,20 +319,6 @@ async def test_empty_poll_does_not_accumulate_receipts(database, queue):
     assert len(await receipts(queue)) == 1
 
 
-@pytest.mark.parametrize("queue", QUEUES)
-async def test_old_receipt_cannot_claim_requeued_attempt_or_unrelated_work(database, queue):
-    await database.init_database()
-    await enqueue(database, queue)
-    old_token = uuid4()
-    old = await claim_for(queue)(claim_token=old_token)
-    await manual_retry(database, queue, old)
-    assert await claim_for(queue)(claim_token=old_token) is None
-    current = await claim_for(queue)(claim_token=uuid4())
-    assert current["id"] == old["id"] and version(current) != version(old)
-    other = await enqueue(database, queue)
-    assert await claim_for(queue)(claim_token=old_token) is None
-    assert (await persisted(queue, other))[STATUS_COLUMNS[queue]] == QUEUED[queue]
-    assert len(await receipts(queue)) == 2
 
 
 @pytest.mark.parametrize("queue", ("classification", "collection"))

@@ -8,11 +8,11 @@ from unittest.mock import Mock
 
 import pytest
 from app.db import classification_votes as votes
-from app.db.collection_jobs import retry_collection_job_for_owner
 from app.db.search_progress import read_search_progress
 from app.workers import classification as classification_worker
 from app.workers import collection as collection_worker
 from app.workers import runtime as workers
+from helpers.inspection import stored_candidate, stored_datasets
 from helpers.workflows import candidate_for, decision, rows
 from psycopg import OperationalError
 
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.anyio
 async def prepare(database, monkeypatch, kind, *, execution_error=False):
     await database.init_database()
     candidate = await candidate_for(database)
-    candidate = await database.get_repository_candidate(candidate["id"], "alice")
+    candidate = await stored_candidate(candidate["id"], "alice")
     if kind == "collection":
         await database.complete_candidate_classification(candidate["id"], "alice", decision())
         item = await database.claim_pending_collection_job()
@@ -87,64 +87,13 @@ async def test_finalization_survives_disconnect_without_reexecuting(
         stored = await database.get_collection_job(item["id"])
         assert stored["status"] == ("error" if execution_error else "done")
         assert stored["saved_count"] == int(not execution_error)
-        assert len(await database.list_collected_datasets()) == int(not execution_error)
+        assert len(await stored_datasets(database)) == int(not execution_error)
     else:
-        stored = await database.get_repository_candidate(item["id"], "alice")
+        stored = await stored_candidate(item["id"], "alice")
         assert stored["classification_status"] == ("error" if execution_error else "accepted")
         assert len(await rows("SELECT id FROM collection_jobs")) == int(not execution_error)
         links = await rows("SELECT * FROM collection_job_candidates")
         assert len(links) == int(not execution_error)
-
-
-@pytest.mark.parametrize("kind", ["collection", "classification"])
-async def test_lost_error_acknowledgement_cannot_overwrite_user_retry(database, monkeypatch, kind):
-    module, item, run, compute, _, fail_name = await prepare(
-        database, monkeypatch, kind, execution_error=True,
-    )
-    original = getattr(module, fail_name)
-    retried = None
-    calls = 0
-
-    async def interrupted(*args, **kwargs):
-        nonlocal calls, retried
-        calls += 1
-        result = await original(*args, **kwargs)
-        if calls == 1:
-            assert result is not None
-            # Another consumer can claim the explicit retry while the first
-            # consumer still believes its error write failed.
-            if kind == "collection":
-                await retry_collection_job_for_owner(item["id"], "alice")
-                retried = await database.claim_pending_collection_job()
-            else:
-                await database.enqueue_candidate_classification(item["id"], "alice", retry=True)
-                retried = await database.claim_candidate_classification()
-            raise OperationalError("commit acknowledgement lost")
-        assert result is None
-        return result
-
-    monkeypatch.setattr(module, fail_name, interrupted)
-    with ThreadPoolExecutor(1) as executor:
-        await run(item, executor)
-    assert calls == 2
-    compute.assert_called_once()
-    assert retried["updated_at"] != item["updated_at"]
-    if kind == "collection":
-        stored = await database.get_collection_job(item["id"])
-        assert stored["status"] == "running"
-        assert await database.complete_collection_job(
-            item["id"], CollectionResult(),
-            expected_updated_at=datetime.fromisoformat(item["updated_at"]),
-        ) is None
-    else:
-        stored = await database.get_repository_candidate(item["id"], "alice")
-        assert stored["classification_status"] == "classifying"
-        assert await database.complete_candidate_classification(
-            item["id"], "alice", decision(),
-            expected_updated_at=datetime.fromisoformat(item["updated_at"]),
-        ) is None
-    assert stored["updated_at"] == retried["updated_at"]
-    assert stored["error"] == ""
 
 
 async def test_guarded_classification_still_checks_owner(database, monkeypatch):
@@ -156,7 +105,7 @@ async def test_guarded_classification_still_checks_owner(database, monkeypatch):
     assert await database.fail_candidate_classification(
         item["id"], "bob", "not allowed", expected_updated_at=version,
     ) is None
-    stored = await database.get_repository_candidate(item["id"], "alice")
+    stored = await stored_candidate(item["id"], "alice")
     assert stored["classification_status"] == "classifying"
     assert stored["updated_at"] == item["updated_at"]
     assert await rows("SELECT id FROM collection_jobs") == []
@@ -202,9 +151,9 @@ async def test_concurrent_persistence_retries_finalize_one_claim(
         assert len(await rows("SELECT id FROM dataset_discovery_observations")) == int(
             not execution_error
         )
-        assert len(await database.list_collected_datasets()) == int(not execution_error)
+        assert len(await stored_datasets(database)) == int(not execution_error)
     else:
-        stored = await database.get_repository_candidate(item["id"], "alice")
+        stored = await stored_candidate(item["id"], "alice")
         assert stored["classification_status"] == ("error" if execution_error else "accepted")
         assert len(await rows("SELECT id FROM collection_jobs")) == int(not execution_error)
         links = await rows("SELECT * FROM collection_job_candidates")
@@ -216,7 +165,7 @@ async def test_vote_progress_and_polling_preserve_completion_claim(database, mon
     _, item, run, compute, _, _ = await prepare(database, monkeypatch, kind)
     scope = {"job_id": item["id"]} if kind == "collection" else {"candidate_id": item["id"]}
     candidate_id = item["repository_candidate_id"] if kind == "collection" else item["id"]
-    candidate = await database.get_repository_candidate(candidate_id, "alice")
+    candidate = await stored_candidate(candidate_id, "alice")
     run_id = await votes.prepare_vote_run({"configuration": [{"voter_id": "a"}]}, **scope)
     vote = await votes.claim_vote(run_id, "a", **scope)
     await votes.finish_vote(
@@ -224,7 +173,7 @@ async def test_vote_progress_and_polling_preserve_completion_claim(database, mon
     )
     await read_search_progress(candidate["search_session_id"], "alice")
     stored = (await database.get_collection_job(item["id"]) if kind == "collection"
-              else await database.get_repository_candidate(item["id"], "alice"))
+              else await stored_candidate(item["id"], "alice"))
     assert stored["updated_at"] == item["updated_at"]
     assert stored["classification_progress"]["succeeded"] == 1
     with ThreadPoolExecutor(1) as executor:

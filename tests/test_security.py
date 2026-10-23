@@ -94,7 +94,7 @@ def test_openapi_describes_only_the_active_access_mechanism(monkeypatch, mode, o
     security = schema["paths"]["/collector/searches"]["post"].get("security")
     assert security == ([{scheme: []}] if scheme else None)
     assert set(schema["components"].get("securitySchemes", {})) == ({scheme} if scheme else set())
-    assert "security" not in schema["paths"]["/collector/collected-datasets"]["get"]
+    assert "security" not in schema["paths"]["/collector/collected-datasets/by-id"]["get"]
 
 
 async def test_api_quota_returns_retry_after_when_limit_is_exhausted(monkeypatch):

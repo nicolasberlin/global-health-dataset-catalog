@@ -10,14 +10,12 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
 from app.quota_policy import WorkAdmission
-from app.retry_policy import enforce_retry_date
 from collector.classification.repository import RepositoryClassification
 from collector.diagnostics import Diagnostic
 from collector.repository_search.models import RepositorySearchResult
 from collector.url_utils import require_http_url
 
 from .api_quotas import lock_work_admission, reserve_work
-from .commands import CommandConflict, read_command, record_command
 from .connection import Row, _fetchall, _fetchone, _require_database_pool
 from .schema import _require_current_schema
 from .search_sessions import SearchStatus, _complete_search_session, _normalized_owner_id
@@ -159,76 +157,6 @@ async def _save_repository_candidates(
     )
 
 
-async def get_repository_candidate(
-    candidate_id: UUID,
-    owner_id: str,
-) -> dict[str, object] | None:
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        row = await _get_repository_candidate_row(connection, candidate_id, owner_id)
-    return _repository_candidate_to_dict(row) if row else None
-
-
-async def enqueue_candidate_classification(
-    candidate_id: UUID,
-    owner_id: str,
-    *,
-    retry: bool = False,
-    admission: WorkAdmission | None = None,
-    idempotency_key: str | None = None,
-) -> dict[str, object] | None:
-    """Persist an explicit request; discoveries alone are never consumed by workers."""
-
-    payload = {"candidate_id": str(candidate_id), "retry": retry}
-    eligible_statuses = ("pending", "error") if retry else ("pending",)
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        async with connection.transaction():
-            if idempotency_key is not None:
-                receipt = await read_command(connection, owner_id, idempotency_key,
-                                             "classification", payload)
-                if receipt is not None:
-                    row = await _get_repository_candidate_row(connection, candidate_id, owner_id)
-                    return _repository_candidate_to_dict(row) if row else None
-            await lock_work_admission(connection, admission)
-            candidate = await _fetchone(connection, """
-                SELECT candidate.classification_status, candidate.errors
-                FROM repository_candidates AS candidate
-                JOIN search_sessions AS session ON session.id = candidate.search_session_id
-                WHERE candidate.id = %s AND session.owner_id = %s FOR UPDATE OF candidate
-            """, (candidate_id, _normalized_owner_id(owner_id)))
-            if candidate is None:
-                return None
-            if candidate["classification_status"] not in eligible_statuses:
-                if idempotency_key is None:
-                    return None
-                if candidate["classification_status"] == "error":
-                    raise CommandConflict("Candidate classification failed; retry explicitly.")
-                await record_command(connection, owner_id, idempotency_key, "classification",
-                                     payload, {"candidate_id": str(candidate_id)})
-                row = await _get_repository_candidate_row(connection, candidate_id, owner_id)
-                return _repository_candidate_to_dict(row)
-            enforce_retry_date(candidate["errors"])
-            await reserve_work(connection, admission, amount=1)
-            row = await _fetchone(
-                connection,
-                f"""
-                UPDATE repository_candidates AS candidate
-                SET classification_status = 'queued', classification = NULL,
-                    error = '', errors = '[]'::jsonb,
-                    retry_cycle = gen_random_uuid(), retry_round = 0, retry_started_at = NULL,
-                    next_retry_at = NULL, updated_at = NOW()
-                FROM search_sessions AS session
-                WHERE candidate.id = %s AND candidate.search_session_id = session.id
-                RETURNING {_RETURNING_CANDIDATE_COLUMNS}
-                """, (candidate_id,),
-            )
-            if idempotency_key is not None:
-                await record_command(connection, owner_id, idempotency_key, "classification",
-                                     payload, {"candidate_id": str(candidate_id)})
-    return _repository_candidate_to_dict(row) if row else None
-
-
 async def claim_candidate_classification(
     *, claim_token: UUID | None = None,
 ) -> dict[str, object] | None:
@@ -278,31 +206,6 @@ async def claim_candidate_classification(
     if row is None:
         return None
     return {**_repository_candidate_to_dict(row), "owner_id": str(row["owner_id"])}
-
-
-async def latest_repository_analysis(owner_id: str) -> list[dict[str, object]]:
-    """Restore the owner's most recent search containing repository candidates."""
-
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        rows = await _fetchall(
-            connection,
-            f"""
-            SELECT {_CANDIDATE_COLUMNS}
-            FROM repository_candidates AS candidate
-            JOIN search_sessions AS session ON session.id = candidate.search_session_id
-            WHERE session.id = (
-                SELECT search.id FROM search_sessions AS search
-                WHERE search.owner_id = %s AND EXISTS (
-                    SELECT 1 FROM repository_candidates WHERE search_session_id = search.id
-                )
-                ORDER BY search.created_at DESC, search.id DESC LIMIT 1
-            ) AND session.owner_id = %s
-            ORDER BY candidate.created_at, candidate.id
-        """,
-            (_normalized_owner_id(owner_id), _normalized_owner_id(owner_id)),
-        )
-    return [_repository_candidate_to_dict(row) for row in rows]
 
 
 async def _complete_candidate_classification(
@@ -409,23 +312,6 @@ async def mark_interrupted_candidate_classifications_error() -> int:
             (_jsonb([Diagnostic("processing_interrupted", "classification").to_dict()]),),
         )
     return len(rows)
-
-
-async def _get_repository_candidate_row(
-    connection: AsyncConnection[DictRow],
-    candidate_id: UUID,
-    owner_id: str,
-) -> Row | None:
-    return await _fetchone(
-        connection,
-        f"""
-        SELECT {_CANDIDATE_COLUMNS}
-        FROM repository_candidates AS candidate
-        JOIN search_sessions AS session ON session.id = candidate.search_session_id
-        WHERE candidate.id = %s AND session.owner_id = %s
-        """,
-        (candidate_id, _normalized_owner_id(owner_id)),
-    )
 
 
 _CANDIDATE_COLUMNS = """
