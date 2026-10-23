@@ -1,4 +1,13 @@
-"""Public collector views. Internal diagnostics remain in storage and server logs."""
+"""Prepare stored collector data for API responses.
+
+searches.search_progress() calls public_search_progress() for search snapshots;
+catalog.read_collected_by_id() calls public_collected_dataset() for full datasets.
+The smaller helpers prepare nested candidates, classifications and collections.
+These functions transform data already in memory; they perform no database or
+network calls and never start processing. FastAPI serializes the returned models
+as JSON. Here, 'public' means suitable for a client, in both local and public mode;
+raw internal failure details remain in storage and server logs.
+"""
 
 from __future__ import annotations
 
@@ -112,6 +121,7 @@ def _public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]:
 def public_repository_classification(
     classification: dict[str, Any] | None,
 ) -> CollectorRepositoryClassification | None:
+    """Prepare a candidate's saved classification, filtering internal vote failures."""
     if classification is None:
         return None
     return CollectorRepositoryClassification(
@@ -120,6 +130,7 @@ def public_repository_classification(
 
 
 def public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]:
+    """Copy a dataset's classification signals with client-safe model failures."""
     if "ensemble" not in signals:
         return dict(signals)
     return {**signals, "ensemble": _public_ensemble(signals["ensemble"])}
@@ -161,6 +172,7 @@ def _automatic_collection(
 
 
 def _collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution:
+    """Prepare one saved download link without requesting the remote resource."""
     return CollectorDistribution(
         url=distribution.url,
         format=distribution.format,
@@ -178,6 +190,7 @@ def _collector_repository_candidate(
     *,
     automatic_collection: CollectorAutomaticCollection | None = None,
 ) -> CollectorRepositorySearchItem:
+    """Combine a saved candidate, its classification and its existing collection view."""
     return CollectorRepositorySearchItem(
         candidate_id=candidate["id"],
         search_id=candidate["search_session_id"],
@@ -216,6 +229,7 @@ def _collector_repository_candidate(
 
 
 def _collector_validation(validation: ValidationResult) -> CollectorValidation:
+    """Present an existing resource check with a controlled failure message."""
     return CollectorValidation(
         url=validation.url,
         final_url=validation.final_url,
@@ -234,7 +248,12 @@ def _collector_validation(validation: ValidationResult) -> CollectorValidation:
     )
 
 
-def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset:
+def public_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset:
+    """Prepare a full dataset response for catalogue reads.
+
+    Include its saved metadata, download links and validation results. The route
+    has already loaded the dataset; this function only builds the response model.
+    """
     return CollectorCollectedDataset(
         id=dataset.database_id,
         source_url=dataset.source_url,
@@ -265,7 +284,12 @@ def _collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollecte
 
 
 def public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse:
-    """Present one consistent store snapshot without scheduling or fetching work."""
+    """Convert read_search_progress() data into the search_progress() response.
+
+    snapshot contains the search row, its candidates and their collections. Build
+    their response views, summarize processing status and gather saved dataset IDs.
+    The client uses polling_required to decide whether to request another update.
+    """
 
     search, candidates, collections = snapshot
     items = [

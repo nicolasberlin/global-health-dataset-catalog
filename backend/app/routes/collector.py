@@ -1,4 +1,9 @@
-"""Routes required by the independent Python API client."""
+"""Assemble the core search, diagnostic and dataset routes under /collector.
+
+main.create_app() registers this router. For example, /searches in searches.py
+becomes /collector/searches here. This module only registers routes; their
+handlers and the background workers perform the actual work.
+"""
 from fastapi import APIRouter
 
 from app.routes.catalog import router as catalog_router

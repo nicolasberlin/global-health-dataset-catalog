@@ -1,4 +1,8 @@
-"""Owner-scoped diagnostic exports with bounded historical pages."""
+"""Export saved search, classification and collection diagnostics for their owner.
+
+The Python client requests this report after progress no longer requires polling.
+History is bounded and can be partial; this read never reruns a processing stage.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +26,12 @@ async def search_diagnostics(
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,
 ):
+    """Assemble the diagnostic report for GET /collector/searches/{search_id}/diagnostics.
+
+    search_progress() verifies ownership and provides the current summary. Add
+    saved collection traces and candidate vote history, keeping each read scoped
+    to the same owner. Return a dictionary that FastAPI serializes as JSON.
+    """
     progress = await search_progress(search_id, principal, response)
     job_ids = {
         item.automatic_collection.job.id
@@ -55,8 +65,7 @@ async def search_diagnostics(
             "coverage": "partial",
             "missing_evidence": [
                 "Persisted history can be partial; missing evidence cannot be reconstructed.",
-                "Search exports contain bounded history pages; "
-                "use the dedicated history endpoints to retrieve older entries when available.",
+                "Search exports contain bounded history pages and can omit older entries.",
                 "Raw pages, invalid model bodies and cookies are not exported.",
             ],
         },

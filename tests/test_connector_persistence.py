@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 from app.db.connection import _fetchone, _require_database_pool
 from app.db.schema import CURRENT_SCHEMA_VERSION
-from app.routes.collector_presenters import _collector_collected_dataset
+from app.routes.collector_presenters import public_collected_dataset
 from helpers.inspection import stored_datasets
 
 from collector.storage.models import CollectedDataset
@@ -40,7 +40,7 @@ async def test_identity_survives_save_reads_search_and_api_presentation(database
     await database.save_collected_datasets("https://zenodo.org", [record()])
     stored = (await stored_datasets(database))[0]
     assert stored.record_identity == IDENTITY
-    assert _collector_collected_dataset(stored).record_identity == IDENTITY
+    assert public_collected_dataset(stored).record_identity == IDENTITY
     searched = await database.search_collected_datasets("health survey")
     assert searched[0].record_identity == IDENTITY
 

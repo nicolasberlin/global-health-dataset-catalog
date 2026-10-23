@@ -1,4 +1,12 @@
-"""Durable search commands and owner-scoped progress snapshots."""
+"""Accept searches and expose their saved progress to the owning client.
+
+POST /collector/searches calls create_search(), which admits the command and
+returns its ID and progress URL. Background workers execute the search.
+GET /collector/searches/latest finds the owner's latest search; both this route
+and GET /collector/searches/{search_id}/progress use search_progress() to read it.
+scripts/api_client.py uses these routes for --query and --latest, then polls
+progress while polling_required is true. Reading progress never schedules work.
+"""
 
 from __future__ import annotations
 
@@ -29,6 +37,7 @@ _COMMAND_HEADERS = {
     },
     "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
 }
+# OpenAPI documentation for command responses; handlers set the actual HTTP status.
 _COMMAND_RESPONSES = {
     200: {
         "model": CollectorSearchCommandResponse,
@@ -46,7 +55,10 @@ _COMMAND_RESPONSES = {
         "description": "Missing or invalid visitor session.",
     },
     403: {"model": CollectorHTTPError, "description": "Visitor origin or local access rejected."},
-    409: {"model": CollectorHTTPError, "description": "Command key or retry state conflicts."},
+    409: {
+        "model": CollectorHTTPError,
+        "description": "Command key already used for another operation or payload.",
+    },
     413: {"model": CollectorHTTPError, "description": "Request body exceeds the configured limit."},
     429: {
         "model": CollectorHTTPError,
@@ -64,6 +76,7 @@ _COMMAND_RESPONSES = {
     },
 }
 
+# A required HTTP header used to recognize repeated commands, not an access credential.
 CommandKey = Annotated[
     str,
     Header(alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
@@ -82,10 +95,21 @@ async def create_search(
     idempotency_key: CommandKey,
     request: Request,
 ) -> CollectorSearchCommandResponse:
+    """Accept a search submitted through POST /collector/searches.
+
+    Save the command for background processing and return its ID and progress URL.
+    The search results are retrieved through separate read requests.
+    """
     return await _admit_search_command(payload, principal, response, idempotency_key, request)
 
 
 async def _admit_search_command(payload, principal, response, idempotency_key, request):
+    """Validate create_search() input and translate admission failures into HTTP errors.
+
+    admit_search() checks quotas and idempotency in its database transaction.
+    row is the saved search; replayed means the command key was already accepted.
+    No discovery or model call runs in this HTTP handler.
+    """
     if not payload.query.strip():
         raise HTTPException(status_code=400, detail="Search query is required")
     try:
@@ -103,6 +127,11 @@ async def _admit_search_command(payload, principal, response, idempotency_key, r
 
 
 async def _search_command_response(row, replayed, principal, response, request):
+    """Build the admission reply from a saved search and its current progress.
+
+    Return 202 for a new command or 200 for a replay, with a Location header and
+    progress_url pointing to the read route. This reply contains no dataset list.
+    """
     if row is None:
         raise HTTPException(status_code=404, detail="Search not found")
     progress = await search_progress(row["id"], principal, response)
@@ -123,6 +152,11 @@ async def latest_search(
     response: Response,
     with_candidates: bool = False,
 ) -> CollectorSearchProgressResponse:
+    """Read the owner's latest search, as requested by the Python client's --latest.
+
+    with_candidates=True selects the latest search with saved candidates instead.
+    Reuse search_progress() to return the snapshot; never restart the search.
+    """
     search_id = await latest_search_id(
         principal.owner_id,
         **({"with_candidates": True} if with_candidates else {}),
@@ -141,6 +175,12 @@ async def search_progress(
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,
 ) -> CollectorSearchProgressResponse:
+    """Read one owned search and prepare its progress response for the client.
+
+    Called by GET /collector/searches/{search_id}/progress, latest_search(), the
+    admission reply and the diagnostic export. The store reads one consistent
+    snapshot; public_search_progress() converts it into the response model.
+    """
     snapshot = await read_search_progress(search_id, principal.owner_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Search not found")

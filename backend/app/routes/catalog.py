@@ -1,4 +1,8 @@
-"""Public, bounded catalog reads and dataset lookups."""
+"""Return saved catalogue datasets by ID, independently of search ownership.
+
+The catalogue is public in both access modes. The Python client calls this route
+with IDs from search progress to retrieve the full dataset records.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.database import get_collected_datasets
-from app.routes.collector_presenters import _collector_collected_dataset
+from app.routes.collector_presenters import public_collected_dataset
 from app.routes.collector_schemas import CollectorCollectionResponse
 
 router = APIRouter(tags=["collector"])
@@ -23,8 +27,13 @@ async def read_collected_by_id(
         ),
     ],
 ) -> CollectorCollectionResponse:
+    """Read up to 100 saved dataset IDs and prepare their API response.
+
+    FastAPI validates the IDs before this handler runs. Missing IDs are omitted;
+    this read does not discover, collect or validate any new dataset.
+    """
     return CollectorCollectionResponse(
         items=[
-            _collector_collected_dataset(dataset) for dataset in await get_collected_datasets(ids)
+            public_collected_dataset(dataset) for dataset in await get_collected_datasets(ids)
         ],
     )

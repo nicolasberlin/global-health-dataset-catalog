@@ -1,4 +1,8 @@
-"""Bootstrap anonymous browser access without returning a credential to JavaScript."""
+"""Create anonymous cookie sessions for browsers and Python clients in public mode.
+
+Local API access needs no session. In public mode, clients keep the cookie to
+access their own searches; browser JavaScript cannot read this HttpOnly cookie.
+"""
 
 from fastapi import APIRouter, Request, Response
 
@@ -14,7 +18,12 @@ router = APIRouter(tags=["sessions"])
 
 @router.post("/session", status_code=204)
 async def start_visitor_session(request: Request) -> Response:
-    """Reuse a valid cookie, or create a visitor. Available only in public mode."""
+    """Handle POST /session: keep a valid cookie or set a new anonymous identity.
+
+    require_public_session_bootstrap() checks the public mode and request origin.
+    Creating a new identity also checks the session quota. Return HTTP 204 with no
+    JSON body.
+    """
 
     settings = require_public_session_bootstrap(request)
     response = Response(status_code=204, headers={"Cache-Control": "no-store"})

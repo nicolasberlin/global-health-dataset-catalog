@@ -1,3 +1,12 @@
+"""Define the request and response structures used by collector routes.
+
+Pydantic validates incoming request fields against these models. Routes and
+presenters also construct response models, which FastAPI serializes as JSON.
+These classes describe data and validation rules; they do not run searches or
+read the database. Classification, collection and dataset models are nested
+inside the progress and catalogue responses below.
+"""
+
 from __future__ import annotations
 
 import json
@@ -27,6 +36,8 @@ from collector.diagnostics import ExecutionStatus, Outcome, Recovery, Stage
 
 
 class CollectorDiagnostic(BaseModel):
+    """A controlled processing error or warning that can be sent to the client."""
+
     model_config = ConfigDict(extra="forbid")
 
     code: str
@@ -39,8 +50,9 @@ class CollectorDiagnostic(BaseModel):
     voter_id: str | None = None
 
 
-# Query-driven repository search endpoint.
 class CollectorRepositorySearchRequest(BaseModel):
+    """Shared query validation inherited by the search creation request."""
+
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1, max_length=MAX_REPOSITORY_SEARCH_QUERY_CHARS)
@@ -199,6 +211,8 @@ class CollectorCollectionJob(BaseModel):
 
 
 class CollectorAutomaticCollection(BaseModel):
+    """The collection associated with a candidate, including already-saved datasets."""
+
     execution_status: ExecutionStatus
     outcome: Outcome | None = None
     errors: list[CollectorDiagnostic] = Field(default_factory=list)
@@ -210,6 +224,8 @@ class CollectorAutomaticCollection(BaseModel):
 
 
 class CollectorRepositorySearchItem(BaseModel):
+    """One discovered candidate and its classification/collection state in a snapshot."""
+
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: UUID
@@ -294,6 +310,8 @@ class CollectorValidation(BaseModel):
 
 
 class CollectorCollectedDataset(BaseModel):
+    """A full saved dataset record returned by catalogue reads, including download links."""
+
     id: int | None = None
     source_url: str = ""
     dataset_url: HttpUrl
@@ -318,11 +336,20 @@ class CollectorCollectedDataset(BaseModel):
 
 
 class CollectorCollectionResponse(BaseModel):
+    """Dataset records returned by a catalogue read; next_cursor supports paged clients."""
+
     next_cursor: int | None = None
     items: list[CollectorCollectedDataset]
 
 
 class CollectorSearchProgressResponse(BaseModel):
+    """A search snapshot returned by progress, latest and diagnostic reads.
+
+    execution_status describes processing; outcome is results, empty or incomplete
+    when known. polling_required tells the client whether to keep requesting updates.
+    dataset_ids can be resolved into full records through the catalogue route.
+    """
+
     search_id: UUID
     query: str = ""
     origin: Literal["database", "online"] | None = None
@@ -342,10 +369,14 @@ class CollectorSearchProgressResponse(BaseModel):
 
 
 class CollectorSearchCreateRequest(CollectorRepositorySearchRequest):
+    """JSON body accepted by POST /collector/searches; the command key is a header."""
+
     model_config = ConfigDict(extra="forbid")
 
 
 class CollectorSearchCommandResponse(BaseModel):
+    """A new or replayed command's acknowledgement, with the URL for reading progress."""
+
     search_id: UUID
     execution_status: ExecutionStatus
     attempt: int
@@ -353,4 +384,6 @@ class CollectorSearchCommandResponse(BaseModel):
 
 
 class CollectorHTTPError(BaseModel):
+    """The simple JSON error shape documented for controlled command failures."""
+
     detail: str

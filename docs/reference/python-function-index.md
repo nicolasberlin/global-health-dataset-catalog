@@ -1,6 +1,6 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **23 October 2026**, based on Git commit `049a286`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **23 October 2026**, based on Git commit `81ed77c`, including the independent core API and public Search Lab. The private web interface is excluded.
 
 This index lists **848 function and method definitions in 126 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
@@ -606,7 +606,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`read_collected_by_id`](../../backend/app/routes/catalog.py#L17) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CollectorCollectionResponse` | async |
+| [`read_collected_by_id`](../../backend/app/routes/catalog.py#L21) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CollectorCollectionResponse` | async |
 
 <a id="backend-app-routes-collector_presenters-py"></a>
 
@@ -614,16 +614,16 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`public_collection_job`](../../backend/app/routes/collector_presenters.py#L24) | `public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob` | function / method |
-| [`_public_ensemble`](../../backend/app/routes/collector_presenters.py#L86) | `_public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]` | function / method |
-| [`public_repository_classification`](../../backend/app/routes/collector_presenters.py#L112) | `public_repository_classification(classification: dict[str, Any] \| None) -> CollectorRepositoryClassification \| None` | function / method |
-| [`public_dataset_signals`](../../backend/app/routes/collector_presenters.py#L122) | `public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]` | function / method |
-| [`_automatic_collection`](../../backend/app/routes/collector_presenters.py#L128) | `_automatic_collection(collection: CollectionJobReservation \| None) -> CollectorAutomaticCollection` | function / method |
-| [`_collector_distribution`](../../backend/app/routes/collector_presenters.py#L163) | `_collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution` | function / method |
-| [`_collector_repository_candidate`](../../backend/app/routes/collector_presenters.py#L176) | `_collector_repository_candidate(candidate: dict[str, object], *, automatic_collection: CollectorAutomaticCollection \| None=None) -> CollectorRepositorySearchItem` | function / method |
-| [`_collector_validation`](../../backend/app/routes/collector_presenters.py#L218) | `_collector_validation(validation: ValidationResult) -> CollectorValidation` | function / method |
-| [`_collector_collected_dataset`](../../backend/app/routes/collector_presenters.py#L237) | `_collector_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset` | function / method |
-| [`public_search_progress`](../../backend/app/routes/collector_presenters.py#L267) | `public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse` | function / method |
+| [`public_collection_job`](../../backend/app/routes/collector_presenters.py#L33) | `public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob` | function / method |
+| [`_public_ensemble`](../../backend/app/routes/collector_presenters.py#L95) | `_public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]` | function / method |
+| [`public_repository_classification`](../../backend/app/routes/collector_presenters.py#L121) | `public_repository_classification(classification: dict[str, Any] \| None) -> CollectorRepositoryClassification \| None` | function / method |
+| [`public_dataset_signals`](../../backend/app/routes/collector_presenters.py#L132) | `public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]` | function / method |
+| [`_automatic_collection`](../../backend/app/routes/collector_presenters.py#L139) | `_automatic_collection(collection: CollectionJobReservation \| None) -> CollectorAutomaticCollection` | function / method |
+| [`_collector_distribution`](../../backend/app/routes/collector_presenters.py#L174) | `_collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution` | function / method |
+| [`_collector_repository_candidate`](../../backend/app/routes/collector_presenters.py#L188) | `_collector_repository_candidate(candidate: dict[str, object], *, automatic_collection: CollectorAutomaticCollection \| None=None) -> CollectorRepositorySearchItem` | function / method |
+| [`_collector_validation`](../../backend/app/routes/collector_presenters.py#L231) | `_collector_validation(validation: ValidationResult) -> CollectorValidation` | function / method |
+| [`public_collected_dataset`](../../backend/app/routes/collector_presenters.py#L251) | `public_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset` | function / method |
+| [`public_search_progress`](../../backend/app/routes/collector_presenters.py#L286) | `public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse` | function / method |
 
 <a id="backend-app-routes-collector_schemas-py"></a>
 
@@ -631,9 +631,9 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`CollectorRepositoryClassificationVote.validate_decision`](../../backend/app/routes/collector_schemas.py#L73) | `validate_decision(self) -> CollectorRepositoryClassificationVote` | function / method |
-| [`CollectorRepositoryClassification.validate_decision`](../../backend/app/routes/collector_schemas.py#L144) | `validate_decision(self) -> CollectorRepositoryClassification` | function / method |
-| [`CollectorRepositorySearchItem.validate_metadata_size`](../../backend/app/routes/collector_schemas.py#L243) | `validate_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]` | classmethod |
+| [`CollectorRepositoryClassificationVote.validate_decision`](../../backend/app/routes/collector_schemas.py#L85) | `validate_decision(self) -> CollectorRepositoryClassificationVote` | function / method |
+| [`CollectorRepositoryClassification.validate_decision`](../../backend/app/routes/collector_schemas.py#L156) | `validate_decision(self) -> CollectorRepositoryClassification` | function / method |
+| [`CollectorRepositorySearchItem.validate_metadata_size`](../../backend/app/routes/collector_schemas.py#L259) | `validate_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]` | classmethod |
 
 <a id="backend-app-routes-diagnostics-py"></a>
 
@@ -641,7 +641,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`search_diagnostics`](../../backend/app/routes/diagnostics.py#L20) | `search_diagnostics(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response)` | async |
+| [`search_diagnostics`](../../backend/app/routes/diagnostics.py#L24) | `search_diagnostics(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response)` | async |
 
 <a id="backend-app-routes-searches-py"></a>
 
@@ -649,11 +649,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`create_search`](../../backend/app/routes/searches.py#L78) | `create_search(payload: CollectorSearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> CollectorSearchCommandResponse` | async |
-| [`_admit_search_command`](../../backend/app/routes/searches.py#L88) | `_admit_search_command(payload, principal, response, idempotency_key, request)` | async |
-| [`_search_command_response`](../../backend/app/routes/searches.py#L105) | `_search_command_response(row, replayed, principal, response, request)` | async |
-| [`latest_search`](../../backend/app/routes/searches.py#L121) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> CollectorSearchProgressResponse` | async |
-| [`search_progress`](../../backend/app/routes/searches.py#L139) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> CollectorSearchProgressResponse` | async |
+| [`create_search`](../../backend/app/routes/searches.py#L91) | `create_search(payload: CollectorSearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> CollectorSearchCommandResponse` | async |
+| [`_admit_search_command`](../../backend/app/routes/searches.py#L106) | `_admit_search_command(payload, principal, response, idempotency_key, request)` | async |
+| [`_search_command_response`](../../backend/app/routes/searches.py#L129) | `_search_command_response(row, replayed, principal, response, request)` | async |
+| [`latest_search`](../../backend/app/routes/searches.py#L150) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> CollectorSearchProgressResponse` | async |
+| [`search_progress`](../../backend/app/routes/searches.py#L173) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> CollectorSearchProgressResponse` | async |
 
 <a id="backend-app-routes-sessions-py"></a>
 
@@ -661,7 +661,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`start_visitor_session`](../../backend/app/routes/sessions.py#L16) | `start_visitor_session(request: Request) -> Response` | async |
+| [`start_visitor_session`](../../backend/app/routes/sessions.py#L20) | `start_visitor_session(request: Request) -> Response` | async |
 
 <a id="backend-app-search_outcomes-py"></a>
 
