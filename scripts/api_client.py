@@ -386,8 +386,8 @@ def parse_args(argv=None):
         or not parsed.hostname
         or parsed.username
         or parsed.password
-        or parsed.query
-        or parsed.fragment
+        or "?" in args.base_url
+        or "#" in args.base_url
         or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in args.base_url)
         or port == 0
     ):
@@ -416,8 +416,8 @@ def parse_args(argv=None):
             or origin.username
             or origin.password
             or origin.path
-            or origin.query
-            or origin.fragment
+            or "?" in args.origin
+            or "#" in args.origin
             or origin_port == 0
             or any(char.isspace() or ord(char) < 32 for char in args.origin)
         ):
@@ -473,17 +473,22 @@ def _snapshot(value, *, search_id=None):
 
 
 def _command(value, client, *, search_id=None):
+    """Validate acceptance and return the search ID and API-relative progress path."""
     if not isinstance(value, dict):
         raise APIError("The API returned an invalid command response.")
     actual_id = _uuid(value.get("search_id"))
     expected = f"/collector/searches/{actual_id}/progress"
-    allowed = {expected, urlsplit(client.base_url).path.rstrip("/") + expected}
+    prefix = urlsplit(client.base_url).path.rstrip("/")
+    progress_path = value.get("progress_url")
     if ((search_id is not None and actual_id != search_id)
             or value.get("execution_status") not in STATUSES
             or type(value.get("attempt")) is not int or value["attempt"] < 1
-            or value.get("progress_url") not in allowed):
+            or progress_path not in (expected, prefix + expected)):
         raise APIError("The API returned an inconsistent command response.")
-    return actual_id
+    # Client.request() adds the API prefix; remove it only from the prefixed form.
+    if prefix and progress_path == prefix + expected:
+        progress_path = progress_path[len(prefix):]
+    return actual_id, progress_path
 
 
 def _datasets(value, requested):
@@ -672,6 +677,7 @@ def run(args):
                     ) from None
                 raise
             search_id = _snapshot(latest)
+            progress_path = f"/collector/searches/{search_id}/progress"
         else:
             key = pending["key"] if pending else str(uuid4())
             _save_pending_search({
@@ -685,7 +691,7 @@ def run(args):
             command = client.request(
                 "POST", "/collector/searches", payload={"query": args.query}, key=key,
             )
-            search_id = _command(command, client)
+            search_id, progress_path = _command(command, client)
             report.update(command=command, command_state="acknowledged", search_id=search_id)
             persist()
             DEFAULT_PENDING_FILE.unlink()
@@ -695,7 +701,7 @@ def run(args):
         deadline = time.monotonic() + args.timeout
         path = f"/collector/searches/{search_id}"
         while True:
-            snapshot = client.request("GET", path + "/progress", deadline=deadline)
+            snapshot = client.request("GET", progress_path, deadline=deadline)
             _snapshot(snapshot, search_id=search_id)
             report["progress"] = snapshot
             persist()

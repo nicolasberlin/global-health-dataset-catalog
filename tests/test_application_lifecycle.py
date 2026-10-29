@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from app import main
+from app import lifecycle, main
 from app.workers.runtime import persisted_workers
 from httpx import ASGITransport, AsyncClient
 from psycopg.errors import DiskFull
@@ -119,8 +119,8 @@ async def test_lost_ownership_rejects_commands_and_keeps_liveness(runtime):
 async def test_lock_monitor_fences_workers_on_loss(runtime, monkeypatch):
     _, ownership = runtime
     stop = Mock()
-    monkeypatch.setattr(main, "request_worker_stop", stop)
-    watcher = asyncio.create_task(main._watch_ownership(main.app, ownership))
+    monkeypatch.setattr(lifecycle, "request_worker_stop", stop)
+    watcher = asyncio.create_task(lifecycle._watch_ownership(main.app, ownership))
     ownership.lost.set()
     await asyncio.wait_for(watcher, timeout=1)
     assert not main.app.state.ready
@@ -142,20 +142,20 @@ async def test_explicit_migration_mode_verifies_without_ddl(monkeypatch):
     async def group():
         yield
 
-    monkeypatch.setattr(main, "application_lock", lock)
+    monkeypatch.setattr(lifecycle, "application_lock", lock)
     for name in ("configure_operational_logging", "validate_api_security_configuration"):
-        monkeypatch.setattr(main, name, Mock())
+        monkeypatch.setattr(lifecycle, name, Mock())
     for name in ("open_database_pool", "close_database_pool", "init_database",
                  "validate_database_schema", "mark_interrupted_votes_error",
                  "mark_interrupted_search_sessions_error",
                  "mark_interrupted_candidate_classifications_error",
                  "mark_interrupted_collection_jobs_error"):
-        monkeypatch.setattr(main, name, AsyncMock())
+        monkeypatch.setattr(lifecycle, name, AsyncMock())
     for name in ("collection_workers", "classification_workers", "search_workers"):
-        monkeypatch.setattr(main, name, group)
-    async with main.lifespan(main.app):
-        main.validate_database_schema.assert_awaited_once()
-        main.init_database.assert_not_awaited()
+        monkeypatch.setattr(lifecycle, name, group)
+    async with lifecycle.lifespan(main.app):
+        lifecycle.validate_database_schema.assert_awaited_once()
+        lifecycle.init_database.assert_not_awaited()
         ownership.activate.assert_awaited_once()
     assert not main.app.state.ready
 
@@ -178,12 +178,12 @@ async def test_startup_activates_generation_then_recovers_parents_before_votes(m
     monkeypatch.setattr(main.app.state, "ready", False, raising=False)
     monkeypatch.setattr(main.app.state, "runtime_enforced", False, raising=False)
     monkeypatch.setattr(main.app.state, "ownership", None, raising=False)
-    monkeypatch.setattr(main, "application_lock", lock)
+    monkeypatch.setattr(lifecycle, "application_lock", lock)
     for name in ("configure_operational_logging", "validate_api_security_configuration"):
-        monkeypatch.setattr(main, name, Mock())
+        monkeypatch.setattr(lifecycle, name, Mock())
     for name in ("open_database_pool", "close_database_pool", "init_database",
                  "validate_database_schema"):
-        monkeypatch.setattr(main, name, AsyncMock())
+        monkeypatch.setattr(lifecycle, name, AsyncMock())
     for name, event in (
         ("mark_interrupted_search_sessions_error", "search"),
         ("mark_interrupted_candidate_classifications_error", "classification"),
@@ -191,11 +191,11 @@ async def test_startup_activates_generation_then_recovers_parents_before_votes(m
         ("mark_interrupted_votes_error", "votes"),
     ):
         monkeypatch.setattr(
-            main, name, AsyncMock(side_effect=lambda event=event: events.append(event)),
+            lifecycle, name, AsyncMock(side_effect=lambda event=event: events.append(event)),
         )
     for name in ("collection_workers", "classification_workers", "search_workers"):
-        monkeypatch.setattr(main, name, group)
-    async with main.lifespan(main.app):
+        monkeypatch.setattr(lifecycle, name, group)
+    async with lifecycle.lifespan(main.app):
         assert main.app.state.ready
 
 

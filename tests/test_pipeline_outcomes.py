@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 
 import pytest
-from app.routes.collector_presenters import public_collection_job
-from app.search_outcomes import summarize_search
+from app.api.presenters import public_collection_job
+from app.search.summary import summarize_search
 from helpers.classification import distribution as _distribution
 from helpers.classification import page as _page
 from helpers.collection import Accept, collect
@@ -23,8 +23,19 @@ from collector.main import collect_source_with_report
 SEARCH = {"status": "completed", "origin": "online", "discovery_complete": True}
 
 
-def candidate(status, *, collection=None):
-    return {"classification_status": status, "automatic_collection": collection}
+def candidate(status, *, collection=None, errors=()):
+    return {
+        "classification_status": status,
+        "automatic_collection": collection,
+        "errors": list(errors),
+    }
+
+
+def queued_classification_retry():
+    return candidate(
+        "queued",
+        errors=[Diagnostic("llm_timeout", "classification", recovery="automatic").to_dict()],
+    )
 
 
 def collection(execution="finished", outcome="empty", ids=()):
@@ -34,6 +45,7 @@ def collection(execution="finished", outcome="empty", ids=()):
 @pytest.mark.parametrize(
     "search,items,execution,outcome,active",
     [
+        ({**SEARCH, "status": "queued"}, [], "queued", None, []),
         ({**SEARCH, "status": "running"}, [], "running", None, ["search"]),
         (SEARCH, [], "finished", "empty", []),
         ({**SEARCH, "origin": "database", "local_result_count": 2}, [], "finished", "results", []),
@@ -41,6 +53,63 @@ def collection(execution="finished", outcome="empty", ids=()):
         ({**SEARCH, "discovery_complete": None}, [], "finished", "incomplete", []),
         ({**SEARCH, "status": "error"}, [], "failed", "incomplete", []),
         (SEARCH, [candidate("queued")], "queued", None, []),
+        (SEARCH, [queued_classification_retry()], "waiting_retry", None, []),
+        (
+            SEARCH,
+            [candidate("accepted", collection=collection("waiting_retry", None))],
+            "waiting_retry",
+            None,
+            [],
+        ),
+        (
+            SEARCH,
+            [queued_classification_retry(), candidate("error")],
+            "waiting_retry",
+            None,
+            [],
+        ),
+        (
+            SEARCH,
+            [candidate("queued"), queued_classification_retry(), candidate("error")],
+            "queued",
+            None,
+            [],
+        ),
+        (
+            SEARCH,
+            [
+                candidate("accepted", collection=collection("queued", None)),
+                queued_classification_retry(),
+                candidate("error"),
+            ],
+            "queued",
+            None,
+            [],
+        ),
+        (
+            SEARCH,
+            [
+                candidate("classifying"),
+                candidate("accepted", collection=collection("queued", None)),
+                candidate("accepted", collection=collection("waiting_retry", None)),
+                candidate("error"),
+            ],
+            "running",
+            None,
+            ["classification"],
+        ),
+        (
+            SEARCH,
+            [
+                candidate("accepted", collection=collection("running", None)),
+                candidate("queued"),
+                queued_classification_retry(),
+                candidate("error"),
+            ],
+            "running",
+            None,
+            ["collection"],
+        ),
         (SEARCH, [candidate("pending")], "finished", "incomplete", []),
         (SEARCH, [candidate("rejected")], "finished", "empty", []),
         (SEARCH, [candidate("error")], "failed", "incomplete", []),
@@ -105,7 +174,7 @@ def test_search_conclusion_table(search, items, execution, outcome, active):
     result = summarize_search(search, items)
     assert (result["execution_status"], result["outcome"]) == (execution, outcome)
     assert result["active_stages"] == active
-    assert result["polling_required"] == (execution in {"queued", "running"})
+    assert result["polling_required"] == (execution in {"queued", "running", "waiting_retry"})
 
 
 def client(request, api_key="test"):

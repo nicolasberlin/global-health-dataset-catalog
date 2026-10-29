@@ -6,9 +6,9 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from app.db import collection_jobs as job_store
+from app.db.classification.candidates import _complete_candidate_classification
+from app.db.collection import jobs as job_store
 from app.db.connection import _require_database_pool
-from app.db.repository_candidates import _complete_candidate_classification
 from app.workers import collection as collection_worker
 from helpers.inspection import stored_candidate
 from helpers.workflows import SOURCE_URL, candidate_for, decision, rows, wait_until
@@ -92,7 +92,8 @@ async def test_claims_are_unique_and_ignore_uncommitted_jobs(database):
 async def test_startup_collects_persisted_pending_job_without_http_scheduling(
     database, monkeypatch
 ):
-    from app.main import app, lifespan
+    from app.lifecycle import lifespan
+    from app.main import app
 
     await database.init_database()
     candidate = await candidate_for(database)

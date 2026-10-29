@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Annotated
 
 import pytest
+from app.api.router import router as collector_router
+from app.api.sessions import router as sessions_router
 from app.auth.security import (
     APIPrincipal,
     require_api_principal,
@@ -17,8 +19,6 @@ from app.auth.sessions import (
     visitor_owner_id,
     visitor_session_settings,
 )
-from app.routes.collector import router as collector_router
-from app.routes.sessions import router as sessions_router
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 from itsdangerous import TimestampSigner
@@ -35,7 +35,7 @@ def public_api(monkeypatch):
         pass
 
     # Session lifecycle tests isolate signing; real quota enforcement has PostgreSQL tests.
-    monkeypatch.setattr("app.routes.sessions.enforce_session_creation_quota", allow_bootstrap)
+    monkeypatch.setattr("app.api.sessions.enforce_session_creation_quota", allow_bootstrap)
     monkeypatch.setenv("API_AUTH_MODE", "public")
     monkeypatch.setenv("API_SESSION_SECRET", SECRET)
     monkeypatch.setenv("API_PUBLIC_ORIGIN", ORIGIN)

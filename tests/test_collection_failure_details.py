@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError
 
 import pytest
-from app.db.collection_traces import safe_observation
+from app.db.collection.traces import safe_observation
 
 from collector.classification.page import PageClassification
 from collector.collection.browser import BrowserSession

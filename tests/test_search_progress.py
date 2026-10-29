@@ -2,8 +2,8 @@
 from uuid import uuid4
 
 import pytest
-from app.db import search_progress as store
 from app.db.connection import _fetchall, _require_database_pool
+from app.db.search import progress as store
 from fastapi import HTTPException
 from helpers.workflows import candidate_for, decision, headers, read
 from httpx import ASGITransport, AsyncClient
@@ -97,7 +97,7 @@ async def test_query_count_is_constant_and_snapshot_does_not_mix_commits(
 
 
 async def test_saved_dataset_without_job_and_missing_legacy_followup(database):
-    from app.db.repository_candidates import _complete_candidate_classification
+    from app.db.classification.candidates import _complete_candidate_classification
 
     await database.init_database()
     candidate = await candidate_for(database)

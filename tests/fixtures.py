@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import psycopg
 import pytest
-from app.routes.collector import router
+from app.api.router import router
 from fastapi import FastAPI
 from helpers.access import inject_owners
 from helpers.classification import KEY_VARIABLES, KEYS
@@ -66,7 +66,7 @@ async def database(monkeypatch, test_database_url):
         _database_url_for_schema(test_database_url, schema_name),
     )
 
-    from app import database as database_module
+    from helpers import database as database_module
 
     database_module = importlib.reload(database_module)
     await database_module.open_database_pool()

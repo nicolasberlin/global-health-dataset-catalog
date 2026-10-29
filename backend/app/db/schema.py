@@ -3,18 +3,18 @@ from __future__ import annotations
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from .connection import (
+from app.db.connection import (
     _fetchall,
     _fetchone,
     _require_database_initialized,
     _require_database_pool,
     _set_initialized_pool,
 )
-from .migrations import migration_for_version
-from .migrations.v001 import (
+from app.db.migrations import migration_for_version
+from app.db.migrations.v001 import (
     DATASET_SEARCH_TEXT_CONFIGURATION as DATASET_SEARCH_TEXT_CONFIGURATION,
 )
-from .migrations.v001 import MANAGED_TABLES
+from app.db.migrations.v001 import MANAGED_TABLES
 
 # One complete baseline initializes an empty database; existing data is preserved.
 CURRENT_SCHEMA_VERSION = 1

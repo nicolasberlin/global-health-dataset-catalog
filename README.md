@@ -143,7 +143,13 @@ client do not depend on it. Search Lab remains versioned in `search_lab/`.
 ## Project layout
 
 ```text
-backend/app/       FastAPI routes, PostgreSQL access and background workers
+backend/app/       FastAPI application, SQL storage and background workers
+  api/             HTTP routes, request/response models and presentation
+  auth/            Local access and anonymous public sessions
+  search/          Discovery preparation and search summaries
+  policies/        Shared quota and retry rules
+  workers/         Background execution and persistence bridges
+  db/              Search, classification, collection and execution storage
 collector/         Repository discovery, classification and bounded validation
 browser/           Isolated browser service for collection fallback
 deploy/            Example Traefik proxy configuration

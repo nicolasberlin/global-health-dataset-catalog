@@ -1,104 +1,30 @@
-from __future__ import annotations
+"""Build the core FastAPI app and expose process health and readiness."""
 
-import asyncio
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from __future__ import annotations
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg.errors import LockNotAvailable, QueryCanceled
 
-from app.auth.security import (
-    api_cors_origins,
-    configure_access_openapi,
-    validate_api_security_configuration,
-)
-from app.database import (
-    close_database_pool,
-    init_database,
-    mark_interrupted_candidate_classifications_error,
-    mark_interrupted_collection_jobs_error,
-    mark_interrupted_search_sessions_error,
-    open_database_pool,
-    validate_database_schema,
-)
-from app.db.application_lock import application_lock
-from app.db.classification_votes import mark_interrupted_votes_error
-from app.db.connection import check_database_readiness, configured_database_timeouts
-from app.http_limits import (
+from app.api.middleware import (
+    ApplicationAvailabilityMiddleware,
     RequestBodyLimitMiddleware,
     configured_max_request_body_bytes,
     configured_request_body_timeout_seconds,
 )
-from app.lifecycle import ApplicationAvailabilityMiddleware, migrate_on_startup
-from app.retry_policy import RetryPolicy
-from app.routes.collector import router as collector_router
-from app.routes.sessions import router as sessions_router
-from app.workers.classification import classification_workers
-from app.workers.collection import collection_workers
-from app.workers.runtime import configured_worker_shutdown_seconds, worker_shutdown_budget
-from app.workers.search import search_workers
-from app.workers.state import request_worker_stop, workers_ready
+from app.api.router import router as collector_router
+from app.api.sessions import router as sessions_router
+from app.auth.security import (
+    api_cors_origins,
+    configure_access_openapi,
+)
+from app.db.connection import (
+    check_database_readiness,
+)
+from app.lifecycle import lifespan
+from app.workers.state import workers_ready
 from collector.classification.factory import validate_default_classifier_configuration
-from collector.config import configured_collection_budget_seconds
-from collector.observability import configure_operational_logging
-
-
-@asynccontextmanager
-async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    application.state.ready = False
-    application.state.runtime_enforced = True
-    application.state.ownership = None
-    configure_operational_logging()
-    validate_api_security_configuration()
-    RetryPolicy.configured()
-    configured_collection_budget_seconds()
-    configured_max_request_body_bytes()
-    configured_request_body_timeout_seconds()
-    configured_worker_shutdown_seconds()
-    configured_database_timeouts()
-    apply_migrations = migrate_on_startup()
-    try:
-        async with application_lock() as ownership:
-            application.state.ownership = ownership
-            await open_database_pool()
-            try:
-                if apply_migrations:
-                    await init_database()
-                else:
-                    await validate_database_schema()
-                await ownership.activate()
-                await mark_interrupted_search_sessions_error()
-                await mark_interrupted_candidate_classifications_error()
-                await mark_interrupted_collection_jobs_error()
-                await mark_interrupted_votes_error()
-                ownership.require_held()
-                watcher = asyncio.create_task(_watch_ownership(application, ownership))
-                try:
-                    async with worker_shutdown_budget(), \
-                            collection_workers(), classification_workers(), search_workers():
-                        ownership.require_held()
-                        application.state.ready = True
-                        try:
-                            yield
-                        finally:
-                            application.state.ready = False
-                            request_worker_stop()
-                finally:
-                    watcher.cancel()
-                    await asyncio.gather(watcher, return_exceptions=True)
-            finally:
-                await close_database_pool()
-    finally:
-        application.state.ready = False
-        application.state.ownership = None
-
-
-async def _watch_ownership(application, ownership) -> None:
-    await ownership.lost.wait()
-    application.state.ready = False
-    request_worker_stop(force=True)
 
 
 async def database_timeout(request, exception) -> JSONResponse:

@@ -22,11 +22,27 @@ or independent worker service is required.
 | PostgreSQL | Durable queues, ownership, receipts, votes, history and catalogue | [backend/app/db](../backend/app/db) |
 | Optional browser service | Render selected pages and probe resources within browser sessions | [browser](../browser) |
 
-Within the backend, `routes/` owns HTTP handlers, `auth/` owns authentication
-and visitor sessions, `workers/` executes background jobs, and `db/` owns SQL and
-transactions. `workers/runtime.py` and `workers/state.py` share worker lifecycle
-and health; `quota_policy.py` supplies admission rules used by HTTP and database
-operations.
+Within the backend, `api/` owns HTTP handlers, models, response presentation and
+request middleware. `auth/` owns access policy and anonymous sessions. `search/`
+prepares discovery results and derives search conclusions; `policies/` contains
+quota and model-retry rules shared across admission, storage and workers.
+
+`workers/` executes background work. Its `runtime.py` and `state.py` manage
+consumers and health, `sql_retries.py` retains outcomes during database failures,
+and `stores.py` bridges synchronous classifier/collector threads to asynchronous
+PostgreSQL writes. `lifecycle.py` starts and stops the pool and worker groups;
+`main.py` constructs the FastAPI application and serves health/readiness.
+
+`db/` owns SQL and transactions. Its `search/`, `classification/`, `collection/`
+and `execution/` packages separate domain records from shared coordination.
+Connection, schema, catalogue, serialization, history formats and maintenance
+remain at the database package root. Production callers import the owning module
+directly, without the former `app.database` re-export layer.
+
+Progress handlers and diagnostics share `api/search_progress.load_search_progress()`.
+It reads an owner-scoped snapshot and passes it to the presenter; no HTTP handler
+calls another route function. Each handler retains its response status, cache
+headers and, for accepted commands, its progress URL.
 
 Any HTTP client, including [scripts/api_client.py](../scripts/api_client.py), can
 submit searches and follow the persisted workflow independently.
@@ -61,7 +77,7 @@ independently accept the record page and validate at least one resource.
 
 ## Durable execution and lifecycle
 
-[main.py](../backend/app/main.py) validates configuration, acquires exclusive
+[lifecycle.py](../backend/app/lifecycle.py) validates configuration, acquires exclusive
 PostgreSQL ownership, opens the pool, and initializes or verifies the schema before
 starting workers. `/health` checks process responsiveness; `/ready` also checks
 runtime ownership, worker health, model configuration and database availability.
@@ -215,7 +231,7 @@ frontend, handlers, exclusive SQL and tests are all excluded from this repositor
 Shared transaction/owner guards, quotas, vote history and collection traces remain
 in the core because automatic processing and the full search diagnostic export
 need them. Response models used in core progress remain in
-`backend/app/routes/collector_schemas.py`.
+`backend/app/api/schemas.py`.
 
 Search Lab, its interface, scenarios and tests remain versioned in `search_lab/`.
 It observes the core API and PostgreSQL without executing application workers.

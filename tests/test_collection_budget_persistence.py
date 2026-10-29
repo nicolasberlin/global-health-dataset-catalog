@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pytest
-from app.db import task_retries
 from app.db.connection import _require_database_pool
+from app.db.execution import retries as task_retries
 from app.db.schema import CURRENT_SCHEMA_VERSION
 from helpers.workflows import candidate_for, decision
 

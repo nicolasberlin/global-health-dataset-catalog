@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.routes.collector_presenters import public_collection_job
+from app.api.presenters import public_collection_job
 
 pytestmark = pytest.mark.anyio
 

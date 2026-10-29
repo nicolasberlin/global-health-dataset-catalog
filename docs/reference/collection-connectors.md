@@ -67,7 +67,7 @@ cookies remain in the browser service.
 | `collection/orchestrator.py` | Attempts, fallback, limits, validation and reporting |
 | `collection/browser.py` | Generic browser-service client and session probes |
 | `backend/app/workers/collection.py` | Configuration, votes/traces and completion |
-| `backend/app/db/collection_completion.py` | Existing guarded atomic finalization |
+| `backend/app/db/collection/completion.py` | Existing guarded atomic finalization |
 
 `collection/strategies/dataverse.py` remains a compatibility wrapper. Dataverse
 catalogue discovery has no dedicated adapter yet; record collection uses the connector.

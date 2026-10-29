@@ -94,7 +94,7 @@ async def test_worker_preserves_failed_voter_cause_and_attempt(database, transpo
 async def test_vote_storage_failure_is_not_a_model_vote_failure(
     database, transport, monkeypatch,
 ):
-    from app import vote_store
+    from app.workers import stores as vote_store
 
     await database.init_database()
     candidate = await candidate_for(database)
@@ -125,7 +125,7 @@ async def test_vote_storage_failure_is_not_a_model_vote_failure(
 async def test_repaired_vote_storage_keeps_model_responses_without_new_invocations(
     database, transport, monkeypatch,
 ):
-    from app import vote_store
+    from app.workers import stores as vote_store
 
     await database.init_database()
     candidate = await candidate_for(database)

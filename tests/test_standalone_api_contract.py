@@ -6,10 +6,11 @@ from urllib.parse import urljoin
 from uuid import UUID
 
 import pytest
-from app.db.commands import CommandConflict
-from app.quota_policy import QuotaExceeded, QuotaUnavailable
-from app.routes import searches
-from app.routes.collector import router
+from app.api import search_progress as progress_reads
+from app.api import searches
+from app.api.router import router
+from app.db.execution.commands import CommandConflict
+from app.policies.quotas import QuotaExceeded, QuotaUnavailable
 from fastapi import FastAPI
 from helpers.access import inject_owners
 from httpx import ASGITransport, AsyncClient
@@ -127,7 +128,7 @@ async def test_location_is_followable_after_creation_and_replay(
         return (row, [], {}) if search_id == SEARCH_ID and owner == "alice" else None
 
     monkeypatch.setattr(searches, "admit_search", admit)
-    monkeypatch.setattr(searches, "read_search_progress", progress)
+    monkeypatch.setattr(progress_reads, "read_search_progress", progress)
     transport = ASGITransport(app=contract_api, root_path=prefix)
     async with AsyncClient(transport=transport, base_url="https://api.example") as client:
         path = f"{prefix}/collector/searches"

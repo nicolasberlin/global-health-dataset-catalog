@@ -113,7 +113,7 @@ installations. No setup script moves or deletes database volumes.
 
 | Change | Start here |
 | --- | --- |
-| Search admission, retry and ownership | `backend/app/routes/searches.py`, `backend/app/db/search_jobs.py` |
+| Search admission, idempotency and ownership | `backend/app/api/searches.py`, `backend/app/db/search/jobs.py` |
 | Repository discovery and normalization | `collector/repository_search/` |
 | Record-platform connector | `collector/collection/connectors/`, `collector/collection/registry.py` |
 | HTML/JSON-LD extraction | `collector/extraction/` |
@@ -122,23 +122,30 @@ installations. No setup script moves or deletes database volumes.
 | HTTP deadlines and destination policy | `collector/transport.py`, `collector/fetch.py` |
 | Search, classification and collection execution | `backend/app/workers/search.py`, `backend/app/workers/classification.py`, `backend/app/workers/collection.py` |
 | Worker lifecycle, state and persisted inputs | `backend/app/workers/runtime.py`, `backend/app/workers/state.py`, `backend/app/workers/jobs.py` |
+| Worker SQL recovery and thread bridges | `backend/app/workers/sql_retries.py`, `backend/app/workers/stores.py` |
 | Authentication and visitor sessions | `backend/app/auth/security.py`, `backend/app/auth/sessions.py` |
-| Quotas and work admission | `backend/app/quota_policy.py`, `backend/app/db/api_quotas.py` |
-| API response mapping | `backend/app/routes/collector_presenters.py`, `collector_schemas.py` |
+| Quotas and work admission | `backend/app/policies/quotas.py`, `backend/app/db/execution/quotas.py` |
+| API response mapping | `backend/app/api/presenters.py`, `backend/app/api/schemas.py` |
 
 The [architecture guide](technical-design-document.md) explains module boundaries.
 The [collection guide](reference/collection.md) owns extraction, validation, timeouts and
 recovery rules. Keep that policy out of UI state management.
 
-Implement database changes in the relevant `backend/app/db/` module.
-`backend/app/database.py` reexports existing database functions for compatibility;
-new code should import the owning `app.db` module. Similarly,
-`backend/app/routes/collector.py` assembles the routers and keeps compatibility
-exports; HTTP handlers belong in the topic-specific route modules above.
+Implement SQL changes in the owning `backend/app/db/` module. Search storage is
+under `db/search/`, candidate analysis under `db/classification/`, collection
+under `db/collection/`, and ownership/quotas/idempotency under `db/execution/`.
+Import directly from these modules; the former `app.database` re-export facade
+has been removed. `tests/helpers/database.py` is only a fixture convenience and
+is never imported by the application.
+
+`backend/app/api/router.py` registers the collector routes. HTTP handlers belong
+in the topic-specific API files. `api/search_progress.py` provides the shared
+owner-scoped progress read used by search replies and diagnostics; handlers do
+not call another HTTP route to obtain a snapshot.
 
 ### Follow a search through the code
 
-1. `backend/app/routes/searches.py` records the request in PostgreSQL.
+1. `backend/app/api/searches.py` records the request in PostgreSQL.
    `backend/app/workers/search.py` checks the saved catalogue, then discovers
    external candidates when needed; `backend/app/workers/classification.py`
    evaluates those candidates.
@@ -146,8 +153,11 @@ exports; HTTP handlers belong in the topic-specific route modules above.
    `collect_repository_candidate_with_report` in `collector/main.py`, which
    delegates to `collect_record` in `collector/collection/orchestrator.py`.
    This resolves one record's metadata and checks its resource links.
-3. `backend/app/db/collection_completion.py` stores the collection results and
+3. `backend/app/db/collection/completion.py` stores the collection results and
    accepted datasets in PostgreSQL. Clients read the saved progress and results.
+4. `backend/app/api/search_progress.py` loads the owner-scoped snapshot and calls
+   `api/presenters.py` to build the response. `search/summary.py` calculates its
+   overall processing status and conclusion.
 
 `collect_source_with_report` in `collector/main.py` is the separate bounded
 source-discovery entrypoint; use the single-record path above for an already

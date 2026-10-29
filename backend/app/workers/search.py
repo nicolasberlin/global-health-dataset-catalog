@@ -8,37 +8,42 @@ from concurrent.futures import Executor
 from contextvars import copy_context
 from datetime import datetime, timedelta, timezone
 
-from app.db.search_jobs import (
+from app.db.search.jobs import (
     claim_search,
     complete_discovery,
     fail_discovery,
     reserve_external_search,
 )
-from app.persistence import persist_with_retry
-from app.quota_policy import QuotaExceeded, QuotaUnavailable, classification_admission
-from app.search_service import DiscoveryResult, lookup_local, prepare_online
+from app.policies.quotas import QuotaExceeded, QuotaUnavailable, classification_admission
+from app.search.discovery import DiscoveryResult, lookup_local, prepare_online
 from app.workers.jobs import SearchJob
 from app.workers.runtime import persisted_workers
+from app.workers.sql_retries import persist_with_retry
 from collector.diagnostics import Diagnostic, exception_diagnostics
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.repository_search import search_repository_metadata
 
 
-async def _run_search(job: SearchJob, executor: Executor):
+async def _run_search(job: SearchJob, executor: Executor) -> None:
+    """Execute a claimed search locally first, then persist its final outcome."""
     origin = "database"
     saving = False
     with operation_context(search_id=job["id"]), \
             measure_operation("search_finished") as measurement:
         emit_event("search_started", outcome="started")
         try:
+            # Catalog hits avoid both the online quota charge and the provider call.
             datasets = await lookup_local(job["query"])
             if datasets:
                 result = DiscoveryResult("database", datasets=datasets)
             else:
                 origin = "online"
+                # Reserve once per attempt; False means this claim is no longer current.
                 allowed = await persist_with_retry(lambda: reserve_external_search(job))
                 if not allowed:
+                    measurement["outcome"] = "superseded"
                     return
+                # Run blocking provider I/O in a thread with the worker's execution/log context.
                 response = await asyncio.get_running_loop().run_in_executor(
                     executor,
                     copy_context().run,
@@ -50,6 +55,7 @@ async def _run_search(job: SearchJob, executor: Executor):
                     job["query"],
                     classification_admission(job["owner_id"], job["client_key"]),
                 )
+            # Retain the computed result during SQL retries and distinguish save failures.
             saving = True
             await persist_with_retry(
                 lambda: complete_discovery(job, result), retry_storage_failures=True,
@@ -83,6 +89,7 @@ async def _run_search(job: SearchJob, executor: Executor):
 
 
 async def _recover_search(job):
+    """Record a terminal failure if execution escaped without finalizing the search."""
     return await fail_discovery(
         job, origin=job.get("origin", "database"), error="Search could not be finalized.",
         diagnostics=[Diagnostic("persistence_failed", "search").to_dict()],
@@ -90,6 +97,7 @@ async def _recover_search(job):
 
 
 def search_workers(*, concurrency=None, poll_interval=1.0):
+    """Manage durable search workers, using SEARCH_MAX_CONCURRENCY by default."""
     return persisted_workers(
         claim=claim_search,
         execute=_run_search,

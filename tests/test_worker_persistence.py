@@ -7,8 +7,8 @@ from functools import partial
 from unittest.mock import Mock
 
 import pytest
-from app.db import classification_votes as votes
-from app.db.search_progress import read_search_progress
+from app.db.classification import votes as votes
+from app.db.search.progress import read_search_progress
 from app.workers import classification as classification_worker
 from app.workers import collection as collection_worker
 from app.workers import runtime as workers

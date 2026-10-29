@@ -3,6 +3,7 @@
 import http.client
 import json
 import os
+import shlex
 import socket
 import ssl
 import threading
@@ -46,7 +47,10 @@ def isolated_client_configuration(tmp_path, monkeypatch):
 @pytest.fixture
 def api_server():
     calls = []
-    state = {"polls": 0, "reject": False, "overrides": {}, "stop": threading.Event()}
+    state = {
+        "polls": 0, "reject": False, "overrides": {}, "stop": threading.Event(),
+        "prefix": "/api",
+    }
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -61,7 +65,7 @@ def api_server():
         def respond(self):
             body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
             calls.append((self.command, self.path, dict(self.headers), body))
-            path = self.path.removeprefix("/api")
+            path = self.path.removeprefix(state["prefix"])
             status, headers = 200, {}
             if path in {"/health", "/ready"}:
                 payload = {"status": "ok"}
@@ -81,7 +85,9 @@ def api_server():
                             "search_id": SEARCH_ID,
                             "attempt": 2 if path.endswith("/retry") else 1,
                             "execution_status": "queued",
-                            "progress_url": f"/api/collector/searches/{SEARCH_ID}/progress",
+                            "progress_url": (
+                                f"{state['prefix']}/collector/searches/{SEARCH_ID}/progress"
+                            ),
                         },
                     )
                 if state.pop("lose_command_once", False):
@@ -177,7 +183,8 @@ def api_server():
 
 def configure(url, *, mode="local", origin=""):
     api_cli.DEFAULT_ENV_FILE.write_text(
-        f"API_BASE_URL={url}\nAPI_CLIENT_MODE={mode}\nAPI_PUBLIC_ORIGIN={origin}\n"
+        f"API_BASE_URL={shlex.quote(url)}\nAPI_CLIENT_MODE={mode}\n"
+        f"API_PUBLIC_ORIGIN={shlex.quote(origin)}\n"
     )
 
 
@@ -208,6 +215,58 @@ def test_public_pipeline_and_cookie_resume(api_server, tmp_path):
     assert main(["--latest", *common]) == 0
     bootstraps = [call for call in calls if call[1] == "/api/session"]
     assert bootstraps[-1][2]["Cookie"] == "visitor=test-owner"
+
+
+@pytest.mark.parametrize("prefix", ["", "/api", "/ai-commons/api", "/collector"])
+@pytest.mark.parametrize("response_path", ["bare", "prefixed"])
+def test_query_and_latest_use_the_api_prefix_once(api_server, tmp_path, prefix, response_path):
+    url, calls, state = api_server
+    state["prefix"] = prefix
+    url = url.removesuffix("/api") + prefix
+    progress_path = f"/collector/searches/{SEARCH_ID}/progress"
+    returned_path = prefix + progress_path if response_path == "prefixed" else progress_path
+    state["overrides"]["/collector/searches"] = {
+        "payload": {
+            "search_id": SEARCH_ID, "execution_status": "queued", "attempt": 1,
+            "progress_url": returned_path,
+        },
+    }
+    configure(url, mode="public", origin="https://catalog.test")
+
+    assert main(["--query", "malaria"]) == 0
+    query_paths = [(method, urlsplit(path).path) for method, path, _, _ in calls]
+    result_paths = [
+        ("GET", prefix + progress_path),
+        ("GET", prefix + progress_path),
+        ("GET", f"{prefix}/collector/searches/{SEARCH_ID}/diagnostics"),
+        ("GET", f"{prefix}/collector/collected-datasets/by-id"),
+        ("GET", f"{prefix}/collector/collected-datasets/by-id"),
+    ]
+    assert query_paths == [
+        ("GET", prefix + "/health"),
+        ("GET", prefix + "/ready"),
+        ("POST", prefix + "/session"),
+        ("POST", prefix + "/collector/searches"),
+        *result_paths,
+    ]
+    command_headers = calls[3][2]
+    assert command_headers["Cookie"] == "visitor=test-owner"
+    assert command_headers["Origin"] == "https://catalog.test"
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["command"]["progress_url"] == returned_path
+    assert command_headers["Idempotency-Key"] == report["idempotency_key"]
+    assert not api_cli.DEFAULT_PENDING_FILE.exists()
+
+    calls.clear()
+    state["polls"] = 0
+    assert main(["--latest"]) == 0
+    assert [(method, urlsplit(path).path) for method, path, _, _ in calls] == [
+        ("GET", prefix + "/health"),
+        ("POST", prefix + "/session"),
+        ("GET", prefix + "/collector/searches/latest"),
+        *result_paths,
+    ]
+    assert calls[1][2]["Cookie"] == "visitor=test-owner"
 
 
 def test_quota_error_preserves_command_key_without_secrets(
@@ -579,6 +638,13 @@ def test_report_redacts_session_cookies_echoed_in_success(api_server, tmp_path):
 @pytest.mark.parametrize("change", [
     {"search_id": "bad"}, {"attempt": True}, {"execution_status": "bad"},
     {"progress_url": "https://other.example/receive"},
+    {"progress_url": "//other.example/receive"},
+    {"progress_url": f"/api-other/collector/searches/{SEARCH_ID}/progress"},
+    {"progress_url": f"/api/collector/searches/{OTHER_ID}/progress"},
+    {"progress_url": f"/api/../collector/searches/{SEARCH_ID}/progress"},
+    {"progress_url": f"/api/collector/searches/{SEARCH_ID}/progress/"},
+    {"progress_url": f"/api/collector/searches/{SEARCH_ID}/progress?"},
+    {"progress_url": f"/api/collector/searches/{SEARCH_ID}/progress#"},
 ])
 def test_invalid_command_ack_remains_uncertain(api_server, tmp_path, change):
     url, calls, state = api_server
@@ -664,9 +730,21 @@ def test_invalid_or_removed_options_fail_before_any_request(extra):
 @pytest.mark.parametrize("url", [
     "http://user:secret@localhost", "http://localhost:bad", "http://localhost/\nsecret",
     "http://[invalid", "https://remote.test", "http://localhost:0", "ftp://localhost",
+    "http://localhost?", "http://localhost?/", "http://localhost/api?value=1",
+    "http://localhost#", "http://localhost#/", "http://localhost/api#section",
 ])
 def test_invalid_configured_address_is_rejected(url):
     configure(url)
+    with pytest.raises(SystemExit):
+        parse_args(["--query", "x"])
+
+
+@pytest.mark.parametrize("origin", [
+    "https://catalog.test?", "https://catalog.test?/",
+    "https://catalog.test#", "https://catalog.test#/",
+])
+def test_public_origin_rejects_empty_query_or_fragment(origin):
+    configure("https://catalog.test/api", mode="public", origin=origin)
     with pytest.raises(SystemExit):
         parse_args(["--query", "x"])
 

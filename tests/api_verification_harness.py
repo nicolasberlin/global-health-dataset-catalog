@@ -15,7 +15,7 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from app import main
+from app import lifecycle, main
 
 from collector import fetch
 from collector.budget import check_collection_budget
@@ -124,7 +124,7 @@ class ModelFixtureTransport:
 # Keep production admission, workers, voting, parsing, validation and persistence.
 fetch.build_opener = lambda *handlers: PublicFixtureTransport()
 llm_client.build_opener = lambda *handlers: ModelFixtureTransport()
-main.search_workers = partial(main.search_workers, poll_interval=0.02)
-main.classification_workers = partial(main.classification_workers, poll_interval=0.02)
-main.collection_workers = partial(main.collection_workers, poll_interval=0.02)
+lifecycle.search_workers = partial(lifecycle.search_workers, poll_interval=0.02)
+lifecycle.classification_workers = partial(lifecycle.classification_workers, poll_interval=0.02)
+lifecycle.collection_workers = partial(lifecycle.collection_workers, poll_interval=0.02)
 app = main.app

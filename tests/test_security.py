@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from app.api.router import router
 from app.auth.security import (
     APIPrincipal,
     configure_access_openapi,
@@ -8,8 +9,7 @@ from app.auth.security import (
     require_api_principal,
     validate_api_security_configuration,
 )
-from app.quota_policy import QuotaExceeded, QuotaLimit
-from app.routes.collector import router
+from app.policies.quotas import QuotaExceeded, QuotaLimit
 from fastapi import FastAPI, HTTPException, Request, Response
 
 pytestmark = pytest.mark.anyio

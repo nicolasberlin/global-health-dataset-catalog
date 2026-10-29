@@ -6,7 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from app.db import application_lock as locking
+from app.db.execution import application_lock as locking
 
 pytestmark = pytest.mark.anyio
 
@@ -148,7 +148,7 @@ async def test_activation_is_runtime_only_and_idempotent(database):
 @pytest.mark.parametrize("activate", [False, True])
 async def test_missing_or_inactive_generation_rejects_claim(database, activate):
     from app.db.connection import _require_database_pool
-    from app.db.search_jobs import claim_search
+    from app.db.search.jobs import claim_search
 
     await database.init_database()
     async with locking.application_lock() as owner:

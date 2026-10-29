@@ -13,8 +13,8 @@ from functools import partial
 from typing import Protocol, TypeVar
 from uuid import UUID, uuid4
 
-from app.db.application_lock import ApplicationLockLost, require_application_ownership
-from app.persistence import persist_with_retry as _persist_with_retry
+from app.db.execution.application_lock import ApplicationLockLost, require_application_ownership
+from app.workers.sql_retries import persist_with_retry as _persist_with_retry
 from app.workers.state import (
     ShutdownBudget,
     WorkerState,
@@ -37,7 +37,7 @@ class Claim(Protocol[ClaimedItem]):
 
 
 async def persist_with_retry(operation, **kwargs):
-    """Compatibility export; policy lives independently in app.persistence."""
+    """Compatibility export; policy lives independently in app.workers.sql_retries."""
     return await _persist_with_retry(operation, event_sink=emit_event, **kwargs)
 
 

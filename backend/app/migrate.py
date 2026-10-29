@@ -6,14 +6,9 @@ import argparse
 import asyncio
 import sys
 
-from app.database import (
-    close_database_pool,
-    init_database,
-    open_database_pool,
-    validate_database_schema,
-)
-from app.db.application_lock import application_lock
-from app.db.schema import CURRENT_SCHEMA_VERSION
+from app.db.connection import close_database_pool, open_database_pool
+from app.db.execution.application_lock import application_lock
+from app.db.schema import CURRENT_SCHEMA_VERSION, init_database, validate_database_schema
 from collector.observability import configure_operational_logging, emit_event
 
 

@@ -1,12 +1,12 @@
 """Read persisted state for core assertions without optional browsing endpoints."""
 
+from app.db.classification.candidates import _CANDIDATE_COLUMNS, _repository_candidate_to_dict
 from app.db.connection import (
     _fetchall,
     _fetchone,
     _require_database_initialized,
     _require_database_pool,
 )
-from app.db.repository_candidates import _CANDIDATE_COLUMNS, _repository_candidate_to_dict
 
 
 async def stored_datasets(database):

@@ -8,17 +8,17 @@ from concurrent.futures import Executor
 from contextvars import copy_context
 from datetime import datetime
 
-from app.database import (
+from app.db.classification.candidates import (
     claim_candidate_classification,
-    complete_candidate_classification,
     fail_candidate_classification,
 )
-from app.db.task_retries import schedule_llm_retry
-from app.persistence import persist_with_retry
-from app.retry_policy import TRANSIENT
-from app.vote_store import PostgresVoteStore
+from app.db.classification.completion import complete_candidate_classification
+from app.db.execution.retries import schedule_llm_retry
+from app.policies.retries import TRANSIENT
 from app.workers.jobs import ClassificationJob
 from app.workers.runtime import persisted_workers
+from app.workers.sql_retries import persist_with_retry
+from app.workers.stores import PostgresVoteStore
 from collector.classification.factory import build_default_repository_result_classifier
 from collector.diagnostics import Diagnostic, exception_diagnostics
 from collector.observability import emit_event, measure_operation, operation_context

@@ -4,16 +4,14 @@ from dataclasses import asdict
 from uuid import UUID
 
 import pytest
-from app.auth.security import APIPrincipal
-from app.database import (
-    normalize_dataset_search_query,
-)
-from app.routes.collector_presenters import _collector_repository_candidate
-from app.routes.collector_schemas import (
+from app.api.presenters import _collector_repository_candidate
+from app.api.schemas import (
     CollectorCollectedDataset,
     CollectorRepositorySearchItem,
     CollectorRepositorySearchRequest,
 )
+from app.auth.security import APIPrincipal
+from app.db.catalog import normalize_dataset_search_query
 from helpers.workflows import CANDIDATE_ID
 
 from collector.classification.repository import RepositoryClassification

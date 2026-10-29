@@ -15,14 +15,14 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from app import vote_store as vote_module
-from app.persistence import persist_with_retry
-from app.vote_store import PostgresVoteStore
 from app.workers import classification as classification_worker
 from app.workers import collection as collection_worker
 from app.workers import runtime as workers
 from app.workers import search as search_worker
+from app.workers import stores as vote_module
+from app.workers.sql_retries import persist_with_retry
 from app.workers.state import request_worker_stop, workers_ready
+from app.workers.stores import PostgresVoteStore
 from psycopg import OperationalError
 from psycopg.errors import DiskFull, QueryCanceled
 
@@ -311,3 +311,34 @@ async def test_search_logs_have_correlation_without_query(monkeypatch, caplog):
                if record.name == "collector.operations"]
     assert records and all(record["search_id"] == str(item["id"]) for record in records)
     assert "sensitive-query" not in caplog.text
+
+
+async def test_superseded_search_skips_provider_and_finalization(monkeypatch, caplog):
+    module, item, lookup, run, complete_name, fail_name = install_execution(monkeypatch, "search")
+    lookup.return_value = []
+    reserve = AsyncMock(return_value=False)
+    provider = Mock()
+    complete, fail = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(module, "reserve_external_search", reserve)
+    monkeypatch.setattr(module, "search_repository_metadata", provider)
+    monkeypatch.setattr(module, complete_name, complete)
+    monkeypatch.setattr(module, fail_name, fail)
+    monkeypatch.setattr(observability.logger, "propagate", True)
+    caplog.set_level(logging.INFO, logger="collector.operations")
+
+    with ThreadPoolExecutor(1) as executor:
+        await run(item, executor)
+
+    reserve.assert_awaited_once_with(item)
+    provider.assert_not_called()
+    complete.assert_not_awaited()
+    fail.assert_not_awaited()
+    records = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == "collector.operations"
+    ]
+    finished = [record for record in records if record["event"] == "search_finished"]
+    assert len(finished) == 1
+    assert finished[0]["search_id"] == str(item["id"])
+    assert finished[0]["outcome"] == "superseded"

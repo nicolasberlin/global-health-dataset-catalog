@@ -34,8 +34,8 @@ def search_repository_metadata(
 
     Provider calls may perform outbound requests. A provider ``ValueError`` is
     downgraded to a warning when another provider succeeds; if every provider
-    fails, this function raises ``ValueError``. Results with invalid titles or
-    URLs are omitted before being returned.
+    fails, this function raises ``ValueError``. Results with invalid titles,
+    URLs or text incompatible with UTF-8/PostgreSQL are omitted with a warning.
     """
 
     normalized_query = query.strip()

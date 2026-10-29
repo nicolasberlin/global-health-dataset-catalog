@@ -22,8 +22,8 @@ from app.auth.sessions import (
     visitor_owner_id,
     visitor_session_settings,
 )
-from app.db.api_quotas import consume_quota_limits
-from app.quota_policy import (
+from app.db.execution.quotas import consume_quota_limits
+from app.policies.quotas import (
     QuotaExceeded,
     QuotaUnavailable,
     WorkAdmission,

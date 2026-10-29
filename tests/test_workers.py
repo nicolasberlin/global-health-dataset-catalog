@@ -47,7 +47,7 @@ async def test_permanent_errors_do_not_loop(failure):
 
 
 async def test_ownership_loss_is_never_retried_even_for_terminal_persistence():
-    from app.db.application_lock import ApplicationLockLost
+    from app.db.execution.application_lock import ApplicationLockLost
 
     operation = AsyncMock(side_effect=ApplicationLockLost("Superseded runtime."))
     with pytest.raises(ApplicationLockLost):

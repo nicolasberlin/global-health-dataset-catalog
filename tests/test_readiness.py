@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from app import main
+from app import lifecycle, main
 from app.db import connection as db
 from httpx import ASGITransport, AsyncClient
 from psycopg import OperationalError
@@ -54,7 +54,7 @@ async def test_success_reuses_pool_and_does_not_initialize_or_call_models(
 ):
     initialize = AsyncMock(side_effect=AssertionError("Must not migrate during probes"))
     create_client = Mock(side_effect=AssertionError("Must not construct an LLM client"))
-    monkeypatch.setattr(main, "init_database", initialize)
+    monkeypatch.setattr(lifecycle, "init_database", initialize)
     monkeypatch.setattr(factory, "HTTPJSONLLMClient", create_client)
     for _ in range(2):
         response = await client.get("/ready")
@@ -218,10 +218,10 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
     client, monkeypatch, fail_startup,
 ):
     close = AsyncMock()
-    monkeypatch.setattr(main, "configure_operational_logging", Mock())
-    monkeypatch.setattr(main, "validate_api_security_configuration", Mock())
-    monkeypatch.setattr(main, "open_database_pool", AsyncMock())
-    monkeypatch.setattr(main, "close_database_pool", close)
+    monkeypatch.setattr(lifecycle, "configure_operational_logging", Mock())
+    monkeypatch.setattr(lifecycle, "validate_api_security_configuration", Mock())
+    monkeypatch.setattr(lifecycle, "open_database_pool", AsyncMock())
+    monkeypatch.setattr(lifecycle, "close_database_pool", close)
     monkeypatch.setattr(main, "check_database_readiness", AsyncMock())
     ownership = Mock(healthy=True, lost=asyncio.Event(), activate=AsyncMock())
     lock_held = False
@@ -236,7 +236,7 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
             assert not main.app.state.ready
             lock_held = False
 
-    monkeypatch.setattr(main, "application_lock", lock)
+    monkeypatch.setattr(lifecycle, "application_lock", lock)
 
     async def startup_step():
         assert lock_held
@@ -249,7 +249,7 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
                  "mark_interrupted_search_sessions_error",
                  "mark_interrupted_candidate_classifications_error",
                  "mark_interrupted_collection_jobs_error"):
-        monkeypatch.setattr(main, name, startup_step)
+        monkeypatch.setattr(lifecycle, name, startup_step)
 
     @asynccontextmanager
     async def workers():
@@ -259,15 +259,15 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
         finally:
             assert (await client.get("/ready")).status_code == 503
 
-    monkeypatch.setattr(main, "collection_workers", workers)
-    monkeypatch.setattr(main, "classification_workers", workers)
-    monkeypatch.setattr(main, "search_workers", workers)
+    monkeypatch.setattr(lifecycle, "collection_workers", workers)
+    monkeypatch.setattr(lifecycle, "classification_workers", workers)
+    monkeypatch.setattr(lifecycle, "search_workers", workers)
     if fail_startup:
         with pytest.raises(RuntimeError, match="failed initialization"):
-            async with main.lifespan(main.app):
+            async with lifecycle.lifespan(main.app):
                 pytest.fail("Failed startup must not serve requests")
     else:
-        async with main.lifespan(main.app):
+        async with lifecycle.lifespan(main.app):
             assert (await client.get("/ready")).status_code == 200
         ownership.activate.assert_awaited_once()
     assert not main.app.state.ready

@@ -7,14 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
+from app.api.router import router as collector_router
+from app.api.sessions import router as sessions_router
 from app.auth.security import public_client_key, validate_api_security_configuration
 from app.auth.sessions import VisitorSessionSettings
-from app.db.api_quotas import consume_quota_limits
 from app.db.connection import _fetchall, _require_database_pool
-from app.db.search_jobs import claim_search
-from app.quota_policy import QuotaExceeded, classification_admission, public_daily_quota
-from app.routes.collector import router as collector_router
-from app.routes.sessions import router as sessions_router
+from app.db.execution.quotas import consume_quota_limits
+from app.db.search.jobs import claim_search
+from app.policies.quotas import QuotaExceeded, classification_admission, public_daily_quota
 from app.workers import search as search_worker
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
@@ -298,7 +298,7 @@ def test_ip_keys_group_ipv6_prefixes_and_do_not_store_raw_addresses():
 
 
 async def test_quota_storage_failure_never_issues_a_session(monkeypatch):
-    from app.quota_policy import QuotaUnavailable
+    from app.policies.quotas import QuotaUnavailable
 
     monkeypatch.setenv("API_AUTH_MODE", "public")
     monkeypatch.setenv("API_SESSION_SECRET", SECRET)

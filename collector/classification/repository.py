@@ -28,6 +28,8 @@ REPOSITORY_ACCEPTED_RELEVANCE_LABELS: set[RepositoryRelevanceLabel] = {
 
 # Bound untrusted repository inputs and model outputs at classification boundaries.
 MAX_REPOSITORY_TITLE_CHARS = 500
+# Match the public HttpUrl input limit; discovery also checks its URL parser.
+MAX_REPOSITORY_URL_CHARS = 2_083
 MAX_REPOSITORY_SEARCH_QUERY_CHARS = 300
 MAX_REPOSITORY_DESCRIPTION_CHARS = 20_000
 MAX_REPOSITORY_SOURCE_CHARS = 100

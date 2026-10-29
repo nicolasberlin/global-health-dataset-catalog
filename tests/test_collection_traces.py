@@ -1,6 +1,6 @@
 
 import pytest
-from app.db.collection_traces import read_collection_trace, safe_url, write_collection_trace
+from app.db.collection.traces import read_collection_trace, safe_url, write_collection_trace
 from helpers.workflows import claimed, observation
 
 from collector.storage.models import CollectionReport, CollectionResult

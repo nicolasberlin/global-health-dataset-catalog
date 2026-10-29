@@ -9,10 +9,12 @@ from functools import partial
 from uuid import uuid4
 
 import pytest
-from app.db import application_lock as locking
-from app.db import collection_jobs, repository_candidates, search_jobs
+from app.db.classification import candidates as repository_candidates
+from app.db.collection import jobs as collection_jobs
 from app.db.connection import _require_database_pool
-from app.db.task_retries import schedule_llm_retry
+from app.db.execution import application_lock as locking
+from app.db.execution.retries import schedule_llm_retry
+from app.db.search import jobs as search_jobs
 from app.workers import runtime as workers
 from psycopg import OperationalError
 

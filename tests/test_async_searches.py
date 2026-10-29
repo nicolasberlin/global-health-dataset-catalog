@@ -9,11 +9,11 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from app.db import search_jobs
-from app.db.commands import CommandConflict
 from app.db.connection import _require_database_pool
-from app.quota_policy import QuotaExceeded
-from app.search_service import DiscoveryResult
+from app.db.execution.commands import CommandConflict
+from app.db.search import jobs as search_jobs
+from app.policies.quotas import QuotaExceeded
+from app.search.discovery import DiscoveryResult
 from app.workers import classification as classification_worker
 from app.workers import collection as collection_worker
 from app.workers import search as search_worker
@@ -404,7 +404,8 @@ async def test_reinitialization_does_not_reschedule_completed_inline_search(data
 
 
 async def test_startup_consumes_queued_discovery_without_http(database, monkeypatch):
-    from app.main import app, lifespan
+    from app.lifecycle import lifespan
+    from app.main import app
 
     await database.init_database()
     session, _ = await admit(query="health")

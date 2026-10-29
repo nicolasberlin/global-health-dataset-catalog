@@ -9,8 +9,8 @@ import sys
 from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass
 
-from .connection import _fetchall, _fetchone, _require_database_pool
-from .schema import validate_database_schema
+from app.db.connection import _fetchall, _fetchone, _require_database_pool
+from app.db.schema import validate_database_schema
 
 
 @dataclass(frozen=True)
@@ -199,7 +199,7 @@ async def maintain_database(
     async with AsyncExitStack() as stack:
         ownership = None
         if apply:
-            from .application_lock import application_lock
+            from app.db.execution.application_lock import application_lock
 
             ownership = await stack.enter_async_context(application_lock())
         async with _require_database_pool().connection() as connection:
@@ -263,7 +263,7 @@ def main() -> None:
         parser.error(str(exception))
 
     async def run():
-        from .connection import close_database_pool, open_database_pool
+        from app.db.connection import close_database_pool, open_database_pool
 
         await open_database_pool()
         try:

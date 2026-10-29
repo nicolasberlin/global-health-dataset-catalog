@@ -173,6 +173,14 @@ The script always waits for the selected search. To retrieve an older search
 with another HTTP client, use its saved progress URL. Manual retry commands belong
 to the separately maintained web integration and are not published by this API.
 
+For `--query`, the client validates the returned `progress_url` and uses that
+path for progress checks. It accepts only the expected progress route for the
+acknowledged search, either with the configured API prefix or without it, and
+adds the prefix exactly once when sending the request. External URLs and other
+paths are rejected. With `--latest`, the response has no `progress_url`, so the
+client builds the progress path from the validated search ID. Diagnostics and
+dataset requests continue to use their documented routes.
+
 The client loads `.env.api-client` from the repository root, regardless of its
 working directory. It does not read the server's `.env.api` or `.env.local`.
 Environment variables override file values, which override local defaults:
@@ -190,6 +198,8 @@ access needs no token or cookie and only allows a loopback API address. Settings
 use literal `KEY=value` lines with optional quotes and comments, without shell
 evaluation or variable substitution. Unknown settings in the client file are
 rejected without echoing their values.
+`API_BASE_URL` and `API_PUBLIC_ORIGIN` must not contain `?` or `#`, including
+empty query or fragment delimiters.
 
 To use this Python script with a public API, configure the same client file:
 

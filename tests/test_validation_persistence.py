@@ -1,8 +1,8 @@
 from dataclasses import replace
 
 import pytest
+from app.api.presenters import _collector_validation
 from app.db.connection import _fetchone, _require_database_pool
-from app.routes.collector_presenters import _collector_validation
 from helpers.inspection import stored_datasets
 
 from collector.classification.page import PageClassification

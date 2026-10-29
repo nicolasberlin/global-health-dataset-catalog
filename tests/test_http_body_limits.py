@@ -8,7 +8,7 @@ import socket
 import time
 
 import pytest
-from app.http_limits import (
+from app.api.middleware import (
     RequestBodyLimitMiddleware,
     configured_max_request_body_bytes,
     configured_request_body_timeout_seconds,

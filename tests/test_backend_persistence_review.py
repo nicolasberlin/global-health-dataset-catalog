@@ -1,13 +1,13 @@
 """Regression coverage for public history, retention and baseline schema indexes."""
 
 import pytest
-from app.db.classification_votes import (
+from app.db.classification.votes import (
     claim_vote,
     finish_vote,
     prepare_vote_run,
     read_collection_vote_history,
 )
-from app.db.collection_traces import read_collection_trace, write_collection_trace
+from app.db.collection.traces import read_collection_trace, write_collection_trace
 from app.db.connection import _require_database_pool
 from app.db.maintenance import RetentionPolicy, maintain_database
 from app.db.public_history import HistoryPage, PublicVoteAttempt
@@ -256,7 +256,7 @@ async def test_maintenance_keeps_replay_targets_and_respects_explicit_window(dat
 
 
 async def test_maintenance_apply_refuses_live_api_ownership(database):
-    from app.db.application_lock import ApplicationAlreadyRunning, application_lock
+    from app.db.execution.application_lock import ApplicationAlreadyRunning, application_lock
 
     await database.init_database()
     async with application_lock():

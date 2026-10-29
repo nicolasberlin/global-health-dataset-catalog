@@ -10,9 +10,9 @@ from collections import Counter
 from dataclasses import replace
 
 import pytest
-from app.db import classification_votes as votes
+from app.db.classification import votes as votes
 from app.db.connection import _fetchall, _require_database_pool
-from app.vote_store import PostgresVoteStore
+from app.workers.stores import PostgresVoteStore
 from helpers.classification import KEYS, MODELS, PAGE
 from helpers.classification import response as _response
 from helpers.workflows import candidate_for, rows, wait_until

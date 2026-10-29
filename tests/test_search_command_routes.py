@@ -6,11 +6,12 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from app.db.commands import CommandConflict
+from app.api import search_progress as progress_reads
+from app.api import searches
+from app.api.router import router
 from app.db.connection import _fetchall, _require_database_pool
-from app.quota_policy import QuotaExceeded
-from app.routes import searches
-from app.routes.collector import router
+from app.db.execution.commands import CommandConflict
+from app.policies.quotas import QuotaExceeded
 from fastapi import FastAPI
 from helpers.access import inject_owners
 from httpx import ASGITransport, AsyncClient
@@ -52,7 +53,7 @@ def command_api(monkeypatch):
         pytest.fail("HTTP route must never call a discovery provider")
 
     monkeypatch.setattr(searches, "admit_search", admit)
-    monkeypatch.setattr(searches, "read_search_progress", progress)
+    monkeypatch.setattr(progress_reads, "read_search_progress", progress)
     monkeypatch.setattr("app.workers.search.search_repository_metadata", forbidden)
     app = FastAPI()
     app.include_router(router)
