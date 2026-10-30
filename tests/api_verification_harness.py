@@ -17,10 +17,10 @@ from urllib.parse import parse_qs, urlsplit
 
 from app import lifecycle, main
 
-from collector import fetch
 from collector.budget import check_collection_budget
 from collector.classification import llm_client
 from collector.execution import check_execution_active
+from collector.network import fetch
 
 LANDING_URL = "https://fixtures.example/records/malaria"
 CSV_URL = "https://fixtures.example/files/malaria.csv"

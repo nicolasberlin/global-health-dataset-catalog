@@ -24,9 +24,13 @@ from collector.collection.contracts import StrategyResult
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.registry import default_registry
 from collector.discovery.adapters.shared import DiscoveredPage
-from collector.fetch import PageFetchError, decode_json_body, is_timeout_error
+from collector.network.fetch import PageFetchError, decode_json_body, is_timeout_error
+from collector.network.transport import (
+    DeadlineHTTPHandler,
+    DeadlineHTTPSHandler,
+    RejectHTTPRedirects,
+)
 from collector.storage.models import HTTPProbe
-from collector.transport import DeadlineHTTPHandler, DeadlineHTTPSHandler, RejectHTTPRedirects
 from collector.validation.downloads import validate_distribution
 
 

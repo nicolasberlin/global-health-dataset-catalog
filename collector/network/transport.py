@@ -19,7 +19,7 @@ from collector.budget import (
     remaining_timeout,
     request_budget,
 )
-from collector.resolver import resolve_addresses
+from collector.network.resolver import resolve_addresses
 
 
 class _DeadlineReader(io.RawIOBase):

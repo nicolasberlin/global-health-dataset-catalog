@@ -3,10 +3,10 @@ from dataclasses import replace
 import pytest
 
 from collector.classification.page import PageClassification
+from collector.collection.service import collect_source_with_report
 from collector.config import CollectorConfig
 from collector.discovery.adapters import DiscoveredPage
-from collector.fetch import FetchedPage, PageFetchError
-from collector.main import collect_source_with_report
+from collector.network.fetch import FetchedPage, PageFetchError
 from collector.storage.models import DistributionCandidate, ValidationResult
 
 PAGE_URL = "https://example.org/dataset/malaria"

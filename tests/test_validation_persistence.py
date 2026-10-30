@@ -6,8 +6,8 @@ from app.db.connection import _fetchone, _require_database_pool
 from helpers.inspection import stored_datasets
 
 from collector.classification.page import PageClassification
+from collector.collection.service import collect_source_with_report
 from collector.discovery.adapters import DiscoveredPage
-from collector.main import collect_source_with_report
 from collector.repository_search import RepositorySearchResult
 from collector.storage.models import (
     CollectedDataset,

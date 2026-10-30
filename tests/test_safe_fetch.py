@@ -12,14 +12,14 @@ from urllib.request import ProxyHandler, Request, build_opener
 import pytest
 
 from collector.budget import request_budget
-from collector.fetch import (
+from collector.network.fetch import (
     PageFetchError,
     _connect_public,
     _PublicHTTPRedirectHandler,
     fetch_public_html,
     open_public_http_url,
 )
-from collector.transport import DeadlineHTTPSHandler
+from collector.network.transport import DeadlineHTTPSHandler
 from collector.validation.downloads import probe_url
 
 
@@ -31,7 +31,7 @@ def test_public_http_fetch_blocks_private_url_before_opening(monkeypatch):
         opened = True
         raise AssertionError("A private URL must not be opened.")
 
-    monkeypatch.setattr("collector.fetch.build_opener", fail_if_opened)
+    monkeypatch.setattr("collector.network.fetch.build_opener", fail_if_opened)
 
     with pytest.raises(ValueError, match="Private or local"):
         open_public_http_url(Request("http://127.0.0.1/private"), timeout=1)
@@ -55,7 +55,7 @@ def test_public_http_redirect_handler_blocks_private_destination():
 
 def test_distribution_probe_reports_private_url_as_invalid(monkeypatch):
     monkeypatch.setattr(
-        "collector.fetch.build_opener",
+        "collector.network.fetch.build_opener",
         lambda *args, **kwargs: pytest.fail("A private distribution must not be opened."),
     )
 
@@ -112,8 +112,8 @@ def test_dns_rebinding_cannot_change_the_connected_address(monkeypatch, address)
         return [_address(address if len(lookups) == 1 else "127.0.0.1", port)]
 
     connection = _Socket()
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", changing_dns)
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *args: connection)
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", changing_dns)
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *args: connection)
 
     with open_public_http_url(Request("http://rebind.example:8080/data"), timeout=2) as response:
         assert response.read() == b"ok"
@@ -152,11 +152,12 @@ def test_dns_rebinding_cannot_change_the_connected_address(monkeypatch, address)
 )
 def test_mixed_dns_answers_are_rejected_before_any_socket(monkeypatch, address):
     monkeypatch.setattr(
-        "collector.fetch.socket.getaddrinfo",
+        "collector.network.fetch.socket.getaddrinfo",
         lambda *args, **kwargs: [_address("93.184.216.34"), _address(address)],
     )
     monkeypatch.setattr(
-        "collector.fetch.socket.socket", lambda *args: pytest.fail("Must not create a socket")
+        "collector.network.fetch.socket.socket",
+        lambda *args: pytest.fail("Must not create a socket"),
     )
     with pytest.raises(ValueError, match="Private or local"):
         open_public_http_url(Request("http://mixed.example/data"), timeout=1)
@@ -171,8 +172,10 @@ def test_redirect_revalidates_dns_even_for_the_same_hostname(monkeypatch):
         created.append(connection)
         return connection
 
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", lambda *a, **kw: next(answers))
-    monkeypatch.setattr("collector.fetch.socket.socket", create_socket)
+    monkeypatch.setattr(
+        "collector.network.fetch.socket.getaddrinfo", lambda *a, **kw: next(answers)
+    )
+    monkeypatch.setattr("collector.network.fetch.socket.socket", create_socket)
     with pytest.raises(ValueError, match="Private or local"):
         open_public_http_url(Request("http://rebind.example/start"), timeout=1)
     assert len(created) == 1
@@ -191,8 +194,8 @@ def test_public_redirect_preserves_method_and_reports_final_url(monkeypatch, met
         hosts.append(host)
         return [_address("93.184.216.34", port)]
 
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", resolve)
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: next(connections))
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", resolve)
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *a: next(connections))
     with open_public_http_url(
         Request("http://public.example/", method=method), timeout=1
     ) as response:
@@ -208,17 +211,17 @@ def test_connection_failure_only_falls_back_to_validated_addresses(monkeypatch):
     second = _Socket()
     connections = iter([first, second])
     monkeypatch.setattr(
-        "collector.fetch.socket.getaddrinfo",
+        "collector.network.fetch.socket.getaddrinfo",
         lambda *a, **kw: [_address("93.184.216.34"), _address("93.184.216.35")],
     )
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: next(connections))
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *a: next(connections))
     assert _connect_public("public.example", 80, 1) is second
     assert first.closed
     assert second.destination == ("93.184.216.35", 80)
 
 
 def test_empty_dns_answer_fails_closed(monkeypatch):
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", lambda *a, **kw: [])
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", lambda *a, **kw: [])
     with pytest.raises(URLError, match="DNS returned no addresses"):
         open_public_http_url(Request("http://empty.example/"), timeout=1)
 
@@ -234,8 +237,8 @@ def test_environment_proxy_is_ignored(monkeypatch):
         hosts.append(host)
         return [_address("93.184.216.34", port)]
 
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", resolve)
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: _Socket())
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", resolve)
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *a: _Socket())
     with open_public_http_url(Request("http://public.example/"), timeout=1) as response:
         assert response.status == 200
     assert hosts == ["public.example"]
@@ -262,7 +265,8 @@ def test_explicit_proxy_is_rejected(scheme):
 )
 def test_invalid_urls_are_rejected_before_dns(monkeypatch, url):
     monkeypatch.setattr(
-        "collector.fetch.socket.getaddrinfo", lambda *a, **kw: pytest.fail("Must not resolve")
+        "collector.network.fetch.socket.getaddrinfo",
+        lambda *a, **kw: pytest.fail("Must not resolve"),
     )
     with pytest.raises(ValueError):
         open_public_http_url(Request(url), timeout=1)
@@ -270,9 +274,9 @@ def test_invalid_urls_are_rejected_before_dns(monkeypatch, url):
 
 def test_html_byte_limit_is_preserved(monkeypatch):
     monkeypatch.setattr(
-        "collector.fetch.socket.getaddrinfo", lambda *a, **kw: [_address("93.184.216.34")]
+        "collector.network.fetch.socket.getaddrinfo", lambda *a, **kw: [_address("93.184.216.34")]
     )
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: _Socket())
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *a: _Socket())
     with pytest.raises(PageFetchError, match="too large"):
         fetch_public_html("http://public.example/", max_bytes=1)
 
@@ -345,8 +349,8 @@ def test_real_tls_preserves_sni_and_verifies_certificate(
         contexts.append(context)
         return context
 
-    monkeypatch.setattr("collector.fetch.ssl.create_default_context", create_context)
-    monkeypatch.setattr("collector.fetch._connect_public", lambda *a: client_socket)
+    monkeypatch.setattr("collector.network.fetch.ssl.create_default_context", create_context)
+    monkeypatch.setattr("collector.network.fetch._connect_public", lambda *a: client_socket)
 
     class LocalPairSocket:
         def __getattr__(self, name):
@@ -355,7 +359,9 @@ def test_real_tls_preserves_sni_and_verifies_certificate(
         def setsockopt(self, *args):
             pass  # The local Unix socket pair has no TCP_NODELAY option.
 
-    monkeypatch.setattr("collector.transport._connect_with_deadline", lambda *a: LocalPairSocket())
+    monkeypatch.setattr(
+        "collector.network.transport._connect_with_deadline", lambda *a: LocalPairSocket()
+    )
 
     def open_request(url):
         if transport == "public":

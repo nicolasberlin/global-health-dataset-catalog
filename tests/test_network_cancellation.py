@@ -5,8 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from collector import fetch
 from collector.execution import ExecutionStopped
+from collector.network import fetch
 
 
 def test_cancellation_after_connect_closes_socket(monkeypatch):

@@ -15,7 +15,7 @@ from collector.extraction.limits import (
     json_objects,
     load_json_ld,
 )
-from collector.source_identity import identify_source
+from collector.extraction.source_identity import identify_source
 from collector.storage.metadata import normalize_doi
 from collector.storage.models import LinkCandidate, PageSnapshot
 from collector.url_utils import canonicalize_url, same_domain, select_dataset_url

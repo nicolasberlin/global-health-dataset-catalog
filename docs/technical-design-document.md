@@ -24,8 +24,9 @@ or independent worker service is required.
 
 Within the backend, `api/` owns HTTP handlers, models, response presentation and
 request middleware. `auth/` owns access policy and anonymous sessions. `search/`
-prepares discovery results and derives search conclusions; `policies/` contains
-quota and model-retry rules shared across admission, storage and workers.
+derives search conclusions from saved progress; discovery preparation belongs to
+`workers/search/discovery.py`. `policies/` contains quota and model-retry rules
+shared across admission, storage and workers.
 
 `workers/` executes background work through `SearchWorker`, `ClassificationWorker`
 and `CollectionWorker`. They satisfy the structural `Worker` protocol in
@@ -40,11 +41,32 @@ PostgreSQL writes. `lifecycle.py` constructs the worker instances and starts and
 stops their groups and the pool; `main.py` constructs the FastAPI application and
 serves health/readiness.
 
-`db/` owns SQL and transactions. Its `search/`, `classification/`, `collection/`
-and `execution/` packages separate domain records from shared coordination.
-Connection, schema, catalogue, serialization, history formats and maintenance
-remain at the database package root. Production callers import the owning module
-directly, without the former `app.database` re-export layer.
+`db/` owns SQL and transactions. Its `catalog/`, `search/`, `classification/`,
+`collection/` and `execution/` packages separate domain records from shared
+coordination. Within `catalog/`, `datasets.py` saves and reconstructs dataset
+aggregates, `distributions.py` persists resource and validation evidence,
+`observations.py` links discoveries to source jobs, and `search.py` performs
+catalogue query normalization and PostgreSQL full-text search.
+`collection/reservations.py` reserves or reuses follow-up for accepted candidates;
+`collection/jobs.py` owns job acquisition, reads and lifecycle transitions.
+Connection, schema, serialization, history formats and maintenance remain at the
+database package root. Production callers import the owning module directly,
+without the former `app.database` re-export layer.
+
+The collector's public collection implementation is in `collection/service.py`,
+alongside its pipeline and record orchestrator. `collector/main.py` remains a
+compatibility import surface for `collect_source_with_report`,
+`collect_repository_candidate_with_report`, `analyze_discovered_page` and
+`analyze_html_page`, plus the `DiscoverFunction`, `FetchHTMLFunction` and
+`ValidateDistributionFunction` type aliases. Internal callers import the service
+directly. Source identification belongs to `extraction/source_identity.py`.
+
+`collector/network/` groups HTTP fetching (`fetch.py`), connection and deadline
+handling (`transport.py`), bounded DNS resolution (`resolver.py`) and the shared
+public-address policy (`policy.py`). The package initializer does not import
+these implementations, and `policy.py` needs only the standard library. Container
+entrypoints can therefore import firewall address rules before loading the
+application's dependency stack. General URL normalization stays in `url_utils.py`.
 
 Progress handlers and diagnostics share `api/search_progress.load_search_progress()`.
 It reads an owner-scoped snapshot and passes it to the presenter; no HTTP handler
@@ -183,9 +205,12 @@ See [Collection](reference/collection.md) and [connector contracts](reference/co
   `dataset_discovery_observations` links successful observations to their jobs.
   The historical `data_sources` table has no active administration API.
 
-Accepted classification and job association commit together. Dataset,
-distribution, observation and job-completion writes also commit together;
-a failed transaction cannot announce a saved dataset or completed job.
+Accepted classification and job association commit together: classification
+completion calls the reservation helper on its existing transaction. Catalogue
+dataset, distribution and observation helpers also use their caller's connection;
+collection completion saves those records and the job outcome in one transaction.
+A failed transaction cannot announce a saved dataset or completed job, and a
+standalone dataset batch is rolled back in full if any member fails.
 Catalogue records conflict on normalized dataset URL; distributions conflict on
 `(dataset_id, url, format)`. Empty incoming descriptions preserve existing values.
 Identity/provenance-aware enrichment can fill missing metadata after collection,

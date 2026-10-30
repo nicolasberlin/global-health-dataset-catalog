@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from typing import Literal, Protocol, TypedDict
 
-from app.db.catalog import normalize_dataset_search_query, search_collected_datasets
+from app.db.catalog.search import normalize_dataset_search_query, search_collected_datasets
 from app.policies.quotas import WorkAdmission
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 

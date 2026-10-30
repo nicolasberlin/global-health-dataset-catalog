@@ -20,9 +20,9 @@ from collector.budget import (
 from collector.classification.page import PageClassificationError
 from collector.diagnostics import retry_after
 from collector.execution import check_execution_active
-from collector.fetch import decode_json_body, is_timeout_error
+from collector.network.fetch import decode_json_body, is_timeout_error
+from collector.network.transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 from collector.observability import measure_operation
-from collector.transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 RequestBodyBuilder = Callable[[dict[str, object], str], dict[str, object]]
 ResponseTextExtractor = Callable[[object], str]

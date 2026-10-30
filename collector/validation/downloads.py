@@ -19,7 +19,7 @@ from collector.budget import check_collection_budget, read_with_budget, remainin
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic
 from collector.extraction.distributions import guess_format
-from collector.fetch import open_public_http_url
+from collector.network.fetch import open_public_http_url
 from collector.storage.models import (
     DistributionCandidate,
     HTTPProbe,

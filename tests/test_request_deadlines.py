@@ -29,7 +29,7 @@ from collector.config import DEFAULT_CONFIG
 from collector.discovery.adapters.shared import fetch_json_url
 from collector.discovery.sitemap import fetch_text_url
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
-from collector.fetch import (
+from collector.network.fetch import (
     PageFetchError,
     decode_text_body,
     fetch_public_html,
@@ -92,10 +92,10 @@ class ClockedSocket:
 
 def install_sockets(monkeypatch, connections):
     values = iter(connections)
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", lambda host, port, *a, **kw: [
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", lambda host, port, *a, **kw: [
         (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port)),
     ])
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *args: next(values))
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *args: next(values))
 
 
 @pytest.mark.parametrize("phase", ["status", "headers", "body", "chunk_headers"])
@@ -158,7 +158,7 @@ def test_real_socket_trickle_is_stopped_at_the_absolute_deadline(monkeypatch, pr
         except OSError:
             pass  # Client closes its transport at the deadline.
 
-    monkeypatch.setattr("collector.fetch._connect_public", lambda *a: client)
+    monkeypatch.setattr("collector.network.fetch._connect_public", lambda *a: client)
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     started = time.monotonic()
@@ -195,8 +195,10 @@ def test_dns_result_arriving_after_deadline_cannot_start_a_connection(monkeypatc
         clock[0] += 6
         return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 80))]
 
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", lookup)
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: pytest.fail("late socket"))
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", lookup)
+    monkeypatch.setattr(
+        "collector.network.fetch.socket.socket", lambda *a: pytest.fail("late socket")
+    )
     with pytest.raises((URLError, TimeoutError)):
         open_public_http_url(Request("http://public.example/"), timeout=5)
     assert clock[0] == 6
@@ -316,7 +318,7 @@ def test_browser_cleanup_remains_bounded_after_owner_expiry_and_cancellation(mon
 
 
 @pytest.mark.parametrize("module,call", [
-    ("collector.fetch", lambda: fetch_public_html("https://public.example/")),
+    ("collector.network.fetch", lambda: fetch_public_html("https://public.example/")),
     ("collector.discovery.adapters.shared", lambda: fetch_json_url("https://public.example/")),
     ("collector.collection.http", lambda: fetch_record_json("https://public.example/")),
     ("collector.discovery.sitemap", lambda: fetch_text_url("https://public.example/")),

@@ -11,11 +11,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from collector import resolver
 from collector.budget import CollectionBudgetExceeded, collection_budget
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
-from collector.fetch import _connect_public
-from collector.transport import _connect_with_deadline
+from collector.network import resolver
+from collector.network.fetch import _connect_public
+from collector.network.transport import _connect_with_deadline
 
 
 def address(ip="93.184.216.34", port=443):
@@ -233,7 +233,7 @@ def test_process_exits_with_an_os_lookup_still_blocked():
     script = """
 import socket
 from threading import Event
-from collector.resolver import resolve_addresses
+from collector.network.resolver import resolve_addresses
 socket.getaddrinfo = lambda *args, **kwargs: Event().wait()
 try:
     resolve_addresses('blocked.example', 443, timeout=0.05)

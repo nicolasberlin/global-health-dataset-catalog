@@ -11,9 +11,9 @@ import pytest
 
 from collector.budget import CollectionBudgetExceeded
 from collector.classification.page import PageClassification
+from collector.collection.service import analyze_discovered_page, collect_source_with_report
 from collector.discovery.adapters import CKANAdapter, DataJsonAdapter, SocrataAdapter
 from collector.discovery.adapters.shared import JsonDocument, fetch_json_url
-from collector.main import analyze_discovered_page, collect_source_with_report
 from collector.storage.models import ValidationResult
 
 

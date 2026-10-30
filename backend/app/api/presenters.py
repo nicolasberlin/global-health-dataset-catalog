@@ -23,7 +23,7 @@ from app.api.schemas import (
     CollectorSearchProgressResponse,
     CollectorValidation,
 )
-from app.db.collection.jobs import CollectionJobReservation
+from app.db.collection.reservations import CollectionJobReservation
 from app.db.collection.traces import safe_coverage, safe_observation
 from app.search.summary import summarize_search
 from collector.diagnostics import Diagnostic, public_diagnostics

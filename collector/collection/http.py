@@ -16,7 +16,7 @@ from collector.budget import active_collection_budget, check_collection_budget, 
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.diagnostics import retry_after
-from collector.fetch import decode_json_body, is_timeout_error, open_public_http_url
+from collector.network.fetch import decode_json_body, is_timeout_error, open_public_http_url
 from collector.observability import emit_event
 
 RETRYABLE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}

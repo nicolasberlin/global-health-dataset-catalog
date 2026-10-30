@@ -23,10 +23,13 @@ from collector.budget import (
     collection_budget,
 )
 from collector.classification.voting import run_voters
+from collector.collection.service import (
+    collect_repository_candidate_with_report,
+    collect_source_with_report,
+)
 from collector.config import CollectorConfig, configured_collection_budget_seconds
 from collector.discovery.adapters import DiscoveredPage
-from collector.fetch import FetchedPage
-from collector.main import collect_repository_candidate_with_report, collect_source_with_report
+from collector.network.fetch import FetchedPage
 from collector.storage.models import DistributionCandidate, ValidationResult
 
 
@@ -317,7 +320,9 @@ async def test_expired_job_concludes_without_any_external_call(database, monkeyp
             "UPDATE collection_jobs SET collection_deadline_at = NOW() - INTERVAL '1 second'"
         )
     job = await database.claim_pending_collection_job()
-    monkeypatch.setattr("collector.main.fetch_public_html", lambda *a, **kw: pytest.fail("fetch"))
+    monkeypatch.setattr(
+        "collector.collection.service.fetch_public_html", lambda *a, **kw: pytest.fail("fetch")
+    )
     monkeypatch.setattr(
         "collector.classification.llm_client.HTTPJSONLLMClient._classify_request",
         lambda *a, **kw: pytest.fail("LLM"),

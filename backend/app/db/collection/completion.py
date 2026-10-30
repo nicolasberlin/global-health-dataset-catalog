@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.db.catalog import _save_collected_dataset
+from app.db.catalog.datasets import _save_collected_dataset
 from app.db.collection.jobs import (
     _job_dataset_ids,
     _lock_running_collection_job,

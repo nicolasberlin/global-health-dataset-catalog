@@ -5,13 +5,9 @@ Production modules import their operations directly from app.db.
 
 from __future__ import annotations
 
-from app.db.catalog import (
-    get_collected_datasets,
-    list_dataset_discovery_observations,
-    normalize_dataset_search_query,
-    save_collected_datasets,
-    search_collected_datasets,
-)
+from app.db.catalog.datasets import get_collected_datasets, save_collected_datasets
+from app.db.catalog.observations import list_dataset_discovery_observations
+from app.db.catalog.search import normalize_dataset_search_query, search_collected_datasets
 from app.db.classification.candidates import (
     claim_candidate_classification,
     complete_search_session_with_repository_candidates,
@@ -25,7 +21,6 @@ from app.db.classification.completion import (
 )
 from app.db.collection.completion import complete_collection_job
 from app.db.collection.jobs import (
-    CollectionJobReservation,
     claim_pending_collection_job,
     create_collection_job,
     get_collection_job,
@@ -34,6 +29,9 @@ from app.db.collection.jobs import (
     mark_collection_job_error,
     mark_collection_job_running,
     mark_interrupted_collection_jobs_error,
+)
+from app.db.collection.reservations import (
+    CollectionJobReservation,
     reserve_repository_candidate_collection_job,
 )
 from app.db.connection import close_database_pool, open_database_pool

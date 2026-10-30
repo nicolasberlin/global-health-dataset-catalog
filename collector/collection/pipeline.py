@@ -14,7 +14,7 @@ from collector.discovery.adapters.shared import EXCLUDED_RESOURCE_FORMATS, Disco
 from collector.extraction.distributions import EXCLUDED_EXTENSIONS, extract_distributions
 from collector.extraction.errors import ExtractionError
 from collector.extraction.extractor import extract_page
-from collector.fetch import PageFetchError
+from collector.network.fetch import PageFetchError
 from collector.storage.metadata import metadata_evidence, normalize_doi
 from collector.storage.models import CollectedDataset, DistributionCandidate, PageSnapshot
 from collector.url_utils import normalize_http_url

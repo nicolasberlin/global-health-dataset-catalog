@@ -16,9 +16,9 @@ from collector.collection.connectors.metadata import MetadataReader, api_link
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.http import JsonResponse
 from collector.collection.registry import ConnectorRegistry, default_registry
+from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG, configured_repository_connectors
-from collector.fetch import FetchedPage
-from collector.main import collect_repository_candidate_with_report
+from collector.network.fetch import FetchedPage
 from collector.storage.models import DistributionCandidate, ValidationResult
 
 ITEM = "11111111-1111-4111-8111-111111111111"

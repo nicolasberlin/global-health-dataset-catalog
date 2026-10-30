@@ -26,6 +26,10 @@ from collector.classification.checkpoints import VoteStore
 from collector.classification.factory import build_default_page_classifier
 from collector.classification.page import PageClassifier
 from collector.collection.browser import configured_browser
+from collector.collection.service import (
+    collect_repository_candidate_with_report,
+    collect_source_with_report,
+)
 from collector.config import (
     DEFAULT_CONFIG,
     configured_collection_budget_seconds,
@@ -33,7 +37,6 @@ from collector.config import (
     configured_repository_connectors,
 )
 from collector.diagnostics import Diagnostic
-from collector.main import collect_repository_candidate_with_report, collect_source_with_report
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.storage.models import CollectionResult
 

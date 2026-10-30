@@ -15,10 +15,10 @@ from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.failures import CollectionTransportError
 from collector.collection.http import JsonResponse
+from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic
-from collector.fetch import FetchedPage
-from collector.main import collect_repository_candidate_with_report
+from collector.network.fetch import FetchedPage
 from collector.storage.models import ValidationResult
 
 PID = "doi:10.7910/DVN/AXRYQD/RTPFQI"
@@ -52,7 +52,7 @@ def test_retry_after_prevents_fallback_requests_to_same_repository():
 
 def test_html_socket_timeout_is_classified_as_timeout():
     def slow(_):
-        from collector.fetch import PageFetchError
+        from collector.network.fetch import PageFetchError
 
         raise PageFetchError("transport failed") from socket.timeout()
 

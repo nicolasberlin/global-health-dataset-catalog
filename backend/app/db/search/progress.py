@@ -5,7 +5,8 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.db.classification.candidates import _CANDIDATE_COLUMNS, _repository_candidate_to_dict
-from app.db.collection.jobs import CollectionJobReservation, _collection_job_to_dict
+from app.db.collection.jobs import _collection_job_to_dict
+from app.db.collection.reservations import CollectionJobReservation
 from app.db.connection import Row, _fetchall, _fetchone, _require_database_pool
 from app.db.search.sessions import _normalized_owner_id
 

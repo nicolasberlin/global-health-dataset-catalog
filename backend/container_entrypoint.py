@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from collector.network_policy import BLOCKED_IPV4, BLOCKED_IPV6, PUBLIC_IPV6
+from collector.network.policy import BLOCKED_IPV4, BLOCKED_IPV6, PUBLIC_IPV6
 
 
 def build_rules(

@@ -15,7 +15,7 @@ from urllib.request import Request
 
 from collector.budget import check_collection_budget, read_with_budget
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import decode_text_body, open_public_http_url
+from collector.network.fetch import decode_text_body, open_public_http_url
 from collector.url_utils import canonicalize_url, same_domain
 
 TextFetcher = Callable[[str], str]

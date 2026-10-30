@@ -11,12 +11,15 @@ from collector.budget import check_collection_budget
 from collector.classification.page import PageClassification, PageClassificationError
 from collector.classification.page_llm_classifier import LLMPageClassifier
 from collector.collection.contracts import StrategyResult
+from collector.collection.service import (
+    collect_repository_candidate_with_report,
+    collect_source_with_report,
+)
 from collector.config import CollectorConfig
 from collector.discovery.adapters.shared import DiscoveredPage
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
-from collector.fetch import FetchedPage
-from collector.main import collect_repository_candidate_with_report, collect_source_with_report
+from collector.network.fetch import FetchedPage
 from collector.storage.models import PageSnapshot, ValidationResult
 
 URL = "https://example.org/health/record"

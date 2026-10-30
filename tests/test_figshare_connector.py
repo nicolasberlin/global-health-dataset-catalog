@@ -11,9 +11,9 @@ from collector.classification.page import PageClassification
 from collector.collection.connectors.figshare import FigshareConnector
 from collector.collection.http import JsonResponse
 from collector.collection.registry import default_registry
+from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import FetchedPage
-from collector.main import collect_repository_candidate_with_report
+from collector.network.fetch import FetchedPage
 from collector.storage.models import DistributionCandidate, ValidationResult
 
 URL = "https://springernature.figshare.com/articles/dataset/BCG_data/20522745/1"

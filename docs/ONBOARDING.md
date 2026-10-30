@@ -116,10 +116,16 @@ installations. No setup script moves or deletes database volumes.
 | Search admission, idempotency and ownership | `backend/app/api/searches.py`, `backend/app/db/search/jobs.py` |
 | Repository discovery and normalization | `collector/repository_search/` |
 | Record-platform connector | `collector/collection/connectors/`, `collector/collection/registry.py` |
+| Collection entry points and orchestration | `collector/collection/service.py`, `collector/collection/orchestrator.py` |
 | HTML/JSON-LD extraction | `collector/extraction/` |
+| Source identity from extracted evidence | `collector/extraction/source_identity.py` |
 | Prompts, voters and classification parsing | `collector/classification/` |
 | Distribution access checks | `collector/validation/downloads.py` |
-| HTTP deadlines and destination policy | `collector/transport.py`, `collector/fetch.py` |
+| HTTP fetching and request deadlines | `collector/network/fetch.py`, `collector/network/transport.py` |
+| DNS and shared public-address policy | `collector/network/resolver.py`, `collector/network/policy.py` |
+| Catalogue aggregates and distribution evidence | `backend/app/db/catalog/datasets.py`, `backend/app/db/catalog/distributions.py` |
+| Catalogue observations and full-text search | `backend/app/db/catalog/observations.py`, `backend/app/db/catalog/search.py` |
+| Accepted-candidate collection reservation | `backend/app/db/collection/reservations.py`, `backend/app/db/classification/completion.py` |
 | Search, classification and collection worker classes | `backend/app/workers/search/workers.py`, `backend/app/workers/classification/workers.py`, `backend/app/workers/collection/workers.py` |
 | Worker contract, lifecycle, state and persisted inputs | `backend/app/workers/contracts.py`, `backend/app/workers/runtime.py`, `backend/app/workers/state.py`, `backend/app/workers/jobs.py` |
 | Shared model-failure recovery | `backend/app/workers/failures.py` |
@@ -132,12 +138,27 @@ The [architecture guide](technical-design-document.md) explains module boundarie
 The [collection guide](reference/collection.md) owns extraction, validation, timeouts and
 recovery rules. Keep that policy out of UI state management.
 
-Implement SQL changes in the owning `backend/app/db/` module. Search storage is
-under `db/search/`, candidate analysis under `db/classification/`, collection
-under `db/collection/`, and ownership/quotas/idempotency under `db/execution/`.
+Implement SQL changes in the owning `backend/app/db/` module. Catalogue storage
+is under `db/catalog/`, search sessions under `db/search/`, candidate analysis
+under `db/classification/`, collection jobs under `db/collection/`, and
+ownership/quotas/idempotency under `db/execution/`.
 Import directly from these modules; the former `app.database` re-export facade
 has been removed. `tests/helpers/database.py` is only a fixture convenience and
 is never imported by the application.
+
+Catalogue writes compose through the caller's connection: dataset metadata,
+observations and distributions remain one aggregate. Collection completion saves
+that aggregate and the job outcome in one transaction. Similarly, the helper in
+`db/collection/reservations.py` reserves follow-up on the classification
+transaction, so an accepted decision cannot commit without its associated result
+or job. Keep these transaction boundaries when changing a single storage module.
+
+Internal collection callers use `collector.collection.service`. The compatibility
+module `collector.main` retains the four public collection/analysis entry points
+and their three callable type aliases; it contains no collection implementation.
+The shared network policy and its package initializer use only the standard
+library, allowing container firewall entrypoints to import the address rules
+before application dependencies are loaded.
 
 `backend/app/api/router.py` registers the collector routes. HTTP handlers belong
 in the topic-specific API files. `api/search_progress.py` provides the shared
@@ -152,7 +173,7 @@ not call another HTTP route to obtain a snapshot.
    `backend/app/workers/classification/workers.py` evaluates those candidates.
 2. For an accepted candidate, `CollectionWorker` in
    `backend/app/workers/collection/workers.py` calls
-   `collect_repository_candidate_with_report` in `collector/main.py`, which
+   `collect_repository_candidate_with_report` in `collector/collection/service.py`, which
    delegates to `collect_record` in `collector/collection/orchestrator.py`.
    This resolves one record's metadata and checks its resource links.
 3. `backend/app/db/collection/completion.py` stores the collection results and
@@ -161,7 +182,7 @@ not call another HTTP route to obtain a snapshot.
    `api/presenters.py` to build the response. `search/summary.py` calculates its
    overall processing status and conclusion.
 
-`collect_source_with_report` in `collector/main.py` is the separate bounded
+`collect_source_with_report` in `collector/collection/service.py` is the separate bounded
 source-discovery entrypoint; use the single-record path above for an already
 identified repository candidate.
 

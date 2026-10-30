@@ -52,6 +52,7 @@ cookies remain in the browser service.
 | Module | Responsibility |
 | --- | --- |
 | `collection/records.py` | Normalized observations and scoped identity |
+| `collection/service.py` | Public collection entry points and bounded source collection |
 | `collection/connectors/__init__.py` | Record connector protocol |
 | `collection/connectors/dataverse.py` | Dataverse response validation and scope |
 | `collection/connectors/zenodo.py` | Zenodo response validation and scope |
@@ -64,15 +65,22 @@ cookies remain in the browser service.
 | `collection/compatibility.py` | Bridge to existing classification contracts |
 | `collection/pipeline.py` | Common extraction and classification |
 | `extraction/limits.py`, `extraction/graph.py` | Bounded HTML/JSON-LD evidence and local Dataset identity selection |
+| `extraction/source_identity.py` | Source identity derived from extracted evidence |
 | `collection/orchestrator.py` | Attempts, fallback, limits, validation and reporting |
 | `collection/browser.py` | Generic browser-service client and session probes |
+| `network/fetch.py`, `network/transport.py`, `network/resolver.py`, `network/policy.py` | Shared bounded HTTP, DNS and destination policy |
 | `backend/app/workers/collection/workers.py` | Configuration, votes/traces and completion |
+| `backend/app/db/collection/reservations.py` | Candidate association and job reuse on the classification transaction |
 | `backend/app/db/collection/completion.py` | Existing guarded atomic finalization |
+| `backend/app/db/catalog/` | Dataset aggregates, distributions, observations and catalogue search |
 
-`collection/strategies/dataverse.py` remains a compatibility wrapper. Dataverse
-catalogue discovery has no dedicated adapter yet; record collection uses the connector.
+`collection/strategies/dataverse.py` remains a compatibility wrapper. The former
+`collector.main` entry points remain compatibility imports from
+`collector.collection.service`; internal callers use the service directly.
+Dataverse catalogue discovery has no dedicated adapter yet; record collection uses
+the connector.
 
-Public entry points in `collector.main` and the record orchestrator use the same
+Public entry points in `collector.collection.service` and the record orchestrator use the same
 pipeline. HTML/JSON-LD extraction limits and unresolved Dataset identity produce
 controlled diagnostics; permitted later methods can recover while retaining the
 failed method's evidence. Context documents are never fetched. Details and

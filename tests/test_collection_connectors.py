@@ -14,10 +14,10 @@ from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.connectors.zenodo import ZenodoConnector
 from collector.collection.registry import ConnectorRegistry, default_registry
+from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
 from collector.discovery.adapters.shared import fetch_json_url
-from collector.fetch import FetchedPage
-from collector.main import collect_repository_candidate_with_report
+from collector.network.fetch import FetchedPage
 from collector.storage.metadata import enrich_from_repository
 from collector.storage.models import ValidationResult
 

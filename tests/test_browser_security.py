@@ -11,7 +11,7 @@ from browser.container_entrypoint import rules
 from browser.public_proxy import BoundedProxyServer, PublicProxy
 from collector.collection.browser import BrowserSession
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import PageFetchError
+from collector.network.fetch import PageFetchError
 
 
 @pytest.fixture

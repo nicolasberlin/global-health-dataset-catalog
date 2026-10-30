@@ -8,10 +8,10 @@ import pytest
 from collector.budget import collection_budget
 from collector.classification.page import PageClassification
 from collector.collection.contracts import public_url
+from collector.collection.service import collect_repository_candidate_with_report
 from collector.collection.strategies.dataverse import record_api_url, resolve_metadata
 from collector.config import DEFAULT_CONFIG
-from collector.fetch import FetchedPage, PageFetchError
-from collector.main import collect_repository_candidate_with_report
+from collector.network.fetch import FetchedPage, PageFetchError
 from collector.storage.models import ValidationResult
 from collector.validation.downloads import page_access_diagnostic
 

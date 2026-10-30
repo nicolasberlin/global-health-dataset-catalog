@@ -146,11 +146,16 @@ client do not depend on it. Search Lab remains versioned in `search_lab/`.
 backend/app/       FastAPI application, SQL storage and background workers
   api/             HTTP routes, request/response models and presentation
   auth/            Local access and anonymous public sessions
-  search/          Discovery preparation and search summaries
+  search/          Search conclusions derived from saved progress
   policies/        Shared quota and retry rules
   workers/         Background execution and persistence bridges
-  db/              Search, classification, collection and execution storage
+  db/              Catalogue, search, classification, collection and execution storage
+    catalog/       Dataset aggregates, distributions, observations and full-text search
 collector/         Repository discovery, classification and bounded validation
+  collection/      Collection service, pipeline, orchestration and connectors
+  extraction/      Dataset metadata, source identity and evidence limits
+  network/         HTTP fetching, transport, DNS and public-address policy
+  main.py          Compatibility imports for public collection entry points
 browser/           Isolated browser service for collection fallback
 deploy/            Example Traefik proxy configuration
 scripts/           Local API configuration helper and HTTP client

@@ -19,7 +19,7 @@ from collector.config import CollectorConfig
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.discovery.adapters.shared import DiscoveredPage
 from collector.extraction.errors import ExtractionError
-from collector.fetch import PageFetchError, fetch_public_html, is_timeout_error
+from collector.network.fetch import PageFetchError, fetch_public_html, is_timeout_error
 from collector.storage.models import CollectionReport, CollectionResult
 from collector.validation.downloads import page_access_diagnostic, validate_distribution
 

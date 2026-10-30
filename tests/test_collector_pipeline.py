@@ -7,6 +7,12 @@ import pytest
 from helpers.collection import DATASET_HTML, AcceptingPageClassifier
 
 from collector.classification.page import PageClassification, PageClassificationError
+from collector.collection.service import (
+    analyze_discovered_page,
+    analyze_html_page,
+    collect_repository_candidate_with_report,
+    collect_source_with_report,
+)
 from collector.config import CollectorConfig
 from collector.discovery.adapters import DiscoveredPage
 from collector.extraction.dataset_metadata import (
@@ -15,13 +21,7 @@ from collector.extraction.dataset_metadata import (
 )
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
-from collector.fetch import FetchedPage, PageFetchError
-from collector.main import (
-    analyze_discovered_page,
-    analyze_html_page,
-    collect_repository_candidate_with_report,
-    collect_source_with_report,
-)
+from collector.network.fetch import FetchedPage, PageFetchError
 from collector.storage.models import (
     CollectedDataset,
     DistributionCandidate,
@@ -73,7 +73,7 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
             return Response(request, b"", {})
         return Response(request, b"age,count\n" * 10_000, {"Content-Type": "text/csv"})
 
-    monkeypatch.setattr("collector.fetch.open_public_http_url", open_response)
+    monkeypatch.setattr("collector.network.fetch.open_public_http_url", open_response)
     monkeypatch.setattr("collector.validation.downloads.open_public_http_url", open_response)
 
     # Consecutive runs must each bind their own settings, including a return

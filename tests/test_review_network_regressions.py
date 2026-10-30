@@ -17,9 +17,9 @@ import pytest
 from collector.budget import CollectionBudgetExceeded, collection_budget
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.classification.page import PageClassification, PageClassificationError
+from collector.collection.service import collect_source_with_report
 from collector.discovery.adapters import DiscoveredPage
 from collector.discovery.sitemap import fetch_text_url
-from collector.main import collect_source_with_report
 from collector.storage.models import DistributionCandidate
 from collector.validation.downloads import probe_url
 

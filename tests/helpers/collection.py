@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collector.classification.page import PageClassification
+from collector.collection.service import collect_source_with_report
 from collector.discovery.adapters import DiscoveredPage
-from collector.main import collect_source_with_report
 from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 DATASET_HTML = """

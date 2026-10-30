@@ -16,7 +16,7 @@ from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderCo
 from collector.classification.page import PageClassificationError
 from collector.discovery.adapters.shared import fetch_json_url
 from collector.discovery.sitemap import fetch_text_url
-from collector.fetch import (
+from collector.network.fetch import (
     _connect_public,
     _PublicHTTPRedirectHandler,
     _PublicHTTPSConnection,
@@ -55,7 +55,9 @@ class Socket:
 
 
 def test_expired_budget_prevents_dns(clock, monkeypatch):
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", lambda *a, **kw: pytest.fail("DNS"))
+    monkeypatch.setattr(
+        "collector.network.fetch.socket.getaddrinfo", lambda *a, **kw: pytest.fail("DNS")
+    )
     with collection_budget(seconds=1):
         clock[0] += 1
         with pytest.raises(CollectionBudgetExceeded):
@@ -67,8 +69,8 @@ def test_expiry_during_dns_prevents_socket_creation(clock, monkeypatch):
         clock[0] += 2
         return [address()]
 
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", resolve)
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: pytest.fail("Socket"))
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", resolve)
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *a: pytest.fail("Socket"))
     with collection_budget(seconds=1), pytest.raises(CollectionBudgetExceeded):
         _connect_public("public.example", 443, 10)
 
@@ -85,8 +87,8 @@ def test_connect_timeout_uses_remaining_budget_after_dns(
         return [address()]
 
     sock = Socket()
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", resolve)
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: sock)
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", resolve)
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *a: sock)
     with collection_budget(seconds=5):
         assert _connect_public("public.example", 443, request_timeout) is sock
     assert sock.timeouts == [expected]
@@ -107,10 +109,10 @@ def test_expiry_during_connect_closes_socket_without_trying_next_ip(clock, monke
         return sock
 
     monkeypatch.setattr(
-        "collector.fetch.socket.getaddrinfo",
+        "collector.network.fetch.socket.getaddrinfo",
         lambda *a, **kw: [address(), address("93.184.216.35")],
     )
-    monkeypatch.setattr("collector.fetch.socket.socket", create)
+    monkeypatch.setattr("collector.network.fetch.socket.socket", create)
     with collection_budget(seconds=1), pytest.raises(CollectionBudgetExceeded):
         _connect_public("public.example", 443, 10)
     assert sock.closed
@@ -130,9 +132,9 @@ def test_tls_uses_remaining_budget_and_hostname_and_closes_on_expiry(clock, monk
             clock[0] += 3
             return connection
 
-    monkeypatch.setattr("collector.fetch.socket.getaddrinfo", lambda *a, **kw: [address()])
-    monkeypatch.setattr("collector.fetch.socket.socket", lambda *a: sock)
-    monkeypatch.setattr("collector.fetch.ssl.create_default_context", TLS)
+    monkeypatch.setattr("collector.network.fetch.socket.getaddrinfo", lambda *a, **kw: [address()])
+    monkeypatch.setattr("collector.network.fetch.socket.socket", lambda *a: sock)
+    monkeypatch.setattr("collector.network.fetch.ssl.create_default_context", TLS)
     with collection_budget(seconds=5), pytest.raises(CollectionBudgetExceeded):
         _PublicHTTPSConnection("public.example", timeout=10).connect()
     assert sock.timeouts == [5, 3]
@@ -177,7 +179,7 @@ def test_validation_rechecks_budget_between_head_and_get(clock, head_duration, e
 @pytest.mark.parametrize(
     "module, call",
     [
-        ("collector.fetch", lambda: fetch_public_html("https://public.example/page")),
+        ("collector.network.fetch", lambda: fetch_public_html("https://public.example/page")),
         (
             "collector.discovery.adapters.shared",
             lambda: fetch_json_url("https://public.example/json"),

@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **30 October 2026**, based on Git commit `66e4917`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **30 October 2026**, based on Git commit `b7e8edc`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **864 function and method definitions in 127 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **864 function and method definitions in 131 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -16,7 +16,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Directory | Files with functions | Definitions |
 | --- | ---: | ---: |
-| `backend/` | 49 | 294 |
+| `backend/` | 53 | 294 |
 | `browser/` | 2 | 7 |
 | `collector/` | 65 | 470 |
 | `scripts/` | 3 | 52 |
@@ -34,12 +34,16 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [backend/app/api/sessions.py](#backend-app-api-sessions-py) — 1 definition
 - [backend/app/auth/security.py](#backend-app-auth-security-py) — 14 definitions
 - [backend/app/auth/sessions.py](#backend-app-auth-sessions-py) — 6 definitions
-- [backend/app/db/catalog.py](#backend-app-db-catalog-py) — 17 definitions
+- [backend/app/db/catalog/datasets.py](#backend-app-db-catalog-datasets-py) — 6 definitions
+- [backend/app/db/catalog/distributions.py](#backend-app-db-catalog-distributions-py) — 5 definitions
+- [backend/app/db/catalog/observations.py](#backend-app-db-catalog-observations-py) — 4 definitions
+- [backend/app/db/catalog/search.py](#backend-app-db-catalog-search-py) — 2 definitions
 - [backend/app/db/classification/candidates.py](#backend-app-db-classification-candidates-py) — 10 definitions
 - [backend/app/db/classification/completion.py](#backend-app-db-classification-completion-py) — 1 definition
 - [backend/app/db/classification/votes.py](#backend-app-db-classification-votes-py) — 11 definitions
 - [backend/app/db/collection/completion.py](#backend-app-db-collection-completion-py) — 1 definition
-- [backend/app/db/collection/jobs.py](#backend-app-db-collection-jobs-py) — 19 definitions
+- [backend/app/db/collection/jobs.py](#backend-app-db-collection-jobs-py) — 15 definitions
+- [backend/app/db/collection/reservations.py](#backend-app-db-collection-reservations-py) — 4 definitions
 - [backend/app/db/collection/traces.py](#backend-app-db-collection-traces-py) — 7 definitions
 - [backend/app/db/connection.py](#backend-app-db-connection-py) — 11 definitions
 - [backend/app/db/execution/application_lock.py](#backend-app-db-execution-application_lock-py) — 11 definitions
@@ -106,6 +110,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/records.py](#collector-collection-records-py) — 1 definition
 - [collector/collection/registry.py](#collector-collection-registry-py) — 3 definitions
 - [collector/collection/resources.py](#collector-collection-resources-py) — 1 definition
+- [collector/collection/service.py](#collector-collection-service-py) — 6 definitions
 - [collector/collection/strategies/dataverse.py](#collector-collection-strategies-dataverse-py) — 2 definitions
 - [collector/config.py](#collector-config-py) — 5 definitions
 - [collector/diagnostics.py](#collector-diagnostics-py) — 8 definitions
@@ -124,19 +129,18 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/extraction/extractor.py](#collector-extraction-extractor-py) — 38 definitions
 - [collector/extraction/graph.py](#collector-extraction-graph-py) — 9 definitions
 - [collector/extraction/limits.py](#collector-extraction-limits-py) — 5 definitions
-- [collector/fetch.py](#collector-fetch-py) — 15 definitions
-- [collector/main.py](#collector-main-py) — 6 definitions
-- [collector/network_policy.py](#collector-network_policy-py) — 1 definition
+- [collector/extraction/source_identity.py](#collector-extraction-source_identity-py) — 2 definitions
+- [collector/network/fetch.py](#collector-network-fetch-py) — 15 definitions
+- [collector/network/policy.py](#collector-network-policy-py) — 1 definition
+- [collector/network/resolver.py](#collector-network-resolver-py) — 3 definitions
+- [collector/network/transport.py](#collector-network-transport-py) — 20 definitions
 - [collector/observability.py](#collector-observability-py) — 5 definitions
 - [collector/repository_search/filtering.py](#collector-repository_search-filtering-py) — 4 definitions
 - [collector/repository_search/models.py](#collector-repository_search-models-py) — 1 definition
 - [collector/repository_search/providers/datacite.py](#collector-repository_search-providers-datacite-py) — 27 definitions
 - [collector/repository_search/service.py](#collector-repository_search-service-py) — 5 definitions
-- [collector/resolver.py](#collector-resolver-py) — 3 definitions
-- [collector/source_identity.py](#collector-source_identity-py) — 2 definitions
 - [collector/storage/metadata.py](#collector-storage-metadata-py) — 3 definitions
 - [collector/storage/models.py](#collector-storage-models-py) — 6 definitions
-- [collector/transport.py](#collector-transport-py) — 20 definitions
 - [collector/url_utils.py](#collector-url_utils-py) — 5 definitions
 - [collector/validation/downloads.py](#collector-validation-downloads-py) — 19 definitions
 - [collector/validation/json_sample.py](#collector-validation-json_sample-py) — 6 definitions
@@ -272,29 +276,50 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`visitor_owner_id`](../../backend/app/auth/sessions.py#L80) | `visitor_owner_id(cookie: str \| None, settings: VisitorSessionSettings) -> str \| None` | function / method |
 | [`_serializer`](../../backend/app/auth/sessions.py#L94) | `_serializer(settings: VisitorSessionSettings) -> URLSafeTimedSerializer` | function / method |
 
-<a id="backend-app-db-catalog-py"></a>
+<a id="backend-app-db-catalog-datasets-py"></a>
 
-## backend/app/db/catalog.py
+## backend/app/db/catalog/datasets.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`normalize_dataset_search_query`](../../backend/app/db/catalog.py#L37) | `normalize_dataset_search_query(query: str) -> str` | function / method |
-| [`save_collected_datasets`](../../backend/app/db/catalog.py#L58) | `save_collected_datasets(source_url: str, datasets: list[CollectedDataset], collection_job_id: int \| None=None) -> list[CollectedDataset]` | async |
-| [`get_collected_datasets`](../../backend/app/db/catalog.py#L83) | `get_collected_datasets(dataset_ids: list[int]) -> list[CollectedDataset]` | async |
-| [`_datasets_with_distributions`](../../backend/app/db/catalog.py#L98) | `_datasets_with_distributions(connection, dataset_rows) -> list[CollectedDataset]` | async |
-| [`search_collected_datasets`](../../backend/app/db/catalog.py#L115) | `search_collected_datasets(query: str, limit: int=10) -> list[CollectedDataset]` | async |
-| [`list_dataset_discovery_observations`](../../backend/app/db/catalog.py#L188) | `list_dataset_discovery_observations(dataset_id: int \| None=None) -> list[dict[str, int \| str \| None]]` | async |
-| [`_save_collected_dataset`](../../backend/app/db/catalog.py#L198) | `_save_collected_dataset(connection: AsyncConnection[DictRow], source_url: str, dataset: CollectedDataset, collection_job_id: int \| None) -> CollectedDataset` | async |
-| [`_upsert_collected_dataset`](../../backend/app/db/catalog.py#L231) | `_upsert_collected_dataset(connection: AsyncConnection[DictRow], source_url: str, dataset: CollectedDataset) -> Row` | async |
-| [`_insert_dataset_discovery_observation`](../../backend/app/db/catalog.py#L342) | `_insert_dataset_discovery_observation(connection: AsyncConnection[DictRow], dataset_id: int, source_url: str, discovery_method: str, collection_job_id: int \| None) -> None` | async |
-| [`_select_dataset_discovery_observations`](../../backend/app/db/catalog.py#L362) | `_select_dataset_discovery_observations(connection: AsyncConnection[DictRow], dataset_id: int \| None) -> list[Row]` | async |
-| [`_dataset_discovery_observation_to_dict`](../../backend/app/db/catalog.py#L383) | `_dataset_discovery_observation_to_dict(row: Row) -> dict[str, int \| str \| None]` | function / method |
-| [`_validation_results_by_distribution_key`](../../backend/app/db/catalog.py#L401) | `_validation_results_by_distribution_key(validation_results: list[ValidationResult]) -> dict[tuple[str, str], ValidationResult]` | function / method |
-| [`_orphan_validation_result_error`](../../backend/app/db/catalog.py#L419) | `_orphan_validation_result_error(dataset: CollectedDataset, validation_keys: set[tuple[str, str]]) -> ValueError \| None` | function / method |
-| [`_upsert_collected_distributions`](../../backend/app/db/catalog.py#L441) | `_upsert_collected_distributions(connection: AsyncConnection[DictRow], dataset_id: int, dataset: CollectedDataset) -> None` | async |
-| [`_upsert_collected_distribution`](../../backend/app/db/catalog.py#L471) | `_upsert_collected_distribution(connection: AsyncConnection[DictRow], dataset_id: int, distribution: DistributionCandidate, validation: ValidationResult \| None) -> None` | async |
-| [`_fetch_collected_distribution_rows`](../../backend/app/db/catalog.py#L596) | `_fetch_collected_distribution_rows(connection: AsyncConnection[DictRow], dataset_id: int) -> list[Row]` | async |
-| [`_collected_dataset_from_rows`](../../backend/app/db/catalog.py#L612) | `_collected_dataset_from_rows(dataset_row: Row, distribution_rows: list[Row]) -> CollectedDataset` | function / method |
+| [`save_collected_datasets`](../../backend/app/db/catalog/datasets.py#L29) | `save_collected_datasets(source_url: str, datasets: list[CollectedDataset], collection_job_id: int \| None=None) -> list[CollectedDataset]` | async |
+| [`get_collected_datasets`](../../backend/app/db/catalog/datasets.py#L54) | `get_collected_datasets(dataset_ids: list[int]) -> list[CollectedDataset]` | async |
+| [`_datasets_with_distributions`](../../backend/app/db/catalog/datasets.py#L69) | `_datasets_with_distributions(connection, dataset_rows) -> list[CollectedDataset]` | async |
+| [`_save_collected_dataset`](../../backend/app/db/catalog/datasets.py#L86) | `_save_collected_dataset(connection: AsyncConnection[DictRow], source_url: str, dataset: CollectedDataset, collection_job_id: int \| None) -> CollectedDataset` | async |
+| [`_upsert_collected_dataset`](../../backend/app/db/catalog/datasets.py#L119) | `_upsert_collected_dataset(connection: AsyncConnection[DictRow], source_url: str, dataset: CollectedDataset) -> Row` | async |
+| [`_collected_dataset_from_rows`](../../backend/app/db/catalog/datasets.py#L230) | `_collected_dataset_from_rows(dataset_row: Row, distribution_rows: list[Row]) -> CollectedDataset` | function / method |
+
+<a id="backend-app-db-catalog-distributions-py"></a>
+
+## backend/app/db/catalog/distributions.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_validation_results_by_distribution_key`](../../backend/app/db/catalog/distributions.py#L13) | `_validation_results_by_distribution_key(validation_results: list[ValidationResult]) -> dict[tuple[str, str], ValidationResult]` | function / method |
+| [`_orphan_validation_result_error`](../../backend/app/db/catalog/distributions.py#L31) | `_orphan_validation_result_error(dataset: CollectedDataset, validation_keys: set[tuple[str, str]]) -> ValueError \| None` | function / method |
+| [`_upsert_collected_distributions`](../../backend/app/db/catalog/distributions.py#L53) | `_upsert_collected_distributions(connection: AsyncConnection[DictRow], dataset_id: int, dataset: CollectedDataset) -> None` | async |
+| [`_upsert_collected_distribution`](../../backend/app/db/catalog/distributions.py#L83) | `_upsert_collected_distribution(connection: AsyncConnection[DictRow], dataset_id: int, distribution: DistributionCandidate, validation: ValidationResult \| None) -> None` | async |
+| [`_fetch_collected_distribution_rows`](../../backend/app/db/catalog/distributions.py#L208) | `_fetch_collected_distribution_rows(connection: AsyncConnection[DictRow], dataset_id: int) -> list[Row]` | async |
+
+<a id="backend-app-db-catalog-observations-py"></a>
+
+## backend/app/db/catalog/observations.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`list_dataset_discovery_observations`](../../backend/app/db/catalog/observations.py#L13) | `list_dataset_discovery_observations(dataset_id: int \| None=None) -> list[dict[str, int \| str \| None]]` | async |
+| [`_insert_dataset_discovery_observation`](../../backend/app/db/catalog/observations.py#L23) | `_insert_dataset_discovery_observation(connection: AsyncConnection[DictRow], dataset_id: int, source_url: str, discovery_method: str, collection_job_id: int \| None) -> None` | async |
+| [`_select_dataset_discovery_observations`](../../backend/app/db/catalog/observations.py#L43) | `_select_dataset_discovery_observations(connection: AsyncConnection[DictRow], dataset_id: int \| None) -> list[Row]` | async |
+| [`_dataset_discovery_observation_to_dict`](../../backend/app/db/catalog/observations.py#L64) | `_dataset_discovery_observation_to_dict(row: Row) -> dict[str, int \| str \| None]` | function / method |
+
+<a id="backend-app-db-catalog-search-py"></a>
+
+## backend/app/db/catalog/search.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`normalize_dataset_search_query`](../../backend/app/db/catalog/search.py#L21) | `normalize_dataset_search_query(query: str) -> str` | function / method |
+| [`search_collected_datasets`](../../backend/app/db/catalog/search.py#L42) | `search_collected_datasets(query: str, limit: int=10) -> list[CollectedDataset]` | async |
 
 <a id="backend-app-db-classification-candidates-py"></a>
 
@@ -353,25 +378,32 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`create_collection_job`](../../backend/app/db/collection/jobs.py#L37) | `create_collection_job(source_url: str) -> dict[str, object]` | async |
-| [`reserve_repository_candidate_collection_job`](../../backend/app/db/collection/jobs.py#L48) | `reserve_repository_candidate_collection_job(candidate_id: UUID, owner_id: str) -> CollectionJobReservation` | async |
-| [`_reserve_repository_candidate_collection_job`](../../backend/app/db/collection/jobs.py#L64) | `_reserve_repository_candidate_collection_job(connection: AsyncConnection[DictRow], candidate_id: UUID, owner_id: str) -> CollectionJobReservation` | async |
-| [`_associate_job_candidate`](../../backend/app/db/collection/jobs.py#L181) | `_associate_job_candidate(connection, job_id: int, candidate_id: UUID) -> None` | async |
-| [`get_collection_job_for_owner`](../../backend/app/db/collection/jobs.py#L191) | `get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, object] \| None` | async |
-| [`_job_dataset_ids`](../../backend/app/db/collection/jobs.py#L216) | `_job_dataset_ids(connection, job_id: int) -> list[int]` | async |
-| [`_existing_dataset_ids`](../../backend/app/db/collection/jobs.py#L226) | `_existing_dataset_ids(connection, source_url: str) -> list[int]` | async |
-| [`mark_interrupted_collection_jobs_error`](../../backend/app/db/collection/jobs.py#L239) | `mark_interrupted_collection_jobs_error() -> int` | async |
-| [`claim_pending_collection_job`](../../backend/app/db/collection/jobs.py#L278) | `claim_pending_collection_job(*, claim_token: UUID \| None=None) -> dict[str, object] \| None` | async |
-| [`_insert_collection_job`](../../backend/app/db/collection/jobs.py#L327) | `_insert_collection_job(connection: AsyncConnection[DictRow], source_url: str, *, kind: str='source', repository_candidate_id: UUID \| None=None) -> Row \| None` | async |
-| [`get_collection_job`](../../backend/app/db/collection/jobs.py#L368) | `get_collection_job(job_id: int) -> dict[str, object] \| None` | async |
-| [`mark_collection_job_running`](../../backend/app/db/collection/jobs.py#L376) | `mark_collection_job_running(job_id: int) -> dict[str, object] \| None` | async |
-| [`mark_collection_job_done`](../../backend/app/db/collection/jobs.py#L414) | `mark_collection_job_done(job_id: int, saved_count: int, report: CollectionReport \| None=None) -> dict[str, object] \| None` | async |
-| [`_mark_collection_job_done`](../../backend/app/db/collection/jobs.py#L425) | `_mark_collection_job_done(connection: AsyncConnection[DictRow], job_id: int, saved_count: int, report: CollectionReport) -> dict[str, object] \| None` | async |
-| [`mark_collection_job_error`](../../backend/app/db/collection/jobs.py#L485) | `mark_collection_job_error(job_id: int, error: str, *, errors: list[dict] \| None=None, expected_updated_at: datetime \| None=None) -> dict[str, object] \| None` | async |
-| [`_get_collection_job_row`](../../backend/app/db/collection/jobs.py#L525) | `_get_collection_job_row(connection, job_id: int) -> Row \| None` | async |
-| [`_lock_running_collection_job`](../../backend/app/db/collection/jobs.py#L542) | `_lock_running_collection_job(connection: AsyncConnection[DictRow], job_id: int) -> Row \| None` | async |
-| [`_collection_job_to_dict`](../../backend/app/db/collection/jobs.py#L558) | `_collection_job_to_dict(row: Row) -> dict[str, object]` | function / method |
-| [`_collection_job_done_message`](../../backend/app/db/collection/jobs.py#L594) | `_collection_job_done_message(saved_count: int, report: CollectionReport) -> str` | function / method |
+| [`create_collection_job`](../../backend/app/db/collection/jobs.py#L29) | `create_collection_job(source_url: str) -> dict[str, object]` | async |
+| [`get_collection_job_for_owner`](../../backend/app/db/collection/jobs.py#L40) | `get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, object] \| None` | async |
+| [`_job_dataset_ids`](../../backend/app/db/collection/jobs.py#L65) | `_job_dataset_ids(connection, job_id: int) -> list[int]` | async |
+| [`mark_interrupted_collection_jobs_error`](../../backend/app/db/collection/jobs.py#L75) | `mark_interrupted_collection_jobs_error() -> int` | async |
+| [`claim_pending_collection_job`](../../backend/app/db/collection/jobs.py#L114) | `claim_pending_collection_job(*, claim_token: UUID \| None=None) -> dict[str, object] \| None` | async |
+| [`_insert_collection_job`](../../backend/app/db/collection/jobs.py#L163) | `_insert_collection_job(connection: AsyncConnection[DictRow], source_url: str, *, kind: str='source', repository_candidate_id: UUID \| None=None) -> Row \| None` | async |
+| [`get_collection_job`](../../backend/app/db/collection/jobs.py#L204) | `get_collection_job(job_id: int) -> dict[str, object] \| None` | async |
+| [`mark_collection_job_running`](../../backend/app/db/collection/jobs.py#L212) | `mark_collection_job_running(job_id: int) -> dict[str, object] \| None` | async |
+| [`mark_collection_job_done`](../../backend/app/db/collection/jobs.py#L250) | `mark_collection_job_done(job_id: int, saved_count: int, report: CollectionReport \| None=None) -> dict[str, object] \| None` | async |
+| [`_mark_collection_job_done`](../../backend/app/db/collection/jobs.py#L261) | `_mark_collection_job_done(connection: AsyncConnection[DictRow], job_id: int, saved_count: int, report: CollectionReport) -> dict[str, object] \| None` | async |
+| [`mark_collection_job_error`](../../backend/app/db/collection/jobs.py#L321) | `mark_collection_job_error(job_id: int, error: str, *, errors: list[dict] \| None=None, expected_updated_at: datetime \| None=None) -> dict[str, object] \| None` | async |
+| [`_get_collection_job_row`](../../backend/app/db/collection/jobs.py#L361) | `_get_collection_job_row(connection, job_id: int) -> Row \| None` | async |
+| [`_lock_running_collection_job`](../../backend/app/db/collection/jobs.py#L378) | `_lock_running_collection_job(connection: AsyncConnection[DictRow], job_id: int) -> Row \| None` | async |
+| [`_collection_job_to_dict`](../../backend/app/db/collection/jobs.py#L394) | `_collection_job_to_dict(row: Row) -> dict[str, object]` | function / method |
+| [`_collection_job_done_message`](../../backend/app/db/collection/jobs.py#L430) | `_collection_job_done_message(saved_count: int, report: CollectionReport) -> str` | function / method |
+
+<a id="backend-app-db-collection-reservations-py"></a>
+
+## backend/app/db/collection/reservations.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`reserve_repository_candidate_collection_job`](../../backend/app/db/collection/reservations.py#L32) | `reserve_repository_candidate_collection_job(candidate_id: UUID, owner_id: str) -> CollectionJobReservation` | async |
+| [`_reserve_repository_candidate_collection_job`](../../backend/app/db/collection/reservations.py#L48) | `_reserve_repository_candidate_collection_job(connection: AsyncConnection[DictRow], candidate_id: UUID, owner_id: str) -> CollectionJobReservation` | async |
+| [`_associate_job_candidate`](../../backend/app/db/collection/reservations.py#L170) | `_associate_job_candidate(connection: AsyncConnection[DictRow], job_id: int, candidate_id: UUID) -> None` | async |
+| [`_existing_dataset_ids`](../../backend/app/db/collection/reservations.py#L183) | `_existing_dataset_ids(connection: AsyncConnection[DictRow], source_url: str) -> list[int]` | async |
 
 <a id="backend-app-db-collection-traces-py"></a>
 
@@ -550,7 +582,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`read_search_progress`](../../backend/app/db/search/progress.py#L13) | `read_search_progress(search_id: UUID, owner_id: str) -> tuple[Row, list[Row], dict[UUID, CollectionJobReservation]] \| None` | async |
+| [`read_search_progress`](../../backend/app/db/search/progress.py#L14) | `read_search_progress(search_id: UUID, owner_id: str) -> tuple[Row, list[Row], dict[UUID, CollectionJobReservation]] \| None` | async |
 
 <a id="backend-app-db-search-sessions-py"></a>
 
@@ -676,13 +708,13 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_collect_record_job`](../../backend/app/workers/collection/workers.py#L41) | `_collect_record_job(url, *, classifier, observe)` | function / method |
-| [`CollectionWorker.__init__`](../../backend/app/workers/collection/workers.py#L73) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTrace] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
-| [`CollectionWorker.claim`](../../backend/app/workers/collection/workers.py#L104) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
-| [`CollectionWorker.execute`](../../backend/app/workers/collection/workers.py#L107) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
-| [`CollectionWorker._retry`](../../backend/app/workers/collection/workers.py#L153) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
-| [`CollectionWorker._fail`](../../backend/app/workers/collection/workers.py#L165) | `_fail(self, job: CollectionJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
-| [`CollectionWorker.recover`](../../backend/app/workers/collection/workers.py#L178) | `recover(self, job: CollectionJob) -> object` | async |
+| [`_collect_record_job`](../../backend/app/workers/collection/workers.py#L44) | `_collect_record_job(url, *, classifier, observe)` | function / method |
+| [`CollectionWorker.__init__`](../../backend/app/workers/collection/workers.py#L76) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTrace] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`CollectionWorker.claim`](../../backend/app/workers/collection/workers.py#L107) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
+| [`CollectionWorker.execute`](../../backend/app/workers/collection/workers.py#L110) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
+| [`CollectionWorker._retry`](../../backend/app/workers/collection/workers.py#L156) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
+| [`CollectionWorker._fail`](../../backend/app/workers/collection/workers.py#L168) | `_fail(self, job: CollectionJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
+| [`CollectionWorker.recover`](../../backend/app/workers/collection/workers.py#L181) | `recover(self, job: CollectionJob) -> object` | async |
 
 <a id="backend-app-workers-contracts-py"></a>
 
@@ -987,14 +1019,14 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`BrowserSession.__init__`](../../collector/collection/browser.py#L34) | `__init__(self, endpoint, token, config, *, registry=None)` | function / method |
-| [`BrowserSession.request`](../../collector/collection/browser.py#L39) | `request(self, action, payload, *, closing=False)` | function / method |
-| [`BrowserSession._request`](../../collector/collection/browser.py#L44) | `_request(self, action, payload, *, closing=False)` | function / method |
-| [`BrowserSession.render`](../../collector/collection/browser.py#L119) | `render(self, url, *, metadata_url=None)` | function / method |
-| [`BrowserSession.probe`](../../collector/collection/browser.py#L166) | `probe(self, url, method, timeout, max_bytes, headers=None)` | function / method |
-| [`BrowserSession.validate`](../../collector/collection/browser.py#L194) | `validate(self, distribution)` | function / method |
-| [`BrowserSession.close`](../../collector/collection/browser.py#L202) | `close(self)` | function / method |
-| [`configured_browser`](../../collector/collection/browser.py#L211) | `configured_browser(config, source_url=None)` | contextmanager |
+| [`BrowserSession.__init__`](../../collector/collection/browser.py#L38) | `__init__(self, endpoint, token, config, *, registry=None)` | function / method |
+| [`BrowserSession.request`](../../collector/collection/browser.py#L43) | `request(self, action, payload, *, closing=False)` | function / method |
+| [`BrowserSession._request`](../../collector/collection/browser.py#L48) | `_request(self, action, payload, *, closing=False)` | function / method |
+| [`BrowserSession.render`](../../collector/collection/browser.py#L123) | `render(self, url, *, metadata_url=None)` | function / method |
+| [`BrowserSession.probe`](../../collector/collection/browser.py#L170) | `probe(self, url, method, timeout, max_bytes, headers=None)` | function / method |
+| [`BrowserSession.validate`](../../collector/collection/browser.py#L198) | `validate(self, distribution)` | function / method |
+| [`BrowserSession.close`](../../collector/collection/browser.py#L206) | `close(self)` | function / method |
+| [`configured_browser`](../../collector/collection/browser.py#L215) | `configured_browser(config, source_url=None)` | contextmanager |
 
 <a id="collector-collection-compatibility-py"></a>
 
@@ -1203,6 +1235,19 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`retain_validated_resources`](../../collector/collection/resources.py#L29) | `retain_validated_resources(resources: list[DistributionCandidate], config: CollectorConfig, validate: Callable[[DistributionCandidate], ValidationResult], *, state: ResourceCheckState \| None=None, context: str='http', on_check: Callable[[DistributionCandidate, ValidationResult], None] \| None=None) -> ResourceSelection` | function / method |
+
+<a id="collector-collection-service-py"></a>
+
+## collector/collection/service.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`collect_source_with_report`](../../collector/collection/service.py#L44) | `collect_source_with_report(source_url: str, config: CollectorConfig=DEFAULT_CONFIG, discover: DiscoverFunction \| None=None, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, browser=None) -> CollectionResult` | function / method |
+| [`_collect_source_within_budget`](../../collector/collection/service.py#L77) | `_collect_source_within_budget(source_url, config, discover, fetch_html, validate, classifier, browser)` | function / method |
+| [`collect_repository_candidate_with_report`](../../collector/collection/service.py#L180) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
+| [`_collect_discovered_page_with_report`](../../collector/collection/service.py#L211) | `_collect_discovered_page_with_report(discovered_page: DiscoveredPage, config: CollectorConfig, fetch_html: FetchHTMLFunction, validate: ValidateDistributionFunction, classifier: PageClassifier \| None=None, *, validation_failures: list[ValidationResult] \| None=None, browser=None, diagnostics: list[Diagnostic] \| None=None) -> tuple[CollectedDataset \| None, int]` | function / method |
+| [`_collect_discovered_page_with_report.<local>.failed_html`](../../collector/collection/service.py#L254) | `failed_html(_, *, error=exception)` | function / method |
+| [`_with_valid_distributions_and_report`](../../collector/collection/service.py#L288) | `_with_valid_distributions_and_report(dataset: CollectedDataset, config: CollectorConfig, validate: ValidateDistributionFunction, *, failures: list[ValidationResult] \| None=None) -> tuple[CollectedDataset \| None, int]` | function / method |
 
 <a id="collector-collection-strategies-dataverse-py"></a>
 
@@ -1495,48 +1540,81 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`load_json_ld`](../../collector/extraction/limits.py#L61) | `load_json_ld(text: str, limits: ExtractionLimits)` | function / method |
 | [`_reject_constant`](../../collector/extraction/limits.py#L91) | `_reject_constant(value: str) -> None` | function / method |
 
-<a id="collector-fetch-py"></a>
+<a id="collector-extraction-source_identity-py"></a>
 
-## collector/fetch.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`is_timeout_error`](../../collector/fetch.py#L38) | `is_timeout_error(exception: Exception) -> bool` | function / method |
-| [`PageFetchError.__init__`](../../collector/fetch.py#L48) | `__init__(self, message: str, *, code='repository_unavailable')` | function / method |
-| [`fetch_public_html`](../../collector/fetch.py#L63) | `fetch_public_html(url: str, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_bytes: int=1000000, *, user_agent: str=DEFAULT_CONFIG.user_agent) -> FetchedPage` | function / method |
-| [`_ensure_public_http_url`](../../collector/fetch.py#L117) | `_ensure_public_http_url(url: str) -> None` | function / method |
-| [`_connect_public`](../../collector/fetch.py#L142) | `_connect_public(host: str, port: int, timeout: float) -> socket.socket` | function / method |
-| [`_connect_public_with_budget`](../../collector/fetch.py#L149) | `_connect_public_with_budget(host: str, port: int, timeout: float) -> socket.socket` | function / method |
-| [`_PublicHTTPConnection.connect`](../../collector/fetch.py#L188) | `connect(self)` | function / method |
-| [`_PublicHTTPSConnection.connect`](../../collector/fetch.py#L197) | `connect(self)` | function / method |
-| [`_PublicHTTPHandler.http_open`](../../collector/fetch.py#L212) | `http_open(self, request)` | function / method |
-| [`_PublicHTTPSHandler.https_open`](../../collector/fetch.py#L217) | `https_open(self, request)` | function / method |
-| [`_PublicHTTPRedirectHandler.redirect_request`](../../collector/fetch.py#L224) | `redirect_request(self, req, fp, code, msg, headers, newurl)` | function / method |
-| [`open_public_http_url`](../../collector/fetch.py#L241) | `open_public_http_url(request: Request, *, timeout: float)` | function / method |
-| [`_decode_html`](../../collector/fetch.py#L266) | `_decode_html(body: bytes, content_type: str) -> str` | function / method |
-| [`decode_text_body`](../../collector/fetch.py#L270) | `decode_text_body(body: bytes, content_type: str) -> str` | function / method |
-| [`decode_json_body`](../../collector/fetch.py#L281) | `decode_json_body(body: bytes) -> object` | function / method |
-
-<a id="collector-main-py"></a>
-
-## collector/main.py
+## collector/extraction/source_identity.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`collect_source_with_report`](../../collector/main.py#L44) | `collect_source_with_report(source_url: str, config: CollectorConfig=DEFAULT_CONFIG, discover: DiscoverFunction \| None=None, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, browser=None) -> CollectionResult` | function / method |
-| [`_collect_source_within_budget`](../../collector/main.py#L77) | `_collect_source_within_budget(source_url, config, discover, fetch_html, validate, classifier, browser)` | function / method |
-| [`collect_repository_candidate_with_report`](../../collector/main.py#L180) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
-| [`_collect_discovered_page_with_report`](../../collector/main.py#L211) | `_collect_discovered_page_with_report(discovered_page: DiscoveredPage, config: CollectorConfig, fetch_html: FetchHTMLFunction, validate: ValidateDistributionFunction, classifier: PageClassifier \| None=None, *, validation_failures: list[ValidationResult] \| None=None, browser=None, diagnostics: list[Diagnostic] \| None=None) -> tuple[CollectedDataset \| None, int]` | function / method |
-| [`_collect_discovered_page_with_report.<local>.failed_html`](../../collector/main.py#L254) | `failed_html(_, *, error=exception)` | function / method |
-| [`_with_valid_distributions_and_report`](../../collector/main.py#L288) | `_with_valid_distributions_and_report(dataset: CollectedDataset, config: CollectorConfig, validate: ValidateDistributionFunction, *, failures: list[ValidationResult] \| None=None) -> tuple[CollectedDataset \| None, int]` | function / method |
+| [`identify_source`](../../collector/extraction/source_identity.py#L24) | `identify_source(url: str) -> SourceIdentity` | function / method |
+| [`_kaggle_uploader`](../../collector/extraction/source_identity.py#L38) | `_kaggle_uploader(path: str) -> str` | function / method |
 
-<a id="collector-network_policy-py"></a>
+<a id="collector-network-fetch-py"></a>
 
-## collector/network_policy.py
+## collector/network/fetch.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`is_public_address`](../../collector/network_policy.py#L34) | `is_public_address(address: ipaddress.IPv4Address \| ipaddress.IPv6Address) -> bool` | function / method |
+| [`is_timeout_error`](../../collector/network/fetch.py#L38) | `is_timeout_error(exception: Exception) -> bool` | function / method |
+| [`PageFetchError.__init__`](../../collector/network/fetch.py#L48) | `__init__(self, message: str, *, code='repository_unavailable')` | function / method |
+| [`fetch_public_html`](../../collector/network/fetch.py#L63) | `fetch_public_html(url: str, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_bytes: int=1000000, *, user_agent: str=DEFAULT_CONFIG.user_agent) -> FetchedPage` | function / method |
+| [`_ensure_public_http_url`](../../collector/network/fetch.py#L117) | `_ensure_public_http_url(url: str) -> None` | function / method |
+| [`_connect_public`](../../collector/network/fetch.py#L142) | `_connect_public(host: str, port: int, timeout: float) -> socket.socket` | function / method |
+| [`_connect_public_with_budget`](../../collector/network/fetch.py#L149) | `_connect_public_with_budget(host: str, port: int, timeout: float) -> socket.socket` | function / method |
+| [`_PublicHTTPConnection.connect`](../../collector/network/fetch.py#L188) | `connect(self)` | function / method |
+| [`_PublicHTTPSConnection.connect`](../../collector/network/fetch.py#L197) | `connect(self)` | function / method |
+| [`_PublicHTTPHandler.http_open`](../../collector/network/fetch.py#L212) | `http_open(self, request)` | function / method |
+| [`_PublicHTTPSHandler.https_open`](../../collector/network/fetch.py#L217) | `https_open(self, request)` | function / method |
+| [`_PublicHTTPRedirectHandler.redirect_request`](../../collector/network/fetch.py#L224) | `redirect_request(self, req, fp, code, msg, headers, newurl)` | function / method |
+| [`open_public_http_url`](../../collector/network/fetch.py#L241) | `open_public_http_url(request: Request, *, timeout: float)` | function / method |
+| [`_decode_html`](../../collector/network/fetch.py#L266) | `_decode_html(body: bytes, content_type: str) -> str` | function / method |
+| [`decode_text_body`](../../collector/network/fetch.py#L270) | `decode_text_body(body: bytes, content_type: str) -> str` | function / method |
+| [`decode_json_body`](../../collector/network/fetch.py#L281) | `decode_json_body(body: bytes) -> object` | function / method |
+
+<a id="collector-network-policy-py"></a>
+
+## collector/network/policy.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`is_public_address`](../../collector/network/policy.py#L34) | `is_public_address(address: ipaddress.IPv4Address \| ipaddress.IPv6Address) -> bool` | function / method |
+
+<a id="collector-network-resolver-py"></a>
+
+## collector/network/resolver.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_AddressResolver.__init__`](../../collector/network/resolver.py#L21) | `__init__(self)` | function / method |
+| [`_AddressResolver.resolve`](../../collector/network/resolver.py#L25) | `resolve(self, *args, **kwargs)` | function / method |
+| [`resolve_addresses`](../../collector/network/resolver.py#L67) | `resolve_addresses(*args, timeout: float, **kwargs)` | function / method |
+
+<a id="collector-network-transport-py"></a>
+
+## collector/network/transport.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_DeadlineReader.__init__`](../../collector/network/transport.py#L26) | `__init__(self, raw, sock, budget: RequestBudget)` | function / method |
+| [`_DeadlineReader.readable`](../../collector/network/transport.py#L30) | `readable(self)` | function / method |
+| [`_DeadlineReader.readinto`](../../collector/network/transport.py#L33) | `readinto(self, buffer)` | function / method |
+| [`_DeadlineReader.close`](../../collector/network/transport.py#L45) | `close(self)` | function / method |
+| [`_ResponseSocket.__init__`](../../collector/network/transport.py#L53) | `__init__(self, sock, budget)` | function / method |
+| [`_ResponseSocket.makefile`](../../collector/network/transport.py#L56) | `makefile(self, mode)` | function / method |
+| [`DeadlineHTTPResponse.__init__`](../../collector/network/transport.py#L66) | `__init__(self, sock, *args, **kwargs)` | function / method |
+| [`DeadlineHTTPResponse._bounded`](../../collector/network/transport.py#L72) | `_bounded(self, operation, *args)` | function / method |
+| [`DeadlineHTTPResponse.begin`](../../collector/network/transport.py#L84) | `begin(self)` | function / method |
+| [`DeadlineHTTPResponse.read`](../../collector/network/transport.py#L87) | `read(self, amt=None)` | function / method |
+| [`DeadlineHTTPResponse.read1`](../../collector/network/transport.py#L90) | `read1(self, n=-1)` | function / method |
+| [`DeadlineHTTPResponse.readinto`](../../collector/network/transport.py#L93) | `readinto(self, buffer)` | function / method |
+| [`_connect_with_deadline`](../../collector/network/transport.py#L97) | `_connect_with_deadline(address, timeout, source_address=None)` | function / method |
+| [`_connect_resolved_with_deadline`](../../collector/network/transport.py#L102) | `_connect_resolved_with_deadline(address, timeout, source_address)` | function / method |
+| [`_DeadlineConnectionMixin.__init__`](../../collector/network/transport.py#L134) | `__init__(self, *args, **kwargs)` | function / method |
+| [`_DeadlineConnectionMixin.send`](../../collector/network/transport.py#L138) | `send(self, data)` | function / method |
+| [`DeadlineHTTPSConnection.connect`](../../collector/network/transport.py#L156) | `connect(self)` | function / method |
+| [`DeadlineHTTPHandler.http_open`](../../collector/network/transport.py#L170) | `http_open(self, request)` | function / method |
+| [`DeadlineHTTPSHandler.https_open`](../../collector/network/transport.py#L175) | `https_open(self, request)` | function / method |
+| [`RejectHTTPRedirects.redirect_request`](../../collector/network/transport.py#L185) | `redirect_request(self, req, fp, code, msg, headers, newurl)` | function / method |
 
 <a id="collector-observability-py"></a>
 
@@ -1615,25 +1693,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_metadata_text`](../../collector/repository_search/service.py#L134) | `_metadata_text(value: str, *, fallback: str='') -> str` | function / method |
 | [`_metadata_items`](../../collector/repository_search/service.py#L138) | `_metadata_items(value: str) -> tuple[str, ...]` | function / method |
 
-<a id="collector-resolver-py"></a>
-
-## collector/resolver.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_AddressResolver.__init__`](../../collector/resolver.py#L21) | `__init__(self)` | function / method |
-| [`_AddressResolver.resolve`](../../collector/resolver.py#L25) | `resolve(self, *args, **kwargs)` | function / method |
-| [`resolve_addresses`](../../collector/resolver.py#L67) | `resolve_addresses(*args, timeout: float, **kwargs)` | function / method |
-
-<a id="collector-source_identity-py"></a>
-
-## collector/source_identity.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`identify_source`](../../collector/source_identity.py#L24) | `identify_source(url: str) -> SourceIdentity` | function / method |
-| [`_kaggle_uploader`](../../collector/source_identity.py#L38) | `_kaggle_uploader(path: str) -> str` | function / method |
-
 <a id="collector-storage-metadata-py"></a>
 
 ## collector/storage/metadata.py
@@ -1656,33 +1715,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_normalized_values`](../../collector/storage/models.py#L119) | `_normalized_values(values: tuple[str, ...]) -> tuple[str, ...]` | function / method |
 | [`ValidationResult.__post_init__`](../../collector/storage/models.py#L186) | `__post_init__(self) -> None` | function / method |
 | [`CollectedDataset.__post_init__`](../../collector/storage/models.py#L232) | `__post_init__(self) -> None` | function / method |
-
-<a id="collector-transport-py"></a>
-
-## collector/transport.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_DeadlineReader.__init__`](../../collector/transport.py#L26) | `__init__(self, raw, sock, budget: RequestBudget)` | function / method |
-| [`_DeadlineReader.readable`](../../collector/transport.py#L30) | `readable(self)` | function / method |
-| [`_DeadlineReader.readinto`](../../collector/transport.py#L33) | `readinto(self, buffer)` | function / method |
-| [`_DeadlineReader.close`](../../collector/transport.py#L45) | `close(self)` | function / method |
-| [`_ResponseSocket.__init__`](../../collector/transport.py#L53) | `__init__(self, sock, budget)` | function / method |
-| [`_ResponseSocket.makefile`](../../collector/transport.py#L56) | `makefile(self, mode)` | function / method |
-| [`DeadlineHTTPResponse.__init__`](../../collector/transport.py#L66) | `__init__(self, sock, *args, **kwargs)` | function / method |
-| [`DeadlineHTTPResponse._bounded`](../../collector/transport.py#L72) | `_bounded(self, operation, *args)` | function / method |
-| [`DeadlineHTTPResponse.begin`](../../collector/transport.py#L84) | `begin(self)` | function / method |
-| [`DeadlineHTTPResponse.read`](../../collector/transport.py#L87) | `read(self, amt=None)` | function / method |
-| [`DeadlineHTTPResponse.read1`](../../collector/transport.py#L90) | `read1(self, n=-1)` | function / method |
-| [`DeadlineHTTPResponse.readinto`](../../collector/transport.py#L93) | `readinto(self, buffer)` | function / method |
-| [`_connect_with_deadline`](../../collector/transport.py#L97) | `_connect_with_deadline(address, timeout, source_address=None)` | function / method |
-| [`_connect_resolved_with_deadline`](../../collector/transport.py#L102) | `_connect_resolved_with_deadline(address, timeout, source_address)` | function / method |
-| [`_DeadlineConnectionMixin.__init__`](../../collector/transport.py#L134) | `__init__(self, *args, **kwargs)` | function / method |
-| [`_DeadlineConnectionMixin.send`](../../collector/transport.py#L138) | `send(self, data)` | function / method |
-| [`DeadlineHTTPSConnection.connect`](../../collector/transport.py#L156) | `connect(self)` | function / method |
-| [`DeadlineHTTPHandler.http_open`](../../collector/transport.py#L170) | `http_open(self, request)` | function / method |
-| [`DeadlineHTTPSHandler.https_open`](../../collector/transport.py#L175) | `https_open(self, request)` | function / method |
-| [`RejectHTTPRedirects.redirect_request`](../../collector/transport.py#L185) | `redirect_request(self, req, fp, code, msg, headers, newurl)` | function / method |
 
 <a id="collector-url_utils-py"></a>
 

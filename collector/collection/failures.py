@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collector.fetch import PageFetchError
+from collector.network.fetch import PageFetchError
 
 FAILURE_PHASES = {"fetch", "decode", "normalize", "render", "validate", "classify", "access"}
 

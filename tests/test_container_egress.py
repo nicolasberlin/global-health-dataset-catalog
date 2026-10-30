@@ -41,7 +41,7 @@ while True:
 CLIENT = """
 import os, socket, subprocess
 from pathlib import Path
-from collector.fetch import fetch_public_html
+from collector.network.fetch import fetch_public_html
 assert os.getuid() == 10001
 status = Path('/proc/self/status').read_text()
 for name in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'):

@@ -7,7 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from collector.network_policy import BLOCKED_IPV4, BLOCKED_IPV6, PUBLIC_IPV6
+from collector.network.policy import BLOCKED_IPV4, BLOCKED_IPV6, PUBLIC_IPV6
 
 
 def rules(resolvers, extra=""):

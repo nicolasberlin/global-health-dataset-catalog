@@ -30,9 +30,9 @@ from collector.budget import (
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.execution import check_execution_active
-from collector.network_policy import is_public_address
-from collector.resolver import resolve_addresses
-from collector.transport import DeadlineHTTPConnection
+from collector.network.policy import is_public_address
+from collector.network.resolver import resolve_addresses
+from collector.network.transport import DeadlineHTTPConnection
 
 
 def is_timeout_error(exception: Exception) -> bool:

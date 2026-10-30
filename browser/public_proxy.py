@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import BoundedSemaphore
 from time import monotonic
 
-from collector.fetch import _connect_public
+from collector.network.fetch import _connect_public
 
 
 class BoundedProxyServer(ThreadingHTTPServer):
