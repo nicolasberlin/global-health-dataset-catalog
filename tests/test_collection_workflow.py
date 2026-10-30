@@ -9,7 +9,7 @@ import pytest
 from app.db.classification.candidates import _complete_candidate_classification
 from app.db.collection import reservations as job_store
 from app.db.connection import _require_database_pool
-from app.workers.collection import workers as collection_worker
+from app.workers.collection import worker as collection_worker
 from app.workers.runtime import persisted_workers
 from helpers.inspection import stored_candidate
 from helpers.workflows import SOURCE_URL, candidate_for, decision, rows, wait_until

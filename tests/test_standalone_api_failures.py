@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from app.db.connection import _fetchall, _require_database_pool
 from app.db.search import jobs as search_jobs
-from app.workers.search import workers as search_worker
+from app.workers.search import worker as search_worker
 from helpers.workflows import candidate_for, decision, headers
 from httpx import ASGITransport, AsyncClient
 

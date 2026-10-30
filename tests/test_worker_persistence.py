@@ -10,8 +10,8 @@ import pytest
 from app.db.classification import votes as votes
 from app.db.search.progress import read_search_progress
 from app.workers import sql_retries
-from app.workers.classification import workers as classification_worker
-from app.workers.collection import workers as collection_worker
+from app.workers.classification import worker as classification_worker
+from app.workers.collection import worker as collection_worker
 from helpers.inspection import stored_candidate, stored_datasets
 from helpers.workers import execute_worker
 from helpers.workflows import candidate_for, decision, rows

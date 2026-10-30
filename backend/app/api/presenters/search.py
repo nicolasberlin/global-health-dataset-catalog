@@ -1,9 +1,20 @@
-"""Derive a search's public execution and conclusion from one durable snapshot."""
+"""Present search snapshots and derive their public execution state and conclusion.
+
+These functions transform data already in memory. They never query the database,
+contact providers or schedule work. Final response construction filters diagnostics
+before exposing them to clients.
+"""
+
+from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any, TypedDict
 
-from collector.diagnostics import Diagnostic, ExecutionStatus, Outcome, Stage
+from app.api.presenters.classification import public_repository_classification
+from app.api.presenters.collection import public_automatic_collection
+from app.api.schemas.collection import CollectorAutomaticCollection
+from app.api.schemas.search import CollectorRepositorySearchItem, CollectorSearchProgressResponse
+from collector.diagnostics import Diagnostic, ExecutionStatus, Outcome, Stage, public_diagnostics
 
 
 class SearchSummary(TypedDict):
@@ -128,3 +139,96 @@ def summarize_search(
         "local_result_count": search.get("local_result_count"),
         "polling_required": bool(active or queued or waiting),
     }
+
+
+def _collector_repository_candidate(
+    candidate: dict[str, object],
+    *,
+    automatic_collection: CollectorAutomaticCollection | None = None,
+) -> CollectorRepositorySearchItem:
+    """Combine a saved candidate, its classification and its existing collection view."""
+    return CollectorRepositorySearchItem(
+        candidate_id=candidate["id"],
+        search_id=candidate["search_session_id"],
+        title=candidate["title"],
+        description=candidate["description"],
+        url=candidate["url"],
+        source=candidate["source"],
+        publisher=candidate["publisher"],
+        date=candidate["publication_date"],
+        doi=candidate["doi"],
+        keywords=candidate["keywords"],
+        metadata=candidate["metadata"],
+        classification_status=candidate["classification_status"],
+        classification_progress=candidate.get("classification_progress", {}),
+        classification=public_repository_classification(candidate["classification"]),
+        errors=public_diagnostics(
+            candidate.get("errors")
+            or (
+                [Diagnostic("legacy_unknown", "classification").to_dict()]
+                if candidate["classification_status"] == "error"
+                else []
+            )
+        ),
+        classification_error=(
+            "Candidate classification failed."
+            if candidate["classification_status"] == "error"
+            else ""
+        ),
+        classification_error_code=(
+            "classification_failed" if candidate["classification_status"] == "error" else ""
+        ),
+        automatic_collection=automatic_collection,
+        created_at=candidate["created_at"],
+        updated_at=candidate["updated_at"],
+    )
+
+
+def public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse:
+    """Convert read_search_progress() data into a client-facing progress response.
+
+    snapshot contains the search row, its candidates and their collections. Build
+    their response views, summarize processing status and gather saved dataset IDs.
+    The client uses polling_required to decide whether to request another update.
+    """
+
+    search, candidates, collections = snapshot
+    items = [
+        _collector_repository_candidate(
+            candidate,
+            automatic_collection=(
+                public_automatic_collection(collections.get(candidate["id"]))
+                if candidate["classification_status"] == "accepted"
+                else None
+            ),
+        )
+        for candidate in candidates
+    ]
+    summary = summarize_search(search, [item.model_dump() for item in items])
+    summary["errors"] = public_diagnostics(summary["errors"])
+    ids = list(
+        dict.fromkeys(
+            [
+                *search.get("local_dataset_ids", []),
+                *(
+                    dataset_id
+                    for item in items
+                    if item.automatic_collection is not None
+                    for dataset_id in item.automatic_collection.dataset_ids
+                ),
+            ]
+        )
+    )
+    return CollectorSearchProgressResponse(
+        search_id=search_id,
+        items=items,
+        query=search.get("query", ""),
+        origin=search["origin"] if search["status"] not in {"queued", "running"} else None,
+        local_dataset_ids=search.get("local_dataset_ids", []),
+        dataset_ids=ids,
+        warnings=search.get("warnings", []),
+        attempt=search.get("attempt_number", 1),
+        created_at=str(search.get("created_at", "")),
+        updated_at=str(search.get("updated_at", "")),
+        **summary,
+    )

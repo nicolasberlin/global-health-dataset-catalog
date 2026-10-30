@@ -20,7 +20,6 @@ from app.workers.failures import FailureHandler
 from app.workers.jobs import CollectionJob
 from app.workers.sql_retries import persist_with_retry
 from app.workers.stores import PostgresCollectionTrace, PostgresVoteStore
-
 from collector.budget import collection_budget
 from collector.classification.checkpoints import VoteStore
 from collector.classification.factory import build_default_page_classifier

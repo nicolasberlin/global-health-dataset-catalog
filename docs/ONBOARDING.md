@@ -126,13 +126,13 @@ installations. No setup script moves or deletes database volumes.
 | Catalogue aggregates and distribution evidence | `backend/app/db/catalog/datasets.py`, `backend/app/db/catalog/distributions.py` |
 | Catalogue observations and full-text search | `backend/app/db/catalog/observations.py`, `backend/app/db/catalog/search.py` |
 | Accepted-candidate collection reservation | `backend/app/db/collection/reservations.py`, `backend/app/db/classification/completion.py` |
-| Search, classification and collection worker classes | `backend/app/workers/search/workers.py`, `backend/app/workers/classification/workers.py`, `backend/app/workers/collection/workers.py` |
+| Search, classification and collection worker classes | `backend/app/workers/search/worker.py`, `backend/app/workers/classification/worker.py`, `backend/app/workers/collection/worker.py` |
 | Worker contract, lifecycle, state and persisted inputs | `backend/app/workers/contracts.py`, `backend/app/workers/runtime.py`, `backend/app/workers/state.py`, `backend/app/workers/jobs.py` |
 | Shared model-failure recovery | `backend/app/workers/failures.py` |
 | Worker SQL recovery and thread bridges | `backend/app/workers/sql_retries.py`, `backend/app/workers/stores.py` |
 | Authentication and visitor sessions | `backend/app/auth/security.py`, `backend/app/auth/sessions.py` |
 | Quotas and work admission | `backend/app/policies/quotas.py`, `backend/app/db/execution/quotas.py` |
-| API response mapping | `backend/app/api/presenters.py`, `backend/app/api/schemas.py` |
+| API response mapping and validation by domain | `backend/app/api/presenters/`, `backend/app/api/schemas/` |
 
 The [architecture guide](technical-design-document.md) explains module boundaries.
 The [collection guide](reference/collection.md) owns extraction, validation, timeouts and
@@ -168,19 +168,21 @@ not call another HTTP route to obtain a snapshot.
 ### Follow a search through the code
 
 1. `backend/app/api/searches.py` records the request in PostgreSQL.
-   `SearchWorker` in `backend/app/workers/search/workers.py` checks the saved catalogue,
+   `SearchWorker` in `backend/app/workers/search/worker.py` checks the saved catalogue,
    then discovers external candidates when needed; `ClassificationWorker` in
-   `backend/app/workers/classification/workers.py` evaluates those candidates.
+   `backend/app/workers/classification/worker.py` evaluates those candidates.
 2. For an accepted candidate, `CollectionWorker` in
-   `backend/app/workers/collection/workers.py` calls
+   `backend/app/workers/collection/worker.py` calls
    `collect_repository_candidate_with_report` in `collector/collection/service.py`, which
    delegates to `collect_record` in `collector/collection/orchestrator.py`.
    This resolves one record's metadata and checks its resource links.
 3. `backend/app/db/collection/completion.py` stores the collection results and
    accepted datasets in PostgreSQL. Clients read the saved progress and results.
 4. `backend/app/api/search_progress.py` loads the owner-scoped snapshot and calls
-   `api/presenters.py` to build the response. `search/summary.py` calculates its
-   overall processing status and conclusion.
+   `api/presenters/search.py` to build the response and calculate its overall
+   processing status and conclusion. Presenters for classification, collection and
+   catalogue data live alongside it; the matching request and response models live
+   in `api/schemas/`. Import from the owning domain module in each package.
 
 `collect_source_with_report` in `collector/collection/service.py` is the separate bounded
 source-discovery entrypoint; use the single-record path above for an already

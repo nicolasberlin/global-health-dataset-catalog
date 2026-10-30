@@ -9,8 +9,8 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from app.api.presenters import public_search_progress
-from app.api.schemas import CollectorSearchProgressResponse
+from app.api.presenters.search import public_search_progress
+from app.api.schemas.search import CollectorSearchProgressResponse
 from app.db.search.progress import read_search_progress
 
 

@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 import pytest
-from app.api.presenters import _collector_validation
+from app.api.presenters.catalog import _collector_validation
 from app.db.connection import _fetchone, _require_database_pool
 from helpers.inspection import stored_datasets
 

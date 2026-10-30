@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 
 import pytest
-from app.api.presenters import public_collection_job
-from app.search.summary import summarize_search
+from app.api.presenters.collection import public_collection_job
+from app.api.presenters.search import summarize_search
 from helpers.classification import distribution as _distribution
 from helpers.classification import page as _page
 from helpers.collection import Accept, collect

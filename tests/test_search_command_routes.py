@@ -54,7 +54,7 @@ def command_api(monkeypatch):
 
     monkeypatch.setattr(searches, "admit_search", admit)
     monkeypatch.setattr(progress_reads, "read_search_progress", progress)
-    monkeypatch.setattr("app.workers.search.workers.search_repository_metadata", forbidden)
+    monkeypatch.setattr("app.workers.search.worker.search_repository_metadata", forbidden)
     app = FastAPI()
     app.include_router(router)
     return inject_owners(app), calls

@@ -13,10 +13,10 @@ from app.db.connection import _require_database_pool
 from app.db.execution.commands import CommandConflict
 from app.db.search import jobs as search_jobs
 from app.policies.quotas import QuotaExceeded
-from app.workers.classification import workers as classification_worker
-from app.workers.collection import workers as collection_worker
+from app.workers.classification import worker as classification_worker
+from app.workers.collection import worker as collection_worker
 from app.workers.runtime import persisted_workers
-from app.workers.search import workers as search_worker
+from app.workers.search import worker as search_worker
 from app.workers.search.discovery import DiscoveryResult
 from app.workers.sql_retries import persist_with_retry
 from helpers.inspection import stored_candidate

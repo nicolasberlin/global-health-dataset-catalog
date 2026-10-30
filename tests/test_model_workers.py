@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from app.workers.classification import workers as classification
-from app.workers.collection import workers as collection
+from app.workers.classification import worker as classification
+from app.workers.collection import worker as collection
 from app.workers.sql_retries import persist_with_retry
 from psycopg.errors import DiskFull, QueryCanceled
 

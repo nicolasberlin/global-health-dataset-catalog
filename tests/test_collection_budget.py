@@ -10,7 +10,7 @@ import pytest
 from app.api.searches import search_progress
 from app.auth.security import APIPrincipal
 from app.db.connection import _require_database_pool
-from app.workers.collection import workers as collection_worker
+from app.workers.collection import worker as collection_worker
 from app.workers.runtime import persisted_workers
 from fastapi import Response
 from helpers.collection import DATASET_HTML, AcceptingPageClassifier

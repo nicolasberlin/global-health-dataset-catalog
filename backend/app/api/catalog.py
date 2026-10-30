@@ -10,8 +10,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from app.api.presenters import public_collected_dataset
-from app.api.schemas import CollectorCollectionResponse
+from app.api.presenters.catalog import public_collected_dataset
+from app.api.schemas.catalog import CollectorCollectionResponse
 from app.db.catalog.datasets import get_collected_datasets
 
 router = APIRouter(tags=["collector"])

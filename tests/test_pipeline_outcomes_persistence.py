@@ -9,7 +9,7 @@ from functools import partial
 
 import pytest
 from app.db.connection import _fetchall, _require_database_pool
-from app.workers.classification import workers as classification_worker
+from app.workers.classification import worker as classification_worker
 from helpers.classification import MODELS
 from helpers.classification import response as _response
 from helpers.collection import collect

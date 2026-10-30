@@ -12,8 +12,8 @@ from uuid import UUID
 import pytest
 from app.workers import runtime as workers
 from app.workers import sql_retries
-from app.workers.classification import workers as classification_worker
-from app.workers.collection import workers as collection_worker
+from app.workers.classification import worker as classification_worker
+from app.workers.collection import worker as collection_worker
 from helpers.workers import StubWorker, execute_worker
 from psycopg import InterfaceError, OperationalError
 from psycopg.errors import (

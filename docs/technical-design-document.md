@@ -285,8 +285,12 @@ frontend, handlers, exclusive SQL and tests are all excluded from this repositor
 
 Shared transaction/owner guards, quotas, vote history and collection traces remain
 in the core because automatic processing and the full search diagnostic export
-need them. Response models used in core progress remain in
-`backend/app/api/schemas.py`.
+need them. Request and response models are grouped by domain in
+`backend/app/api/schemas/`: `search.py`, `classification.py`, `collection.py` and
+`catalog.py`, with shared diagnostics and HTTP errors in `common.py`. The matching
+modules in `backend/app/api/presenters/` build client-safe responses from stored
+data. The search presenter also derives the snapshot's execution status and
+conclusion; these read operations never schedule processing.
 
 Search Lab, its interface, scenarios and tests remain versioned in `search_lab/`.
 It observes the core API and PostgreSQL without executing application workers.

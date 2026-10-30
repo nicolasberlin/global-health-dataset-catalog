@@ -12,8 +12,8 @@ from uuid import uuid4
 
 import pytest
 from app.policies.quotas import QuotaExceeded, QuotaUnavailable
-from app.workers.search import workers as module
-from app.workers.search.workers import SearchWorker
+from app.workers.search import worker as module
+from app.workers.search.worker import SearchWorker
 from app.workers.sql_retries import persist_with_retry
 from psycopg.errors import DiskFull
 

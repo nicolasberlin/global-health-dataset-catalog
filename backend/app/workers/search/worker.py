@@ -24,7 +24,6 @@ from app.workers.search.discovery import (
     prepare_repository_candidates,
 )
 from app.workers.sql_retries import persist_with_retry
-
 from collector.diagnostics import Diagnostic, exception_diagnostics
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.repository_search import RepositorySearchResponse, search_repository_metadata

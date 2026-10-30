@@ -19,8 +19,8 @@ from app.db.execution.retries import schedule_llm_retry
 from app.policies.quotas import QuotaExceeded
 from app.policies.retries import RetryPolicy, enforce_retry_date, plan_retry
 from app.workers import stores as vote_store
-from app.workers.classification import workers as classification_worker
-from app.workers.collection import workers as collection_worker
+from app.workers.classification import worker as classification_worker
+from app.workers.collection import worker as collection_worker
 from fastapi import Response
 from helpers.classification import MODELS, PAGE
 from helpers.classification import response as _response

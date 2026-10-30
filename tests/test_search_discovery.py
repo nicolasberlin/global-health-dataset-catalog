@@ -7,7 +7,7 @@ from dataclasses import asdict, replace
 from uuid import uuid4
 
 import pytest
-from app.api.schemas import CollectorRepositorySearchItem
+from app.api.schemas.search import CollectorRepositorySearchItem
 from app.policies.quotas import WorkAdmission
 from app.workers.search.discovery import lookup_local, prepare_repository_candidates
 

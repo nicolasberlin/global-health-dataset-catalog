@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from app.api.presenters import public_collected_dataset
+from app.api.presenters.catalog import public_collected_dataset
 from app.db.connection import _fetchone, _require_database_pool
 from app.db.schema import CURRENT_SCHEMA_VERSION
 from helpers.inspection import stored_datasets

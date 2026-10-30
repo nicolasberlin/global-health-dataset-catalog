@@ -69,7 +69,7 @@ cookies remain in the browser service.
 | `collection/orchestrator.py` | Attempts, fallback, limits, validation and reporting |
 | `collection/browser.py` | Generic browser-service client and session probes |
 | `network/fetch.py`, `network/transport.py`, `network/resolver.py`, `network/policy.py` | Shared bounded HTTP, DNS and destination policy |
-| `backend/app/workers/collection/workers.py` | Configuration, votes/traces and completion |
+| `backend/app/workers/collection/worker.py` | Configuration, votes/traces and completion |
 | `backend/app/db/collection/reservations.py` | Candidate association and job reuse on the classification transaction |
 | `backend/app/db/collection/completion.py` | Existing guarded atomic finalization |
 | `backend/app/db/catalog/` | Dataset aggregates, distributions, observations and catalogue search |

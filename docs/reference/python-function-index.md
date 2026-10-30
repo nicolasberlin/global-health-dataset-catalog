@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **30 October 2026**, based on Git commit `b7e8edc`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **30 October 2026**, based on Git commit `bd92a36`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **864 function and method definitions in 131 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **864 function and method definitions in 134 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -16,7 +16,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Directory | Files with functions | Definitions |
 | --- | ---: | ---: |
-| `backend/` | 53 | 294 |
+| `backend/` | 56 | 294 |
 | `browser/` | 2 | 7 |
 | `collector/` | 65 | 470 |
 | `scripts/` | 3 | 52 |
@@ -27,8 +27,12 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [backend/app/api/catalog.py](#backend-app-api-catalog-py) — 1 definition
 - [backend/app/api/diagnostics.py](#backend-app-api-diagnostics-py) — 1 definition
 - [backend/app/api/middleware.py](#backend-app-api-middleware-py) — 8 definitions
-- [backend/app/api/presenters.py](#backend-app-api-presenters-py) — 10 definitions
-- [backend/app/api/schemas.py](#backend-app-api-schemas-py) — 3 definitions
+- [backend/app/api/presenters/catalog.py](#backend-app-api-presenters-catalog-py) — 3 definitions
+- [backend/app/api/presenters/classification.py](#backend-app-api-presenters-classification-py) — 3 definitions
+- [backend/app/api/presenters/collection.py](#backend-app-api-presenters-collection-py) — 2 definitions
+- [backend/app/api/presenters/search.py](#backend-app-api-presenters-search-py) — 3 definitions
+- [backend/app/api/schemas/classification.py](#backend-app-api-schemas-classification-py) — 2 definitions
+- [backend/app/api/schemas/search.py](#backend-app-api-schemas-search-py) — 1 definition
 - [backend/app/api/search_progress.py](#backend-app-api-search_progress-py) — 1 definition
 - [backend/app/api/searches.py](#backend-app-api-searches-py) — 5 definitions
 - [backend/app/api/sessions.py](#backend-app-api-sessions-py) — 1 definition
@@ -65,14 +69,13 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [backend/app/migrate.py](#backend-app-migrate-py) — 2 definitions
 - [backend/app/policies/quotas.py](#backend-app-policies-quotas-py) — 9 definitions
 - [backend/app/policies/retries.py](#backend-app-policies-retries-py) — 5 definitions
-- [backend/app/search/summary.py](#backend-app-search-summary-py) — 1 definition
-- [backend/app/workers/classification/workers.py](#backend-app-workers-classification-workers-py) — 8 definitions
-- [backend/app/workers/collection/workers.py](#backend-app-workers-collection-workers-py) — 7 definitions
+- [backend/app/workers/classification/worker.py](#backend-app-workers-classification-worker-py) — 8 definitions
+- [backend/app/workers/collection/worker.py](#backend-app-workers-collection-worker-py) — 7 definitions
 - [backend/app/workers/contracts.py](#backend-app-workers-contracts-py) — 5 definitions
 - [backend/app/workers/failures.py](#backend-app-workers-failures-py) — 2 definitions
 - [backend/app/workers/runtime.py](#backend-app-workers-runtime-py) — 5 definitions
 - [backend/app/workers/search/discovery.py](#backend-app-workers-search-discovery-py) — 9 definitions
-- [backend/app/workers/search/workers.py](#backend-app-workers-search-workers-py) — 4 definitions
+- [backend/app/workers/search/worker.py](#backend-app-workers-search-worker-py) — 4 definitions
 - [backend/app/workers/sql_retries.py](#backend-app-workers-sql_retries-py) — 2 definitions
 - [backend/app/workers/state.py](#backend-app-workers-state-py) — 6 definitions
 - [backend/app/workers/stores.py](#backend-app-workers-stores-py) — 6 definitions
@@ -187,32 +190,61 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`ApplicationAvailabilityMiddleware.__init__`](../../backend/app/api/middleware.py#L123) | `__init__(self, app: ASGIApp)` | function / method |
 | [`ApplicationAvailabilityMiddleware.__call__`](../../backend/app/api/middleware.py#L126) | `__call__(self, scope: Scope, receive: Receive, send: Send) -> None` | async |
 
-<a id="backend-app-api-presenters-py"></a>
+<a id="backend-app-api-presenters-catalog-py"></a>
 
-## backend/app/api/presenters.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`public_collection_job`](../../backend/app/api/presenters.py#L33) | `public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob` | function / method |
-| [`_public_ensemble`](../../backend/app/api/presenters.py#L95) | `_public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]` | function / method |
-| [`public_repository_classification`](../../backend/app/api/presenters.py#L121) | `public_repository_classification(classification: dict[str, Any] \| None) -> CollectorRepositoryClassification \| None` | function / method |
-| [`public_dataset_signals`](../../backend/app/api/presenters.py#L132) | `public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]` | function / method |
-| [`_automatic_collection`](../../backend/app/api/presenters.py#L139) | `_automatic_collection(collection: CollectionJobReservation \| None) -> CollectorAutomaticCollection` | function / method |
-| [`_collector_distribution`](../../backend/app/api/presenters.py#L174) | `_collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution` | function / method |
-| [`_collector_repository_candidate`](../../backend/app/api/presenters.py#L188) | `_collector_repository_candidate(candidate: dict[str, object], *, automatic_collection: CollectorAutomaticCollection \| None=None) -> CollectorRepositorySearchItem` | function / method |
-| [`_collector_validation`](../../backend/app/api/presenters.py#L231) | `_collector_validation(validation: ValidationResult) -> CollectorValidation` | function / method |
-| [`public_collected_dataset`](../../backend/app/api/presenters.py#L251) | `public_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset` | function / method |
-| [`public_search_progress`](../../backend/app/api/presenters.py#L286) | `public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse` | function / method |
-
-<a id="backend-app-api-schemas-py"></a>
-
-## backend/app/api/schemas.py
+## backend/app/api/presenters/catalog.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`CollectorRepositoryClassificationVote.validate_decision`](../../backend/app/api/schemas.py#L84) | `validate_decision(self) -> CollectorRepositoryClassificationVote` | function / method |
-| [`CollectorRepositoryClassification.validate_decision`](../../backend/app/api/schemas.py#L155) | `validate_decision(self) -> CollectorRepositoryClassification` | function / method |
-| [`CollectorRepositorySearchItem.validate_metadata_size`](../../backend/app/api/schemas.py#L257) | `validate_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]` | classmethod |
+| [`_collector_distribution`](../../backend/app/api/presenters/catalog.py#L14) | `_collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution` | function / method |
+| [`_collector_validation`](../../backend/app/api/presenters/catalog.py#L28) | `_collector_validation(validation: ValidationResult) -> CollectorValidation` | function / method |
+| [`public_collected_dataset`](../../backend/app/api/presenters/catalog.py#L48) | `public_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset` | function / method |
+
+<a id="backend-app-api-presenters-classification-py"></a>
+
+## backend/app/api/presenters/classification.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_public_ensemble`](../../backend/app/api/presenters/classification.py#L11) | `_public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]` | function / method |
+| [`public_repository_classification`](../../backend/app/api/presenters/classification.py#L37) | `public_repository_classification(classification: dict[str, Any] \| None) -> CollectorRepositoryClassification \| None` | function / method |
+| [`public_dataset_signals`](../../backend/app/api/presenters/classification.py#L48) | `public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]` | function / method |
+
+<a id="backend-app-api-presenters-collection-py"></a>
+
+## backend/app/api/presenters/collection.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`public_collection_job`](../../backend/app/api/presenters/collection.py#L13) | `public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob` | function / method |
+| [`public_automatic_collection`](../../backend/app/api/presenters/collection.py#L75) | `public_automatic_collection(collection: CollectionJobReservation \| None) -> CollectorAutomaticCollection` | function / method |
+
+<a id="backend-app-api-presenters-search-py"></a>
+
+## backend/app/api/presenters/search.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`summarize_search`](../../backend/app/api/presenters/search.py#L31) | `summarize_search(search: Mapping[str, Any], items: Sequence[Mapping[str, Any]]) -> SearchSummary` | function / method |
+| [`_collector_repository_candidate`](../../backend/app/api/presenters/search.py#L144) | `_collector_repository_candidate(candidate: dict[str, object], *, automatic_collection: CollectorAutomaticCollection \| None=None) -> CollectorRepositorySearchItem` | function / method |
+| [`public_search_progress`](../../backend/app/api/presenters/search.py#L187) | `public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse` | function / method |
+
+<a id="backend-app-api-schemas-classification-py"></a>
+
+## backend/app/api/schemas/classification.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`CollectorRepositoryClassificationVote.validate_decision`](../../backend/app/api/schemas/classification.py#L42) | `validate_decision(self) -> CollectorRepositoryClassificationVote` | function / method |
+| [`CollectorRepositoryClassification.validate_decision`](../../backend/app/api/schemas/classification.py#L113) | `validate_decision(self) -> CollectorRepositoryClassification` | function / method |
+
+<a id="backend-app-api-schemas-search-py"></a>
+
+## backend/app/api/schemas/search.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`CollectorRepositorySearchItem.validate_metadata_size`](../../backend/app/api/schemas/search.py#L74) | `validate_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]` | classmethod |
 
 <a id="backend-app-api-search_progress-py"></a>
 
@@ -679,42 +711,34 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`enforce_retry_date`](../../backend/app/policies/retries.py#L57) | `enforce_retry_date(errors, *, now=None)` | function / method |
 | [`plan_retry`](../../backend/app/policies/retries.py#L66) | `plan_retry(errors: list[Diagnostic], *, round_number, started_at, now=None, policy=None)` | function / method |
 
-<a id="backend-app-search-summary-py"></a>
+<a id="backend-app-workers-classification-worker-py"></a>
 
-## backend/app/search/summary.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`summarize_search`](../../backend/app/search/summary.py#L20) | `summarize_search(search: Mapping[str, Any], items: Sequence[Mapping[str, Any]]) -> SearchSummary` | function / method |
-
-<a id="backend-app-workers-classification-workers-py"></a>
-
-## backend/app/workers/classification/workers.py
+## backend/app/workers/classification/worker.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_classify`](../../backend/app/workers/classification/workers.py#L33) | `_classify(candidate: ClassificationJob, vote_store: VoteStore) -> RepositoryClassification \| None` | function / method |
-| [`ClassificationWorker.__init__`](../../backend/app/workers/classification/workers.py#L49) | `__init__(self, *, classify: Callable[[ClassificationJob, VoteStore], RepositoryClassification \| None] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
-| [`ClassificationWorker.claim`](../../backend/app/workers/classification/workers.py#L69) | `claim(self, *, claim_token: UUID) -> ClassificationJob \| None` | async |
-| [`ClassificationWorker.execute`](../../backend/app/workers/classification/workers.py#L72) | `execute(self, candidate: ClassificationJob, executor: Executor) -> None` | async |
-| [`ClassificationWorker._retry`](../../backend/app/workers/classification/workers.py#L112) | `_retry(self, candidate: ClassificationJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
-| [`ClassificationWorker._fail`](../../backend/app/workers/classification/workers.py#L124) | `_fail(self, candidate: ClassificationJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
-| [`ClassificationWorker.recover`](../../backend/app/workers/classification/workers.py#L138) | `recover(self, candidate: ClassificationJob) -> object` | async |
-| [`_repository_search_result_from_candidate`](../../backend/app/workers/classification/workers.py#L147) | `_repository_search_result_from_candidate(candidate: ClassificationJob) -> RepositorySearchResult` | function / method |
+| [`_classify`](../../backend/app/workers/classification/worker.py#L32) | `_classify(candidate: ClassificationJob, vote_store: VoteStore) -> RepositoryClassification \| None` | function / method |
+| [`ClassificationWorker.__init__`](../../backend/app/workers/classification/worker.py#L48) | `__init__(self, *, classify: Callable[[ClassificationJob, VoteStore], RepositoryClassification \| None] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`ClassificationWorker.claim`](../../backend/app/workers/classification/worker.py#L68) | `claim(self, *, claim_token: UUID) -> ClassificationJob \| None` | async |
+| [`ClassificationWorker.execute`](../../backend/app/workers/classification/worker.py#L71) | `execute(self, candidate: ClassificationJob, executor: Executor) -> None` | async |
+| [`ClassificationWorker._retry`](../../backend/app/workers/classification/worker.py#L111) | `_retry(self, candidate: ClassificationJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
+| [`ClassificationWorker._fail`](../../backend/app/workers/classification/worker.py#L123) | `_fail(self, candidate: ClassificationJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
+| [`ClassificationWorker.recover`](../../backend/app/workers/classification/worker.py#L137) | `recover(self, candidate: ClassificationJob) -> object` | async |
+| [`_repository_search_result_from_candidate`](../../backend/app/workers/classification/worker.py#L146) | `_repository_search_result_from_candidate(candidate: ClassificationJob) -> RepositorySearchResult` | function / method |
 
-<a id="backend-app-workers-collection-workers-py"></a>
+<a id="backend-app-workers-collection-worker-py"></a>
 
-## backend/app/workers/collection/workers.py
+## backend/app/workers/collection/worker.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_collect_record_job`](../../backend/app/workers/collection/workers.py#L44) | `_collect_record_job(url, *, classifier, observe)` | function / method |
-| [`CollectionWorker.__init__`](../../backend/app/workers/collection/workers.py#L76) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTrace] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
-| [`CollectionWorker.claim`](../../backend/app/workers/collection/workers.py#L107) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
-| [`CollectionWorker.execute`](../../backend/app/workers/collection/workers.py#L110) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
-| [`CollectionWorker._retry`](../../backend/app/workers/collection/workers.py#L156) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
-| [`CollectionWorker._fail`](../../backend/app/workers/collection/workers.py#L168) | `_fail(self, job: CollectionJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
-| [`CollectionWorker.recover`](../../backend/app/workers/collection/workers.py#L181) | `recover(self, job: CollectionJob) -> object` | async |
+| [`_collect_record_job`](../../backend/app/workers/collection/worker.py#L43) | `_collect_record_job(url, *, classifier, observe)` | function / method |
+| [`CollectionWorker.__init__`](../../backend/app/workers/collection/worker.py#L75) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTrace] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`CollectionWorker.claim`](../../backend/app/workers/collection/worker.py#L106) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
+| [`CollectionWorker.execute`](../../backend/app/workers/collection/worker.py#L109) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
+| [`CollectionWorker._retry`](../../backend/app/workers/collection/worker.py#L155) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
+| [`CollectionWorker._fail`](../../backend/app/workers/collection/worker.py#L167) | `_fail(self, job: CollectionJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
+| [`CollectionWorker.recover`](../../backend/app/workers/collection/worker.py#L180) | `recover(self, job: CollectionJob) -> object` | async |
 
 <a id="backend-app-workers-contracts-py"></a>
 
@@ -765,16 +789,16 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_json_size_bytes`](../../backend/app/workers/search/discovery.py#L169) | `_json_size_bytes(value: dict[str, str]) -> int` | function / method |
 | [`prepare_repository_candidates`](../../backend/app/workers/search/discovery.py#L181) | `prepare_repository_candidates(response: RepositorySearchResponse, query: str, admission: WorkAdmission, *, bound: RepositoryResultBounder=_bounded_repository_result) -> DiscoveryResult` | function / method |
 
-<a id="backend-app-workers-search-workers-py"></a>
+<a id="backend-app-workers-search-worker-py"></a>
 
-## backend/app/workers/search/workers.py
+## backend/app/workers/search/worker.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`SearchWorker.__init__`](../../backend/app/workers/search/workers.py#L39) | `__init__(self, *, local_lookup: Callable[[str], Awaitable[list[CollectedDataset]]] \| None=None, provider: Callable[[str], RepositorySearchResponse] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
-| [`SearchWorker.claim`](../../backend/app/workers/search/workers.py#L50) | `claim(self, *, claim_token: UUID) -> SearchJob \| None` | async |
-| [`SearchWorker.execute`](../../backend/app/workers/search/workers.py#L54) | `execute(self, job: SearchJob, executor: Executor) -> None` | async |
-| [`SearchWorker.recover`](../../backend/app/workers/search/workers.py#L122) | `recover(self, job: SearchJob) -> object` | async |
+| [`SearchWorker.__init__`](../../backend/app/workers/search/worker.py#L38) | `__init__(self, *, local_lookup: Callable[[str], Awaitable[list[CollectedDataset]]] \| None=None, provider: Callable[[str], RepositorySearchResponse] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`SearchWorker.claim`](../../backend/app/workers/search/worker.py#L49) | `claim(self, *, claim_token: UUID) -> SearchJob \| None` | async |
+| [`SearchWorker.execute`](../../backend/app/workers/search/worker.py#L53) | `execute(self, job: SearchJob, executor: Executor) -> None` | async |
+| [`SearchWorker.recover`](../../backend/app/workers/search/worker.py#L121) | `recover(self, job: SearchJob) -> object` | async |
 
 <a id="backend-app-workers-sql_retries-py"></a>
 

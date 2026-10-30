@@ -20,7 +20,6 @@ from app.workers.failures import FailureHandler
 from app.workers.jobs import ClassificationJob
 from app.workers.sql_retries import persist_with_retry
 from app.workers.stores import PostgresVoteStore
-
 from collector.classification.checkpoints import VoteStore
 from collector.classification.factory import build_default_repository_result_classifier
 from collector.classification.repository import RepositoryClassification

@@ -15,8 +15,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
-from app.api.schemas import (
-    CollectorHTTPError,
+from app.api.schemas.common import CollectorHTTPError
+from app.api.schemas.search import (
     CollectorSearchCommandResponse,
     CollectorSearchCreateRequest,
     CollectorSearchProgressResponse,

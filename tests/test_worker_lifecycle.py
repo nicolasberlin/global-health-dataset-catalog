@@ -18,9 +18,9 @@ import pytest
 from app.workers import runtime as workers
 from app.workers import sql_retries
 from app.workers import stores as vote_module
-from app.workers.classification import workers as classification_worker
-from app.workers.collection import workers as collection_worker
-from app.workers.search import workers as search_worker
+from app.workers.classification import worker as classification_worker
+from app.workers.collection import worker as collection_worker
+from app.workers.search import worker as search_worker
 from app.workers.sql_retries import persist_with_retry
 from app.workers.state import request_worker_stop, workers_ready
 from app.workers.stores import PostgresVoteStore
