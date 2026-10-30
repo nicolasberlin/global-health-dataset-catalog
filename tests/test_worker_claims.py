@@ -16,6 +16,8 @@ from app.db.execution import application_lock as locking
 from app.db.execution.retries import schedule_llm_retry
 from app.db.search import jobs as search_jobs
 from app.workers import runtime as workers
+from app.workers import sql_retries
+from helpers.workers import StubWorker
 from psycopg import OperationalError
 
 from collector.classification.repository import RepositoryClassification
@@ -251,10 +253,12 @@ async def test_consumer_recovers_lost_claim_ack_without_claiming_or_executing_ot
     monkeypatch.setattr(
         workers,
         "persist_with_retry",
-        partial(workers.persist_with_retry, initial_delay=0),
+        partial(sql_retries.persist_with_retry, initial_delay=0),
     )
     with ThreadPoolExecutor(1) as executor:
-        await asyncio.wait_for(workers._consume(stop, executor, 0.001, lost_ack, execute), 3)
+        await asyncio.wait_for(
+            workers._consume(stop, executor, 0.001, StubWorker(claim=lost_ack, execute=execute)), 3
+        )
     assert len(tokens) == 2 and tokens[0] == tokens[1]
     assert claimed_items[0]["id"] == claimed_items[1]["id"] == first["id"]
     assert version(claimed_items[0]) == version(claimed_items[1])

@@ -89,8 +89,10 @@ class PipelineFailure(RuntimeError):
 
 
 class PersistenceFailure(PipelineFailure):
-    def __init__(self, message: str):
-        super().__init__(message, diagnostics=[Diagnostic("persistence_failed", "classification")])
+    """Keep a failed storage operation attached to its owning pipeline stage."""
+
+    def __init__(self, message: str, *, stage: Stage = "classification") -> None:
+        super().__init__(message, diagnostics=[Diagnostic("persistence_failed", stage)])
 
 
 def exception_diagnostics(exception: Exception, stage: Stage) -> list[Diagnostic]:

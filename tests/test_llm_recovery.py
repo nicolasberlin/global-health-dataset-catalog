@@ -18,9 +18,9 @@ from app.db.connection import _require_database_pool
 from app.db.execution.retries import schedule_llm_retry
 from app.policies.quotas import QuotaExceeded
 from app.policies.retries import RetryPolicy, enforce_retry_date, plan_retry
-from app.workers import classification as classification_worker
-from app.workers import collection as collection_worker
 from app.workers import stores as vote_store
+from app.workers.classification import workers as classification_worker
+from app.workers.collection import workers as collection_worker
 from fastapi import Response
 from helpers.classification import MODELS, PAGE
 from helpers.classification import response as _response
@@ -118,9 +118,9 @@ async def setup_work(database, kind):
 
 async def execute(kind, item):
     worker = (
-        classification_worker._run_classification
+        classification_worker.ClassificationWorker().execute
         if kind == "repository"
-        else collection_worker._run_collection_job
+        else collection_worker.CollectionWorker().execute
     )
     with ThreadPoolExecutor(1) as executor:
         await worker(item, executor)

@@ -124,7 +124,5 @@ class ModelFixtureTransport:
 # Keep production admission, workers, voting, parsing, validation and persistence.
 fetch.build_opener = lambda *handlers: PublicFixtureTransport()
 llm_client.build_opener = lambda *handlers: ModelFixtureTransport()
-lifecycle.search_workers = partial(lifecycle.search_workers, poll_interval=0.02)
-lifecycle.classification_workers = partial(lifecycle.classification_workers, poll_interval=0.02)
-lifecycle.collection_workers = partial(lifecycle.collection_workers, poll_interval=0.02)
+lifecycle.persisted_workers = partial(lifecycle.persisted_workers, poll_interval=0.02)
 app = main.app

@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from app.db.connection import _fetchall, _require_database_pool
 from app.db.search import jobs as search_jobs
-from app.workers import search as search_worker
+from app.workers.search import workers as search_worker
 from helpers.workflows import candidate_for, decision, headers
 from httpx import ASGITransport, AsyncClient
 
@@ -74,7 +74,7 @@ async def test_full_queue_rejects_without_receipt_and_replay_survives_pool_resta
             response.json()["search_id"] == first.json()["search_id"] for response in replays
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
-            await search_worker._run_search(await search_jobs.claim_search(), executor)
+            await search_worker.SearchWorker().execute(await search_jobs.claim_search(), executor)
         admitted = await client.post(
             "/collector/searches", headers=bob, json={"query": "diabetes"}
         )

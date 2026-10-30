@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **29 October 2026**, based on Git commit `92490c1`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **30 October 2026**, based on Git commit `66e4917`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **851 function and method definitions in 125 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **864 function and method definitions in 127 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -16,7 +16,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Directory | Files with functions | Definitions |
 | --- | ---: | ---: |
-| `backend/` | 47 | 281 |
+| `backend/` | 49 | 294 |
 | `browser/` | 2 | 7 |
 | `collector/` | 65 | 470 |
 | `scripts/` | 3 | 52 |
@@ -61,15 +61,17 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [backend/app/migrate.py](#backend-app-migrate-py) — 2 definitions
 - [backend/app/policies/quotas.py](#backend-app-policies-quotas-py) — 9 definitions
 - [backend/app/policies/retries.py](#backend-app-policies-retries-py) — 5 definitions
-- [backend/app/search/discovery.py](#backend-app-search-discovery-py) — 9 definitions
 - [backend/app/search/summary.py](#backend-app-search-summary-py) — 1 definition
-- [backend/app/workers/classification.py](#backend-app-workers-classification-py) — 5 definitions
-- [backend/app/workers/collection.py](#backend-app-workers-collection-py) — 4 definitions
-- [backend/app/workers/runtime.py](#backend-app-workers-runtime-py) — 7 definitions
-- [backend/app/workers/search.py](#backend-app-workers-search-py) — 3 definitions
+- [backend/app/workers/classification/workers.py](#backend-app-workers-classification-workers-py) — 8 definitions
+- [backend/app/workers/collection/workers.py](#backend-app-workers-collection-workers-py) — 7 definitions
+- [backend/app/workers/contracts.py](#backend-app-workers-contracts-py) — 5 definitions
+- [backend/app/workers/failures.py](#backend-app-workers-failures-py) — 2 definitions
+- [backend/app/workers/runtime.py](#backend-app-workers-runtime-py) — 5 definitions
+- [backend/app/workers/search/discovery.py](#backend-app-workers-search-discovery-py) — 9 definitions
+- [backend/app/workers/search/workers.py](#backend-app-workers-search-workers-py) — 4 definitions
 - [backend/app/workers/sql_retries.py](#backend-app-workers-sql_retries-py) — 2 definitions
 - [backend/app/workers/state.py](#backend-app-workers-state-py) — 6 definitions
-- [backend/app/workers/stores.py](#backend-app-workers-stores-py) — 5 definitions
+- [backend/app/workers/stores.py](#backend-app-workers-stores-py) — 6 definitions
 - [backend/container_entrypoint.py](#backend-container_entrypoint-py) — 3 definitions
 - [browser/container_entrypoint.py](#browser-container_entrypoint-py) — 1 definition
 - [browser/public_proxy.py](#browser-public_proxy-py) — 6 definitions
@@ -156,7 +158,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`read_collected_by_id`](../../backend/app/api/catalog.py#L21) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CollectorCollectionResponse` | async |
+| [`read_collected_by_id`](../../backend/app/api/catalog.py#L20) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CollectorCollectionResponse` | async |
 
 <a id="backend-app-api-diagnostics-py"></a>
 
@@ -164,7 +166,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`search_diagnostics`](../../backend/app/api/diagnostics.py#L24) | `search_diagnostics(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response)` | async |
+| [`search_diagnostics`](../../backend/app/api/diagnostics.py#L23) | `search_diagnostics(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response)` | async |
 
 <a id="backend-app-api-middleware-py"></a>
 
@@ -177,7 +179,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`RequestBodyLimitMiddleware.__init__`](../../backend/app/api/middleware.py#L47) | `__init__(self, app: ASGIApp, *, max_body_bytes: int \| None=None, body_timeout_seconds: float \| None=None) -> None` | function / method |
 | [`RequestBodyLimitMiddleware.__call__`](../../backend/app/api/middleware.py#L60) | `__call__(self, scope: Scope, receive: Receive, send: Send) -> None` | async |
 | [`RequestBodyLimitMiddleware.__call__.<local>.replay`](../../backend/app/api/middleware.py#L103) | `replay() -> Message` | async |
-| [`RequestBodyLimitMiddleware._reject`](../../backend/app/api/middleware.py#L113) | `_reject(scope: Scope, receive: Receive, send: Send) -> None` | staticmethod |
+| [`RequestBodyLimitMiddleware._reject`](../../backend/app/api/middleware.py#L112) | `_reject(scope: Scope, receive: Receive, send: Send) -> None` | staticmethod |
 | [`ApplicationAvailabilityMiddleware.__init__`](../../backend/app/api/middleware.py#L123) | `__init__(self, app: ASGIApp)` | function / method |
 | [`ApplicationAvailabilityMiddleware.__call__`](../../backend/app/api/middleware.py#L126) | `__call__(self, scope: Scope, receive: Receive, send: Send) -> None` | async |
 
@@ -222,11 +224,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`create_search`](../../backend/app/api/searches.py#L90) | `create_search(payload: CollectorSearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> CollectorSearchCommandResponse` | async |
+| [`create_search`](../../backend/app/api/searches.py#L85) | `create_search(payload: CollectorSearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> CollectorSearchCommandResponse` | async |
 | [`_admit_search_command`](../../backend/app/api/searches.py#L105) | `_admit_search_command(payload, principal, response, idempotency_key, request)` | async |
 | [`_search_command_response`](../../backend/app/api/searches.py#L128) | `_search_command_response(row, replayed, principal, response, request)` | async |
-| [`latest_search`](../../backend/app/api/searches.py#L150) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> CollectorSearchProgressResponse` | async |
-| [`search_progress`](../../backend/app/api/searches.py#L175) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> CollectorSearchProgressResponse` | async |
+| [`latest_search`](../../backend/app/api/searches.py#L149) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> CollectorSearchProgressResponse` | async |
+| [`search_progress`](../../backend/app/api/searches.py#L174) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> CollectorSearchProgressResponse` | async |
 
 <a id="backend-app-api-sessions-py"></a>
 
@@ -234,7 +236,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`start_visitor_session`](../../backend/app/api/sessions.py#L16) | `start_visitor_session(request: Request) -> Response` | async |
+| [`start_visitor_session`](../../backend/app/api/sessions.py#L15) | `start_visitor_session(request: Request) -> Response` | async |
 
 <a id="backend-app-auth-security-py"></a>
 
@@ -249,7 +251,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`enforce_public_online_quota`](../../backend/app/auth/security.py#L125) | `enforce_public_online_quota(principal: APIPrincipal) -> None` | async |
 | [`enforce_session_creation_quota`](../../backend/app/auth/security.py#L131) | `enforce_session_creation_quota(request: Request, settings: VisitorSessionSettings) -> None` | async |
 | [`public_client_key`](../../backend/app/auth/security.py#L139) | `public_client_key(request: Request, settings: VisitorSessionSettings) -> str` | function / method |
-| [`quota_http_errors`](../../backend/app/auth/security.py#L154) | `quota_http_errors() -> Iterator[None]` | contextmanager |
+| [`quota_http_errors`](../../backend/app/auth/security.py#L153) | `quota_http_errors() -> Iterator[None]` | contextmanager |
 | [`api_auth_mode`](../../backend/app/auth/security.py#L167) | `api_auth_mode() -> str` | function / method |
 | [`require_public_session_bootstrap`](../../backend/app/auth/security.py#L174) | `require_public_session_bootstrap(request: Request) -> VisitorSessionSettings` | function / method |
 | [`_require_session_origin`](../../backend/app/auth/security.py#L184) | `_require_session_origin(request: Request, settings: VisitorSessionSettings) -> None` | function / method |
@@ -263,8 +265,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`VisitorSessionSettings.secure`](../../backend/app/auth/sessions.py#L25) | `secure(self) -> bool` | property |
-| [`VisitorSessionSettings.cookie_name`](../../backend/app/auth/sessions.py#L29) | `cookie_name(self) -> str` | property |
+| [`VisitorSessionSettings.secure`](../../backend/app/auth/sessions.py#L24) | `secure(self) -> bool` | property |
+| [`VisitorSessionSettings.cookie_name`](../../backend/app/auth/sessions.py#L28) | `cookie_name(self) -> str` | property |
 | [`visitor_session_settings`](../../backend/app/auth/sessions.py#L33) | `visitor_session_settings() -> VisitorSessionSettings` | function / method |
 | [`new_visitor_cookie`](../../backend/app/auth/sessions.py#L76) | `new_visitor_cookie(settings: VisitorSessionSettings) -> str` | function / method |
 | [`visitor_owner_id`](../../backend/app/auth/sessions.py#L80) | `visitor_owner_id(cookie: str \| None, settings: VisitorSessionSettings) -> str \| None` | function / method |
@@ -410,7 +412,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`ApplicationOwnership.__init__`](../../backend/app/db/execution/application_lock.py#L31) | `__init__(self, connection, key: int, *, probe_timeout: float=2.0)` | function / method |
-| [`ApplicationOwnership.healthy`](../../backend/app/db/execution/application_lock.py#L39) | `healthy(self) -> bool` | property |
+| [`ApplicationOwnership.healthy`](../../backend/app/db/execution/application_lock.py#L38) | `healthy(self) -> bool` | property |
 | [`ApplicationOwnership.require_held`](../../backend/app/db/execution/application_lock.py#L42) | `require_held(self) -> None` | function / method |
 | [`ApplicationOwnership._mark_lost`](../../backend/app/db/execution/application_lock.py#L47) | `_mark_lost(self) -> None` | function / method |
 | [`ApplicationOwnership.check`](../../backend/app/db/execution/application_lock.py#L54) | `check(self) -> None` | async |
@@ -418,7 +420,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`ApplicationOwnership._check_locked`](../../backend/app/db/execution/application_lock.py#L75) | `_check_locked(self) -> None` | async |
 | [`require_application_ownership`](../../backend/app/db/execution/application_lock.py#L105) | `require_application_ownership() -> None` | function / method |
 | [`fence_worker_claim`](../../backend/app/db/execution/application_lock.py#L111) | `fence_worker_claim(connection) -> None` | async |
-| [`application_lock`](../../backend/app/db/execution/application_lock.py#L126) | `application_lock(*, probe_interval: float=1.0, probe_timeout: float=2.0)` | asynccontextmanager |
+| [`application_lock`](../../backend/app/db/execution/application_lock.py#L125) | `application_lock(*, probe_interval: float=1.0, probe_timeout: float=2.0)` | asynccontextmanager |
 | [`application_lock.<local>.watch`](../../backend/app/db/execution/application_lock.py#L150) | `watch()` | async |
 
 <a id="backend-app-db-execution-commands-py"></a>
@@ -502,7 +504,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`public_timestamp`](../../backend/app/db/public_history.py#L41) | `public_timestamp(value: object) -> str \| None` | function / method |
 | [`public_identifier`](../../backend/app/db/public_history.py#L54) | `public_identifier(value: object) -> str \| None` | function / method |
 | [`bounded_diagnostics`](../../backend/app/db/public_history.py#L61) | `bounded_diagnostics(values: object, *, stage: str='classification') -> list[dict]` | function / method |
-| [`PublicVoteAttempt.from_row`](../../backend/app/db/public_history.py#L114) | `from_row(cls, row: dict) -> PublicVoteAttempt` | classmethod |
+| [`PublicVoteAttempt.from_row`](../../backend/app/db/public_history.py#L113) | `from_row(cls, row: dict) -> PublicVoteAttempt` | classmethod |
 | [`PublicVoteAttempt.to_dict`](../../backend/app/db/public_history.py#L141) | `to_dict(self) -> dict` | function / method |
 
 <a id="backend-app-db-schema-py"></a>
@@ -593,9 +595,9 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`migrate_on_startup`](../../backend/app/lifecycle.py#L40) | `migrate_on_startup() -> bool` | function / method |
-| [`lifespan`](../../backend/app/lifecycle.py#L48) | `lifespan(application: FastAPI) -> AsyncIterator[None]` | asynccontextmanager |
-| [`_watch_ownership`](../../backend/app/lifecycle.py#L97) | `_watch_ownership(application, ownership) -> None` | async |
+| [`migrate_on_startup`](../../backend/app/lifecycle.py#L44) | `migrate_on_startup() -> bool` | function / method |
+| [`lifespan`](../../backend/app/lifecycle.py#L51) | `lifespan(application: FastAPI) -> AsyncIterator[None]` | asynccontextmanager |
+| [`_watch_ownership`](../../backend/app/lifecycle.py#L114) | `_watch_ownership(application, ownership) -> None` | async |
 
 <a id="backend-app-main-py"></a>
 
@@ -639,27 +641,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`RetryPolicy.configured`](../../backend/app/policies/retries.py#L24) | `configured(cls)` | classmethod |
+| [`RetryPolicy.configured`](../../backend/app/policies/retries.py#L23) | `configured(cls)` | classmethod |
 | [`RetryPolicy.limit`](../../backend/app/policies/retries.py#L40) | `limit(self, code)` | function / method |
 | [`as_datetime`](../../backend/app/policies/retries.py#L50) | `as_datetime(value)` | function / method |
 | [`enforce_retry_date`](../../backend/app/policies/retries.py#L57) | `enforce_retry_date(errors, *, now=None)` | function / method |
 | [`plan_retry`](../../backend/app/policies/retries.py#L66) | `plan_retry(errors: list[Diagnostic], *, round_number, started_at, now=None, policy=None)` | function / method |
-
-<a id="backend-app-search-discovery-py"></a>
-
-## backend/app/search/discovery.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`RepositoryResultBounder.__call__`](../../backend/app/search/discovery.py#L53) | `__call__(self, item: RepositorySearchResult, *, search_query: str) -> RepositorySearchResult` | function / method |
-| [`DiscoveryResult.complete`](../../backend/app/search/discovery.py#L75) | `complete(self) -> bool` | property |
-| [`DiscoveryResult.diagnostics`](../../backend/app/search/discovery.py#L80) | `diagnostics(self) -> list[dict[str, object]]` | property |
-| [`DiscoveryResult.warning_records`](../../backend/app/search/discovery.py#L90) | `warning_records(self) -> list[SearchWarningRecord]` | property |
-| [`lookup_local`](../../backend/app/search/discovery.py#L104) | `lookup_local(query: str, *, lookup: Callable[[str], Awaitable[list[CollectedDataset]]]=search_collected_datasets) -> list[CollectedDataset]` | async |
-| [`_bounded_repository_result`](../../backend/app/search/discovery.py#L119) | `_bounded_repository_result(item: RepositorySearchResult, *, search_query: str) -> RepositorySearchResult` | function / method |
-| [`_bounded_repository_metadata`](../../backend/app/search/discovery.py#L144) | `_bounded_repository_metadata(value: object) -> dict[str, str]` | function / method |
-| [`_json_size_bytes`](../../backend/app/search/discovery.py#L169) | `_json_size_bytes(value: dict[str, str]) -> int` | function / method |
-| [`prepare_online`](../../backend/app/search/discovery.py#L181) | `prepare_online(response: RepositorySearchResponse, query: str, admission: WorkAdmission, *, bound: RepositoryResultBounder=_bounded_repository_result) -> DiscoveryResult` | function / method |
 
 <a id="backend-app-search-summary-py"></a>
 
@@ -669,28 +655,55 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`summarize_search`](../../backend/app/search/summary.py#L20) | `summarize_search(search: Mapping[str, Any], items: Sequence[Mapping[str, Any]]) -> SearchSummary` | function / method |
 
-<a id="backend-app-workers-classification-py"></a>
+<a id="backend-app-workers-classification-workers-py"></a>
 
-## backend/app/workers/classification.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_classify`](../../backend/app/workers/classification.py#L29) | `_classify(candidate)` | function / method |
-| [`_run_classification`](../../backend/app/workers/classification.py#L36) | `_run_classification(candidate: ClassificationJob, executor: Executor) -> None` | async |
-| [`_recover_classification`](../../backend/app/workers/classification.py#L75) | `_recover_classification(candidate)` | async |
-| [`classification_workers`](../../backend/app/workers/classification.py#L83) | `classification_workers(*, concurrency: int \| None=None, poll_interval: float=1.0)` | function / method |
-| [`_repository_search_result_from_candidate`](../../backend/app/workers/classification.py#L98) | `_repository_search_result_from_candidate(candidate: dict[str, object]) -> RepositorySearchResult` | function / method |
-
-<a id="backend-app-workers-collection-py"></a>
-
-## backend/app/workers/collection.py
+## backend/app/workers/classification/workers.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_collect_record_job`](../../backend/app/workers/collection.py#L35) | `_collect_record_job(url, *, classifier, observe)` | function / method |
-| [`_run_collection_job`](../../backend/app/workers/collection.py#L59) | `_run_collection_job(job: CollectionJob, executor: Executor) -> None` | async |
-| [`_recover_collection`](../../backend/app/workers/collection.py#L127) | `_recover_collection(job)` | async |
-| [`collection_workers`](../../backend/app/workers/collection.py#L135) | `collection_workers(*, concurrency: int \| None=None, poll_interval: float=1.0)` | function / method |
+| [`_classify`](../../backend/app/workers/classification/workers.py#L33) | `_classify(candidate: ClassificationJob, vote_store: VoteStore) -> RepositoryClassification \| None` | function / method |
+| [`ClassificationWorker.__init__`](../../backend/app/workers/classification/workers.py#L49) | `__init__(self, *, classify: Callable[[ClassificationJob, VoteStore], RepositoryClassification \| None] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`ClassificationWorker.claim`](../../backend/app/workers/classification/workers.py#L69) | `claim(self, *, claim_token: UUID) -> ClassificationJob \| None` | async |
+| [`ClassificationWorker.execute`](../../backend/app/workers/classification/workers.py#L72) | `execute(self, candidate: ClassificationJob, executor: Executor) -> None` | async |
+| [`ClassificationWorker._retry`](../../backend/app/workers/classification/workers.py#L112) | `_retry(self, candidate: ClassificationJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
+| [`ClassificationWorker._fail`](../../backend/app/workers/classification/workers.py#L124) | `_fail(self, candidate: ClassificationJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
+| [`ClassificationWorker.recover`](../../backend/app/workers/classification/workers.py#L138) | `recover(self, candidate: ClassificationJob) -> object` | async |
+| [`_repository_search_result_from_candidate`](../../backend/app/workers/classification/workers.py#L147) | `_repository_search_result_from_candidate(candidate: ClassificationJob) -> RepositorySearchResult` | function / method |
+
+<a id="backend-app-workers-collection-workers-py"></a>
+
+## backend/app/workers/collection/workers.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_collect_record_job`](../../backend/app/workers/collection/workers.py#L41) | `_collect_record_job(url, *, classifier, observe)` | function / method |
+| [`CollectionWorker.__init__`](../../backend/app/workers/collection/workers.py#L73) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTrace] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`CollectionWorker.claim`](../../backend/app/workers/collection/workers.py#L104) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
+| [`CollectionWorker.execute`](../../backend/app/workers/collection/workers.py#L107) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
+| [`CollectionWorker._retry`](../../backend/app/workers/collection/workers.py#L153) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
+| [`CollectionWorker._fail`](../../backend/app/workers/collection/workers.py#L165) | `_fail(self, job: CollectionJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
+| [`CollectionWorker.recover`](../../backend/app/workers/collection/workers.py#L178) | `recover(self, job: CollectionJob) -> object` | async |
+
+<a id="backend-app-workers-contracts-py"></a>
+
+## backend/app/workers/contracts.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`Worker.name`](../../backend/app/workers/contracts.py#L17) | `name(self) -> str` | property |
+| [`Worker.claim`](../../backend/app/workers/contracts.py#L20) | `claim(self, *, claim_token: UUID) -> JobT \| None` | async |
+| [`Worker.execute`](../../backend/app/workers/contracts.py#L24) | `execute(self, job: JobT, executor: Executor) -> None` | async |
+| [`Worker.recover`](../../backend/app/workers/contracts.py#L28) | `recover(self, job: JobT) -> object` | async |
+| [`Persistence.__call__`](../../backend/app/workers/contracts.py#L36) | `__call__(self, operation: Callable[[], Awaitable[ResultT]], *, retry_storage_failures: bool=False, retry_unexpected: bool=False) -> ResultT` | async |
+
+<a id="backend-app-workers-failures-py"></a>
+
+## backend/app/workers/failures.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`FailureHandler.__init__`](../../backend/app/workers/failures.py#L26) | `__init__(self, *, stage: Stage, retry: RetryCallback[JobT], fail: FailureCallback[JobT], persist: Persistence \| None=None) -> None` | function / method |
+| [`FailureHandler.handle`](../../backend/app/workers/failures.py#L39) | `handle(self, job: JobT, exception: Exception, *, saving: bool) -> None` | async |
 
 <a id="backend-app-workers-runtime-py"></a>
 
@@ -698,23 +711,38 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`Claim.__call__`](../../backend/app/workers/runtime.py#L36) | `__call__(self, *, claim_token: UUID) -> ClaimedItem \| None` | async |
-| [`persist_with_retry`](../../backend/app/workers/runtime.py#L39) | `persist_with_retry(operation, **kwargs)` | async |
-| [`configured_worker_shutdown_seconds`](../../backend/app/workers/runtime.py#L44) | `configured_worker_shutdown_seconds() -> float` | function / method |
-| [`worker_shutdown_budget`](../../backend/app/workers/runtime.py#L52) | `worker_shutdown_budget(*, seconds: float \| None=None)` | asynccontextmanager |
-| [`_consume`](../../backend/app/workers/runtime.py#L64) | `_consume(stop: asyncio.Event, executor: Executor, poll_interval: float, claim: Claim[WorkItem], execute: Execute[WorkItem], recover: Recover[WorkItem] \| None=None) -> None` | async |
-| [`persisted_workers`](../../backend/app/workers/runtime.py#L115) | `persisted_workers(*, claim: Claim[WorkItem], execute: Execute[WorkItem], concurrency: int, name: str, poll_interval: float=1.0, recover: Recover[WorkItem] \| None=None, shutdown_timeout: float \| None=None) -> AsyncIterator[None]` | asynccontextmanager |
-| [`persisted_workers.<local>.run`](../../backend/app/workers/runtime.py#L138) | `run(state)` | async |
+| [`configured_worker_shutdown_seconds`](../../backend/app/workers/runtime.py#L29) | `configured_worker_shutdown_seconds() -> float` | function / method |
+| [`worker_shutdown_budget`](../../backend/app/workers/runtime.py#L36) | `worker_shutdown_budget(*, seconds: float \| None=None) -> AsyncIterator[None]` | asynccontextmanager |
+| [`_consume`](../../backend/app/workers/runtime.py#L49) | `_consume(stop: asyncio.Event, executor: Executor, poll_interval: float, worker: Worker[JobT]) -> None` | async |
+| [`persisted_workers`](../../backend/app/workers/runtime.py#L99) | `persisted_workers(worker: Worker[JobT], *, concurrency: int, poll_interval: float=1.0, shutdown_timeout: float \| None=None) -> AsyncIterator[None]` | asynccontextmanager |
+| [`persisted_workers.<local>.run`](../../backend/app/workers/runtime.py#L126) | `run(state: WorkerState) -> None` | async |
 
-<a id="backend-app-workers-search-py"></a>
+<a id="backend-app-workers-search-discovery-py"></a>
 
-## backend/app/workers/search.py
+## backend/app/workers/search/discovery.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_run_search`](../../backend/app/workers/search.py#L27) | `_run_search(job: SearchJob, executor: Executor) -> None` | async |
-| [`_recover_search`](../../backend/app/workers/search.py#L91) | `_recover_search(job)` | async |
-| [`search_workers`](../../backend/app/workers/search.py#L99) | `search_workers(*, concurrency=None, poll_interval=1.0)` | function / method |
+| [`RepositoryResultBounder.__call__`](../../backend/app/workers/search/discovery.py#L53) | `__call__(self, item: RepositorySearchResult, *, search_query: str) -> RepositorySearchResult` | function / method |
+| [`DiscoveryResult.complete`](../../backend/app/workers/search/discovery.py#L75) | `complete(self) -> bool` | property |
+| [`DiscoveryResult.diagnostics`](../../backend/app/workers/search/discovery.py#L80) | `diagnostics(self) -> list[dict[str, object]]` | property |
+| [`DiscoveryResult.warning_records`](../../backend/app/workers/search/discovery.py#L90) | `warning_records(self) -> list[SearchWarningRecord]` | property |
+| [`lookup_local`](../../backend/app/workers/search/discovery.py#L104) | `lookup_local(query: str, *, lookup: Callable[[str], Awaitable[list[CollectedDataset]]]=search_collected_datasets) -> list[CollectedDataset]` | async |
+| [`_bounded_repository_result`](../../backend/app/workers/search/discovery.py#L119) | `_bounded_repository_result(item: RepositorySearchResult, *, search_query: str) -> RepositorySearchResult` | function / method |
+| [`_bounded_repository_metadata`](../../backend/app/workers/search/discovery.py#L144) | `_bounded_repository_metadata(value: object) -> dict[str, str]` | function / method |
+| [`_json_size_bytes`](../../backend/app/workers/search/discovery.py#L169) | `_json_size_bytes(value: dict[str, str]) -> int` | function / method |
+| [`prepare_repository_candidates`](../../backend/app/workers/search/discovery.py#L181) | `prepare_repository_candidates(response: RepositorySearchResponse, query: str, admission: WorkAdmission, *, bound: RepositoryResultBounder=_bounded_repository_result) -> DiscoveryResult` | function / method |
+
+<a id="backend-app-workers-search-workers-py"></a>
+
+## backend/app/workers/search/workers.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`SearchWorker.__init__`](../../backend/app/workers/search/workers.py#L39) | `__init__(self, *, local_lookup: Callable[[str], Awaitable[list[CollectedDataset]]] \| None=None, provider: Callable[[str], RepositorySearchResponse] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`SearchWorker.claim`](../../backend/app/workers/search/workers.py#L50) | `claim(self, *, claim_token: UUID) -> SearchJob \| None` | async |
+| [`SearchWorker.execute`](../../backend/app/workers/search/workers.py#L54) | `execute(self, job: SearchJob, executor: Executor) -> None` | async |
+| [`SearchWorker.recover`](../../backend/app/workers/search/workers.py#L122) | `recover(self, job: SearchJob) -> object` | async |
 
 <a id="backend-app-workers-sql_retries-py"></a>
 
@@ -732,7 +760,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`ShutdownBudget.start`](../../backend/app/workers/state.py#L17) | `start(self) -> None` | function / method |
-| [`WorkerState.persistence_blocked`](../../backend/app/workers/state.py#L37) | `persistence_blocked(self) -> bool` | property |
+| [`WorkerState.persistence_blocked`](../../backend/app/workers/state.py#L36) | `persistence_blocked(self) -> bool` | property |
 | [`workers_ready`](../../backend/app/workers/state.py#L45) | `workers_ready() -> bool` | function / method |
 | [`request_worker_stop`](../../backend/app/workers/state.py#L52) | `request_worker_stop(*, force: bool=False) -> None` | function / method |
 | [`register_worker`](../../backend/app/workers/state.py#L63) | `register_worker(worker: WorkerState) -> None` | function / method |
@@ -744,11 +772,12 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`PostgresVoteStore.__init__`](../../backend/app/workers/stores.py#L17) | `__init__(self, loop, *, candidate_id=None, job_id=None, expected_updated_at=None)` | function / method |
-| [`PostgresVoteStore._wait`](../../backend/app/workers/stores.py#L25) | `_wait(self, operation, *, finalizing=False)` | function / method |
-| [`PostgresVoteStore.run`](../../backend/app/workers/stores.py#L42) | `run(self, snapshot, voter_id, invoke)` | function / method |
-| [`PostgresCollectionTrace.__init__`](../../backend/app/workers/stores.py#L80) | `__init__(self, loop, job_id, version)` | function / method |
-| [`PostgresCollectionTrace.__call__`](../../backend/app/workers/stores.py#L83) | `__call__(self, sequence, observation)` | function / method |
+| [`_submit_and_wait`](../../backend/app/workers/stores.py#L21) | `_submit_and_wait(loop: asyncio.AbstractEventLoop, coroutine: Coroutine[Any, Any, T]) -> T` | function / method |
+| [`PostgresVoteStore.__init__`](../../backend/app/workers/stores.py#L45) | `__init__(self, loop: asyncio.AbstractEventLoop, *, candidate_id: UUID \| None=None, job_id: int \| None=None, expected_updated_at: datetime \| None=None) -> None` | function / method |
+| [`PostgresVoteStore._wait`](../../backend/app/workers/stores.py#L60) | `_wait(self, operation: Callable[[], Awaitable[T]], *, finalizing: bool=False) -> T` | function / method |
+| [`PostgresVoteStore.run`](../../backend/app/workers/stores.py#L75) | `run(self, snapshot: dict[str, object], voter_id: str, invoke: Callable[[], dict[str, object]]) -> dict[str, object]` | function / method |
+| [`PostgresCollectionTrace.__init__`](../../backend/app/workers/stores.py#L127) | `__init__(self, loop: asyncio.AbstractEventLoop, job_id: int, version: datetime) -> None` | function / method |
+| [`PostgresCollectionTrace.__call__`](../../backend/app/workers/stores.py#L130) | `__call__(self, sequence: int, observation: dict[str, object]) -> None` | function / method |
 
 <a id="backend-container_entrypoint-py"></a>
 
@@ -790,12 +819,12 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`CollectionBudgetExceeded.__init__`](../../collector/budget.py#L23) | `__init__(self)` | function / method |
 | [`CollectionBudget.remaining`](../../collector/budget.py#L36) | `remaining(self) -> float` | function / method |
 | [`active_collection_budget`](../../collector/budget.py#L47) | `active_collection_budget() -> CollectionBudget \| None` | function / method |
-| [`collection_budget`](../../collector/budget.py#L52) | `collection_budget(*, seconds: float=300, deadline_at: datetime \| str \| None=None)` | contextmanager |
+| [`collection_budget`](../../collector/budget.py#L51) | `collection_budget(*, seconds: float=300, deadline_at: datetime \| str \| None=None)` | contextmanager |
 | [`check_collection_budget`](../../collector/budget.py#L71) | `check_collection_budget() -> None` | function / method |
 | [`RequestBudget.remaining`](../../collector/budget.py#L84) | `remaining(self) -> float` | function / method |
 | [`active_request_budget`](../../collector/budget.py#L95) | `active_request_budget() -> RequestBudget \| None` | function / method |
-| [`request_budget`](../../collector/budget.py#L100) | `request_budget(*, seconds: float)` | contextmanager |
-| [`cleanup_request_budget`](../../collector/budget.py#L122) | `cleanup_request_budget(*, seconds: float)` | contextmanager |
+| [`request_budget`](../../collector/budget.py#L99) | `request_budget(*, seconds: float)` | contextmanager |
+| [`cleanup_request_budget`](../../collector/budget.py#L121) | `cleanup_request_budget(*, seconds: float)` | contextmanager |
 | [`check_request_budget`](../../collector/budget.py#L136) | `check_request_budget() -> None` | function / method |
 | [`remaining_timeout`](../../collector/budget.py#L143) | `remaining_timeout(timeout: float) -> float` | function / method |
 | [`read_with_budget`](../../collector/budget.py#L152) | `read_with_budget(response, max_bytes: int) -> bytes` | function / method |
@@ -819,14 +848,14 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`_validate_voting_thresholds`](../../collector/classification/ensemble.py#L30) | `_validate_voting_thresholds(*, voter_count: int, votes_required: int, minimum_successful_votes: int \| None) -> int` | function / method |
 | [`EnsemblePageClassifier.__init__`](../../collector/classification/ensemble.py#L65) | `__init__(self, voters: list[tuple[str, PageClassifier]] \| tuple[tuple[str, PageClassifier], ...], votes_required: int=2, minimum_successful_votes: int \| None=None) -> None` | function / method |
-| [`EnsemblePageClassifier.voter_ids`](../../collector/classification/ensemble.py#L88) | `voter_ids(self) -> tuple[str, ...]` | property |
-| [`EnsemblePageClassifier.votes_required`](../../collector/classification/ensemble.py#L92) | `votes_required(self) -> int` | property |
-| [`EnsemblePageClassifier.minimum_successful_votes`](../../collector/classification/ensemble.py#L96) | `minimum_successful_votes(self) -> int` | property |
+| [`EnsemblePageClassifier.voter_ids`](../../collector/classification/ensemble.py#L87) | `voter_ids(self) -> tuple[str, ...]` | property |
+| [`EnsemblePageClassifier.votes_required`](../../collector/classification/ensemble.py#L91) | `votes_required(self) -> int` | property |
+| [`EnsemblePageClassifier.minimum_successful_votes`](../../collector/classification/ensemble.py#L95) | `minimum_successful_votes(self) -> int` | property |
 | [`EnsemblePageClassifier.classify`](../../collector/classification/ensemble.py#L99) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
 | [`EnsembleRepositoryRelevanceClassifier.__init__`](../../collector/classification/ensemble.py#L177) | `__init__(self, voters: list[tuple[str, RepositoryResultClassifier]] \| tuple[tuple[str, RepositoryResultClassifier], ...], votes_required: int=2, minimum_successful_votes: int \| None=None) -> None` | function / method |
-| [`EnsembleRepositoryRelevanceClassifier.voter_ids`](../../collector/classification/ensemble.py#L207) | `voter_ids(self) -> tuple[str, ...]` | property |
-| [`EnsembleRepositoryRelevanceClassifier.votes_required`](../../collector/classification/ensemble.py#L211) | `votes_required(self) -> int` | property |
-| [`EnsembleRepositoryRelevanceClassifier.minimum_successful_votes`](../../collector/classification/ensemble.py#L215) | `minimum_successful_votes(self) -> int` | property |
+| [`EnsembleRepositoryRelevanceClassifier.voter_ids`](../../collector/classification/ensemble.py#L206) | `voter_ids(self) -> tuple[str, ...]` | property |
+| [`EnsembleRepositoryRelevanceClassifier.votes_required`](../../collector/classification/ensemble.py#L210) | `votes_required(self) -> int` | property |
+| [`EnsembleRepositoryRelevanceClassifier.minimum_successful_votes`](../../collector/classification/ensemble.py#L214) | `minimum_successful_votes(self) -> int` | property |
 | [`EnsembleRepositoryRelevanceClassifier.classify`](../../collector/classification/ensemble.py#L218) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
 | [`_page_vote`](../../collector/classification/ensemble.py#L307) | `_page_vote(voter_id: str, classification: PageClassification) -> PageClassificationVote` | function / method |
 | [`_repository_vote`](../../collector/classification/ensemble.py#L318) | `_repository_vote(voter_id: str, classification: RepositoryClassification) -> RepositoryClassificationVote` | function / method |
@@ -965,7 +994,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`BrowserSession.probe`](../../collector/collection/browser.py#L166) | `probe(self, url, method, timeout, max_bytes, headers=None)` | function / method |
 | [`BrowserSession.validate`](../../collector/collection/browser.py#L194) | `validate(self, distribution)` | function / method |
 | [`BrowserSession.close`](../../collector/collection/browser.py#L202) | `close(self)` | function / method |
-| [`configured_browser`](../../collector/collection/browser.py#L212) | `configured_browser(config, source_url=None)` | contextmanager |
+| [`configured_browser`](../../collector/collection/browser.py#L211) | `configured_browser(config, source_url=None)` | contextmanager |
 
 <a id="collector-collection-compatibility-py"></a>
 
@@ -1202,14 +1231,14 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`Diagnostic.message`](../../collector/diagnostics.py#L78) | `message(self) -> str` | property |
+| [`Diagnostic.message`](../../collector/diagnostics.py#L77) | `message(self) -> str` | property |
 | [`Diagnostic.to_dict`](../../collector/diagnostics.py#L81) | `to_dict(self) -> dict` | function / method |
 | [`PipelineFailure.__init__`](../../collector/diagnostics.py#L86) | `__init__(self, message: str, *, diagnostics: list[Diagnostic])` | function / method |
-| [`PersistenceFailure.__init__`](../../collector/diagnostics.py#L92) | `__init__(self, message: str)` | function / method |
-| [`exception_diagnostics`](../../collector/diagnostics.py#L96) | `exception_diagnostics(exception: Exception, stage: Stage) -> list[Diagnostic]` | function / method |
-| [`public_diagnostics`](../../collector/diagnostics.py#L102) | `public_diagnostics(values: list[dict]) -> list[dict]` | function / method |
-| [`voter_diagnostics`](../../collector/diagnostics.py#L115) | `voter_diagnostics(exception: Exception, voter_id: str, attempt=None) -> list[Diagnostic]` | function / method |
-| [`retry_after`](../../collector/diagnostics.py#L122) | `retry_after(value: str \| None, *, now: datetime \| None=None) -> str \| None` | function / method |
+| [`PersistenceFailure.__init__`](../../collector/diagnostics.py#L94) | `__init__(self, message: str, *, stage: Stage='classification') -> None` | function / method |
+| [`exception_diagnostics`](../../collector/diagnostics.py#L98) | `exception_diagnostics(exception: Exception, stage: Stage) -> list[Diagnostic]` | function / method |
+| [`public_diagnostics`](../../collector/diagnostics.py#L104) | `public_diagnostics(values: list[dict]) -> list[dict]` | function / method |
+| [`voter_diagnostics`](../../collector/diagnostics.py#L117) | `voter_diagnostics(exception: Exception, voter_id: str, attempt=None) -> list[Diagnostic]` | function / method |
+| [`retry_after`](../../collector/diagnostics.py#L124) | `retry_after(value: str \| None, *, now: datetime \| None=None) -> str \| None` | function / method |
 
 <a id="collector-discovery-adapters-__init__-py"></a>
 
@@ -1518,8 +1547,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`OperationalStreamHandler.handleError`](../../collector/observability.py#L18) | `handleError(self, record) -> None` | function / method |
 | [`configure_operational_logging`](../../collector/observability.py#L24) | `configure_operational_logging() -> None` | function / method |
 | [`emit_event`](../../collector/observability.py#L35) | `emit_event(event: str, *, outcome: str, duration_seconds: float \| None=None, retry_count: int \| None=None, delay_seconds: float \| None=None, error_category: str \| None=None) -> None` | function / method |
-| [`operation_context`](../../collector/observability.py#L61) | `operation_context(*, job_id=None, candidate_id=None, search_id=None, queue=None)` | contextmanager |
-| [`measure_operation`](../../collector/observability.py#L76) | `measure_operation(event: str)` | contextmanager |
+| [`operation_context`](../../collector/observability.py#L60) | `operation_context(*, job_id=None, candidate_id=None, search_id=None, queue=None)` | contextmanager |
+| [`measure_operation`](../../collector/observability.py#L75) | `measure_operation(event: str)` | contextmanager |
 
 <a id="collector-repository_search-filtering-py"></a>
 
@@ -1743,7 +1772,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_snapshot`](../../scripts/api_client.py#L456) | `_snapshot(value, *, search_id=None)` | function / method |
 | [`_command`](../../scripts/api_client.py#L475) | `_command(value, client, *, search_id=None)` | function / method |
 | [`_datasets`](../../scripts/api_client.py#L494) | `_datasets(value, requested)` | function / method |
-| [`client_lock`](../../scripts/api_client.py#L505) | `client_lock()` | contextmanager |
+| [`client_lock`](../../scripts/api_client.py#L504) | `client_lock()` | contextmanager |
 | [`_recovery_context`](../../scripts/api_client.py#L539) | `_recovery_context(client, args)` | function / method |
 | [`_read_pending_search`](../../scripts/api_client.py#L552) | `_read_pending_search()` | function / method |
 | [`_check_pending_search`](../../scripts/api_client.py#L575) | `_check_pending_search(pending, client, args)` | function / method |
@@ -1787,17 +1816,17 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`principal`](../../search_lab/backend/app.py#L24) | `principal(request: Request, response: Response)` | async |
 | [`create_app`](../../search_lab/backend/app.py#L54) | `create_app(settings=None)` | function / method |
-| [`create_app.<local>.lifespan`](../../search_lab/backend/app.py#L56) | `lifespan(application)` | asynccontextmanager |
-| [`create_app.<local>.no_cache`](../../search_lab/backend/app.py#L76) | `no_cache(request, call_next)` | async |
-| [`create_app.<local>.config`](../../search_lab/backend/app.py#L82) | `config()` | async |
-| [`create_app.<local>.searches`](../../search_lab/backend/app.py#L90) | `searches(request: Request, owner: Owner, q: str=Query(default='', max_length=200), origin: Literal['database', 'online']=None, limit: int=Query(default=25, ge=1, le=100), cursor: str=Query(default=None, max_length=500))` | async |
+| [`create_app.<local>.lifespan`](../../search_lab/backend/app.py#L55) | `lifespan(application)` | asynccontextmanager |
+| [`create_app.<local>.no_cache`](../../search_lab/backend/app.py#L75) | `no_cache(request, call_next)` | async |
+| [`create_app.<local>.config`](../../search_lab/backend/app.py#L81) | `config()` | async |
+| [`create_app.<local>.searches`](../../search_lab/backend/app.py#L89) | `searches(request: Request, owner: Owner, q: str=Query(default='', max_length=200), origin: Literal['database', 'online']=None, limit: int=Query(default=25, ge=1, le=100), cursor: str=Query(default=None, max_length=500))` | async |
 | [`create_app.<local>.observation`](../../search_lab/backend/app.py#L109) | `observation(search_id, request, owner)` | async |
-| [`create_app.<local>.detail`](../../search_lab/backend/app.py#L149) | `detail(search_id: UUID, request: Request, owner: Owner)` | async |
-| [`create_app.<local>.capture`](../../search_lab/backend/app.py#L153) | `capture(search_id: UUID, notes: Notes, request: Request, owner: Owner)` | async |
-| [`create_app.<local>.snapshots`](../../search_lab/backend/app.py#L163) | `snapshots(request: Request, owner: Owner)` | async |
+| [`create_app.<local>.detail`](../../search_lab/backend/app.py#L148) | `detail(search_id: UUID, request: Request, owner: Owner)` | async |
+| [`create_app.<local>.capture`](../../search_lab/backend/app.py#L152) | `capture(search_id: UUID, notes: Notes, request: Request, owner: Owner)` | async |
+| [`create_app.<local>.snapshots`](../../search_lab/backend/app.py#L162) | `snapshots(request: Request, owner: Owner)` | async |
 | [`create_app.<local>.read_snapshot`](../../search_lab/backend/app.py#L166) | `read_snapshot(request, owner, identifier)` | function / method |
-| [`create_app.<local>.snapshot`](../../search_lab/backend/app.py#L175) | `snapshot(identifier: UUID, request: Request, owner: Owner)` | async |
-| [`create_app.<local>.comparison`](../../search_lab/backend/app.py#L179) | `comparison(before: UUID, after: UUID, request: Request, owner: Owner)` | async |
+| [`create_app.<local>.snapshot`](../../search_lab/backend/app.py#L174) | `snapshot(identifier: UUID, request: Request, owner: Owner)` | async |
+| [`create_app.<local>.comparison`](../../search_lab/backend/app.py#L178) | `comparison(before: UUID, after: UUID, request: Request, owner: Owner)` | async |
 
 <a id="search_lab-backend-attempts-py"></a>
 
@@ -1824,10 +1853,10 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`decode_cursor`](../../search_lab/backend/history.py#L15) | `decode_cursor(value)` | function / method |
 | [`History.__init__`](../../search_lab/backend/history.py#L26) | `__init__(self, database_url)` | function / method |
-| [`History._configure`](../../search_lab/backend/history.py#L37) | `_configure(connection)` | staticmethod |
+| [`History._configure`](../../search_lab/backend/history.py#L36) | `_configure(connection)` | staticmethod |
 | [`History.open`](../../search_lab/backend/history.py#L41) | `open(self)` | async |
 | [`History.close`](../../search_lab/backend/history.py#L45) | `close(self)` | async |
-| [`History.connection`](../../search_lab/backend/history.py#L49) | `connection(self)` | asynccontextmanager |
+| [`History.connection`](../../search_lab/backend/history.py#L48) | `connection(self)` | asynccontextmanager |
 | [`History.list_searches`](../../search_lab/backend/history.py#L57) | `list_searches(self, owner_id, *, query='', origin=None, limit=25, cursor=None)` | async |
 | [`History.owns_search`](../../search_lab/backend/history.py#L99) | `owns_search(self, owner_id, search_id)` | async |
 | [`History.method_claims`](../../search_lab/backend/history.py#L109) | `method_claims(self, job_ids)` | async |
@@ -1840,7 +1869,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`evidence_directory`](../../search_lab/backend/settings.py#L13) | `evidence_directory() -> Path` | function / method |
 | [`local_api_url`](../../search_lab/backend/settings.py#L18) | `local_api_url(value: str) -> str` | function / method |
-| [`Settings.configured`](../../search_lab/backend/settings.py#L40) | `configured(cls)` | classmethod |
+| [`Settings.configured`](../../search_lab/backend/settings.py#L39) | `configured(cls)` | classmethod |
 
 <a id="search_lab-backend-snapshots-py"></a>
 

@@ -9,7 +9,7 @@ from functools import partial
 
 import pytest
 from app.db.connection import _fetchall, _require_database_pool
-from app.workers import classification as classification_worker
+from app.workers.classification import workers as classification_worker
 from helpers.classification import MODELS
 from helpers.classification import response as _response
 from helpers.collection import collect
@@ -79,7 +79,7 @@ async def test_worker_preserves_failed_voter_cause_and_attempt(database, transpo
 
     transport(request)
     with ThreadPoolExecutor(1) as executor:
-        await classification_worker._run_classification(claimed, executor)
+        await classification_worker.ClassificationWorker().execute(claimed, executor)
     progress = await read(candidate["search_session_id"])
     assert (progress.execution_status, progress.outcome) == ("waiting_retry", None)
     diagnostic = progress.items[0].errors[0]
@@ -114,7 +114,7 @@ async def test_vote_storage_failure_is_not_a_model_vote_failure(
     transport(request)
     monkeypatch.setattr(vote_store, "finish_vote", broken_save)
     with ThreadPoolExecutor(1) as executor:
-        await classification_worker._run_classification(claimed, executor)
+        await classification_worker.ClassificationWorker().execute(claimed, executor)
     stored = await stored_candidate(candidate["id"], "alice")
     assert stored["classification_status"] == "error"
     assert stored["errors"][0]["code"] == "persistence_failed"
@@ -149,7 +149,9 @@ async def test_repaired_vote_storage_keeps_model_responses_without_new_invocatio
     monkeypatch.setattr(vote_store, "persist_with_retry",
                         partial(vote_store.persist_with_retry, initial_delay=0))
     with ThreadPoolExecutor(1) as executor:
-        await asyncio.wait_for(classification_worker._run_classification(claimed, executor), 3)
+        await asyncio.wait_for(
+            classification_worker.ClassificationWorker().execute(claimed, executor), 3
+        )
     stored = await stored_candidate(candidate["id"], "alice")
     assert stored["classification_status"] == "accepted" and stored["errors"] == []
     assert calls == Counter({model: 1 for model in MODELS})

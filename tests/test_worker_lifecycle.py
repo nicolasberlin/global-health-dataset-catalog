@@ -15,14 +15,16 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from app.workers import classification as classification_worker
-from app.workers import collection as collection_worker
 from app.workers import runtime as workers
-from app.workers import search as search_worker
+from app.workers import sql_retries
 from app.workers import stores as vote_module
+from app.workers.classification import workers as classification_worker
+from app.workers.collection import workers as collection_worker
+from app.workers.search import workers as search_worker
 from app.workers.sql_retries import persist_with_retry
 from app.workers.state import request_worker_stop, workers_ready
 from app.workers.stores import PostgresVoteStore
+from helpers.workers import StubWorker, execute_worker
 from psycopg import OperationalError
 from psycopg.errors import DiskFull, QueryCanceled
 
@@ -44,14 +46,14 @@ def install_execution(monkeypatch, kind):
         compute = Mock(return_value=CollectionResult())
         monkeypatch.setattr(module, "build_default_page_classifier", Mock())
         monkeypatch.setattr(module, "collect_source_with_report", compute)
-        run = module._run_collection_job
+        run = partial(execute_worker, module)
         complete_name, fail_name = "complete_collection_job", "mark_collection_job_error"
     elif kind == "classification":
         module = classification_worker
         item["id"] = uuid4()
         compute = Mock(return_value=object())
         monkeypatch.setattr(module, "_classify", compute)
-        run = module._run_classification
+        run = partial(execute_worker, module)
         complete_name = "complete_candidate_classification"
         fail_name = "fail_candidate_classification"
     else:
@@ -59,7 +61,7 @@ def install_execution(monkeypatch, kind):
         item["id"] = uuid4()
         compute = AsyncMock(return_value=[object()])
         monkeypatch.setattr(module, "lookup_local", compute)
-        run = module._run_search
+        run = partial(execute_worker, module)
         complete_name, fail_name = "complete_discovery", "fail_discovery"
     monkeypatch.setattr(module, "persist_with_retry", partial(persist_with_retry, initial_delay=0))
     return module, item, compute, run, complete_name, fail_name
@@ -151,7 +153,7 @@ async def test_failed_terminal_write_retains_slot_and_recovers_health(monkeypatc
 
     monkeypatch.setattr(module, fail_name, fail)
     manager = workers.persisted_workers(
-        claim=claim, execute=run, concurrency=1, name=kind, shutdown_timeout=.1,
+        StubWorker(claim=claim, execute=run, name=kind), concurrency=1, shutdown_timeout=0.1
     )
     await manager.__aenter__()
     try:
@@ -179,9 +181,11 @@ async def test_stop_interrupts_acquisition_backoff(monkeypatch):
         raise OperationalError("simulated unavailable database")
 
     monkeypatch.setattr(workers, "persist_with_retry",
-                        partial(workers.persist_with_retry, initial_delay=30))
+                        partial(sql_retries.persist_with_retry, initial_delay=30))
     manager = workers.persisted_workers(
-        claim=claim, execute=AsyncMock(), concurrency=1, name="search", shutdown_timeout=.5,
+        StubWorker(claim=claim, execute=AsyncMock(), name="search"),
+        concurrency=1,
+        shutdown_timeout=0.5,
     )
     await manager.__aenter__()
     await attempted.wait()
@@ -213,8 +217,9 @@ async def test_expired_shutdown_cancels_bridge_without_late_write():
         await loop.run_in_executor(executor, copy_context().run, bridge)
 
     manager = workers.persisted_workers(
-        claim=AsyncMock(return_value={"id": 1}), execute=execute, concurrency=1,
-        name="classification", shutdown_timeout=.03,
+        StubWorker(claim=AsyncMock(return_value={"id": 1}), execute=execute, name="classification"),
+        concurrency=1,
+        shutdown_timeout=0.03,
     )
     await manager.__aenter__()
     await asyncio.wait_for(entered.wait(), 2)
@@ -237,8 +242,9 @@ async def test_inflight_collection_cannot_finalize_after_forced_shutdown(monkeyp
     monkeypatch.setattr(module, "collect_source_with_report", collect)
     monkeypatch.setattr(module, complete_name, complete)
     manager = workers.persisted_workers(
-        claim=AsyncMock(return_value=item), execute=run, concurrency=1,
-        name="collection", shutdown_timeout=.03,
+        StubWorker(claim=AsyncMock(return_value=item), execute=run, name="collection"),
+        concurrency=1,
+        shutdown_timeout=0.03,
     )
     await manager.__aenter__()
     try:
@@ -266,8 +272,8 @@ async def test_shared_shutdown_budget_starts_on_stop_and_is_not_multiplied():
         assert shutdown_budget.get().deadline is None
         for queue in ("collection", "classification", "search"):
             manager = workers.persisted_workers(
-                claim=AsyncMock(return_value={"id": 1}), execute=execute,
-                concurrency=1, name=queue,
+                StubWorker(claim=AsyncMock(return_value={"id": 1}), execute=execute, name=queue),
+                concurrency=1,
             )
             await manager.__aenter__()
             managers.append(manager)
@@ -323,7 +329,10 @@ async def test_superseded_search_skips_provider_and_finalization(monkeypatch, ca
     monkeypatch.setattr(module, "search_repository_metadata", provider)
     monkeypatch.setattr(module, complete_name, complete)
     monkeypatch.setattr(module, fail_name, fail)
-    monkeypatch.setattr(observability.logger, "propagate", True)
+    # Pytest also attaches to non-propagating loggers after application startup.
+    # Capture directly rather than enabling a second path through the root logger.
+    monkeypatch.setattr(observability.logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(observability.logger, "propagate", False)
     caplog.set_level(logging.INFO, logger="collector.operations")
 
     with ThreadPoolExecutor(1) as executor:

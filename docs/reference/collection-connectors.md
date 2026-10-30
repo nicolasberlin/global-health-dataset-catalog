@@ -66,7 +66,7 @@ cookies remain in the browser service.
 | `extraction/limits.py`, `extraction/graph.py` | Bounded HTML/JSON-LD evidence and local Dataset identity selection |
 | `collection/orchestrator.py` | Attempts, fallback, limits, validation and reporting |
 | `collection/browser.py` | Generic browser-service client and session probes |
-| `backend/app/workers/collection.py` | Configuration, votes/traces and completion |
+| `backend/app/workers/collection/workers.py` | Configuration, votes/traces and completion |
 | `backend/app/db/collection/completion.py` | Existing guarded atomic finalization |
 
 `collection/strategies/dataverse.py` remains a compatibility wrapper. Dataverse

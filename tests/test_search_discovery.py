@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from app.api.schemas import CollectorRepositorySearchItem
 from app.policies.quotas import WorkAdmission
-from app.search.discovery import lookup_local, prepare_online
+from app.workers.search.discovery import lookup_local, prepare_repository_candidates
 
 from collector.classification.repository import (
     MAX_REPOSITORY_DESCRIPTION_CHARS,
@@ -43,7 +43,7 @@ def candidate(name="healthy", **changes):
 
 
 def prepare(items, *, warnings=(), max_candidates=None):
-    return prepare_online(
+    return prepare_repository_candidates(
         RepositorySearchResponse(results=items, warnings=list(warnings)),
         "malaria",
         WorkAdmission((), max_candidates=max_candidates),
@@ -147,7 +147,7 @@ def test_datacite_records_are_filtered_without_losing_valid_results(field, unsaf
     response = search_repository_metadata("malaria", providers=[provider])
     assert [item.title for item in response.results] == ["First", "Second"]
     assert [warning.code for warning in response.warnings] == ["invalid_repository_metadata"]
-    result = prepare_online(response, "malaria", WorkAdmission(()))
+    result = prepare_repository_candidates(response, "malaria", WorkAdmission(()))
 
     assert [item.title for item in result.candidates] == ["First", "Second"]
     assert_invalid_warning(result)
@@ -169,7 +169,7 @@ def test_datacite_url_outside_public_contract_is_omitted_before_preparation():
 
     assert [item.title for item in response.results] == ["Healthy"]
     assert [warning.code for warning in response.warnings] == ["invalid_repository_metadata"]
-    result = prepare_online(response, "malaria", WorkAdmission(()))
+    result = prepare_repository_candidates(response, "malaria", WorkAdmission(()))
     assert_invalid_warning(result)
     public_item(result.candidates[0])
 
@@ -312,7 +312,7 @@ def test_preparation_does_not_hide_unexpected_failures():
         raise failure
 
     with pytest.raises(RuntimeError) as caught:
-        prepare_online(
+        prepare_repository_candidates(
             RepositorySearchResponse(results=[candidate()]),
             "malaria",
             WorkAdmission(()),

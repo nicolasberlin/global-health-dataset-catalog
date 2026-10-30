@@ -9,7 +9,8 @@ import pytest
 from app.db.classification.candidates import _complete_candidate_classification
 from app.db.collection import jobs as job_store
 from app.db.connection import _require_database_pool
-from app.workers import collection as collection_worker
+from app.workers.collection import workers as collection_worker
+from app.workers.runtime import persisted_workers
 from helpers.inspection import stored_candidate
 from helpers.workflows import SOURCE_URL, candidate_for, decision, rows, wait_until
 
@@ -139,7 +140,9 @@ async def test_busy_workers_leave_excess_jobs_pending_and_drain_on_shutdown(data
         return CollectionResult()
 
     monkeypatch.setattr(collection_worker, "collect_source_with_report", collect)
-    manager = collection_worker.collection_workers(concurrency=2, poll_interval=0.01)
+    manager = persisted_workers(
+        collection_worker.CollectionWorker(), concurrency=2, poll_interval=0.01
+    )
     await manager.__aenter__()
     closing = None
     try:
@@ -187,7 +190,9 @@ async def test_worker_records_error_and_continues_to_next_job(database, monkeypa
 
     monkeypatch.setattr(collection_worker, "collect_source_with_report", collect)
     monkeypatch.setattr(collection_worker, "complete_collection_job", complete)
-    async with collection_worker.collection_workers(concurrency=1, poll_interval=0.01):
+    async with persisted_workers(
+        collection_worker.CollectionWorker(), concurrency=1, poll_interval=0.01
+    ):
 
         async def done():
             return (await database.get_collection_job(second["id"]))["status"] == "done"

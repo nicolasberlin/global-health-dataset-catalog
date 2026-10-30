@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from app import lifecycle, main
 from app.workers.runtime import persisted_workers
+from helpers.workers import StubWorker
 from httpx import ASGITransport, AsyncClient
 from psycopg.errors import DiskFull
 
@@ -60,7 +61,7 @@ async def test_acquisition_failure_blocks_admission_and_same_consumer_recovers(r
 
     execute = AsyncMock(side_effect=lambda *_: executed.set())
     async with persisted_workers(
-        claim=claim, execute=execute, concurrency=1, name="search", poll_interval=.001,
+        StubWorker(claim=claim, execute=execute, name="search"), concurrency=1, poll_interval=0.001
     ):
         await asyncio.wait_for(failed_polls.wait(), 1)
         assert (await client.get("/ready")).status_code == 503
@@ -139,7 +140,7 @@ async def test_explicit_migration_mode_verifies_without_ddl(monkeypatch):
         yield ownership
 
     @asynccontextmanager
-    async def group():
+    async def group(*args, **kwargs):
         yield
 
     monkeypatch.setattr(lifecycle, "application_lock", lock)
@@ -151,8 +152,7 @@ async def test_explicit_migration_mode_verifies_without_ddl(monkeypatch):
                  "mark_interrupted_candidate_classifications_error",
                  "mark_interrupted_collection_jobs_error"):
         monkeypatch.setattr(lifecycle, name, AsyncMock())
-    for name in ("collection_workers", "classification_workers", "search_workers"):
-        monkeypatch.setattr(lifecycle, name, group)
+    monkeypatch.setattr(lifecycle, "persisted_workers", group)
     async with lifecycle.lifespan(main.app):
         lifecycle.validate_database_schema.assert_awaited_once()
         lifecycle.init_database.assert_not_awaited()
@@ -171,7 +171,7 @@ async def test_startup_activates_generation_then_recovers_parents_before_votes(m
         yield ownership
 
     @asynccontextmanager
-    async def group():
+    async def group(*args, **kwargs):
         assert events == ["activate", "search", "classification", "collection", "votes"]
         yield
 
@@ -193,8 +193,7 @@ async def test_startup_activates_generation_then_recovers_parents_before_votes(m
         monkeypatch.setattr(
             lifecycle, name, AsyncMock(side_effect=lambda event=event: events.append(event)),
         )
-    for name in ("collection_workers", "classification_workers", "search_workers"):
-        monkeypatch.setattr(lifecycle, name, group)
+    monkeypatch.setattr(lifecycle, "persisted_workers", group)
     async with lifecycle.lifespan(main.app):
         assert main.app.state.ready
 

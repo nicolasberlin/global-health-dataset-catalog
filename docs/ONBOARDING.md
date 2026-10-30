@@ -120,8 +120,9 @@ installations. No setup script moves or deletes database volumes.
 | Prompts, voters and classification parsing | `collector/classification/` |
 | Distribution access checks | `collector/validation/downloads.py` |
 | HTTP deadlines and destination policy | `collector/transport.py`, `collector/fetch.py` |
-| Search, classification and collection execution | `backend/app/workers/search.py`, `backend/app/workers/classification.py`, `backend/app/workers/collection.py` |
-| Worker lifecycle, state and persisted inputs | `backend/app/workers/runtime.py`, `backend/app/workers/state.py`, `backend/app/workers/jobs.py` |
+| Search, classification and collection worker classes | `backend/app/workers/search/workers.py`, `backend/app/workers/classification/workers.py`, `backend/app/workers/collection/workers.py` |
+| Worker contract, lifecycle, state and persisted inputs | `backend/app/workers/contracts.py`, `backend/app/workers/runtime.py`, `backend/app/workers/state.py`, `backend/app/workers/jobs.py` |
+| Shared model-failure recovery | `backend/app/workers/failures.py` |
 | Worker SQL recovery and thread bridges | `backend/app/workers/sql_retries.py`, `backend/app/workers/stores.py` |
 | Authentication and visitor sessions | `backend/app/auth/security.py`, `backend/app/auth/sessions.py` |
 | Quotas and work admission | `backend/app/policies/quotas.py`, `backend/app/db/execution/quotas.py` |
@@ -146,10 +147,11 @@ not call another HTTP route to obtain a snapshot.
 ### Follow a search through the code
 
 1. `backend/app/api/searches.py` records the request in PostgreSQL.
-   `backend/app/workers/search.py` checks the saved catalogue, then discovers
-   external candidates when needed; `backend/app/workers/classification.py`
-   evaluates those candidates.
-2. For an accepted candidate, `backend/app/workers/collection.py` calls
+   `SearchWorker` in `backend/app/workers/search/workers.py` checks the saved catalogue,
+   then discovers external candidates when needed; `ClassificationWorker` in
+   `backend/app/workers/classification/workers.py` evaluates those candidates.
+2. For an accepted candidate, `CollectionWorker` in
+   `backend/app/workers/collection/workers.py` calls
    `collect_repository_candidate_with_report` in `collector/main.py`, which
    delegates to `collect_record` in `collector/collection/orchestrator.py`.
    This resolves one record's metadata and checks its resource links.
@@ -162,6 +164,26 @@ not call another HTTP route to obtain a snapshot.
 `collect_source_with_report` in `collector/main.py` is the separate bounded
 source-discovery entrypoint; use the single-record path above for an already
 identified repository candidate.
+
+### Change a worker
+
+`lifecycle.py` constructs the three worker instances and passes each to
+`runtime.persisted_workers` with its concurrency setting. Their shared structural
+`Worker` protocol requires `name`, `claim`, `execute` and `recover`; each class
+keeps its domain execution steps and delegates claims and guarded writes to its
+existing `app.db` functions. Keep configured dependencies on the instance and
+job-specific state in `execute` locals so concurrent consumers remain independent.
+
+Classification and collection delegate model retry and terminal failure handling
+to `FailureHandler`. This includes retaining model diagnostics while a repairable
+SQL failure delays retry scheduling. Search keeps its quota and discovery-origin
+handling. Keep blocking work in the executor with its copied execution context;
+vote and trace writes use the shared bridge in `workers/stores.py`.
+
+Tests can inject worker dependencies through constructor arguments. Default
+dependencies are resolved at construction, so construct the worker after applying
+patches to those defaults. The runtime's acquisition, bounded shutdown and fencing
+tests remain relevant when changing a worker's implementation.
 
 ## Validation
 

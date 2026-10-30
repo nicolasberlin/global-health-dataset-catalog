@@ -9,10 +9,11 @@ from unittest.mock import Mock
 import pytest
 from app.db.classification import votes as votes
 from app.db.search.progress import read_search_progress
-from app.workers import classification as classification_worker
-from app.workers import collection as collection_worker
-from app.workers import runtime as workers
+from app.workers import sql_retries
+from app.workers.classification import workers as classification_worker
+from app.workers.collection import workers as collection_worker
 from helpers.inspection import stored_candidate, stored_datasets
+from helpers.workers import execute_worker
 from helpers.workflows import candidate_for, decision, rows
 from psycopg import OperationalError
 
@@ -36,20 +37,20 @@ async def prepare(database, monkeypatch, kind, *, execution_error=False):
         compute = Mock(return_value=result)
         monkeypatch.setattr(module, "collect_repository_candidate_with_report", compute)
         monkeypatch.setattr(module, "build_default_page_classifier", Mock())
-        run = module._run_collection_job
+        run = partial(execute_worker, module)
         complete_name, fail_name = "complete_collection_job", "mark_collection_job_error"
     else:
         item = {**candidate, "owner_id": "alice"}
         module = classification_worker
         compute = Mock(return_value=decision())
         monkeypatch.setattr(module, "_classify", compute)
-        run = module._run_classification
+        run = partial(execute_worker, module)
         complete_name = "complete_candidate_classification"
         fail_name = "fail_candidate_classification"
     if execution_error:
         compute.side_effect = RuntimeError("external work failed")
     monkeypatch.setattr(module, "persist_with_retry",
-                        partial(workers.persist_with_retry, initial_delay=0))
+                        partial(sql_retries.persist_with_retry, initial_delay=0))
     return module, item, run, compute, complete_name, fail_name
 
 
@@ -141,7 +142,7 @@ async def test_concurrent_persistence_retries_finalize_one_claim(
             await ready.wait()
             return await operation(*args, expected_updated_at=version)
 
-        return await workers.persist_with_retry(persist, initial_delay=0)
+        return await sql_retries.persist_with_retry(persist, initial_delay=0)
 
     results = await asyncio.wait_for(asyncio.gather(retry(), retry()), timeout=5)
     assert sum(result is not None for result in results) == 1

@@ -15,7 +15,7 @@ from app.db.connection import _fetchall, _require_database_pool
 from app.db.execution.quotas import consume_quota_limits
 from app.db.search.jobs import claim_search
 from app.policies.quotas import QuotaExceeded, classification_admission, public_daily_quota
-from app.workers import search as search_worker
+from app.workers.search import workers as search_worker
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 
@@ -78,7 +78,7 @@ async def execute_next_search():
     job = await claim_search()
     assert job is not None
     with ThreadPoolExecutor(max_workers=1) as executor:
-        await search_worker._run_search(job, executor)
+        await search_worker.SearchWorker().execute(job, executor)
     return job
 
 
@@ -107,7 +107,7 @@ async def test_ip_search_quota_cannot_be_reset_by_minting_a_new_cookie(public_ap
         provider_calls.append(query)
         return RepositorySearchResponse()
 
-    monkeypatch.setattr("app.workers.search.search_repository_metadata", provider)
+    monkeypatch.setattr("app.workers.search.workers.search_repository_metadata", provider)
     async with browser(public_api) as alice, browser(public_api) as bob:
         await bootstrap(alice)
         await bootstrap(bob)
@@ -147,7 +147,7 @@ async def test_daily_online_budget_blocks_providers_across_visitors_and_ips(
         provider_calls.append(query)
         return RepositorySearchResponse()
 
-    monkeypatch.setattr("app.workers.search.search_repository_metadata", provider)
+    monkeypatch.setattr("app.workers.search.workers.search_repository_metadata", provider)
     async with browser(public_api) as alice, browser(public_api, "198.51.100.2") as bob:
         await bootstrap(alice)
         await bootstrap(bob)
@@ -178,7 +178,7 @@ async def test_daily_online_budget_blocks_providers_across_visitors_and_ips(
 async def test_public_candidate_cap_deduplicates_before_charging(public_api, monkeypatch):
     monkeypatch.setenv("API_PUBLIC_MAX_CANDIDATES_PER_SEARCH", "2")
     monkeypatch.setattr(
-        "app.workers.search.search_repository_metadata",
+        "app.workers.search.workers.search_repository_metadata",
         lambda query: RepositorySearchResponse(
             results=[result(0), result(0), result(1), result(2)]
         ),
@@ -349,8 +349,8 @@ async def test_local_results_remain_available_when_external_budget_is_exhausted(
     def forbidden(query):
         pytest.fail("Local results must not require an external search")
 
-    monkeypatch.setattr("app.workers.search.lookup_local", local_result)
-    monkeypatch.setattr("app.workers.search.search_repository_metadata", forbidden)
+    monkeypatch.setattr("app.workers.search.workers.lookup_local", local_result)
+    monkeypatch.setattr("app.workers.search.workers.search_repository_metadata", forbidden)
     async with browser(public_api) as client:
         await bootstrap(client)
         response = await client.post(
@@ -406,7 +406,7 @@ async def test_shared_ip_sessions_candidate_admission_and_polling(
     from contextlib import AsyncExitStack
 
     monkeypatch.setattr(
-        "app.workers.search.search_repository_metadata",
+        "app.workers.search.workers.search_repository_metadata",
         lambda query: RepositorySearchResponse(results=[result(i) for i in range(10)]),
     )
     async with AsyncExitStack() as stack:

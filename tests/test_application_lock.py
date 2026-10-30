@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from app.db.execution import application_lock as locking
+from helpers.workers import StubWorker
 
 pytestmark = pytest.mark.anyio
 
@@ -55,8 +56,9 @@ async def test_cancelled_worker_does_not_release_application_lock(database, monk
 
     async with locking.application_lock() as owner:
         manager = workers.persisted_workers(
-            claim=pending_claim, execute=AsyncMock(), concurrency=1, name="search",
-            shutdown_timeout=.01,
+            StubWorker(claim=pending_claim, execute=AsyncMock(), name="search"),
+            concurrency=1,
+            shutdown_timeout=0.01,
         )
         await manager.__aenter__()
         await started.wait()

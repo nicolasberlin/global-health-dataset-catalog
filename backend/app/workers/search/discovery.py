@@ -7,10 +7,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from typing import Literal, Protocol, TypedDict
 
-from pydantic import HttpUrl, TypeAdapter, ValidationError
-
 from app.db.catalog import normalize_dataset_search_query, search_collected_datasets
 from app.policies.quotas import WorkAdmission
+from pydantic import HttpUrl, TypeAdapter, ValidationError
+
 from collector.classification.repository import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
@@ -178,7 +178,7 @@ def _json_size_bytes(value: dict[str, str]) -> int:
     )
 
 
-def prepare_online(
+def prepare_repository_candidates(
     response: RepositorySearchResponse,
     query: str,
     admission: WorkAdmission,

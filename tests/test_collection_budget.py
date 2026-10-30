@@ -10,7 +10,8 @@ import pytest
 from app.api.searches import search_progress
 from app.auth.security import APIPrincipal
 from app.db.connection import _require_database_pool
-from app.workers import collection as collection_worker
+from app.workers.collection import workers as collection_worker
+from app.workers.runtime import persisted_workers
 from fastapi import Response
 from helpers.collection import DATASET_HTML, AcceptingPageClassifier
 from helpers.workflows import candidate_for, decision, wait_until
@@ -275,7 +276,9 @@ async def test_worker_keeps_slot_and_persists_partial_result_after_expiration(
     )
     # Stop a second job without making a provider call if the worker claims it after release.
     monkeypatch.setattr(collection_worker, "collect_source_with_report", collect_owned)
-    async with collection_worker.collection_workers(concurrency=1, poll_interval=0.01):
+    async with persisted_workers(
+        collection_worker.CollectionWorker(), concurrency=1, poll_interval=0.01
+    ):
         try:
             assert await asyncio.to_thread(entered.wait, 3)
             assert (await database.get_collection_job(other["id"]))["status"] == "pending"
@@ -320,7 +323,7 @@ async def test_expired_job_concludes_without_any_external_call(database, monkeyp
         lambda *a, **kw: pytest.fail("LLM"),
     )
     with ThreadPoolExecutor(1) as executor:
-        await collection_worker._run_collection_job(job, executor)
+        await collection_worker.CollectionWorker().execute(job, executor)
     finished = await database.get_collection_job(job["id"])
     assert finished["status"] == "done" and finished["outcome"] == "incomplete"
     assert finished["errors"][0]["code"] == "collection_budget_exhausted"

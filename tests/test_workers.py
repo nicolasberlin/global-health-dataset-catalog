@@ -10,9 +10,11 @@ from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import pytest
-from app.workers import classification as classification_worker
-from app.workers import collection as collection_worker
 from app.workers import runtime as workers
+from app.workers import sql_retries
+from app.workers.classification import workers as classification_worker
+from app.workers.collection import workers as collection_worker
+from helpers.workers import StubWorker, execute_worker
 from psycopg import InterfaceError, OperationalError
 from psycopg.errors import (
     DeadlockDetected,
@@ -34,7 +36,7 @@ VERSION = datetime(2026, 9, 25, tzinfo=timezone.utc)
                                     SerializationFailure, DeadlockDetected, LockNotAvailable])
 async def test_transient_persistence_retries_until_success(failure):
     operation = AsyncMock(side_effect=[failure("outage"), failure("outage"), "saved"])
-    assert await workers.persist_with_retry(operation, initial_delay=0) == "saved"
+    assert await sql_retries.persist_with_retry(operation, initial_delay=0) == "saved"
     assert operation.await_count == 3
 
 
@@ -42,7 +44,7 @@ async def test_transient_persistence_retries_until_success(failure):
 async def test_permanent_errors_do_not_loop(failure):
     operation = AsyncMock(side_effect=failure("permanent"))
     with pytest.raises(failure):
-        await workers.persist_with_retry(operation, initial_delay=0)
+        await sql_retries.persist_with_retry(operation, initial_delay=0)
     assert operation.await_count == 1
 
 
@@ -51,17 +53,17 @@ async def test_ownership_loss_is_never_retried_even_for_terminal_persistence():
 
     operation = AsyncMock(side_effect=ApplicationLockLost("Superseded runtime."))
     with pytest.raises(ApplicationLockLost):
-        await workers.persist_with_retry(operation, initial_delay=0, retry_unexpected=True)
+        await sql_retries.persist_with_retry(operation, initial_delay=0, retry_unexpected=True)
     operation.assert_awaited_once()
 
 
 async def test_persistence_backoff_is_capped(monkeypatch):
     pause = AsyncMock()
-    monkeypatch.setattr(workers.asyncio, "sleep", pause)
+    monkeypatch.setattr(sql_retries.asyncio, "sleep", pause)
     jitter = Mock(side_effect=lambda low, high: high)
-    monkeypatch.setattr(workers.random, "uniform", jitter)
+    monkeypatch.setattr(sql_retries.random, "uniform", jitter)
     operation = AsyncMock(side_effect=[OperationalError("offline")] * 7 + ["saved"])
-    assert await workers.persist_with_retry(operation) == "saved"
+    assert await sql_retries.persist_with_retry(operation) == "saved"
     delays = [call.args[0] for call in pause.await_args_list]
     assert delays == [1, 2, 4, 8, 16, 30, 30]
     assert [call.args for call in jitter.call_args_list] == [(d / 2, d) for d in delays]
@@ -74,7 +76,7 @@ async def test_persistence_wait_is_cancellable():
         attempted.set()
         raise OperationalError("offline")
 
-    task = asyncio.create_task(workers.persist_with_retry(unavailable))
+    task = asyncio.create_task(sql_retries.persist_with_retry(unavailable))
     await attempted.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -83,12 +85,14 @@ async def test_persistence_wait_is_cancellable():
 
 async def test_acquisition_logging_skips_idle_polls_but_reports_retries(monkeypatch):
     events = Mock()
-    monkeypatch.setattr(workers, "emit_event", events)
-    await workers.persist_with_retry(AsyncMock(return_value=None), log_operation=False)
+    monkeypatch.setattr(sql_retries, "emit_event", events)
+    await sql_retries.persist_with_retry(
+        AsyncMock(return_value=None), log_operation=False, event_sink=events
+    )
     events.assert_not_called()
-    await workers.persist_with_retry(
+    await sql_retries.persist_with_retry(
         AsyncMock(side_effect=[OperationalError("offline"), None]),
-        initial_delay=0, log_operation=False,
+        initial_delay=0, log_operation=False, event_sink=events,
     )
     assert [call.args[0] for call in events.call_args_list] == ["persistence_retry"]
 
@@ -121,11 +125,16 @@ async def test_consumer_keeps_slot_until_terminal_write_recovers(monkeypatch):
     monkeypatch.setattr(collection_worker, "PostgresVoteStore", Mock())
     monkeypatch.setattr(collection_worker, "complete_collection_job", complete)
     monkeypatch.setattr(collection_worker, "persist_with_retry",
-                        partial(workers.persist_with_retry, initial_delay=0))
+                        partial(sql_retries.persist_with_retry, initial_delay=0))
     with ThreadPoolExecutor(1) as executor:
-        task = asyncio.create_task(workers._consume(
-            stop, executor, .001, claim, collection_worker._run_collection_job,
-        ))
+        task = asyncio.create_task(
+            workers._consume(
+                stop,
+                executor,
+                0.001,
+                StubWorker(claim=claim, execute=collection_worker.CollectionWorker().execute),
+            )
+        )
         try:
             await asyncio.wait_for(blocked.wait(), 2)
             assert claims == 1
@@ -146,7 +155,7 @@ async def test_workers_retry_only_persistence(monkeypatch, kind, stage, caplog):
     caplog.set_level(logging.INFO, logger="collector.operations")
     module = collection_worker if kind == "collection" else classification_worker
     monkeypatch.setattr(module, "persist_with_retry",
-                        partial(workers.persist_with_retry, initial_delay=0))
+                        partial(sql_retries.persist_with_retry, initial_delay=0))
     monkeypatch.setattr(module, "PostgresVoteStore", Mock())
     def execute(*args, **kwargs):
         observability.emit_event("test_execution", outcome="success")
@@ -167,14 +176,14 @@ async def test_workers_retry_only_persistence(monkeypatch, kind, stage, caplog):
         monkeypatch.setattr(module, "mark_collection_job_error", fail)
         item = {"id": 1, "kind": "source", "source_url": "https://example.org",
                 "updated_at": VERSION.isoformat()}
-        run = module._run_collection_job
+        run = partial(execute_worker, module)
     else:
         monkeypatch.setattr(module, "_classify", compute)
         monkeypatch.setattr(module, "complete_candidate_classification", complete)
         monkeypatch.setattr(module, "fail_candidate_classification", fail)
         item = {"id": UUID("00000000-0000-0000-0000-000000000001"),
                 "owner_id": "alice", "updated_at": VERSION.isoformat()}
-        run = module._run_classification
+        run = partial(execute_worker, module)
     with ThreadPoolExecutor(1) as executor:
         await run(item, executor)
     compute.assert_called_once()
@@ -209,12 +218,12 @@ async def test_logging_failure_cannot_fail_worker(monkeypatch, kind):
                             Mock(return_value=CollectionResult()))
         monkeypatch.setattr(module, "complete_collection_job", complete)
         monkeypatch.setattr(module, "mark_collection_job_error", fail)
-        run = module._run_collection_job
+        run = partial(execute_worker, module)
     else:
         monkeypatch.setattr(module, "_classify", Mock(return_value=object()))
         monkeypatch.setattr(module, "complete_candidate_classification", complete)
         monkeypatch.setattr(module, "fail_candidate_classification", fail)
-        run = module._run_classification
+        run = partial(execute_worker, module)
     with ThreadPoolExecutor(1) as executor:
         await run(item, executor)
     complete.assert_awaited_once()

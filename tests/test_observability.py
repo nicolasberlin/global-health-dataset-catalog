@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from uuid import UUID
 
 import pytest
-from app.workers import runtime as workers
+from app.workers import sql_retries
 
 from collector import observability
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
@@ -77,9 +77,9 @@ async def test_persistence_retry_recovery_and_failure_events(events, caplog):
     candidate_id = UUID("00000000-0000-0000-0000-000000000001")
     with observability.operation_context(candidate_id=candidate_id):
         operation = AsyncMock(side_effect=[OperationalError("secret-db"), "saved"])
-        assert await workers.persist_with_retry(operation, initial_delay=0) == "saved"
+        assert await sql_retries.persist_with_retry(operation, initial_delay=0) == "saved"
         with pytest.raises(ValueError):
-            await workers.persist_with_retry(AsyncMock(side_effect=ValueError("secret-db")))
+            await sql_retries.persist_with_retry(AsyncMock(side_effect=ValueError("secret-db")))
     records = events()
     assert [(r["event"], r["outcome"]) for r in records] == [
         ("persistence_retry", "retry"), ("persistence_finished", "success"),
@@ -107,7 +107,7 @@ def test_parallel_votes_carry_context_without_leaking_it(events):
 async def test_broken_logging_cannot_fail_model_or_persistence(monkeypatch):
     monkeypatch.setattr(observability.logger, "info", Mock(side_effect=RuntimeError("broken")))
     assert client(Mock(return_value=BytesIO(b'{"output":"{}"}'))).classify_request({}) == {}
-    assert await workers.persist_with_retry(AsyncMock(return_value="saved")) == "saved"
+    assert await sql_retries.persist_with_retry(AsyncMock(return_value="saved")) == "saved"
 
 
 def test_logging_configuration_is_idempotent(monkeypatch):

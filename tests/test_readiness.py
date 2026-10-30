@@ -252,16 +252,14 @@ async def test_lifespan_marks_ready_only_after_startup_and_before_worker_shutdow
         monkeypatch.setattr(lifecycle, name, startup_step)
 
     @asynccontextmanager
-    async def workers():
+    async def workers(*args, **kwargs):
         assert not main.app.state.ready
         try:
             yield
         finally:
             assert (await client.get("/ready")).status_code == 503
 
-    monkeypatch.setattr(lifecycle, "collection_workers", workers)
-    monkeypatch.setattr(lifecycle, "classification_workers", workers)
-    monkeypatch.setattr(lifecycle, "search_workers", workers)
+    monkeypatch.setattr(lifecycle, "persisted_workers", workers)
     if fail_startup:
         with pytest.raises(RuntimeError, match="failed initialization"):
             async with lifecycle.lifespan(main.app):

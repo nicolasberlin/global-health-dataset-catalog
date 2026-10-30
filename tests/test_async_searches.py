@@ -13,11 +13,12 @@ from app.db.connection import _require_database_pool
 from app.db.execution.commands import CommandConflict
 from app.db.search import jobs as search_jobs
 from app.policies.quotas import QuotaExceeded
-from app.search.discovery import DiscoveryResult
-from app.workers import classification as classification_worker
-from app.workers import collection as collection_worker
-from app.workers import search as search_worker
-from app.workers.runtime import persist_with_retry
+from app.workers.classification import workers as classification_worker
+from app.workers.collection import workers as collection_worker
+from app.workers.runtime import persisted_workers
+from app.workers.search import workers as search_worker
+from app.workers.search.discovery import DiscoveryResult
+from app.workers.sql_retries import persist_with_retry
 from helpers.inspection import stored_candidate
 from helpers.workflows import candidate, headers, read, rows, wait_until
 from helpers.workflows import classification_decision as decision
@@ -55,7 +56,7 @@ def provider_result():
 
 async def run(job):
     with ThreadPoolExecutor(max_workers=1) as executor:
-        await search_worker._run_search(job, executor)
+        await search_worker.SearchWorker().execute(job, executor)
 
 
 async def test_removed_repository_analysis_route_is_absent(api):
@@ -114,7 +115,7 @@ async def test_single_post_then_disconnected_client_completes_all_stages(
         calls.append("discovery")
         return RepositorySearchResponse(results=[provider_result()])
 
-    def classify(item):
+    def classify(item, vote_store):
         calls.append("classification")
         assert item["search_query"] == "mortality"
         return decision()
@@ -149,9 +150,11 @@ async def test_single_post_then_disconnected_client_completes_all_stages(
         assert created.status_code == 202
     # The HTTP client is closed. Workers use only persisted state; no progress/classify calls.
     async with (
-        search_worker.search_workers(poll_interval=0.01),
-        classification_worker.classification_workers(poll_interval=0.01),
-        collection_worker.collection_workers(poll_interval=0.01),
+        persisted_workers(search_worker.SearchWorker(), poll_interval=0.01, concurrency=1),
+        persisted_workers(
+            classification_worker.ClassificationWorker(), poll_interval=0.01, concurrency=2
+        ),
+        persisted_workers(collection_worker.CollectionWorker(), poll_interval=0.01, concurrency=2),
     ):
 
         async def finished():

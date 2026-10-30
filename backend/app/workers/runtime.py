@@ -5,16 +5,15 @@ from __future__ import annotations
 import asyncio
 import math
 import os
-import random as random  # Compatibility export for the shared persistence jitter source.
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator
 from concurrent.futures import Executor
 from contextlib import asynccontextmanager
 from functools import partial
-from typing import Protocol, TypeVar
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from app.db.execution.application_lock import ApplicationLockLost, require_application_ownership
-from app.workers.sql_retries import persist_with_retry as _persist_with_retry
+from app.workers.contracts import JobT, Worker
+from app.workers.sql_retries import persist_with_retry
 from app.workers.state import (
     ShutdownBudget,
     WorkerState,
@@ -26,20 +25,6 @@ from app.workers.state import (
 from collector.execution import BoundedThreadExecutor, ExecutionControl, execution_control
 from collector.observability import emit_event, operation_context
 
-WorkItem = TypeVar("WorkItem", bound=Mapping[str, object])
-ClaimedItem = TypeVar("ClaimedItem", bound=Mapping[str, object], covariant=True)
-Execute = Callable[[WorkItem, Executor], Awaitable[None]]
-Recover = Callable[[WorkItem], Awaitable[object]]
-
-
-class Claim(Protocol[ClaimedItem]):
-    async def __call__(self, *, claim_token: UUID) -> ClaimedItem | None: ...
-
-
-async def persist_with_retry(operation, **kwargs):
-    """Compatibility export; policy lives independently in app.workers.sql_retries."""
-    return await _persist_with_retry(operation, event_sink=emit_event, **kwargs)
-
 
 def configured_worker_shutdown_seconds() -> float:
     value = float(os.getenv("WORKER_SHUTDOWN_TIMEOUT_SECONDS", "10"))
@@ -49,7 +34,7 @@ def configured_worker_shutdown_seconds() -> float:
 
 
 @asynccontextmanager
-async def worker_shutdown_budget(*, seconds: float | None = None):
+async def worker_shutdown_budget(*, seconds: float | None = None) -> AsyncIterator[None]:
     """Share one drain deadline, activated only when shutdown starts."""
     duration = configured_worker_shutdown_seconds() if seconds is None else seconds
     if not math.isfinite(duration) or duration <= 0:
@@ -65,10 +50,9 @@ async def _consume(
     stop: asyncio.Event,
     executor: Executor,
     poll_interval: float,
-    claim: Claim[WorkItem],
-    execute: Execute[WorkItem],
-    recover: Recover[WorkItem] | None = None,
+    worker: Worker[JobT],
 ) -> None:
+    """Keep one claim token through acquisition and finalize before taking more work."""
     state = current_worker.get()
     while not stop.is_set():
         job = None
@@ -77,12 +61,14 @@ async def _consume(
             # Keep the token until SQL acknowledges acquisition, including a lost commit reply.
             claim_token = uuid4()
             job = await persist_with_retry(
-                partial(claim, claim_token=claim_token), log_operation=False, stop=stop,
+                partial(worker.claim, claim_token=claim_token),
+                log_operation=False,
+                stop=stop,
             )
             if state is not None:
                 state.acquisition_failed = False
             if job is not None:
-                await execute(job, executor)
+                await worker.execute(job, executor)
                 continue
         except ApplicationLockLost:
             raise
@@ -92,18 +78,17 @@ async def _consume(
             identifier = job.get("id") if job is not None else None
             queue = state.queue if state is not None else None
             with operation_context(
-                queue=queue, job_id=identifier if queue == "collection" else None,
+                queue=queue,
+                job_id=identifier if queue == "collection" else None,
                 candidate_id=identifier if queue == "classification" else None,
                 search_id=identifier if queue == "search" else None,
             ):
                 emit_event("worker_poll", outcome="failed", error_category="execution")
                 if job is not None:
-                    if recover is None:
-                        if state is not None:
-                            state.failed = True
-                        raise
                     await persist_with_retry(
-                        partial(recover, job), retry_storage_failures=True, retry_unexpected=True,
+                        partial(worker.recover, job),
+                        retry_storage_failures=True,
+                        retry_unexpected=True,
                     )
         try:
             await asyncio.wait_for(stop.wait(), timeout=poll_interval)
@@ -113,8 +98,10 @@ async def _consume(
 
 @asynccontextmanager
 async def persisted_workers(
-    *, claim: Claim[WorkItem], execute: Execute[WorkItem], concurrency: int, name: str,
-    poll_interval: float = 1.0, recover: Recover[WorkItem] | None = None,
+    worker: Worker[JobT],
+    *,
+    concurrency: int,
+    poll_interval: float = 1.0,
     shutdown_timeout: float | None = None,
 ) -> AsyncIterator[None]:
     """Keep each outcome in its worker slot until acknowledged or shutdown expires.
@@ -131,16 +118,17 @@ async def persisted_workers(
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("Worker shutdown timeout must be positive and finite.")
     budget = shutdown_budget.get() or ShutdownBudget(duration)
+    name = worker.name
     stop = asyncio.Event()
     executor = BoundedThreadExecutor(max_workers=concurrency, thread_name_prefix=name)
     states = [WorkerState(name, stop, ExecutionControl(), budget) for _ in range(concurrency)]
 
-    async def run(state):
+    async def run(state: WorkerState) -> None:
         worker_token = current_worker.set(state)
         execution_token = execution_control.set(state.control)
         try:
             with operation_context(queue=name):
-                await _consume(stop, executor, poll_interval, claim, execute, recover)
+                await _consume(stop, executor, poll_interval, worker)
         except asyncio.CancelledError:
             if not stop.is_set():
                 state.failed = True

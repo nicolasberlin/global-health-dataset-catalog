@@ -27,11 +27,18 @@ request middleware. `auth/` owns access policy and anonymous sessions. `search/`
 prepares discovery results and derives search conclusions; `policies/` contains
 quota and model-retry rules shared across admission, storage and workers.
 
-`workers/` executes background work. Its `runtime.py` and `state.py` manage
-consumers and health, `sql_retries.py` retains outcomes during database failures,
-and `stores.py` bridges synchronous classifier/collector threads to asynchronous
-PostgreSQL writes. `lifecycle.py` starts and stops the pool and worker groups;
-`main.py` constructs the FastAPI application and serves health/readiness.
+`workers/` executes background work through `SearchWorker`, `ClassificationWorker`
+and `CollectionWorker`. They satisfy the structural `Worker` protocol in
+`contracts.py`: a queue name and the methods `claim`, `execute` and `recover`.
+The classes keep their own execution logic; the existing `runtime.py` manages
+bounded consumers and shutdown, while `state.py` tracks ownership and health.
+
+`sql_retries.py` retains outcomes during database failures. `FailureHandler` in
+`failures.py` shares model-failure recovery between classification and collection.
+`stores.py` bridges synchronous classifier/collector threads to asynchronous
+PostgreSQL writes. `lifecycle.py` constructs the worker instances and starts and
+stops their groups and the pool; `main.py` constructs the FastAPI application and
+serves health/readiness.
 
 `db/` owns SQL and transactions. Its `search/`, `classification/`, `collection/`
 and `execution/` packages separate domain records from shared coordination.
@@ -94,6 +101,29 @@ Search, classification and collection have separate PostgreSQL queues and bounde
 executors. Consumers claim committed work with row locking; worker receipts and
 attempt/version checks prevent an uncertain SQL acknowledgement from creating
 another claim or allowing stale completion to overwrite a newer attempt.
+
+`persisted_workers(worker, concurrency=...)` runs each worker instance through the
+same acquisition, health and shutdown machinery. An instance holds configured
+dependencies, which can be supplied explicitly for tests. Each call to `execute`
+keeps its job, origin, version, result and persistence phase in local variables,
+so several consumers can safely share one instance. Claims and finalization
+delegate to the existing domain SQL functions and their transaction guards:
+search uses an attempt token and number; classification and collection use the
+claimed version, with owner checks where applicable.
+
+Classification and collection use `FailureHandler` to persist an eligible LLM
+continuation or a terminal error. Repairable storage failures during retry
+scheduling retain the original model diagnostics until SQL acknowledges the
+transition. A failure saving an already computed result only retries persistence
+or records a persistence error. Search retains its own failure handling because
+its local/provider origin and quota retry date are part of the discovery outcome.
+
+Blocking provider and collector calls receive a copy of the execution context
+in their worker thread, preserving cancellation and operational correlation.
+Votes and collection traces travel back to the event loop through the shared
+`stores._submit_and_wait` bridge. It waits with cooperative cancellation and closes
+an unsubmitted coroutine when the loop rejects submission. Collection's attempt
+budget covers computation; its final SQL transaction runs outside that budget.
 
 The client submits a command and may disconnect immediately. Polling neither
 starts nor advances work. Owner-scoped idempotency receipts bind command keys to

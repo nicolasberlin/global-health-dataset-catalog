@@ -28,10 +28,14 @@ from app.db.execution.application_lock import application_lock
 from app.db.schema import init_database, validate_database_schema
 from app.db.search.sessions import mark_interrupted_search_sessions_error
 from app.policies.retries import RetryPolicy
-from app.workers.classification import classification_workers
-from app.workers.collection import collection_workers
-from app.workers.runtime import configured_worker_shutdown_seconds, worker_shutdown_budget
-from app.workers.search import search_workers
+from app.workers.classification.workers import ClassificationWorker
+from app.workers.collection.workers import CollectionWorker
+from app.workers.runtime import (
+    configured_worker_shutdown_seconds,
+    persisted_workers,
+    worker_shutdown_budget,
+)
+from app.workers.search.workers import SearchWorker
 from app.workers.state import request_worker_stop
 from collector.config import configured_collection_budget_seconds
 from collector.observability import configure_operational_logging
@@ -75,8 +79,21 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 ownership.require_held()
                 watcher = asyncio.create_task(_watch_ownership(application, ownership))
                 try:
-                    async with worker_shutdown_budget(), \
-                            collection_workers(), classification_workers(), search_workers():
+                    async with (
+                        worker_shutdown_budget(),
+                        persisted_workers(
+                            CollectionWorker(),
+                            concurrency=int(os.getenv("COLLECTION_MAX_CONCURRENCY", "2")),
+                        ),
+                        persisted_workers(
+                            ClassificationWorker(),
+                            concurrency=int(os.getenv("CLASSIFICATION_MAX_CONCURRENCY", "2")),
+                        ),
+                        persisted_workers(
+                            SearchWorker(),
+                            concurrency=int(os.getenv("SEARCH_MAX_CONCURRENCY", "1")),
+                        ),
+                    ):
                         ownership.require_held()
                         application.state.ready = True
                         try:
