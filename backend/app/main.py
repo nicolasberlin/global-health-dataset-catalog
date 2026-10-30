@@ -14,7 +14,7 @@ from app.api.middleware import (
     configured_request_body_timeout_seconds,
 )
 from app.api.router import router as collector_router
-from app.api.sessions import router as sessions_router
+from app.api.routes.sessions import router as sessions_router
 from app.auth.security import (
     api_cors_origins,
     configure_access_openapi,

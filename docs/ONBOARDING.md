@@ -113,7 +113,7 @@ installations. No setup script moves or deletes database volumes.
 
 | Change | Start here |
 | --- | --- |
-| Search admission, idempotency and ownership | `backend/app/api/searches.py`, `backend/app/db/search/jobs.py` |
+| Search admission, idempotency and ownership | `backend/app/api/routes/searches.py`, `backend/app/db/search/jobs.py` |
 | Repository discovery and normalization | `collector/repository_search/` |
 | Record-platform connector | `collector/collection/connectors/`, `collector/collection/registry.py` |
 | Collection entry points and orchestration | `collector/collection/service.py`, `collector/collection/orchestrator.py` |
@@ -160,14 +160,16 @@ The shared network policy and its package initializer use only the standard
 library, allowing container firewall entrypoints to import the address rules
 before application dependencies are loaded.
 
-`backend/app/api/router.py` registers the collector routes. HTTP handlers belong
-in the topic-specific API files. `api/search_progress.py` provides the shared
+`backend/app/api/router.py` registers the collector routes from `api/routes/`:
+`searches.py`, `catalog.py` and `diagnostics.py`. `app.main.create_app()` separately
+registers `api/routes/sessions.py` at `/session`. HTTP handlers belong in these
+topic-specific route modules. `api/search_progress.py` provides the shared
 owner-scoped progress read used by search replies and diagnostics; handlers do
 not call another HTTP route to obtain a snapshot.
 
 ### Follow a search through the code
 
-1. `backend/app/api/searches.py` records the request in PostgreSQL.
+1. `backend/app/api/routes/searches.py` records the request in PostgreSQL.
    `SearchWorker` in `backend/app/workers/search/worker.py` checks the saved catalogue,
    then discovers external candidates when needed; `ClassificationWorker` in
    `backend/app/workers/classification/worker.py` evaluates those candidates.

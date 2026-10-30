@@ -4,7 +4,7 @@ from typing import Annotated
 
 import pytest
 from app.api.router import router as collector_router
-from app.api.sessions import router as sessions_router
+from app.api.routes.sessions import router as sessions_router
 from app.auth.security import (
     APIPrincipal,
     require_api_principal,
@@ -35,7 +35,7 @@ def public_api(monkeypatch):
         pass
 
     # Session lifecycle tests isolate signing; real quota enforcement has PostgreSQL tests.
-    monkeypatch.setattr("app.api.sessions.enforce_session_creation_quota", allow_bootstrap)
+    monkeypatch.setattr("app.api.routes.sessions.enforce_session_creation_quota", allow_bootstrap)
     monkeypatch.setenv("API_AUTH_MODE", "public")
     monkeypatch.setenv("API_SESSION_SECRET", SECRET)
     monkeypatch.setenv("API_PUBLIC_ORIGIN", ORIGIN)

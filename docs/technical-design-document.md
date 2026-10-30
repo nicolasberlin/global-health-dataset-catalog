@@ -22,9 +22,13 @@ or independent worker service is required.
 | PostgreSQL | Durable queues, ownership, receipts, votes, history and catalogue | [backend/app/db](../backend/app/db) |
 | Optional browser service | Render selected pages and probe resources within browser sessions | [browser](../browser) |
 
-Within the backend, `api/` owns HTTP handlers, models, response presentation and
-request middleware. `auth/` owns access policy and anonymous sessions. `search/`
-derives search conclusions from saved progress; discovery preparation belongs to
+Within the backend, `api/routes/` groups the search, catalogue, diagnostic and
+session HTTP handlers. `api/router.py` assembles the `/collector` routes;
+`app.main.create_app()` separately registers the session route at `/session`.
+`api/schemas/` owns validation models, `api/presenters/` prepares public responses,
+and the search presenter derives conclusions from saved progress. Request
+middleware and shared progress reads remain directly in `api/`. `auth/` owns
+access policy and anonymous sessions. Discovery preparation belongs to
 `workers/search/discovery.py`. `policies/` contains quota and model-retry rules
 shared across admission, storage and workers.
 

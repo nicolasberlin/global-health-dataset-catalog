@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from app.api.router import router as collector_router
-from app.api.sessions import router as sessions_router
+from app.api.routes.sessions import router as sessions_router
 from app.auth.security import public_client_key, validate_api_security_configuration
 from app.auth.sessions import VisitorSessionSettings
 from app.db.connection import _fetchall, _require_database_pool

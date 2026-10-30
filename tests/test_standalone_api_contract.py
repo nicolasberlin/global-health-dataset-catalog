@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 from app.api import search_progress as progress_reads
-from app.api import searches
 from app.api.router import router
+from app.api.routes import searches
 from app.db.execution.commands import CommandConflict
 from app.policies.quotas import QuotaExceeded, QuotaUnavailable
 from fastapi import FastAPI

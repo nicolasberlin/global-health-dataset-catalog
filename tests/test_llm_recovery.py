@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
-from app.api.searches import search_progress
+from app.api.routes.searches import search_progress
 from app.auth.security import APIPrincipal
 from app.db.classification import votes as votes
 from app.db.connection import _require_database_pool

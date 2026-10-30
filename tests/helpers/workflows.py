@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from uuid import UUID
 
-from app.api.searches import search_progress
+from app.api.routes.searches import search_progress
 from app.auth.security import APIPrincipal
 from app.db.connection import _fetchall, _require_database_pool
 from fastapi import Response

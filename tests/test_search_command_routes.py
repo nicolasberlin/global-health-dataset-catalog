@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 from app.api import search_progress as progress_reads
-from app.api import searches
 from app.api.router import router
+from app.api.routes import searches
 from app.db.connection import _fetchall, _require_database_pool
 from app.db.execution.commands import CommandConflict
 from app.policies.quotas import QuotaExceeded

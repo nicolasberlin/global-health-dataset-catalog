@@ -1,6 +1,6 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **30 October 2026**, based on Git commit `bd92a36`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **30 October 2026**, based on Git commit `6cc2a2e`, including the independent core API and public Search Lab. The private web interface is excluded.
 
 This index lists **864 function and method definitions in 134 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
@@ -24,18 +24,18 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 ## Files
 
-- [backend/app/api/catalog.py](#backend-app-api-catalog-py) — 1 definition
-- [backend/app/api/diagnostics.py](#backend-app-api-diagnostics-py) — 1 definition
 - [backend/app/api/middleware.py](#backend-app-api-middleware-py) — 8 definitions
 - [backend/app/api/presenters/catalog.py](#backend-app-api-presenters-catalog-py) — 3 definitions
 - [backend/app/api/presenters/classification.py](#backend-app-api-presenters-classification-py) — 3 definitions
 - [backend/app/api/presenters/collection.py](#backend-app-api-presenters-collection-py) — 2 definitions
 - [backend/app/api/presenters/search.py](#backend-app-api-presenters-search-py) — 3 definitions
+- [backend/app/api/routes/catalog.py](#backend-app-api-routes-catalog-py) — 1 definition
+- [backend/app/api/routes/diagnostics.py](#backend-app-api-routes-diagnostics-py) — 1 definition
+- [backend/app/api/routes/searches.py](#backend-app-api-routes-searches-py) — 5 definitions
+- [backend/app/api/routes/sessions.py](#backend-app-api-routes-sessions-py) — 1 definition
 - [backend/app/api/schemas/classification.py](#backend-app-api-schemas-classification-py) — 2 definitions
 - [backend/app/api/schemas/search.py](#backend-app-api-schemas-search-py) — 1 definition
 - [backend/app/api/search_progress.py](#backend-app-api-search_progress-py) — 1 definition
-- [backend/app/api/searches.py](#backend-app-api-searches-py) — 5 definitions
-- [backend/app/api/sessions.py](#backend-app-api-sessions-py) — 1 definition
 - [backend/app/auth/security.py](#backend-app-auth-security-py) — 14 definitions
 - [backend/app/auth/sessions.py](#backend-app-auth-sessions-py) — 6 definitions
 - [backend/app/db/catalog/datasets.py](#backend-app-db-catalog-datasets-py) — 6 definitions
@@ -159,22 +159,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [search_lab/scenarios/experiment.py](#search_lab-scenarios-experiment-py) — 2 definitions
 - [search_lab/scenarios/run.py](#search_lab-scenarios-run-py) — 4 definitions
 
-<a id="backend-app-api-catalog-py"></a>
-
-## backend/app/api/catalog.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`read_collected_by_id`](../../backend/app/api/catalog.py#L20) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CollectorCollectionResponse` | async |
-
-<a id="backend-app-api-diagnostics-py"></a>
-
-## backend/app/api/diagnostics.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`search_diagnostics`](../../backend/app/api/diagnostics.py#L23) | `search_diagnostics(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response)` | async |
-
 <a id="backend-app-api-middleware-py"></a>
 
 ## backend/app/api/middleware.py
@@ -229,6 +213,42 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_collector_repository_candidate`](../../backend/app/api/presenters/search.py#L144) | `_collector_repository_candidate(candidate: dict[str, object], *, automatic_collection: CollectorAutomaticCollection \| None=None) -> CollectorRepositorySearchItem` | function / method |
 | [`public_search_progress`](../../backend/app/api/presenters/search.py#L187) | `public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse` | function / method |
 
+<a id="backend-app-api-routes-catalog-py"></a>
+
+## backend/app/api/routes/catalog.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`read_collected_by_id`](../../backend/app/api/routes/catalog.py#L20) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CollectorCollectionResponse` | async |
+
+<a id="backend-app-api-routes-diagnostics-py"></a>
+
+## backend/app/api/routes/diagnostics.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`search_diagnostics`](../../backend/app/api/routes/diagnostics.py#L23) | `search_diagnostics(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response)` | async |
+
+<a id="backend-app-api-routes-searches-py"></a>
+
+## backend/app/api/routes/searches.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`create_search`](../../backend/app/api/routes/searches.py#L85) | `create_search(payload: CollectorSearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> CollectorSearchCommandResponse` | async |
+| [`_admit_search_command`](../../backend/app/api/routes/searches.py#L105) | `_admit_search_command(payload, principal, response, idempotency_key, request)` | async |
+| [`_search_command_response`](../../backend/app/api/routes/searches.py#L128) | `_search_command_response(row, replayed, principal, response, request)` | async |
+| [`latest_search`](../../backend/app/api/routes/searches.py#L149) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> CollectorSearchProgressResponse` | async |
+| [`search_progress`](../../backend/app/api/routes/searches.py#L174) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> CollectorSearchProgressResponse` | async |
+
+<a id="backend-app-api-routes-sessions-py"></a>
+
+## backend/app/api/routes/sessions.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`start_visitor_session`](../../backend/app/api/routes/sessions.py#L15) | `start_visitor_session(request: Request) -> Response` | async |
+
 <a id="backend-app-api-schemas-classification-py"></a>
 
 ## backend/app/api/schemas/classification.py
@@ -253,26 +273,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`load_search_progress`](../../backend/app/api/search_progress.py#L17) | `load_search_progress(search_id: UUID, owner_id: str) -> CollectorSearchProgressResponse` | async |
-
-<a id="backend-app-api-searches-py"></a>
-
-## backend/app/api/searches.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`create_search`](../../backend/app/api/searches.py#L85) | `create_search(payload: CollectorSearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> CollectorSearchCommandResponse` | async |
-| [`_admit_search_command`](../../backend/app/api/searches.py#L105) | `_admit_search_command(payload, principal, response, idempotency_key, request)` | async |
-| [`_search_command_response`](../../backend/app/api/searches.py#L128) | `_search_command_response(row, replayed, principal, response, request)` | async |
-| [`latest_search`](../../backend/app/api/searches.py#L149) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> CollectorSearchProgressResponse` | async |
-| [`search_progress`](../../backend/app/api/searches.py#L174) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> CollectorSearchProgressResponse` | async |
-
-<a id="backend-app-api-sessions-py"></a>
-
-## backend/app/api/sessions.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`start_visitor_session`](../../backend/app/api/sessions.py#L15) | `start_visitor_session(request: Request) -> Response` | async |
 
 <a id="backend-app-auth-security-py"></a>
 
