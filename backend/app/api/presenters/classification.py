@@ -8,7 +8,7 @@ from app.api.schemas.classification import CandidateClassificationView
 from collector.diagnostics import Diagnostic, public_diagnostics
 
 
-def _public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]:
+def _sanitize_ensemble_failures(ensemble: dict[str, Any]) -> dict[str, Any]:
     """Preserve decisions and votes while replacing technical failure details."""
 
     if "failures" not in ensemble:
@@ -34,19 +34,19 @@ def _public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def public_repository_classification(
+def build_candidate_classification_view(
     classification: dict[str, Any] | None,
 ) -> CandidateClassificationView | None:
     """Prepare a candidate's saved classification, filtering internal vote failures."""
     if classification is None:
         return None
     return CandidateClassificationView(
-        **{**classification, "ensemble": _public_ensemble(classification["ensemble"])},
+        **{**classification, "ensemble": _sanitize_ensemble_failures(classification["ensemble"])},
     )
 
 
-def public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]:
+def prepare_public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]:
     """Copy a dataset's classification signals with client-safe model failures."""
     if "ensemble" not in signals:
         return dict(signals)
-    return {**signals, "ensemble": _public_ensemble(signals["ensemble"])}
+    return {**signals, "ensemble": _sanitize_ensemble_failures(signals["ensemble"])}

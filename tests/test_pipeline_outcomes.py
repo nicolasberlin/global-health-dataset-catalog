@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 
 import pytest
-from app.api.presenters.collection import public_collection_job
+from app.api.presenters.collection import build_collection_job_view
 from app.api.presenters.search import summarize_search
 from helpers.classification import distribution as _distribution
 from helpers.classification import page as _page
@@ -297,7 +297,7 @@ def test_captcha_landing_page_cannot_become_empty():
 
 
 def test_historical_zero_saved_is_incomplete_and_legacy_contract_survives():
-    job = public_collection_job(_collection_job(status="done"))
+    job = build_collection_job_view(_collection_job(status="done"))
     assert job.status == "done" and job.saved_count == 0
     assert job.outcome == "incomplete"
     assert job.errors[0].code == "legacy_unknown"

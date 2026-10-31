@@ -11,9 +11,10 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
-from app.api.routes.searches import search_progress
+from app.api.routes.searches import get_search_progress
 from app.auth.security import APIPrincipal
-from app.db.classification import votes as votes
+from app.db.classification.voting import runs as voting_runs
+from app.db.classification.voting import votes as votes
 from app.db.connection import _require_database_pool
 from app.db.execution.retries import schedule_llm_retry
 from app.policies.quotas import QuotaExceeded
@@ -172,7 +173,7 @@ async def test_automatic_retry_preserves_successes_and_survives_restart(
 
     transport(request)
     await execute(kind, item)
-    progress = await search_progress(
+    progress = await get_search_progress(
         candidate["search_session_id"], APIPrincipal("alice"), Response()
     )
     assert progress.execution_status == "waiting_retry" and progress.polling_required
@@ -233,7 +234,7 @@ async def test_retry_exhaustion_is_terminal(database, transport, failure, max_ca
     assert row["classification_status"] == "error"
     assert calls == {MODELS[0]: 1, MODELS[1]: 1, MODELS[2]: max_calls}
     assert await database.claim_candidate_classification() is None
-    progress = await search_progress(
+    progress = await get_search_progress(
         candidate["search_session_id"], APIPrincipal("alice"), Response()
     )
     assert not progress.polling_required and progress.outcome == "incomplete"
@@ -296,7 +297,7 @@ async def test_stale_worker_and_conflicting_vote_writes_are_rejected(database):
     candidate, item = await setup_work(database, "repository")
     version = datetime.fromisoformat(item["updated_at"])
     scope = {"candidate_id": candidate["id"], "expected_updated_at": version}
-    run = await votes.prepare_vote_run(
+    run = await voting_runs.prepare_vote_run(
         {"configuration": [{"voter_id": "a"}], "payload": {}}, **scope
     )
     vote = await votes.claim_vote(run, "a", **scope)
@@ -322,7 +323,7 @@ async def test_reinitialization_preserves_votes_and_retry_counters(database):
 
     await database.init_database()
     candidate, item = await setup_work(database, "repository")
-    run = await votes.prepare_vote_run(
+    run = await voting_runs.prepare_vote_run(
         {"configuration": [{"voter_id": "a"}], "payload": {}}, candidate_id=candidate["id"]
     )
     vote = await votes.claim_vote(run, "a", candidate_id=candidate["id"])
@@ -364,7 +365,7 @@ async def test_expired_queued_retry_does_not_invoke_models(database, transport, 
     resumed = await next_attempt(database, kind, item["id"])
     await execute(kind, resumed)
     assert calls == dict.fromkeys(MODELS, 1)
-    progress = await search_progress(
+    progress = await get_search_progress(
         candidate["search_session_id"], APIPrincipal("alice"), Response()
     )
     assert not progress.polling_required and progress.outcome == "incomplete"

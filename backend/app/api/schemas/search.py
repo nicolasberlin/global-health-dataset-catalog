@@ -92,6 +92,8 @@ class RepositoryCandidateView(BaseModel):
 
 
 class RepositorySearchWarningView(BaseModel):
+    """A non-fatal repository discovery warning with optional provider context."""
+
     code: str = "repository_unavailable"
     incomplete: bool = True
     message: str

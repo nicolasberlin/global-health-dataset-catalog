@@ -9,12 +9,8 @@ from contextvars import copy_context
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from app.db.search.jobs import (
-    claim_search,
-    complete_discovery,
-    fail_discovery,
-    reserve_external_search,
-)
+from app.db.search.completion import complete_discovery
+from app.db.search.jobs import claim_search, fail_discovery, reserve_external_search
 from app.policies.quotas import QuotaExceeded, QuotaUnavailable, classification_admission
 from app.workers.contracts import Persistence
 from app.workers.jobs import SearchJob

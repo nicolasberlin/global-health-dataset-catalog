@@ -121,6 +121,10 @@ have intentionally been renamed, for example to `SearchCreateRequest`,
 their validation constraints are unchanged. Clients generated from OpenAPI may
 need to update their model imports when regenerating.
 
+GET handler names use `get_*`; generated operation IDs and summaries reflect
+those names, including `get_latest_search` and `get_search_progress`. This naming
+update preserves HTTP paths, methods, request and response fields, and validation.
+
 HTTP request bodies are bounded before parsing or admission. The default
 `API_MAX_REQUEST_BODY_BYTES=65536` allows 64 KiB; accepted configuration is
 1024–1048576 bytes. Oversized bodies return 413, including bodies without a

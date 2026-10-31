@@ -9,11 +9,12 @@ from functools import partial
 from uuid import uuid4
 
 import pytest
-from app.db.classification import candidates as repository_candidates
+from app.db.classification import jobs as classification_jobs
 from app.db.collection import jobs as collection_jobs
 from app.db.connection import _require_database_pool
 from app.db.execution import application_lock as locking
 from app.db.execution.retries import schedule_llm_retry
+from app.db.search import admission as search_admission
 from app.db.search import jobs as search_jobs
 from app.workers import runtime as workers
 from app.workers import sql_retries
@@ -28,7 +29,7 @@ pytestmark = pytest.mark.anyio
 QUEUES = ("search", "classification", "collection")
 MODULES = {
     "search": search_jobs,
-    "classification": repository_candidates,
+    "classification": classification_jobs,
     "collection": collection_jobs,
 }
 CLAIMS = {
@@ -76,7 +77,7 @@ async def persisted(queue, item):
 async def enqueue(database, queue):
     suffix = uuid4().hex
     if queue == "search":
-        item, _ = await search_jobs.admit_search(
+        item, _ = await search_admission.admit_search(
             "alice",
             suffix,
             query="mortality",
@@ -101,7 +102,7 @@ async def enqueue(database, queue):
     )[0]
     if queue == "classification":
         return item
-    claimed = await repository_candidates.claim_candidate_classification()
+    claimed = await classification_jobs.claim_candidate_classification()
     assert claimed["id"] == item["id"]
     result = await database.complete_candidate_classification(
         item["id"],

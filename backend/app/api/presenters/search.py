@@ -10,8 +10,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, TypedDict
 
-from app.api.presenters.classification import public_repository_classification
-from app.api.presenters.collection import public_automatic_collection
+from app.api.presenters.classification import build_candidate_classification_view
+from app.api.presenters.collection import build_collection_follow_up_view
 from app.api.schemas.collection import CollectionFollowUpView
 from app.api.schemas.search import RepositoryCandidateView, SearchProgressResponse
 from collector.diagnostics import Diagnostic, ExecutionStatus, Outcome, Stage, public_diagnostics
@@ -141,7 +141,7 @@ def summarize_search(
     }
 
 
-def _collector_repository_candidate(
+def _build_repository_candidate_view(
     candidate: dict[str, object],
     *,
     automatic_collection: CollectionFollowUpView | None = None,
@@ -161,7 +161,7 @@ def _collector_repository_candidate(
         metadata=candidate["metadata"],
         classification_status=candidate["classification_status"],
         classification_progress=candidate.get("classification_progress", {}),
-        classification=public_repository_classification(candidate["classification"]),
+        classification=build_candidate_classification_view(candidate["classification"]),
         errors=public_diagnostics(
             candidate.get("errors")
             or (
@@ -184,7 +184,7 @@ def _collector_repository_candidate(
     )
 
 
-def public_search_progress(search_id, snapshot) -> SearchProgressResponse:
+def build_search_progress_response(search_id, snapshot) -> SearchProgressResponse:
     """Convert read_search_progress() data into a client-facing progress response.
 
     snapshot contains the search row, its candidates and their collections. Build
@@ -194,10 +194,10 @@ def public_search_progress(search_id, snapshot) -> SearchProgressResponse:
 
     search, candidates, collections = snapshot
     items = [
-        _collector_repository_candidate(
+        _build_repository_candidate_view(
             candidate,
             automatic_collection=(
-                public_automatic_collection(collections.get(candidate["id"]))
+                build_collection_follow_up_view(collections.get(candidate["id"]))
                 if candidate["classification_status"] == "accepted"
                 else None
             ),

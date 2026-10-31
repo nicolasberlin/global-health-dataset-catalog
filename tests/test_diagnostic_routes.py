@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.api.presenters.collection import public_collection_job
+from app.api.presenters.collection import build_collection_job_view
 
 pytestmark = pytest.mark.anyio
 
@@ -24,7 +24,7 @@ def test_job_presenter_filters_legacy_observation_and_coverage_fields():
         ],
         "coverage": {"checked": 1, "private": "private-provider-config"},
     }
-    result = public_collection_job(job)
+    result = build_collection_job_view(job)
     assert result.coverage == {"checked": 1}
     assert "private-provider" not in result.model_dump_json()
     assert result.method_attempts[0]["method"] == "datacite"

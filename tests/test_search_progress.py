@@ -97,7 +97,7 @@ async def test_query_count_is_constant_and_snapshot_does_not_mix_commits(
 
 
 async def test_saved_dataset_without_job_and_missing_legacy_followup(database):
-    from app.db.classification.candidates import _complete_candidate_classification
+    from app.db.classification.jobs import _complete_candidate_classification
 
     await database.init_database()
     candidate = await candidate_for(database)

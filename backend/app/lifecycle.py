@@ -16,8 +16,8 @@ from app.api.middleware import (
 from app.auth.security import (
     validate_api_security_configuration,
 )
-from app.db.classification.candidates import mark_interrupted_candidate_classifications_error
-from app.db.classification.votes import mark_interrupted_votes_error
+from app.db.classification.jobs import mark_interrupted_candidate_classifications_error
+from app.db.classification.voting.votes import mark_interrupted_votes_error
 from app.db.collection.jobs import mark_interrupted_collection_jobs_error
 from app.db.connection import (
     close_database_pool,
@@ -26,7 +26,7 @@ from app.db.connection import (
 )
 from app.db.execution.application_lock import application_lock
 from app.db.schema import init_database, validate_database_schema
-from app.db.search.sessions import mark_interrupted_search_sessions_error
+from app.db.search.jobs import mark_interrupted_search_sessions_error
 from app.policies.retries import RetryPolicy
 from app.workers.classification.worker import ClassificationWorker
 from app.workers.collection.worker import CollectionWorker

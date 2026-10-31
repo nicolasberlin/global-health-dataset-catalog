@@ -12,10 +12,11 @@ from uuid import UUID
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from app.db.collection.jobs import _collection_job_to_dict, _insert_collection_job
+from app.db.collection.job_reads import _collection_job_to_dict
+from app.db.collection.jobs import _insert_collection_job
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
+from app.db.owner_ids import validate_owner_id
 from app.db.schema import _require_current_schema
-from app.db.search.sessions import _normalized_owner_id
 from collector.url_utils import require_http_url
 
 
@@ -67,7 +68,7 @@ async def _reserve_repository_candidate_collection_job(
         WHERE candidate.id = %s AND session.owner_id = %s
         FOR UPDATE OF candidate
         """,
-        (candidate_id, _normalized_owner_id(owner_id)),
+        (candidate_id, validate_owner_id(owner_id)),
     )
     if candidate is None:
         raise ValueError("Repository candidate not found.")

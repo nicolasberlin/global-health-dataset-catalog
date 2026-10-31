@@ -24,7 +24,7 @@ from app.api.schemas.search import (
 from app.api.search_progress import load_search_progress
 from app.auth.security import APIPrincipal, api_auth_mode, quota_http_errors, require_api_principal
 from app.db.execution.commands import CommandConflict
-from app.db.search.jobs import admit_search
+from app.db.search.admission import admit_search
 from app.db.search.sessions import latest_search_id
 
 router = APIRouter(tags=["collector"])
@@ -122,10 +122,10 @@ async def _admit_search_command(payload, principal, response, idempotency_key, r
             )
     except CommandConflict as exception:
         raise HTTPException(status_code=409, detail=str(exception)) from exception
-    return await _search_command_response(row, replayed, principal, response, request)
+    return await _build_search_submission_response(row, replayed, principal, response, request)
 
 
-async def _search_command_response(row, replayed, principal, response, request):
+async def _build_search_submission_response(row, replayed, principal, response, request):
     """Build the admission reply from a saved search and its current progress.
 
     Return 202 for a new command or 200 for a replay, with a Location header and
@@ -136,7 +136,7 @@ async def _search_command_response(row, replayed, principal, response, request):
     progress = await load_search_progress(row["id"], principal.owner_id)
     response.headers["Cache-Control"] = "no-store"
     response.status_code = 200 if replayed else 202
-    progress_url = request.url_for("search_progress", search_id=str(row["id"])).path
+    progress_url = request.url_for("get_search_progress", search_id=str(row["id"])).path
     response.headers["Location"] = progress_url
     return SearchSubmissionResponse(
         search_id=row["id"],
@@ -147,7 +147,7 @@ async def _search_command_response(row, replayed, principal, response, request):
 
 
 @router.get("/searches/latest")
-async def latest_search(
+async def get_latest_search(
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,
     with_candidates: bool = False,
@@ -172,7 +172,7 @@ async def latest_search(
 
 
 @router.get("/searches/{search_id}/progress")
-async def search_progress(
+async def get_search_progress(
     search_id: UUID,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,

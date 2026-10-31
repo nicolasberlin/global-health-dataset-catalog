@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from app.db.classification.candidates import _complete_candidate_classification
+from app.db.classification.jobs import _complete_candidate_classification
 from app.db.collection.reservations import (
     CollectionJobReservation,
     _reserve_repository_candidate_collection_job,

@@ -7,7 +7,8 @@ from functools import partial
 from unittest.mock import Mock
 
 import pytest
-from app.db.classification import votes as votes
+from app.db.classification.voting import runs as voting_runs
+from app.db.classification.voting import votes as votes
 from app.db.search.progress import read_search_progress
 from app.workers import sql_retries
 from app.workers.classification import worker as classification_worker
@@ -167,7 +168,7 @@ async def test_vote_progress_and_polling_preserve_completion_claim(database, mon
     scope = {"job_id": item["id"]} if kind == "collection" else {"candidate_id": item["id"]}
     candidate_id = item["repository_candidate_id"] if kind == "collection" else item["id"]
     candidate = await stored_candidate(candidate_id, "alice")
-    run_id = await votes.prepare_vote_run({"configuration": [{"voter_id": "a"}]}, **scope)
+    run_id = await voting_runs.prepare_vote_run({"configuration": [{"voter_id": "a"}]}, **scope)
     vote = await votes.claim_vote(run_id, "a", **scope)
     await votes.finish_vote(
         run_id, "a", vote["attempt_token"], response={"accepted": True}, **scope,

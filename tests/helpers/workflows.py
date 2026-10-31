@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from uuid import UUID
 
-from app.api.routes.searches import search_progress
+from app.api.routes.searches import get_search_progress
 from app.auth.security import APIPrincipal
 from app.db.connection import _fetchall, _require_database_pool
 from fastapi import Response
@@ -103,7 +103,7 @@ def headers(owner="alice"):
 
 async def read(search_id, owner="alice"):
     response = Response()
-    result = await search_progress(search_id, APIPrincipal(owner_id=owner), response)
+    result = await get_search_progress(search_id, APIPrincipal(owner_id=owner), response)
     assert response.headers["cache-control"] == "no-store"
     return result
 

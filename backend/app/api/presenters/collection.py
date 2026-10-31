@@ -6,11 +6,11 @@ from typing import Any
 
 from app.api.schemas.collection import CollectionFollowUpView, CollectionJobView
 from app.db.collection.reservations import CollectionJobReservation
-from app.db.collection.traces import safe_coverage, safe_observation
+from app.db.collection.traces.sanitization import safe_coverage, safe_observation
 from collector.diagnostics import Diagnostic, public_diagnostics
 
 
-def public_collection_job(job: dict[str, Any]) -> CollectionJobView:
+def build_collection_job_view(job: dict[str, Any]) -> CollectionJobView:
     """Select public fields and derive messages without copying internal errors."""
 
     status = job["status"]
@@ -72,7 +72,7 @@ def public_collection_job(job: dict[str, Any]) -> CollectionJobView:
     )
 
 
-def public_automatic_collection(
+def build_collection_follow_up_view(
     collection: CollectionJobReservation | None,
 ) -> CollectionFollowUpView:
     """Present existing follow-up; this function never reserves or schedules work."""
@@ -95,7 +95,7 @@ def public_automatic_collection(
             error="No collection is associated with this candidate.",
             error_code="collection_not_scheduled",
         )
-    job = public_collection_job(collection.job)
+    job = build_collection_job_view(collection.job)
     state = ("saved" if job.saved_count else "empty") if job.status == "done" else job.status
     return CollectionFollowUpView(
         state=state,

@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 import pytest
-from app.api.presenters.catalog import _collector_validation
+from app.api.presenters.catalog import _build_distribution_validation_view
 from app.db.connection import _fetchone, _require_database_pool
 from helpers.inspection import stored_datasets
 
@@ -135,7 +135,7 @@ async def test_access_diagnosis_survives_storage_and_public_conversion(
     # Exercise serialization independently of the collector's publication filter.
     await database.save_collected_datasets(URL, [dataset(validation)])
     stored = (await stored_datasets(database))[0].validation_results[0]
-    public = _collector_validation(stored)
+    public = _build_distribution_validation_view(stored)
     assert stored.status == public.status == validation.status == status
     assert stored.reason == public.reason == validation.reason
     assert stored.ok is public.ok is False

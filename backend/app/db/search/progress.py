@@ -5,10 +5,10 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.db.classification.candidates import _CANDIDATE_COLUMNS, _repository_candidate_to_dict
-from app.db.collection.jobs import _collection_job_to_dict
+from app.db.collection.job_reads import _collection_job_to_dict
 from app.db.collection.reservations import CollectionJobReservation
 from app.db.connection import Row, _fetchall, _fetchone, _require_database_pool
-from app.db.search.sessions import _normalized_owner_id
+from app.db.owner_ids import validate_owner_id
 
 
 async def read_search_progress(
@@ -24,7 +24,7 @@ async def read_search_progress(
                 "SELECT id, query, status, origin, errors, warnings, local_result_count, "
                 "discovery_complete, created_at, updated_at, attempt_number "
                 "FROM search_sessions WHERE id = %s AND owner_id = %s",
-                (search_id, _normalized_owner_id(owner_id)),
+                (search_id, validate_owner_id(owner_id)),
             )
             if search is None:
                 return None

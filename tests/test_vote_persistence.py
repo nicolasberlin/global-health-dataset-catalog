@@ -10,7 +10,9 @@ from collections import Counter
 from dataclasses import replace
 
 import pytest
-from app.db.classification import votes as votes
+from app.db.classification.voting import history as voting_history
+from app.db.classification.voting import runs as voting_runs
+from app.db.classification.voting import votes as votes
 from app.db.connection import _fetchall, _require_database_pool
 from app.workers.stores import PostgresVoteStore
 from helpers.classification import KEYS, MODELS, PAGE
@@ -97,11 +99,13 @@ async def test_retry_only_failed_model_preserves_negative_votes(
     assert next(h for h in history if h["attempt"] == 2)["status"] == "succeeded"
     assert all(key not in json.dumps(history, default=str) for key in KEYS)
     if kind == "repository":
-        exported = await votes.read_candidate_vote_history(scope["candidate_id"], "alice")
+        exported = await voting_history.read_candidate_vote_history(scope["candidate_id"], "alice")
         assert len(exported["attempts"]) == 4
         failed = next(a for a in exported["attempts"] if a["status"] == "error")
         assert failed["errors"] and "error" not in failed
-        assert await votes.read_candidate_vote_history(scope["candidate_id"], "bob") is None
+        assert (
+            await voting_history.read_candidate_vote_history(scope["candidate_id"], "bob")
+        ) is None
 
 
 async def test_fast_votes_are_saved_before_slowest_model_finishes(database, transport):
@@ -149,7 +153,7 @@ async def test_parent_recovery_prevents_late_vote_claim_and_finish_before_vote_c
         ))[0]
     scope["expected_updated_at"] = current["updated_at"]
     snapshot = {"configuration": [{"voter_id": "a"}, {"voter_id": "b"}], "payload": {}}
-    run = await votes.prepare_vote_run(snapshot, **scope)
+    run = await voting_runs.prepare_vote_run(snapshot, **scope)
     old = await votes.claim_vote(run, "a", **scope)
     if kind == "repository":
         await database.mark_interrupted_candidate_classifications_error()

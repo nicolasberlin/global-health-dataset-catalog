@@ -14,14 +14,14 @@ from fastapi import APIRouter, Depends, Response
 
 from app.api.search_progress import load_search_progress
 from app.auth.security import APIPrincipal, require_api_principal
-from app.db.classification.votes import read_candidate_vote_history
-from app.db.collection.traces import read_collection_trace
+from app.db.classification.voting.history import read_candidate_vote_history
+from app.db.collection.traces.reading import read_collection_trace
 
 router = APIRouter(tags=["collector"])
 
 
 @router.get("/searches/{search_id}/diagnostics")
-async def search_diagnostics(
+async def get_search_diagnostics(
     search_id: UUID,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,

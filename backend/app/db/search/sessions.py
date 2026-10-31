@@ -1,19 +1,18 @@
-"""Persistence and terminal state transitions for repository search sessions."""
+"""Create, retrieve and represent persisted search session records."""
 
 from __future__ import annotations
 
 from typing import Literal
 from uuid import UUID, uuid4
 
-from psycopg import AsyncConnection
-from psycopg.rows import DictRow
-
-from app.db.connection import Row, _fetchall, _fetchone, _require_database_pool
+from app.db.connection import Row, _fetchone, _require_database_pool
+from app.db.owner_ids import validate_owner_id
 from app.db.schema import _require_current_schema
-from app.db.serialization import _format_optional_timestamp, _format_timestamp, _jsonb
-from collector.diagnostics import Diagnostic
+from app.db.serialization import _format_optional_timestamp, _format_timestamp
 
 SearchOrigin = Literal["database", "online"]
+
+
 SearchStatus = Literal["completed", "partial", "error"]
 
 
@@ -21,7 +20,7 @@ async def create_search_session(query: str, owner_id: str) -> dict[str, object]:
     """Create the durable record that owns one local-then-online search."""
 
     normalized_query = query.strip()
-    normalized_owner_id = _normalized_owner_id(owner_id)
+    normalized_owner_id = validate_owner_id(owner_id)
     if not normalized_query:
         raise ValueError("Search query is required.")
 
@@ -44,113 +43,25 @@ async def create_search_session(query: str, owner_id: str) -> dict[str, object]:
     return _search_session_to_dict(row)
 
 
-async def complete_search_session(
-    search_id: UUID,
-    owner_id: str,
-    *,
-    origin: SearchOrigin,
-    status: SearchStatus = "completed",
-    error: str = "",
-    errors: list[dict] | None = None,
-    local_result_count: int | None = None,
-    discovery_complete: bool | None = None,
-    warnings: list[dict] | None = None,
-    local_dataset_ids: list[int] | None = None,
-) -> dict[str, object]:
-    """Move a running search to one terminal state without overwriting it."""
+async def latest_search_id(owner_id, *, with_candidates=False):
 
+    """Return the owner's latest search ID, optionally requiring saved candidates."""
     async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        async with connection.transaction():
-            row = await _complete_search_session(
-                connection,
-                search_id,
-                owner_id,
-                origin=origin,
-                status=status,
-                error=error,
-                errors=errors,
-                local_result_count=local_result_count,
-                discovery_complete=discovery_complete,
-                warnings=warnings,
-            )
-            if row is not None and local_dataset_ids is not None:
-                await save_local_results(connection, search_id, local_dataset_ids)
-
-    if row is None:
-        raise RuntimeError("Search session is missing or already completed.")
-    return _search_session_to_dict(row)
-
-
-async def mark_interrupted_search_sessions_error() -> int:
-    """Close searches abandoned by a previous single application process."""
-
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        rows = await _fetchall(
-            connection,
-            """
-            UPDATE search_sessions
-            SET status = 'error',
-                error = 'Search interrupted by application restart.',
-                errors = %s, discovery_complete = FALSE, attempt_token = NULL,
-                updated_at = NOW(),
-                finished_at = NOW()
-            WHERE status = 'running'
-            RETURNING id
-            """,
-            (_jsonb([Diagnostic("processing_interrupted", "search").to_dict()]),),
+        candidate_filter = (
+            "AND EXISTS (SELECT 1 FROM repository_candidates AS candidate "
+            "WHERE candidate.search_session_id = search_sessions.id)"
+            if with_candidates else ""
         )
-        return len(rows)
-
-
-async def _complete_search_session(
-    connection: AsyncConnection[DictRow],
-    search_id: UUID,
-    owner_id: str,
-    *,
-    origin: SearchOrigin,
-    status: SearchStatus,
-    error: str = "",
-    errors: list[dict] | None = None,
-    local_result_count: int | None = None,
-    discovery_complete: bool | None = None,
-    warnings: list[dict] | None = None,
-) -> Row | None:
-    if origin not in {"database", "online"}:
-        raise ValueError(f"Unsupported search origin: {origin!r}.")
-    if status not in {"completed", "partial", "error"}:
-        raise ValueError(f"Unsupported terminal search status: {status!r}.")
-
-    normalized_error = error.strip()
-    if status == "error" and not normalized_error:
-        raise ValueError("An errored search session requires an error message.")
-    if status != "error" and normalized_error:
-        raise ValueError("Only an errored search session may contain an error.")
-
-    return await _fetchone(
-        connection,
-        """
-        UPDATE search_sessions
-        SET origin = %s,
-            status = %s,
-            error = %s,
-            errors = %s, local_result_count = %s, discovery_complete = %s,
-            warnings = %s, attempt_token = NULL, retry_at = NULL,
-            updated_at = NOW(),
-            finished_at = NOW()
-        WHERE id = %s AND owner_id = %s AND status = 'running'
-        RETURNING id, query, origin, status, error, errors,
-                  local_result_count, discovery_complete,
-                  created_at, updated_at, finished_at
+        row = await _fetchone(
+            connection,
+            f"""
+            SELECT id FROM search_sessions WHERE owner_id = %s
+            {candidate_filter}
+            ORDER BY created_at DESC, id DESC LIMIT 1
         """,
-        (origin, status, normalized_error,
-         _jsonb(errors or ([Diagnostic("processing_failed", "search").to_dict()]
-                          if status == "error" else [])),
-         local_result_count,
-         discovery_complete if discovery_complete is not None else status == "completed",
-         _jsonb(warnings or []), search_id, _normalized_owner_id(owner_id)),
-    )
+            (validate_owner_id(owner_id),),
+        )
+    return row["id"] if row else None
 
 
 def _search_session_to_dict(row: Row) -> dict[str, object]:
@@ -167,46 +78,3 @@ def _search_session_to_dict(row: Row) -> dict[str, object]:
         "updated_at": _format_timestamp(row["updated_at"]),
         "finished_at": _format_optional_timestamp(row["finished_at"]),
     }
-
-
-def _normalized_owner_id(owner_id: str) -> str:
-    normalized_owner_id = owner_id.strip()
-    if not normalized_owner_id:
-        raise ValueError("Search owner ID is required.")
-    if normalized_owner_id != owner_id or len(normalized_owner_id) > 200:
-        raise ValueError("Search owner ID must be trimmed and at most 200 characters.")
-    return normalized_owner_id
-
-
-async def save_local_results(connection, search_id, dataset_ids):
-    if len(set(dataset_ids)) != len(dataset_ids):
-        raise ValueError("Local result identifiers must be unique.")
-    for position, dataset_id in enumerate(dataset_ids):
-        await connection.execute(
-            """
-            INSERT INTO search_local_results (search_id, dataset_id, position)
-            VALUES (%s, %s, %s)
-        """,
-            (search_id, dataset_id, position),
-        )
-
-
-
-async def latest_search_id(owner_id, *, with_candidates=False):
-
-    async with _require_database_pool().connection() as connection:
-        candidate_filter = (
-            "AND EXISTS (SELECT 1 FROM repository_candidates AS candidate "
-            "WHERE candidate.search_session_id = search_sessions.id)"
-            if with_candidates else ""
-        )
-        row = await _fetchone(
-            connection,
-            f"""
-            SELECT id FROM search_sessions WHERE owner_id = %s
-            {candidate_filter}
-            ORDER BY created_at DESC, id DESC LIMIT 1
-        """,
-            (_normalized_owner_id(owner_id),),
-        )
-    return row["id"] if row else None

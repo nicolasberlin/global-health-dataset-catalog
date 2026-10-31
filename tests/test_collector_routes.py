@@ -4,7 +4,7 @@ from dataclasses import asdict
 from uuid import UUID
 
 import pytest
-from app.api.presenters.search import _collector_repository_candidate
+from app.api.presenters.search import _build_repository_candidate_view
 from app.api.schemas.catalog import CatalogDatasetView
 from app.api.schemas.search import RepositoryCandidateView, SearchCreateRequest
 from app.auth.security import APIPrincipal
@@ -186,7 +186,7 @@ async def test_manual_source_collection_endpoint_is_removed():
 
 def test_candidate_errors_are_public_messages_and_keep_internal_diagnostics():
     stored = _candidate(status="error", error="internal-only: private provider response")
-    public = _collector_repository_candidate(stored)
+    public = _build_repository_candidate_view(stored)
 
     assert public.classification_error == "Candidate classification failed."
     assert public.classification_error_code == "classification_failed"

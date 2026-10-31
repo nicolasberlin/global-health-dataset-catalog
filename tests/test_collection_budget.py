@@ -7,7 +7,7 @@ import threading
 from dataclasses import replace
 
 import pytest
-from app.api.routes.searches import search_progress
+from app.api.routes.searches import get_search_progress
 from app.auth.security import APIPrincipal
 from app.db.connection import _require_database_pool
 from app.workers.collection import worker as collection_worker
@@ -296,7 +296,7 @@ async def test_worker_keeps_slot_and_persists_partial_result_after_expiration(
     job = await database.get_collection_job(job_id)
     assert job["saved_count"] == 1 and job["outcome"] == "incomplete"
     assert job["errors"][0]["code"] == "collection_budget_exhausted"
-    progress = await search_progress(
+    progress = await get_search_progress(
         candidate["search_session_id"], APIPrincipal("alice"), Response()
     )
     assert not progress.polling_required and progress.outcome == "incomplete"

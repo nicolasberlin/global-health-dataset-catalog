@@ -25,6 +25,8 @@ RepositoryVoterId = Annotated[str, Field(min_length=1, max_length=100)]
 
 
 class ClassificationVoteView(BaseModel):
+    """One model voter's relevance decision for a repository candidate."""
+
     model_config = ConfigDict(extra="forbid")
 
     voter_id: RepositoryVoterId
@@ -59,6 +61,8 @@ class ClassificationVoteView(BaseModel):
 
 
 class ClassificationVoteFailureView(BaseModel):
+    """A failed classification vote and its public processing diagnostics."""
+
     model_config = ConfigDict(extra="forbid")
 
     voter_id: RepositoryVoterId
@@ -68,6 +72,8 @@ class ClassificationVoteFailureView(BaseModel):
 
 
 class ClassificationEnsembleView(BaseModel):
+    """Aggregated votes, failures, thresholds and the final ensemble decision."""
+
     model_config = ConfigDict(extra="forbid")
 
     votes_required: int = Field(ge=1, le=10)
@@ -96,6 +102,8 @@ class ClassificationEnsembleView(BaseModel):
 
 
 class CandidateClassificationView(BaseModel):
+    """A candidate's final relevance classification and supporting ensemble."""
+
     model_config = ConfigDict(extra="forbid")
 
     accepted: bool
@@ -132,6 +140,8 @@ class CandidateClassificationView(BaseModel):
 
 
 class VoteProgressView(BaseModel):
+    """Expected, successful and failed vote counts for a processing stage."""
+
     total: int = Field(default=0, ge=0, le=10)
     succeeded: int = Field(default=0, ge=0, le=10)
     failed: int = Field(default=0, ge=0, le=10)

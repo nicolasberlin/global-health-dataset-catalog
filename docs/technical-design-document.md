@@ -51,11 +51,38 @@ coordination. Within `catalog/`, `datasets.py` saves and reconstructs dataset
 aggregates, `distributions.py` persists resource and validation evidence,
 `observations.py` links discoveries to source jobs, and `search.py` performs
 catalogue query normalization and PostgreSQL full-text search.
-`collection/reservations.py` reserves or reuses follow-up for accepted candidates;
-`collection/jobs.py` owns job acquisition, reads and lifecycle transitions.
+`search/admission.py` accepts or replays commands with their quota and idempotency
+receipt in one transaction. `jobs.py` owns each domain's acquisition and lifecycle
+transitions; it never calls providers or models. `completion.py` owns final writes
+that must commit together. Search completion publishes local results or queued
+candidates; classification completion saves a decision with its collection
+reservation; collection completion saves datasets with the final job state.
+
+`classification/candidates.py` stores candidate metadata and its row representation.
+`classification/voting/` serves candidate and collection classifications alike:
+`runs.py` prepares reusable runs, `votes.py` claims and finalizes attempts,
+`history.py` reads bounded owner-scoped history, and `state.py` shares connection-taking
+locks and progress writes. The state helpers never open another transaction.
+
+`collection/reservations.py` reserves or reuses follow-up for accepted candidates.
+`collection/job_reads.py` owns queries and the stored-job conversion shared by
+reads and lifecycle writes; it does not import `jobs.py`. `collection/traces/`
+separates `writing.py`, `reading.py` and pure `sanitization.py`. Writes and reads
+apply the same evidence filters, including when publishing legacy stored traces.
+Its shared check bound lives with the filtering policy; the page-wide read bound
+stays in `reading.py`.
+
+`owner_ids.py` validates identifiers for every domain. It rejects surrounding
+whitespace, preserving the existing validation rather than silently normalizing it.
 Connection, schema, serialization, history formats and maintenance remain at the
 database package root. Production callers import the owning module directly,
 without the former `app.database` re-export layer.
+
+The package initializers contain documentation only. Shared leaf modules keep
+imports acyclic: voting runs and votes depend on `voting/state.py`; trace reads
+depend on vote history and job reads; mutations and reservations use job reads
+for row conversion. The [database refactor report](reference/database-refactor.md)
+contains the concrete file map, function moves and dependency graph.
 
 The collector's public collection implementation is in `collection/service.py`,
 alongside its pipeline and record orchestrator. `collector/main.py` remains a

@@ -1,62 +1,23 @@
-"""Individual validated votes, scoped to an owned candidate or a collection retry lineage."""
+"""Claim and finalize individual votes for candidate and collection classifications."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from app.db.classification.voting.state import _lock_run, _publish_progress, _scope
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
-from app.db.public_history import HistoryPage, PublicVoteAttempt
 from app.db.serialization import _jsonb
 from app.policies.retries import TRANSIENT, RetryPolicy, as_datetime
 from collector.classification.page import PageClassificationError
 from collector.diagnostics import Diagnostic, PersistenceFailure
 
 
-async def prepare_vote_run(snapshot, *, candidate_id=None, job_id=None, expected_updated_at=None):
-    if (candidate_id is None) == (job_id is None):
-        raise ValueError("Exactly one classification scope is required.")
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            snapshot,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode()
-    ).hexdigest()
-    voter_ids = [item["voter_id"] for item in snapshot["configuration"]]
-    if not voter_ids or len(voter_ids) != len(set(voter_ids)):
-        raise ValueError("Vote identifiers must be non-empty and unique.")
-    async with _require_database_pool().connection() as connection:
-        async with connection.transaction():
-            scope = await _scope(connection, candidate_id, job_id, expected_updated_at)
-            column = "repository_candidate_id" if candidate_id is not None else "collection_job_id"
-            await connection.execute(
-                f"INSERT INTO classification_runs (id, {column}, fingerprint, snapshot) "
-                "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
-                (uuid4(), scope["id"], fingerprint, _jsonb(snapshot)),
-            )
-            run = await _fetchone(
-                connection,
-                f"SELECT id FROM classification_runs WHERE {column} = %s AND fingerprint = %s "
-                "FOR UPDATE",
-                (scope["id"], fingerprint),
-            )
-            await connection.execute(
-                "INSERT INTO classification_votes (run_id, voter_id) "
-                "SELECT %s, unnest(%s::text[]) ON CONFLICT DO NOTHING",
-                (run["id"], voter_ids),
-            )
-            await _publish_progress(connection, run["id"], candidate_id, job_id)
-    return run["id"]
-
-
 async def claim_vote(
     run_id, voter_id, *, candidate_id=None, job_id=None, expected_updated_at=None, token=None
 ):
+    """Claim under the parent version; replaying the same token recovers the current vote."""
     token = token or uuid4()
     async with _require_database_pool().connection() as connection:
         async with connection.transaction():
@@ -175,6 +136,7 @@ async def finish_vote(
     job_id=None,
     expected_updated_at=None,
 ):
+    """Save the vote, attempt history and parent progress in one fenced transaction."""
     status = "succeeded" if response is not None else "error"
     diagnostics = errors or (
         [Diagnostic("processing_failed", "classification", voter_id=voter_id).to_dict()]
@@ -227,115 +189,6 @@ async def finish_vote(
                 (status, error[:2000], _jsonb(diagnostics), run_id, voter_id, vote["attempts"]),
             )
             await _publish_progress(connection, run_id, candidate_id, job_id)
-
-
-async def _scope(connection, candidate_id, job_id, version):
-    if (candidate_id is None) == (job_id is None):
-        raise ValueError("Exactly one classification scope is required.")
-    table, column, status = (
-        ("repository_candidates", "classification_status", "classifying")
-        if candidate_id is not None
-        else ("collection_jobs", "status", "running")
-    )
-    scope = await _fetchone(
-        connection,
-        f"SELECT * FROM {table} WHERE id = %s FOR UPDATE",
-        (candidate_id if candidate_id is not None else job_id,),
-    )
-    if (
-        scope is None
-        or scope[column] != status
-        or (version is not None and scope["updated_at"] != version)
-    ):
-        raise PersistenceFailure("Classification is no longer running.")
-    if job_id is not None:
-        scope["id"] = scope["classification_root_id"] or scope["id"]
-    return scope
-
-
-async def _lock_run(connection, run_id):
-    await connection.execute(
-        "SELECT id FROM classification_runs WHERE id = %s FOR UPDATE",
-        (run_id,),
-    )
-
-
-async def read_candidate_vote_history(candidate_id, owner_id, *, limit=100, offset=0):
-    from app.db.search.sessions import _normalized_owner_id
-
-    async with _require_database_pool().connection() as connection:
-        candidate = await _fetchone(
-            connection,
-            "SELECT c.id FROM repository_candidates c JOIN search_sessions s "
-            "ON s.id = c.search_session_id WHERE c.id = %s AND s.owner_id = %s",
-            (candidate_id, _normalized_owner_id(owner_id)),
-        )
-    if candidate is None:
-        return None
-    return await _read_vote_history(
-        "repository_candidate_id", candidate_id, limit=limit, offset=offset
-    )
-
-
-async def read_collection_vote_history(job_id, owner_id, *, limit=100, offset=0):
-    from app.db.collection.jobs import get_collection_job_for_owner
-
-    job = await get_collection_job_for_owner(job_id, owner_id)
-    if job is None:
-        return None
-    async with _require_database_pool().connection() as connection:
-        root = await _fetchone(
-            connection,
-            "SELECT COALESCE(classification_root_id, id) AS id FROM collection_jobs WHERE id = %s",
-            (job_id,),
-        )
-    if root is None:
-        return None
-    return await _read_vote_history("collection_job_id", root["id"], limit=limit, offset=offset)
-
-
-async def _read_vote_history(column, scope_id, *, limit=100, offset=0):
-    page = HistoryPage(limit, offset)
-    if column not in {"repository_candidate_id", "collection_job_id"}:
-        raise ValueError("Unsupported vote history scope.")
-    async with _require_database_pool().connection() as connection:
-        rows = await _fetchall(
-            connection,
-            "SELECT a.run_id, a.voter_id, a.attempt, a.retry_cycle, a.model, a.status, "
-            "a.started_at, a.finished_at, a.errors, a.evidence "
-            "FROM classification_vote_attempts a JOIN classification_runs r "
-            f"ON r.id = a.run_id WHERE r.{column} = %s "
-            "ORDER BY COALESCE(a.started_at, a.finished_at) DESC NULLS LAST, "
-            "a.run_id, a.voter_id, a.attempt DESC LIMIT %s OFFSET %s",
-            (scope_id, page.limit + 1, page.offset),
-        )
-    return {
-        "attempts": [
-            PublicVoteAttempt.from_row(row).to_dict() for row in reversed(rows[: page.limit])
-        ],
-        **page.metadata(len(rows) > page.limit),
-    }
-
-
-async def _publish_progress(connection, run_id, candidate_id, job_id):
-    counts = await _fetchone(
-        connection,
-        "SELECT COUNT(*)::integer AS total, "
-        "COUNT(*) FILTER (WHERE status = 'succeeded')::integer AS succeeded, "
-        "COUNT(*) FILTER (WHERE status = 'error')::integer AS failed "
-        "FROM classification_votes WHERE run_id = %s",
-        (run_id,),
-    )
-    if candidate_id is not None:
-        await connection.execute(
-            "UPDATE repository_candidates SET classification_progress = %s WHERE id = %s",
-            (_jsonb(counts), candidate_id),
-        )
-    else:
-        await connection.execute(
-            "UPDATE collection_jobs SET classification_progress = %s WHERE id = %s",
-            (_jsonb(counts), job_id),
-        )
 
 
 async def mark_interrupted_votes_error():

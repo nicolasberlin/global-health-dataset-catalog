@@ -13,7 +13,7 @@ router = APIRouter(tags=["sessions"])
 
 
 @router.post("/session", status_code=204)
-async def start_visitor_session(request: Request) -> Response:
+async def ensure_visitor_session(request: Request) -> Response:
     """Handle POST /session: keep a valid cookie or set a new anonymous identity.
 
     require_public_session_bootstrap() checks the public mode and request origin.

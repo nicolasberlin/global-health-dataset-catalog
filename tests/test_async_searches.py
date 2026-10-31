@@ -11,6 +11,8 @@ import psycopg
 import pytest
 from app.db.connection import _require_database_pool
 from app.db.execution.commands import CommandConflict
+from app.db.search import admission as search_admission
+from app.db.search import completion as search_completion
 from app.db.search import jobs as search_jobs
 from app.policies.quotas import QuotaExceeded
 from app.workers.classification import worker as classification_worker
@@ -41,7 +43,7 @@ def browser(application):
 
 
 async def admit(key="first", **kwargs):
-    return await search_jobs.admit_search(
+    return await search_admission.admit_search(
         "alice",
         key,
         access_mode="local",
@@ -293,9 +295,9 @@ async def test_restart_preserves_queue_fences_old_attempt_and_late_command_repla
     assert retried["attempt_number"] == 2 and not replay
     new = await search_jobs.claim_search()
     assert new["id"] == first["id"]
-    assert not await search_jobs.complete_discovery(old, DiscoveryResult("online"))
+    assert not await search_completion.complete_discovery(old, DiscoveryResult("online"))
     assert not await search_jobs.fail_discovery(old, origin="online", error="old", diagnostics=[])
-    await search_jobs.complete_discovery(new, DiscoveryResult("online"))
+    await search_completion.complete_discovery(new, DiscoveryResult("online"))
     late, replay = await admit("retry", retry_search_id=first["id"])
     assert replay and late["status"] == "completed" and late["attempt_number"] == 2
     original, replay = await admit(query="first")
@@ -318,13 +320,15 @@ async def test_full_queue_rolls_back_receipts_and_quota(database, monkeypatch):
 async def test_public_quota_is_once_per_attempt_and_retry_after_is_enforced(database, monkeypatch):
     await database.init_database()
     monkeypatch.setenv("API_PUBLIC_ONLINE_SEARCHES_PER_DAY", "1")
-    create = partial(search_jobs.admit_search, "alice", access_mode="public", client_key="ip-hash")
+    create = partial(
+        search_admission.admit_search, "alice", access_mode="public", client_key="ip-hash",
+    )
     session, _ = await create("first", query="health")
     job = await search_jobs.claim_search()
     assert job["client_key"] == "ip-hash" and job["access_mode"] == "public"
     assert await search_jobs.reserve_external_search(job)
     assert await search_jobs.reserve_external_search(job)  # Lost acknowledgement replay.
-    await search_jobs.complete_discovery(job, DiscoveryResult("online"))
+    await search_completion.complete_discovery(job, DiscoveryResult("online"))
     second, _ = await create("second", query="another")
     monkeypatch.setattr(
         search_worker, "search_repository_metadata", lambda _: pytest.fail("provider")
@@ -341,7 +345,7 @@ async def test_public_quota_is_once_per_attempt_and_retry_after_is_enforced(data
 async def test_commit_ack_loss_does_not_repeat_provider_or_downstream_quota(database, monkeypatch):
     await database.init_database()
     calls = []
-    original = search_jobs.complete_discovery
+    original = search_completion.complete_discovery
 
     def discover(query):
         calls.append("provider")
@@ -377,9 +381,9 @@ async def test_failed_downstream_admission_publishes_nothing(database, monkeypat
     async def reject(*args, **kwargs):
         raise QuotaExceeded(10)
 
-    monkeypatch.setattr(search_jobs, "reserve_work", reject)
+    monkeypatch.setattr(search_completion, "reserve_work", reject)
     with pytest.raises(QuotaExceeded):
-        await search_jobs.complete_discovery(
+        await search_completion.complete_discovery(
             job,
             DiscoveryResult(
                 "online",
@@ -432,7 +436,7 @@ async def test_startup_consumes_queued_discovery_without_http(database, monkeypa
 async def test_unsupported_search_access_mode_is_rejected(database):
     await database.init_database()
     with pytest.raises(ValueError, match="Unsupported access mode"):
-        await search_jobs.admit_search(
+        await search_admission.admit_search(
             "alice", "unsupported-mode", query="health", access_mode="unknown", client_key=None,
         )
     assert not await rows("SELECT * FROM search_sessions")

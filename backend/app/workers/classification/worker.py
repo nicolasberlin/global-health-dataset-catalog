@@ -9,11 +9,8 @@ from contextvars import copy_context
 from datetime import datetime
 from uuid import UUID
 
-from app.db.classification.candidates import (
-    claim_candidate_classification,
-    fail_candidate_classification,
-)
 from app.db.classification.completion import complete_candidate_classification
+from app.db.classification.jobs import claim_candidate_classification, fail_candidate_classification
 from app.db.execution.retries import schedule_llm_retry
 from app.workers.contracts import Persistence
 from app.workers.failures import FailureHandler

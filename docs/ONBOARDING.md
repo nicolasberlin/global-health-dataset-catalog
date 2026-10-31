@@ -113,7 +113,13 @@ installations. No setup script moves or deletes database volumes.
 
 | Change | Start here |
 | --- | --- |
-| Search admission, idempotency and ownership | `backend/app/api/routes/searches.py`, `backend/app/db/search/jobs.py` |
+| Search admission and command replay | `backend/app/db/search/admission.py`, `backend/app/db/execution/commands.py` |
+| Worker queue acquisition and lifecycle | `backend/app/db/search/jobs.py`, `backend/app/db/classification/jobs.py`, `backend/app/db/collection/jobs.py` |
+| Atomic search, classification and collection completion | The corresponding `backend/app/db/<domain>/completion.py` |
+| Reusable model votes and their history | `backend/app/db/classification/voting/` |
+| Collection job reads and row conversion | `backend/app/db/collection/job_reads.py` |
+| Trace recording, history and evidence filtering | `backend/app/db/collection/traces/` |
+| Shared persisted owner ID validation | `backend/app/db/owner_ids.py` |
 | Repository discovery and normalization | `collector/repository_search/` |
 | Record-platform connector | `collector/collection/connectors/`, `collector/collection/registry.py` |
 | Collection entry points and orchestration | `collector/collection/service.py`, `collector/collection/orchestrator.py` |
@@ -143,6 +149,11 @@ Implement SQL changes in the owning `backend/app/db/` module. Catalogue storage
 is under `db/catalog/`, search sessions under `db/search/`, candidate analysis
 under `db/classification/`, collection jobs under `db/collection/`, and
 ownership/quotas/idempotency under `db/execution/`.
+`jobs.py` reserves or transitions persisted tasks; `completion.py` commits their
+results atomically. In `classification/voting/`, separate run preparation,
+individual votes, history and shared state helpers. In `collection/traces/`, keep
+reading, writing and pure filtering separate. See the
+[DB file and function map](reference/database-refactor.md) for the full layout.
 Import directly from these modules; the former `app.database` re-export facade
 has been removed. `tests/helpers/database.py` is only a fixture convenience and
 is never imported by the application.
@@ -170,7 +181,8 @@ not call another HTTP route to obtain a snapshot.
 
 ### Follow a search through the code
 
-1. `backend/app/api/routes/searches.py` records the request in PostgreSQL.
+1. `backend/app/api/routes/searches.py` delegates admission to
+   `backend/app/db/search/admission.py`, which records the command in PostgreSQL.
    `SearchWorker` in `backend/app/workers/search/worker.py` checks the saved catalogue,
    then discovers external candidates when needed; `ClassificationWorker` in
    `backend/app/workers/classification/worker.py` evaluates those candidates.
@@ -193,6 +205,12 @@ add a `Collector` prefix. For example, use `SearchCreateRequest`,
 `SearchSubmissionResponse` and `RepositoryCandidateView`; see the
 [architecture guide](technical-design-document.md#dependency-boundary-for-the-private-web-interface)
 for the model boundary.
+
+Use `get_*` for GET handlers in `api/routes/`, such as `get_latest_search()` and
+`get_search_progress()`. Presenters use `build_*_view()` or `build_*_response()`
+when constructing API models. Keep calculations and filtering explicit:
+`summarize_search()` derives the conclusion, while `_sanitize_ensemble_failures()`
+replaces internal model failure details with public diagnostics.
 
 `collect_source_with_report` in `collector/collection/service.py` is the separate bounded
 source-discovery entrypoint; use the single-record path above for an already

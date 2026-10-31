@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 class DatasetDistributionView(BaseModel):
+    """A saved dataset resource with its format and extraction confidence."""
+
     url: str
     format: str
     probability: float
@@ -19,6 +21,8 @@ class DatasetDistributionView(BaseModel):
 
 
 class DistributionValidationView(BaseModel):
+    """Bounded HTTP access and format checks recorded for a dataset resource."""
+
     url: str
     final_url: str
     format: str

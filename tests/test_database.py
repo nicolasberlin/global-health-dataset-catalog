@@ -9,7 +9,7 @@ import pytest
 from app.db import connection as db_connection
 from app.db import schema as db_schema
 from app.db import serialization as db_serialization
-from app.db.classification.candidates import _complete_candidate_classification
+from app.db.classification.jobs import _complete_candidate_classification
 from helpers.collection import mortality_dataset as _mortality_dataset
 from helpers.inspection import stored_candidate, stored_datasets
 from helpers.workflows import start_candidate as _start_candidate
