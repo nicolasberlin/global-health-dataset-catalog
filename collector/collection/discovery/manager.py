@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collector.collection.contracts import DiscoveredPage
 from collector.collection.discovery.adapters import default_adapters
-from collector.collection.discovery.models import DiscoveredPage, DiscoveryAdapter
+from collector.collection.discovery.models import DiscoveryAdapter
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 
 

@@ -18,7 +18,7 @@ from collector.repository_search import (
     RepositorySearchWarning,
     search_repository_metadata,
 )
-from collector.repository_search.providers import datacite
+from collector.repository_search.providers.datacite import mapping as datacite_mapping
 
 
 def test_datacite_provider_builds_query_url_and_normalizes_results():
@@ -461,7 +461,7 @@ def test_datacite_does_not_hide_non_extraction_failures(monkeypatch, failure):
     def fail(_):
         raise failure
 
-    monkeypatch.setattr(datacite, "_datacite_result", fail)
+    monkeypatch.setattr(datacite_mapping, "_datacite_result", fail)
     provider = DataCiteRepositorySearchProvider(
         fetch_json=lambda _: {"data": [_datacite_record()]},
     )

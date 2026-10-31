@@ -7,10 +7,9 @@ from dataclasses import replace
 from collector.budget import check_collection_budget
 from collector.classification.eligibility.models import PageClassifier
 from collector.classification.factory import build_default_page_classifier
-from collector.collection.contracts import StrategyResult
-from collector.collection.discovery.metadata import EXCLUDED_RESOURCE_FORMATS
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.contracts import DiscoveredPage, StrategyResult
 from collector.collection.records import NormalizedRecord
+from collector.collection.resources import EXCLUDED_RESOURCE_FORMATS
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.extraction.distributions import EXCLUDED_EXTENSIONS, extract_distributions
 from collector.extraction.errors import ExtractionError
@@ -238,7 +237,7 @@ def classify_resolution(
     record_identity: dict[str, str] | None = None,
 ) -> CollectedDataset | None:
     if resolved.html:
-        from collector.collection.compatibility import to_strategy_result
+        from collector.collection.record_mapping import to_strategy_result
 
         return analyze_html_page(
             resolved.page.url, resolved.html, config, classifier,

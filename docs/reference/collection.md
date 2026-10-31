@@ -14,6 +14,15 @@ candidates receive a persisted collection job, which resolves that record,
 classifies its dataset/health eligibility, validates resource access, then saves
 the metadata and links atomically with job completion.
 
+`collector/collection/service.py` exposes the public entry points and delegates to
+`workflows/source.py` for a whole source or `workflows/record.py` for one accepted
+repository candidate. The source workflow owns discovery limits, page analysis
+and source reporting. The record workflow owns URL validation, `collect_record()`,
+API/HTML/browser attempts, shared attempt limits and record reporting. Source
+collection can call the record workflow for its configured browser fallback without
+going back through the service. Both return transient results; database writes
+and transaction boundaries remain with the backend worker and persistence layer.
+
 Both classification stages use three configured voters and require three usable
 responses with at least two positive votes. Two positive votes plus a technical
 failure are insufficient. Page classification uses the selected record's evidence;
@@ -50,8 +59,14 @@ a separate entry path sharing extraction, page classification and validation.
 Source exploration is implemented in `collector/collection/discovery/`: the manager
 selects the first matching adapter in the order CKAN, Socrata, data.json, then
 generic website discovery. The generic adapter explores same-domain sitemaps and
-falls back to the source page. Discovery contracts live in `models.py`; shared
-adapter metadata helpers and resource-format exclusions live in `metadata.py`.
+falls back to the source page. The discovery-specific `DiscoveryAdapter` and
+`JsonFetcher` contracts live in `discovery/models.py`; adapter metadata helpers
+live in `discovery/metadata.py`. The page candidate `DiscoveredPage` is defined
+once in `collection/contracts.py` and is also used by connector mapping and
+HTML/browser resolution. Resource-format exclusions, validation state and bounded
+retention belong to `collection/resources.py`. `collection/pipeline.py` remains
+the shared preparation and classification path, and `collection/record_mapping.py`
+maps connector-normalized records to that path without changing metadata.
 Bounded JSON fetching lives in `collector/network/json.py`, also used directly by
 DataCite, so external repository search does not depend on collection discovery.
 See [connector contracts](collection-connectors.md) for supported URLs, host/API
@@ -86,6 +101,15 @@ relative references use that final document URL, including redirects. Supported
 Dataset type IRIs and local `@id` URL objects do not require general RDF expansion.
 
 ## Extraction limits
+
+`collector/extraction/extractor.py` retains the public `extract_page()` entry point.
+The page parser lives in `html.py`; shared bounded parsing and `html_to_text()`
+live in `text.py`, with the existing public `extractor.html_to_text` import still
+supported. `json_ld.py` reads fields from selected dataset evidence, and the
+existing `dataset_metadata.py` owns normalized metadata fields and text inference.
+Dataset selection stays in `graph.py`, resource discovery in `distributions.py`,
+and bounded decoding/traversal in `limits.py`. These modules preserve the same
+snapshot evidence and controlled failures used by the collection pipeline.
 
 Limits apply during construction/traversal, not just after parsing:
 

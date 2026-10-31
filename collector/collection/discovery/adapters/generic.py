@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.contracts import DiscoveredPage
 from collector.collection.discovery.sitemap import TextFetcher, discover_sitemap_entries
 from collector.url_utils import canonicalize_url
 

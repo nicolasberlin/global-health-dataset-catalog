@@ -11,11 +11,11 @@ from collector.budget import CollectionBudgetExceeded, collection_budget
 from collector.classification.eligibility.models import PageClassification
 from collector.collection.connectors.dryad import DryadConnector
 from collector.collection.connectors.dspace import DSpaceConnector
+from collector.collection.connectors.http import JsonResponse
 from collector.collection.connectors.inveniordm import InvenioRDMConnector
 from collector.collection.connectors.metadata import MetadataReader, api_link
+from collector.collection.connectors.registry import ConnectorRegistry, default_registry
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
-from collector.collection.http import JsonResponse
-from collector.collection.registry import ConnectorRegistry, default_registry
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG, configured_repository_connectors
 from collector.network.fetch import FetchedPage

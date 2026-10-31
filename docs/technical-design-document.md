@@ -84,13 +84,42 @@ depend on vote history and job reads; mutations and reservations use job reads
 for row conversion. The [database refactor report](reference/database-refactor.md)
 contains the concrete file map, function moves and dependency graph.
 
-The collector's public collection implementation is in `collection/service.py`,
-alongside its pipeline and record orchestrator. `collector/main.py` remains a
+The collector's public collection entry points are in `collection/service.py`.
+They delegate to two explicit workflows: `collection/workflows/source.py` owns
+`collect_source_with_report()` and its source-discovery, analysis and validation
+helpers; `collection/workflows/record.py` owns candidate URL validation and
+`collect_record()`, including the API → HTML → browser sequence, attempt history,
+resource limits and reporting. The source workflow calls the record workflow
+directly for its configured browser fallback; neither workflow imports the service.
+The three shared callback type aliases live in `collection/contracts.py`.
+`workflows/__init__.py` contains documentation only. The former `collection/orchestrator.py`
+has been removed. The pipeline, connectors, resource checks and persistence
+boundaries remain unchanged.
+
+`collector/main.py` remains a
 compatibility import surface for `collect_source_with_report`,
 `collect_repository_candidate_with_report`, `analyze_discovered_page` and
 `analyze_html_page`, plus the `DiscoverFunction`, `FetchHTMLFunction` and
 `ValidateDistributionFunction` type aliases. Internal callers import the service
 directly. Source identification belongs to `extraction/source_identity.py`.
+
+`collection/contracts.py` owns the page candidate shared by source discovery,
+connector mapping, HTML resolution and browser rendering, along with
+`StrategyResult`, `MethodAttempt`, diagnostic URL filtering and callback types.
+The page keeps its existing public name `DiscoveredPage`, fields and defaults;
+there is one definition, outside the discovery package. `collection/records.py`
+remains the connector-normalized record and identity model, which has a different
+role from a page candidate. `collection/record_mapping.py` explicitly maps that
+record into `StrategyResult` through `to_strategy_result()`; it replaces the
+vaguely named compatibility module without changing the mapping.
+
+`collection/pipeline.py` remains the shared page preparation, evidence merging,
+candidate filtering and classification pipeline. `collection/resources.py` owns
+the shared `EXCLUDED_RESOURCE_FORMATS` policy, resource-check state and bounded
+validation/retention. Both workflows reuse that policy and the existing pipeline;
+no duplicate page model or additional abstraction layer is introduced. These
+shared modules, the record workflow and the browser do not depend on source
+discovery implementations.
 
 Source exploration belongs to `collector/collection/discovery/`, distinct from
 external candidate search in `collector/repository_search/`:
@@ -99,6 +128,28 @@ external candidate search in `collector/repository_search/`:
 collector/
 ├── repository_search/
 ├── collection/
+│   ├── service.py
+│   ├── contracts.py
+│   ├── records.py
+│   ├── record_mapping.py
+│   ├── pipeline.py
+│   ├── resources.py
+│   ├── workflows/
+│   │   ├── __init__.py
+│   │   ├── source.py
+│   │   └── record.py
+│   ├── connectors/
+│   │   ├── __init__.py
+│   │   ├── registry.py
+│   │   ├── http.py
+│   │   ├── metadata.py
+│   │   ├── shared.py
+│   │   ├── dataverse.py
+│   │   ├── zenodo.py
+│   │   ├── dryad.py
+│   │   ├── figshare.py
+│   │   ├── dspace.py
+│   │   └── inveniordm.py
 │   └── discovery/
 │       ├── __init__.py
 │       ├── manager.py
@@ -116,11 +167,22 @@ collector/
     └── ...
 ```
 
+`collection/connectors/` groups the record connector protocol and platform
+implementations with their registry and metadata transport. `registry.py` selects
+configured connectors locally and preserves their existing order. `http.py` owns
+`JsonResponse` and the bounded `fetch_record_json()` transport used by the record
+workflow and connector metadata readers. It preserves HTTP evidence, request
+limits, retry policy, deadlines and network protections. The protocol initializer
+does not import either implementation, keeping imports acyclic. General public
+JSON fetching for DataCite and source discovery stays in `network/json.py`.
+
 `manager.py` runs the first adapter that recognizes the source. The registry in
 `adapters/__init__.py` keeps the order CKAN, Socrata, data.json, then generic
-website discovery, with per-run request settings. `models.py` owns `DiscoveredPage`,
-`DiscoveryAdapter` and the injected `JsonFetcher` contract. `metadata.py` owns
-adapter metadata normalization, vocabularies and resource-format exclusions.
+website discovery, with per-run request settings. `discovery/models.py` owns
+`DiscoveryAdapter` and the injected `JsonFetcher` contract, using the shared
+`DiscoveredPage` from `collection/contracts.py`. `discovery/metadata.py` owns
+adapter metadata normalization and vocabularies. Resource-format exclusions
+belong to `collection/resources.py` and are imported by adapters and the pipeline.
 `sitemap.py` retains sitemap parsing, ranking, traversal limits and bounded text
 fetching; these operations are specific to source exploration.
 
@@ -138,6 +200,73 @@ public-address policy (`policy.py`). The package initializer does not import
 these implementations, and `policy.py` needs only the standard library. Container
 entrypoints can therefore import firewall address rules before loading the
 application's dependency stack. General URL normalization stays in `url_utils.py`.
+
+The DataCite provider separates request orchestration, result conversion and
+metadata extraction:
+
+```text
+collector/repository_search/providers/datacite/
+├── __init__.py
+├── client.py
+├── mapping.py
+└── metadata.py
+```
+
+`client.py` owns `DataCiteRepositorySearchProvider`, its injected `fetch_json`
+transport, URL construction and public response/warning assembly. `mapping.py`
+validates the response's data list, preserves usable result order and maps each
+record to `RepositorySearchResult`, including the DOI resolver URL fallback.
+Only the existing per-record `ExtractionError` is treated as omitted metadata;
+fetch failures and unexpected normalization errors retain their propagation.
+`metadata.py` owns field extraction, vocabularies, geographic validation and the
+normalized dataset metadata mapping, without network calls. Request parameters,
+page-size behavior, filtering, metadata defaults and errors are preserved.
+
+The package initializer exports `DataCiteRepositorySearchProvider`, preserving
+the existing `collector.repository_search.providers.datacite` import as well as
+the parent providers and repository-search imports. Private conversion mocks
+target `datacite.mapping`; default public JSON transport remains in
+`collector/network/json.py`. Dependencies run from client to mapping to metadata,
+without reverse imports.
+
+`collector/extraction/` separates bounded HTML parsing, selected JSON-LD field
+reading, metadata normalization and dataset/resource identification:
+
+```text
+collector/extraction/
+├── __init__.py
+├── extractor.py
+├── html.py
+├── text.py
+├── json_ld.py
+├── dataset_metadata.py
+├── distributions.py
+├── graph.py
+├── limits.py
+├── source_identity.py
+└── errors.py
+```
+
+`extractor.py` keeps `extract_page()` as the public orchestrator assembling
+`PageSnapshot`. `html.py` owns the page parser, links, HTML metadata and raw
+JSON-LD script evidence. `text.py` owns the shared bounded parser base, normalized
+HTML-to-text conversion and whitespace handling. This shared foundation lets
+metadata helpers clean embedded HTML without depending on the page parser.
+`html_to_text()` remains available through its existing `extractor.py` import.
+
+`json_ld.py` reads publisher, geography, dates, license, size, modality and DOI
+from the selected local evidence. Bounded JSON decoding and traversal remain in
+`limits.py`; dataset disambiguation and local-reference resolution remain in
+`graph.py`. `distributions.py` keeps resource extraction and ranking, while
+`source_identity.py` keeps source-specific publisher/platform inference.
+
+The existing `dataset_metadata.py` is retained and extended with page-text
+normalization and inference helpers rather than adding a second metadata module.
+Its ten-field contract, normalization functions and missing-value behavior are
+unchanged. All parser callbacks, budgets, limits, exceptions, dataset-selection
+rules and output fields are preserved. The extraction parser tests import private
+classes from `html.py` and `text.py`; collection, classification and validation
+implementations remain unchanged.
 
 `collector/classification/` separates query relevance from collection eligibility:
 

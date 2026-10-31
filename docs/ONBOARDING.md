@@ -121,11 +121,21 @@ installations. No setup script moves or deletes database volumes.
 | Trace recording, history and evidence filtering | `backend/app/db/collection/traces/` |
 | Shared persisted owner ID validation | `backend/app/db/owner_ids.py` |
 | Repository discovery and normalization | `collector/repository_search/` |
+| DataCite requests, result mapping and metadata extraction | `collector/repository_search/providers/datacite/client.py`, `collector/repository_search/providers/datacite/mapping.py`, `collector/repository_search/providers/datacite/metadata.py` |
 | Source exploration through CKAN, Socrata, data.json and sitemaps | `collector/collection/discovery/manager.py`, `collector/collection/discovery/adapters/`, `collector/collection/discovery/sitemap.py` |
 | Source-discovery contracts and shared adapter metadata normalization | `collector/collection/discovery/models.py`, `collector/collection/discovery/metadata.py` |
-| Record-platform connector | `collector/collection/connectors/`, `collector/collection/registry.py` |
-| Collection entry points and orchestration | `collector/collection/service.py`, `collector/collection/orchestrator.py` |
-| HTML/JSON-LD extraction | `collector/extraction/` |
+| Shared page candidates, resolution/attempt evidence and callback contracts | `collector/collection/contracts.py` |
+| Connector-normalized records and mapping to collection contracts | `collector/collection/records.py`, `collector/collection/record_mapping.py` |
+| Shared page preparation/classification and resource-validation policy | `collector/collection/pipeline.py`, `collector/collection/resources.py` |
+| Record-platform connectors and selection | `collector/collection/connectors/`, `collector/collection/connectors/registry.py` |
+| Connector metadata HTTP transport, evidence and retries | `collector/collection/connectors/http.py` |
+| Public collection entry points | `collector/collection/service.py` |
+| Whole-source collection, bounded analysis and reporting | `collector/collection/workflows/source.py` |
+| Single-record API, HTML and browser collection | `collector/collection/workflows/record.py` |
+| Public page extraction and snapshot assembly | `collector/extraction/extractor.py` |
+| HTML page structure and bounded HTML-to-text parsing | `collector/extraction/html.py`, `collector/extraction/text.py` |
+| Selected JSON-LD fields and dataset metadata normalization | `collector/extraction/json_ld.py`, `collector/extraction/dataset_metadata.py` |
+| Dataset identity selection, resource discovery and extraction bounds | `collector/extraction/graph.py`, `collector/extraction/distributions.py`, `collector/extraction/limits.py` |
 | Source identity from extracted evidence | `collector/extraction/source_identity.py` |
 | External repository candidate relevance: contracts, prompts, parsing and aggregation | `collector/classification/relevance/` |
 | Dataset page eligibility during collection: contracts, prompts, parsing and aggregation | `collector/classification/eligibility/` |
@@ -194,7 +204,7 @@ not call another HTTP route to obtain a snapshot.
 2. For an accepted candidate, `CollectionWorker` in
    `backend/app/workers/collection/worker.py` calls
    `collect_repository_candidate_with_report` in `collector/collection/service.py`, which
-   delegates to `collect_record` in `collector/collection/orchestrator.py`.
+   delegates to the record workflow in `collector/collection/workflows/record.py`.
    This resolves one record's metadata and checks its resource links.
 3. `backend/app/db/collection/completion.py` stores the collection results and
    accepted datasets in PostgreSQL. Clients read the saved progress and results.
@@ -217,9 +227,12 @@ when constructing API models. Keep calculations and filtering explicit:
 `summarize_search()` derives the conclusion, while `_sanitize_ensemble_failures()`
 replaces internal model failure details with public diagnostics.
 
-`collect_source_with_report` in `collector/collection/service.py` is the separate bounded
-source-discovery entrypoint; use the single-record path above for an already
-identified repository candidate.
+`collect_source_with_report` in `collector/collection/service.py` delegates bounded
+source collection to `collector/collection/workflows/source.py`. That workflow owns
+discovery, page analysis and source reports, and reuses the record workflow for
+its configured browser fallback. Use the single-record path above for an already
+identified repository candidate. Shared callback contracts live in
+`collector/collection/contracts.py`; neither workflow depends on the service.
 
 ### Change a worker
 

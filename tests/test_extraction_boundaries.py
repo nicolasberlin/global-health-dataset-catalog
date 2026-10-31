@@ -6,13 +6,10 @@ import pytest
 from collector.budget import CollectionBudgetExceeded, collection_budget
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
 from collector.extraction.errors import ExtractionError
-from collector.extraction.extractor import (
-    _PageHTMLParser,
-    _TextHTMLParser,
-    extract_page,
-    html_to_text,
-)
+from collector.extraction.extractor import extract_page, html_to_text
+from collector.extraction.html import _PageHTMLParser
 from collector.extraction.limits import DEFAULT_EXTRACTION_LIMITS
+from collector.extraction.text import _TextHTMLParser
 
 URL = "https://example.org/dataset"
 

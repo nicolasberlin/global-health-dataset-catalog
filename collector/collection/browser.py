@@ -19,11 +19,10 @@ from collector.budget import (
     remaining_timeout,
     request_budget,
 )
-from collector.collection.compatibility import to_strategy_result
-from collector.collection.contracts import StrategyResult
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.connectors.registry import default_registry
+from collector.collection.contracts import DiscoveredPage, StrategyResult
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
-from collector.collection.registry import default_registry
+from collector.collection.record_mapping import to_strategy_result
 from collector.network.fetch import PageFetchError, decode_json_body, is_timeout_error
 from collector.network.transport import (
     DeadlineHTTPHandler,

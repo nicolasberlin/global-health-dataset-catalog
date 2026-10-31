@@ -11,15 +11,15 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
+from collector.collection.connectors.http import fetch_record_json
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
-from collector.collection.http import fetch_record_json
 
 URL = "https://example.org/api/files/123"
 
 
 @pytest.fixture(autouse=True)
 def no_real_retry_wait(monkeypatch):
-    monkeypatch.setattr("collector.collection.http.time.sleep", lambda delay: None)
+    monkeypatch.setattr("collector.collection.connectors.http.time.sleep", lambda delay: None)
 
 
 class Response(io.BytesIO):
@@ -34,7 +34,7 @@ class Response(io.BytesIO):
 
 def test_record_json_retains_actual_http_status_and_final_url(monkeypatch):
     monkeypatch.setattr(
-        "collector.collection.http.open_public_http_url",
+        "collector.collection.connectors.http.open_public_http_url",
         lambda *a, **k: Response(b'{"status":"OK","data":{}}', 202),
     )
     response = fetch_record_json(URL)
@@ -46,7 +46,7 @@ def test_record_json_retains_actual_http_status_and_final_url(monkeypatch):
 @pytest.mark.parametrize("body", [b"<html>Verification</html>", b"\xff", b"null", b"42"])
 def test_unreadable_response_retains_successful_transport_evidence(monkeypatch, body):
     monkeypatch.setattr(
-        "collector.collection.http.open_public_http_url", lambda *a, **k: Response(body)
+        "collector.collection.connectors.http.open_public_http_url", lambda *a, **k: Response(body)
     )
     with pytest.raises(CollectionResponseError) as caught:
         fetch_record_json(URL)
@@ -57,7 +57,9 @@ def test_unreadable_response_retains_successful_transport_evidence(monkeypatch, 
 
 def test_oversized_response_remains_bounded(monkeypatch):
     response = Response(b"{}SECRET")
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", lambda *a, **k: response)
+    monkeypatch.setattr(
+        "collector.collection.connectors.http.open_public_http_url", lambda *a, **k: response,
+    )
     with pytest.raises(CollectionResponseError) as caught:
         fetch_record_json(URL, max_bytes=2)
     assert caught.value.http_status == 200
@@ -81,7 +83,7 @@ def test_transport_failures_are_distinct_and_controlled(monkeypatch, error, code
     def failed(*args, **kwargs):
         raise error
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", failed)
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", failed)
     with pytest.raises(CollectionTransportError) as caught:
         fetch_record_json(URL)
     exc = caught.value
@@ -94,7 +96,7 @@ def test_expired_budget_does_not_hide_behind_network_failure(monkeypatch):
     def failed(*args, **kwargs):
         raise TimeoutError()
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", failed)
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", failed)
     with collection_budget(seconds=-1), pytest.raises(CollectionBudgetExceeded):
         fetch_record_json(URL)
 
@@ -104,7 +106,8 @@ def test_body_read_timeout_preserves_received_headers(monkeypatch):
         def read(self, *args):
             raise TimeoutError("private provider text")
     monkeypatch.setattr(
-        "collector.collection.http.open_public_http_url", lambda *a, **k: SlowResponse(b""),
+        "collector.collection.connectors.http.open_public_http_url",
+        lambda *a, **k: SlowResponse(b""),
     )
     with pytest.raises(CollectionTransportError) as caught:
         fetch_record_json(URL)
@@ -128,8 +131,8 @@ def test_transient_metadata_error_retries_then_succeeds(monkeypatch, error):
             raise error
         return Response(b'{"files":[]}')
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", open_request)
-    monkeypatch.setattr("collector.collection.http.time.sleep", sleeps.append)
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", open_request)
+    monkeypatch.setattr("collector.collection.connectors.http.time.sleep", sleeps.append)
     response = fetch_record_json(URL)
     assert response.request_attempts == 2
     assert len(calls) == 2 and len(sleeps) == 1 and sleeps[0] >= 1
@@ -150,8 +153,10 @@ def test_permanent_failures_are_not_retried(monkeypatch, error):
         calls.append(1)
         raise error
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", fail)
-    monkeypatch.setattr("collector.collection.http.time.sleep", lambda _: pytest.fail("wait"))
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", fail)
+    monkeypatch.setattr(
+        "collector.collection.connectors.http.time.sleep", lambda _: pytest.fail("wait"),
+    )
     with pytest.raises(CollectionTransportError) as caught:
         fetch_record_json(URL)
     assert calls == [1] and caught.value.request_attempts == 1
@@ -164,8 +169,8 @@ def test_network_retries_are_bounded_and_keep_last_error(monkeypatch):
         calls.append(1)
         raise ConnectionResetError("private transport text")
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", fail)
-    monkeypatch.setattr("collector.collection.http.time.sleep", sleeps.append)
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", fail)
+    monkeypatch.setattr("collector.collection.connectors.http.time.sleep", sleeps.append)
     with pytest.raises(CollectionTransportError) as caught:
         fetch_record_json(URL)
     assert len(calls) == 3 and sleeps == [1, 2]
@@ -181,8 +186,10 @@ def test_long_retry_after_is_preserved_without_shortening(monkeypatch, header):
     def fail(*args, **kwargs):
         raise HTTPError(URL, 429, "limited", {"Retry-After": header}, io.BytesIO())
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", fail)
-    monkeypatch.setattr("collector.collection.http.time.sleep", lambda _: pytest.fail("wait"))
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", fail)
+    monkeypatch.setattr(
+        "collector.collection.connectors.http.time.sleep", lambda _: pytest.fail("wait"),
+    )
     with pytest.raises(CollectionTransportError) as caught:
         fetch_record_json(URL)
     assert caught.value.request_attempts == 1
@@ -200,8 +207,8 @@ def test_retry_wait_cannot_overrun_collection_deadline(monkeypatch):
     def sleep(delay):
         clock[0] += delay + 1  # Also simulate an overdue scheduler wakeup.
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", fail)
-    monkeypatch.setattr("collector.collection.http.time.sleep", sleep)
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", fail)
+    monkeypatch.setattr("collector.collection.connectors.http.time.sleep", sleep)
     with collection_budget(seconds=2), pytest.raises(CollectionBudgetExceeded):
         fetch_record_json(URL)
     assert calls == [1]
@@ -211,8 +218,10 @@ def test_retry_after_exceeding_remaining_budget_does_not_wait(monkeypatch):
     def fail(*args, **kwargs):
         raise HTTPError(URL, 503, "unavailable", {"Retry-After": "10"}, io.BytesIO())
 
-    monkeypatch.setattr("collector.collection.http.open_public_http_url", fail)
-    monkeypatch.setattr("collector.collection.http.time.sleep", lambda _: pytest.fail("wait"))
+    monkeypatch.setattr("collector.collection.connectors.http.open_public_http_url", fail)
+    monkeypatch.setattr(
+        "collector.collection.connectors.http.time.sleep", lambda _: pytest.fail("wait"),
+    )
     with collection_budget(seconds=5), pytest.raises(CollectionTransportError) as caught:
         fetch_record_json(URL)
     assert caught.value.request_attempts == 1
@@ -224,7 +233,8 @@ def test_retry_after_exceeding_remaining_budget_does_not_wait(monkeypatch):
 ])
 def test_invalid_transport_configuration_fails_before_network(monkeypatch, kwargs):
     monkeypatch.setattr(
-        "collector.collection.http.open_public_http_url", lambda *a, **k: pytest.fail("network"),
+        "collector.collection.connectors.http.open_public_http_url",
+        lambda *a, **k: pytest.fail("network"),
     )
     with pytest.raises(ValueError):
         fetch_record_json(URL, **kwargs)

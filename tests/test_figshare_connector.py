@@ -9,8 +9,8 @@ import pytest
 
 from collector.classification.eligibility.models import PageClassification
 from collector.collection.connectors.figshare import FigshareConnector
-from collector.collection.http import JsonResponse
-from collector.collection.registry import default_registry
+from collector.collection.connectors.http import JsonResponse
+from collector.collection.connectors.registry import default_registry
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
 from collector.network.fetch import FetchedPage

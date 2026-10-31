@@ -13,8 +13,8 @@ from app.db.collection.traces.sanitization import safe_observation
 from collector.classification.eligibility.models import PageClassification
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
+from collector.collection.connectors.http import JsonResponse
 from collector.collection.failures import CollectionTransportError
-from collector.collection.http import JsonResponse
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic
@@ -63,7 +63,7 @@ def test_html_socket_timeout_is_classified_as_timeout():
 
 
 def test_default_metadata_transport_uses_configured_policy(monkeypatch):
-    import collector.collection.orchestrator as orchestrator
+    import collector.collection.workflows.record as record_workflow
 
     calls = []
 
@@ -71,9 +71,9 @@ def test_default_metadata_transport_uses_configured_policy(monkeypatch):
         calls.append(kwargs)
         raise CollectionTransportError("repository_http_error", "fetch", http_status=404)
 
-    monkeypatch.setattr(orchestrator, "fetch_record_json", fetch)
+    monkeypatch.setattr(record_workflow, "fetch_record_json", fetch)
     monkeypatch.setattr(
-        orchestrator, "fetch_public_html",
+        record_workflow, "fetch_public_html",
         lambda url, **kwargs: FetchedPage(url, url, "<html>No files</html>", 200, "text/html"),
     )
     config = replace(

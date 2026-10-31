@@ -15,7 +15,7 @@ from helpers.workflows import collection_job as _collection_job
 from collector.classification.eligibility.llm import LLMPageClassifier
 from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.contracts import DiscoveredPage
 from collector.collection.service import collect_source_with_report
 from collector.diagnostics import Diagnostic, PersistenceFailure, public_diagnostics, retry_after
 from collector.network.fetch import FetchedPage, PageFetchError

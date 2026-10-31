@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from collector.collection.compatibility import to_strategy_result
 from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.contracts import StrategyResult
+from collector.collection.record_mapping import to_strategy_result
 
 
 def record_api_url(url: str, hosts: tuple[str, ...]) -> str | None:

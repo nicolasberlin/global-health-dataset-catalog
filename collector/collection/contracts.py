@@ -1,14 +1,48 @@
-"""Transport-independent collection observations; never persist raw HTML or cookies."""
+"""Shared collection page, resolution, diagnostics and callback contracts."""
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.records import NormalizedRecord
-from collector.storage.models import PageSnapshot
+from collector.network.fetch import FetchedPage
+from collector.storage.models import DistributionCandidate, PageSnapshot, ValidationResult
+
+
+@dataclass(frozen=True)
+class DiscoveredPage:
+    """Normalized page candidate shared by source and record collection.
+
+    Source adapters, connector mapping and HTML/browser resolution all supply
+    this contract to the shared pipeline. ``discovery_method`` identifies the
+    origin or resolution method. ``priority`` retains source-adapter ranking;
+    ``distributions`` remain unvalidated candidates. ``discovery_metadata``
+    carries optional source-specific evidence. The existing public class name
+    is retained so caller signatures and field names remain unchanged.
+    """
+
+    url: str
+    discovery_method: str
+    priority: float = 0.0
+    title: str = ""
+    description: str = ""
+    publisher: str = ""
+    geography: tuple[str, ...] = ()
+    date_of_publication: str = ""
+    diseases: tuple[str, ...] = ()
+    size_of_dataset: str = ""
+    demographic_information: tuple[str, ...] = ()
+    sharing_license: str = ""
+    modality_of_data: tuple[str, ...] = ()
+    distributions: tuple[DistributionCandidate, ...] = ()
+    discovery_metadata: dict[str, object] = field(default_factory=dict)
+    doi: str = ""
+    hosting_platform: str = ""
+    record_identity: dict[str, str] = field(default_factory=dict)
+    metadata_source_url: str = ""
 
 
 def public_url(value: str) -> str:
@@ -27,6 +61,8 @@ def public_url(value: str) -> str:
 
 @dataclass
 class MethodAttempt:
+    """Progress and public-safe evidence for one API, HTML or browser attempt."""
+
     method: str
     started_at: str
     finished_at: str = ""
@@ -48,6 +84,13 @@ class MethodAttempt:
 
 @dataclass
 class StrategyResult:
+    """Unvalidated resolution evidence prepared for the shared collection pipeline.
+
+    ``record`` retains a connector's normalized observation when available;
+    HTML/browser results may instead supply page content and a parsed snapshot.
+    This is not an accepted catalogue dataset or a persistence payload.
+    """
+
     page: DiscoveredPage
     html: str = ""
     http_status: int | None = None
@@ -58,3 +101,8 @@ class StrategyResult:
     metadata_code: str = ""
     metadata_http_status: int | None = None
     snapshot: PageSnapshot | None = None
+
+
+DiscoverFunction = Callable[[str], list[DiscoveredPage]]
+FetchHTMLFunction = Callable[[str], FetchedPage]
+ValidateDistributionFunction = Callable[[DistributionCandidate], ValidationResult]

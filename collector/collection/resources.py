@@ -1,4 +1,4 @@
-"""One bounded validation and retention policy for source and record collection."""
+"""Shared resource-format exclusions and bounded validation/retention policy."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from collector.budget import CollectionBudgetExceeded, check_collection_budget
 from collector.config import CollectorConfig
 from collector.storage.models import DistributionCandidate, ValidationResult
 from collector.url_utils import normalize_http_url
+
+EXCLUDED_RESOURCE_FORMATS = {"HTML", "HTM", "PDF", "PNG", "JPG", "JPEG", "GIF", "SVG"}
 
 
 @dataclass

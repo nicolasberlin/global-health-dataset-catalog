@@ -25,10 +25,12 @@ Do not introduce a separate service per platform.
   Hosts are trusted server configuration, not payload data.
 - `NormalizedRecord` is an observation before acceptance. It has a scoped
   `RecordIdentity`, metadata source, resource candidates and optional parent PID.
-- Compatibility conversion feeds existing `DiscoveredPage`, `PageSnapshot`
-  and `DistributionCandidate` contracts. The fixed display/classification
+- `collection/record_mapping.py` maps normalized records to `StrategyResult`
+  using the shared `DiscoveredPage` from `collection/contracts.py`. The pipeline
+  reuses `PageSnapshot` and `DistributionCandidate`. The fixed display/classification
   metadata mapping is not the catalogue's identity model.
-- The shared pipeline prepares classifier evidence. The orchestrator owns
+- The shared pipeline prepares classifier evidence. The record workflow in
+  `collector/collection/workflows/record.py` owns
   fallback decisions, resource limits, deadlines and diagnostics. Connectors
   cannot classify, approve, save datasets or create unbounded retries.
 - Backend workers retain responsibility for checkpointing and atomic
@@ -43,7 +45,7 @@ required to implement all of them.
 The default registry contains Dataverse, Zenodo, Figshare, Dryad, InvenioRDM
 and DSpace. HTTP and browser metadata pass through the same selected connector;
 HTML stays a shared fallback. Platform recognition and enabled hosts are defined
-in `collector/collection/registry.py` and `collector/config.py`.
+in `collector/collection/connectors/registry.py` and `collector/config.py`.
 
 The initial schema includes `collected_datasets.record_identity` as JSONB.
 Its default is an empty object; missing identities are not inferred.

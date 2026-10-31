@@ -8,19 +8,27 @@ from functools import partial
 from urllib.error import HTTPError, URLError
 
 from collector.budget import CollectionBudgetExceeded, check_collection_budget, collection_budget
-from collector.collection.compatibility import to_strategy_result
-from collector.collection.contracts import MethodAttempt, StrategyResult, public_url
-from collector.collection.discovery.models import DiscoveredPage
+from collector.classification.eligibility.models import PageClassifier
+from collector.collection.connectors.http import JsonResponse, fetch_record_json
+from collector.collection.connectors.registry import ConnectorRegistry, default_registry
+from collector.collection.contracts import (
+    DiscoveredPage,
+    FetchHTMLFunction,
+    MethodAttempt,
+    StrategyResult,
+    ValidateDistributionFunction,
+    public_url,
+)
 from collector.collection.failures import CollectionMetadataError, CollectionStepError
-from collector.collection.http import JsonResponse, fetch_record_json
 from collector.collection.pipeline import classify_resolution, eligible_resources
-from collector.collection.registry import ConnectorRegistry, default_registry
+from collector.collection.record_mapping import to_strategy_result
 from collector.collection.resources import ResourceCheckState, retain_validated_resources
-from collector.config import CollectorConfig
+from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.extraction.errors import ExtractionError
 from collector.network.fetch import PageFetchError, fetch_public_html, is_timeout_error
 from collector.storage.models import CollectionReport, CollectionResult
+from collector.url_utils import normalize_http_url
 from collector.validation.distributions import page_access_diagnostic, validate_distribution
 
 
@@ -335,3 +343,32 @@ def collect_record(
                 coverage=coverage,
             ),
         )
+
+
+def collect_repository_candidate_with_report(
+    candidate_url: str,
+    config: CollectorConfig = DEFAULT_CONFIG,
+    fetch_html: FetchHTMLFunction | None = None,
+    validate: ValidateDistributionFunction | None = None,
+    classifier: PageClassifier | None = None,
+    *,
+    fetch_json=None,
+    browser=None,
+    observe=None,
+    registry=None,
+) -> CollectionResult:
+    """Resolve one accepted record with shared validation, never a whole-site crawl."""
+    normalized_url = normalize_http_url(candidate_url)
+    if normalized_url is None:
+        raise ValueError("Repository candidate URL must be a valid HTTP(S) URL.")
+    return collect_record(
+        normalized_url,
+        config,
+        fetch_html=fetch_html,
+        fetch_json=fetch_json,
+        validate=validate,
+        classifier=classifier,
+        browser=browser,
+        observe=observe,
+        registry=registry,
+    )

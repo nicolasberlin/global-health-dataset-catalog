@@ -15,13 +15,12 @@ from uuid import uuid4
 
 from collector.budget import collection_budget
 from collector.collection.browser import configured_browser
-from collector.collection.contracts import StrategyResult, public_url
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.connectors.http import fetch_record_json
+from collector.collection.connectors.registry import default_registry
+from collector.collection.contracts import DiscoveredPage, StrategyResult, public_url
 from collector.collection.failures import CollectionStepError
-from collector.collection.http import fetch_record_json
-from collector.collection.orchestrator import collect_record
 from collector.collection.pipeline import eligible_resources
-from collector.collection.registry import default_registry
+from collector.collection.workflows.record import collect_record
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import PipelineFailure
 from collector.network.fetch import PageFetchError, fetch_public_html

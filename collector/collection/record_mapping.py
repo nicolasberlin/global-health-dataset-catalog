@@ -1,9 +1,8 @@
-"""Bridge normalized records to the existing classifier and validator contracts."""
+"""Map normalized connector records to shared collection page and resolution contracts."""
 
 from __future__ import annotations
 
-from collector.collection.contracts import StrategyResult
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.contracts import DiscoveredPage, StrategyResult
 from collector.collection.records import NormalizedRecord
 
 

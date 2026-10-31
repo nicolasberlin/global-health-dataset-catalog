@@ -1,25 +1,15 @@
-"""DataCite repository search and metadata normalization."""
+"""Extract and normalize DataCite metadata without network requests."""
 
 from __future__ import annotations
 
 import math
 import re
 from collections.abc import Iterable
-from urllib.parse import urlencode
 
 from collector.extraction.dataset_metadata import build_dataset_metadata
-from collector.extraction.errors import ExtractionError
 from collector.extraction.extractor import html_to_text
-from collector.network.json import fetch_json_url
-from collector.repository_search.filtering import _http_url, _text
-from collector.repository_search.models import (
-    INVALID_METADATA_MESSAGE,
-    MISSING_METADATA_VALUE,
-    JsonFetcher,
-    RepositorySearchResponse,
-    RepositorySearchResult,
-    RepositorySearchWarning,
-)
+from collector.repository_search.filtering import _text
+from collector.repository_search.models import MISSING_METADATA_VALUE
 
 # These vocabularies infer metadata fields only; relevance is decided later.
 DISEASE_TERMS = (
@@ -111,98 +101,6 @@ TEXT_MODALITY_TERMS = {
     "genomic": "genomic sequence",
     "genome": "genomic sequence",
 }
-
-
-class DataCiteRepositorySearchProvider:
-    """Search DataCite datasets and map records to the repository contract."""
-
-    name = "DataCite"
-    _base_url = "https://api.datacite.org/dois"
-
-    def __init__(
-        self,
-        fetch_json: JsonFetcher | None = None,
-        page_size: int = 10,
-    ) -> None:
-        self._fetch_json = fetch_json or fetch_json_url
-        self._page_size = page_size
-
-    def search(self, query: str) -> RepositorySearchResponse:
-        data = self._fetch_json(self._search_url(query))
-        items = data.get("data")
-        if not isinstance(items, list):
-            raise ValueError("Invalid DataCite response shape: expected data list.")
-
-        results: list[RepositorySearchResult] = []
-        omitted = False
-        for item in items:
-            if not isinstance(item, dict):
-                omitted = True
-                continue
-
-            try:
-                result = _datacite_result(item)
-            except ExtractionError:
-                omitted = True
-                continue
-            if result is None:
-                omitted = True
-                continue
-            results.append(result)
-
-        warnings = [
-            RepositorySearchWarning(
-                code="invalid_repository_metadata",
-                message=INVALID_METADATA_MESSAGE,
-                provider=self.name,
-            )
-        ] if omitted else []
-        return RepositorySearchResponse(results=results, warnings=warnings)
-
-    def _search_url(self, query: str) -> str:
-        params = {
-            "query": query,
-            "resource-type-id": "dataset",
-            "page[size]": str(self._page_size),
-            "sort": "relevance",
-        }
-        return f"{self._base_url}?{urlencode(params)}"
-
-
-def _datacite_result(item: dict[object, object]) -> RepositorySearchResult | None:
-    attributes = item.get("attributes")
-    if not isinstance(attributes, dict):
-        return None
-
-    doi = _doi(item, attributes)
-    url = _http_url(_text(attributes.get("url"))) or _doi_url(doi)
-    extracted_title = _title(attributes)
-    title = extracted_title or url
-    if not title or not url:
-        return None
-
-    description = _description(attributes)
-    date = _date(attributes)
-    keywords = _subjects(attributes)
-
-    return RepositorySearchResult(
-        title=title,
-        description=description,
-        url=url,
-        source="DataCite",
-        publisher=_publisher(attributes),
-        date=date,
-        doi=doi,
-        keywords=keywords,
-        metadata=_search_result_metadata(
-            attributes,
-            title=extracted_title,
-            url=url,
-            date=date,
-            description=description,
-            subjects=keywords,
-        ),
-    )
 
 
 def _search_result_metadata(
@@ -544,10 +442,6 @@ def _doi(
 ) -> str:
     doi = _text(attributes.get("doi")) or _text(item.get("id"))
     return doi.removeprefix("https://doi.org/").removeprefix("http://doi.org/")
-
-
-def _doi_url(doi: str) -> str:
-    return f"https://doi.org/{doi}" if doi else ""
 
 
 def _subjects(attributes: dict[object, object]) -> list[str]:

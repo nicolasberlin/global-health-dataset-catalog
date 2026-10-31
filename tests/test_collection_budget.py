@@ -23,7 +23,7 @@ from collector.budget import (
     collection_budget,
 )
 from collector.classification.voting import run_voters
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.contracts import DiscoveredPage
 from collector.collection.service import (
     collect_repository_candidate_with_report,
     collect_source_with_report,
@@ -321,7 +321,8 @@ async def test_expired_job_concludes_without_any_external_call(database, monkeyp
         )
     job = await database.claim_pending_collection_job()
     monkeypatch.setattr(
-        "collector.collection.service.fetch_public_html", lambda *a, **kw: pytest.fail("fetch")
+        "collector.collection.workflows.record.fetch_public_html",
+        lambda *a, **kw: pytest.fail("fetch"),
     )
     monkeypatch.setattr(
         "collector.classification.llm_client.HTTPJSONLLMClient._classify_request",

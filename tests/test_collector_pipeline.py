@@ -8,7 +8,7 @@ from helpers.collection import DATASET_HTML, AcceptingPageClassifier
 
 from collector.classification.eligibility.models import PageClassification
 from collector.classification.errors import PageClassificationError
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.contracts import DiscoveredPage
 from collector.collection.service import (
     analyze_discovered_page,
     analyze_html_page,

@@ -18,7 +18,7 @@ from collector.budget import CollectionBudgetExceeded, collection_budget
 from collector.classification.eligibility.models import PageClassification
 from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.contracts import DiscoveredPage
 from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.service import collect_source_with_report
 from collector.storage.models import DistributionCandidate

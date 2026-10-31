@@ -12,7 +12,8 @@ flowchart TD
     Search --> Candidate[Persisted candidate and relevance classification]
     Candidate -->|accepted| Job[Persisted collection job]
     Job --> Worker[Collection worker]
-    Worker --> Orchestrator[Common orchestrator]
+    Worker --> Service[Collection service]
+    Service --> Orchestrator[Record workflow]
     Orchestrator --> Registry[Connector registry]
     Registry --> Dataverse[Dataverse connector]
     Registry --> Zenodo[Zenodo connector]
@@ -52,7 +53,9 @@ cookies remain in the browser service.
 | Module | Responsibility |
 | --- | --- |
 | `collection/records.py` | Normalized observations and scoped identity |
-| `collection/service.py` | Public collection entry points and bounded source collection |
+| `collection/contracts.py` | Shared page candidate, resolution/attempt evidence and callback types |
+| `collection/service.py` | Public collection entry points delegating to the workflows |
+| `collection/workflows/source.py` | Bounded source discovery, page analysis and source reports |
 | `collection/connectors/__init__.py` | Record connector protocol |
 | `collection/connectors/dataverse.py` | Dataverse response validation and scope |
 | `collection/connectors/zenodo.py` | Zenodo response validation and scope |
@@ -61,12 +64,17 @@ cookies remain in the browser service.
 | `collection/connectors/inveniordm.py` | Published InvenioRDM records and dedicated file metadata |
 | `collection/connectors/dspace.py` | Published DSpace 7+ UUID items and ORIGINAL bitstreams |
 | `collection/connectors/metadata.py` | API-confined, budgeted and bounded related metadata reads |
-| `collection/registry.py` | Trusted connector selection |
-| `collection/compatibility.py` | Bridge to existing classification contracts |
+| `collection/connectors/registry.py` | Trusted connector selection |
+| `collection/connectors/http.py` | Bounded record metadata HTTP reads, response evidence and retries |
+| `collection/record_mapping.py` | Map normalized records to shared page and resolution contracts |
 | `collection/pipeline.py` | Common extraction and classification |
+| `collection/resources.py` | Resource-format exclusions and shared bounded validation/retention policy |
+| `extraction/extractor.py` | Public page extraction and snapshot assembly |
+| `extraction/html.py`, `extraction/text.py` | HTML page evidence, shared bounded parsing and plain-text conversion |
+| `extraction/json_ld.py`, `extraction/dataset_metadata.py` | Selected JSON-LD fields and dataset metadata normalization/inference |
 | `extraction/limits.py`, `extraction/graph.py` | Bounded HTML/JSON-LD evidence and local Dataset identity selection |
 | `extraction/source_identity.py` | Source identity derived from extracted evidence |
-| `collection/orchestrator.py` | Attempts, fallback, limits, validation and reporting |
+| `collection/workflows/record.py` | Candidate URL validation, API/HTML/browser attempts, fallback, limits and record reports |
 | `collection/browser.py` | Generic browser-service client and session probes |
 | `network/fetch.py`, `network/transport.py`, `network/resolver.py`, `network/policy.py` | Shared bounded HTTP, DNS and destination policy |
 | `backend/app/workers/collection/worker.py` | Configuration, votes/traces and completion |
@@ -80,8 +88,9 @@ cookies remain in the browser service.
 Dataverse catalogue discovery has no dedicated adapter yet; record collection uses
 the connector.
 
-Public entry points in `collector.collection.service` and the record orchestrator use the same
-pipeline. HTML/JSON-LD extraction limits and unresolved Dataset identity produce
+Public entry points in `collector.collection.service` delegate to the source and
+record workflows, which use the same pipeline. HTML/JSON-LD extraction limits and
+unresolved Dataset identity produce
 controlled diagnostics; permitted later methods can recover while retaining the
 failed method's evidence. Context documents are never fetched. Details and
 validation are described in the [collection guide](collection.md).
@@ -218,9 +227,9 @@ its parent DOI is stored as a parent reference, not assigned as a file DOI.
 
 ## Failure evidence
 
-`collection/http.py` returns the payload together with its actual HTTP status and
+`collection/connectors/http.py` returns the payload together with its actual HTTP status and
 final URL. `collection/failures.py` separates transport, response decoding and
-connector normalization failures. The orchestrator records HTTP evidence before
+connector normalization failures. The record workflow records HTTP evidence before
 normalizing; a received HTTP 200 with incompatible metadata is reported as
 `repository_metadata_invalid`, not an unreachable repository.
 

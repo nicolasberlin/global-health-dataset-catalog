@@ -12,8 +12,8 @@ from collector.budget import collection_budget
 from collector.classification.eligibility.models import PageClassification
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
+from collector.collection.connectors.registry import ConnectorRegistry, default_registry
 from collector.collection.connectors.zenodo import ZenodoConnector
-from collector.collection.registry import ConnectorRegistry, default_registry
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
 from collector.network.fetch import FetchedPage

@@ -1,4 +1,4 @@
-"""Metadata normalization and resource-format filtering for source adapters."""
+"""Metadata extraction and normalization shared by source adapters."""
 
 from __future__ import annotations
 
@@ -6,9 +6,6 @@ import re
 from urllib.parse import urlsplit, urlunsplit
 
 from collector.storage.models import DistributionCandidate
-
-EXCLUDED_RESOURCE_FORMATS = {"HTML", "HTM", "PDF", "PNG", "JPG", "JPEG", "GIF", "SVG"}
-
 
 # These vocabularies enrich metadata only; they do not accept or reject a page.
 DISEASE_TERMS = (
