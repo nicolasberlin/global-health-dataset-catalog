@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from app.api.presenters.classification import public_dataset_signals
 from app.api.schemas.catalog import (
-    CollectorCollectedDataset,
-    CollectorDistribution,
-    CollectorValidation,
+    CatalogDatasetView,
+    DatasetDistributionView,
+    DistributionValidationView,
 )
 from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 
-def _collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution:
+def _collector_distribution(distribution: DistributionCandidate) -> DatasetDistributionView:
     """Prepare one saved download link without requesting the remote resource."""
-    return CollectorDistribution(
+    return DatasetDistributionView(
         url=distribution.url,
         format=distribution.format,
         probability=distribution.probability,
@@ -25,9 +25,9 @@ def _collector_distribution(distribution: DistributionCandidate) -> CollectorDis
     )
 
 
-def _collector_validation(validation: ValidationResult) -> CollectorValidation:
+def _collector_validation(validation: ValidationResult) -> DistributionValidationView:
     """Present an existing resource check with a controlled failure message."""
-    return CollectorValidation(
+    return DistributionValidationView(
         url=validation.url,
         final_url=validation.final_url,
         format=validation.format,
@@ -45,13 +45,13 @@ def _collector_validation(validation: ValidationResult) -> CollectorValidation:
     )
 
 
-def public_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset:
+def public_collected_dataset(dataset: CollectedDataset) -> CatalogDatasetView:
     """Prepare a full dataset response for catalogue reads.
 
     Include its saved metadata, download links and validation results. The route
     has already loaded the dataset; this function only builds the response model.
     """
-    return CollectorCollectedDataset(
+    return CatalogDatasetView(
         id=dataset.database_id,
         source_url=dataset.source_url,
         dataset_url=dataset.dataset_url,

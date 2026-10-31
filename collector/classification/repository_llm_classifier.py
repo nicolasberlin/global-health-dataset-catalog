@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from collector.classification.llm_client import LLMPageClassificationClient
+from collector.classification.llm_client import LLMClassificationClient
 from collector.classification.page import PageClassificationError
 from collector.classification.repository import (
     MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
@@ -37,7 +37,7 @@ class LLMRepositoryRelevanceClassifier:
 
     def __init__(
         self,
-        client: LLMPageClassificationClient,
+        client: LLMClassificationClient,
     ) -> None:
         self._client = client
 
@@ -45,7 +45,7 @@ class LLMRepositoryRelevanceClassifier:
         payload = _build_repository_relevance_payload(page)
 
         try:
-            raw_classification = self._client.classify_page(payload)
+            raw_classification = self._client.classify_payload(payload)
         except PipelineFailure:
             raise
         except Exception as exception:

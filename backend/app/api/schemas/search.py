@@ -9,11 +9,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from app.api.schemas.classification import (
-    CollectorRepositoryClassification,
-    CollectorVoteProgress,
+    CandidateClassificationView,
+    VoteProgressView,
 )
-from app.api.schemas.collection import CollectorAutomaticCollection
-from app.api.schemas.common import CollectorDiagnostic
+from app.api.schemas.collection import CollectionFollowUpView
+from app.api.schemas.common import ProcessingDiagnosticView
 from collector.classification.repository import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
@@ -29,8 +29,8 @@ from collector.classification.repository import (
 from collector.diagnostics import ExecutionStatus, Outcome, Stage
 
 
-class CollectorRepositorySearchRequest(BaseModel):
-    """Shared query validation inherited by the search creation request."""
+class SearchCreateRequest(BaseModel):
+    """JSON body accepted by POST /collector/searches; the command key is a header."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -40,7 +40,7 @@ class CollectorRepositorySearchRequest(BaseModel):
 RepositoryKeyword = Annotated[str, Field(max_length=MAX_REPOSITORY_KEYWORD_CHARS)]
 
 
-class CollectorRepositorySearchItem(BaseModel):
+class RepositoryCandidateView(BaseModel):
     """One discovered candidate and its classification/collection state in a snapshot."""
 
     model_config = ConfigDict(extra="forbid")
@@ -62,12 +62,12 @@ class CollectorRepositorySearchItem(BaseModel):
     classification_status: Literal[
         "pending", "queued", "classifying", "accepted", "rejected", "error"
     ] = "pending"
-    classification: CollectorRepositoryClassification | None = None
-    classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
-    errors: list[CollectorDiagnostic] = Field(default_factory=list)
+    classification: CandidateClassificationView | None = None
+    classification_progress: VoteProgressView = Field(default_factory=VoteProgressView)
+    errors: list[ProcessingDiagnosticView] = Field(default_factory=list)
     classification_error: str = Field(default="", max_length=2_000)
     classification_error_code: Literal["", "classification_failed"] = ""
-    automatic_collection: CollectorAutomaticCollection | None = None
+    automatic_collection: CollectionFollowUpView | None = None
     created_at: str = ""
     updated_at: str = ""
 
@@ -91,14 +91,14 @@ class CollectorRepositorySearchItem(BaseModel):
         return value
 
 
-class CollectorRepositorySearchWarning(BaseModel):
+class RepositorySearchWarningView(BaseModel):
     code: str = "repository_unavailable"
     incomplete: bool = True
     message: str
     provider: str | None = None
 
 
-class CollectorSearchProgressResponse(BaseModel):
+class SearchProgressResponse(BaseModel):
     """A search snapshot returned by progress, latest and diagnostic reads.
 
     execution_status describes processing; outcome is results, empty or incomplete
@@ -111,7 +111,7 @@ class CollectorSearchProgressResponse(BaseModel):
     origin: Literal["database", "online"] | None = None
     local_dataset_ids: list[int] = Field(default_factory=list)
     dataset_ids: list[int] = Field(default_factory=list)
-    warnings: list[CollectorRepositorySearchWarning] = Field(default_factory=list)
+    warnings: list[RepositorySearchWarningView] = Field(default_factory=list)
     attempt: int = 1
     created_at: str = ""
     updated_at: str = ""
@@ -119,18 +119,12 @@ class CollectorSearchProgressResponse(BaseModel):
     execution_status: ExecutionStatus
     outcome: Outcome | None = None
     active_stages: list[Stage]
-    errors: list[CollectorDiagnostic] = Field(default_factory=list)
+    errors: list[ProcessingDiagnosticView] = Field(default_factory=list)
     local_result_count: int | None = Field(default=None, ge=0)
-    items: list[CollectorRepositorySearchItem]
+    items: list[RepositoryCandidateView]
 
 
-class CollectorSearchCreateRequest(CollectorRepositorySearchRequest):
-    """JSON body accepted by POST /collector/searches; the command key is a header."""
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class CollectorSearchCommandResponse(BaseModel):
+class SearchSubmissionResponse(BaseModel):
     """A new or replayed command's acknowledgement, with the URL for reading progress."""
 
     search_id: UUID

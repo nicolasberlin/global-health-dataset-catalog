@@ -17,7 +17,7 @@ from collector.storage.models import (
     HTTPProbe,
     ValidationResult,
 )
-from collector.validation.downloads import validate_distribution
+from collector.validation.distributions import validate_distribution
 
 pytestmark = pytest.mark.anyio
 URL = "https://example.org/data.csv"

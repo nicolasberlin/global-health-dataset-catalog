@@ -45,7 +45,7 @@ def test_llm_page_classifier_returns_validated_classification():
         def __init__(self):
             self.payload = {}
 
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             self.payload = payload
             return _valid_llm_response()
 
@@ -84,7 +84,7 @@ def test_llm_page_classifier_bounds_untrusted_payload():
         def __init__(self):
             self.payload = {}
 
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             self.payload = payload
             return _valid_llm_response()
 
@@ -168,7 +168,7 @@ def test_default_repository_classifier_uses_three_epfl_rcp_voters():
 
 def test_llm_page_classifier_uses_llm_accepted_decision_not_probability_thresholds():
     class FakeClient:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             response = _valid_llm_response()
             response["accepted"] = True
             return response
@@ -182,7 +182,7 @@ def test_llm_page_classifier_uses_llm_accepted_decision_not_probability_threshol
 
 def test_llm_page_classifier_rejects_missing_accepted_decision():
     class FakeClient:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             response = _valid_llm_response()
             del response["accepted"]
             return response
@@ -207,7 +207,7 @@ def test_llm_page_classifier_rejects_invalid_signal_contract(
     expected_error,
 ):
     class FakeClient:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             response = _valid_llm_response()
             response[field_name] = invalid_signals
             return response
@@ -220,7 +220,7 @@ def test_llm_page_classifier_rejects_invalid_signal_contract(
 
 def test_llm_page_classifier_wraps_client_failures():
     class FailingClient:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             raise TimeoutError("timed out")
 
     classifier = LLMPageClassifier(FailingClient())
@@ -258,7 +258,7 @@ def test_http_json_llm_client_uses_provider_config():
         request=fake_request,
     )
 
-    result = client.classify_page({"page": {"title": "Mortality dataset"}})
+    result = client.classify_payload({"page": {"title": "Mortality dataset"}})
 
     body = json.loads(captured["request"].data.decode("utf-8"))
     assert result["accepted"] is True
@@ -311,7 +311,7 @@ def test_repository_relevance_classifier_returns_repository_classification():
         def __init__(self):
             self.payload = {}
 
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             self.payload = payload
             return {
                 "label": "somewhat_relevant",
@@ -336,7 +336,7 @@ def test_repository_relevance_classifier_returns_repository_classification():
 
 def test_repository_relevance_classifier_rejects_non_health_query_result():
     class FakeClient:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             assert payload["search_query"] == "rainfall Africa datasets"
             return {
                 "label": "not_relevant",
@@ -370,7 +370,7 @@ def test_repository_relevance_classifier_rejects_missing_query():
 
 def test_repository_relevance_classifier_requires_missing_information_details():
     class FakeClient:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             return {
                 "label": "insufficient_information",
                 "reason": "The requested geography is not specified.",
@@ -385,7 +385,7 @@ def test_repository_relevance_classifier_requires_missing_information_details():
 
 def test_repository_relevance_classifier_rejects_unexpected_missing_information():
     class FakeClient:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             return {
                 "label": "somewhat_relevant",
                 "reason": "The topic matches but geography is missing.",
@@ -403,7 +403,7 @@ def test_repository_relevance_classifier_bounds_untrusted_payload():
         def __init__(self):
             self.payload = {}
 
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             self.payload = payload
             return {
                 "label": "relevant",
@@ -483,10 +483,10 @@ def test_http_json_llm_client_bounds_response_before_parsing(extra_bytes):
         with pytest.raises(
             PageClassificationError, match="Provider response is too large",
         ) as caught:
-            client.classify_page({})
+            client.classify_payload({})
         assert caught.value.diagnostics[0].code == "llm_response_too_large"
     else:
-        assert client.classify_page({}) == _valid_llm_response()
+        assert client.classify_payload({}) == _valid_llm_response()
     assert reads and all(0 < requested <= MAX_LLM_RESPONSE_BYTES + 1 for requested, _ in reads)
     assert sum(requested for requested, _ in reads) <= MAX_LLM_RESPONSE_BYTES + 1
     assert sum(received for _, received in reads) == min(len(body), MAX_LLM_RESPONSE_BYTES + 1)
@@ -509,7 +509,7 @@ def test_http_json_llm_client_requires_configured_api_key(monkeypatch):
     )
 
     with pytest.raises(PageClassificationError, match="FAKE_LLM_API_KEY"):
-        client.classify_page({"page": {"title": "Mortality dataset"}})
+        client.classify_payload({"page": {"title": "Mortality dataset"}})
 
 
 def _repository_page() -> PageSnapshot:
@@ -560,5 +560,5 @@ def _fake_response_text(response_payload: object) -> str:
 
 
 class FakeUnusedClient:
-    def classify_page(self, payload):
+    def classify_payload(self, payload):
         raise AssertionError("Client should not be called.")

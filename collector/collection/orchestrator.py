@@ -21,7 +21,7 @@ from collector.discovery.adapters.shared import DiscoveredPage
 from collector.extraction.errors import ExtractionError
 from collector.network.fetch import PageFetchError, fetch_public_html, is_timeout_error
 from collector.storage.models import CollectionReport, CollectionResult
-from collector.validation.downloads import page_access_diagnostic, validate_distribution
+from collector.validation.distributions import page_access_diagnostic, validate_distribution
 
 
 def now():

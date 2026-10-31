@@ -113,7 +113,7 @@ def test_nested_model_signal_is_rejected_without_recursively_copying_it():
         nested = [nested]
 
     class Client:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             return {"accepted": True, "dataset_signals": {"reason": "Dataset", "evidence": nested}}
 
     with pytest.raises(PageClassificationError) as caught:

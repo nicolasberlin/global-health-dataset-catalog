@@ -25,7 +25,7 @@ from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import PipelineFailure
 from collector.discovery.adapters.shared import DiscoveredPage
 from collector.network.fetch import PageFetchError, fetch_public_html
-from collector.validation.downloads import page_access_diagnostic
+from collector.validation.distributions import page_access_diagnostic
 from search_lab.backend.settings import ROOT, evidence_directory
 
 

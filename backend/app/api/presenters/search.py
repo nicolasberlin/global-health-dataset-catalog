@@ -12,8 +12,8 @@ from typing import Any, TypedDict
 
 from app.api.presenters.classification import public_repository_classification
 from app.api.presenters.collection import public_automatic_collection
-from app.api.schemas.collection import CollectorAutomaticCollection
-from app.api.schemas.search import CollectorRepositorySearchItem, CollectorSearchProgressResponse
+from app.api.schemas.collection import CollectionFollowUpView
+from app.api.schemas.search import RepositoryCandidateView, SearchProgressResponse
 from collector.diagnostics import Diagnostic, ExecutionStatus, Outcome, Stage, public_diagnostics
 
 
@@ -144,10 +144,10 @@ def summarize_search(
 def _collector_repository_candidate(
     candidate: dict[str, object],
     *,
-    automatic_collection: CollectorAutomaticCollection | None = None,
-) -> CollectorRepositorySearchItem:
+    automatic_collection: CollectionFollowUpView | None = None,
+) -> RepositoryCandidateView:
     """Combine a saved candidate, its classification and its existing collection view."""
-    return CollectorRepositorySearchItem(
+    return RepositoryCandidateView(
         candidate_id=candidate["id"],
         search_id=candidate["search_session_id"],
         title=candidate["title"],
@@ -184,7 +184,7 @@ def _collector_repository_candidate(
     )
 
 
-def public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse:
+def public_search_progress(search_id, snapshot) -> SearchProgressResponse:
     """Convert read_search_progress() data into a client-facing progress response.
 
     snapshot contains the search row, its candidates and their collections. Build
@@ -219,7 +219,7 @@ def public_search_progress(search_id, snapshot) -> CollectorSearchProgressRespon
             ]
         )
     )
-    return CollectorSearchProgressResponse(
+    return SearchProgressResponse(
         search_id=search_id,
         items=items,
         query=search.get("query", ""),

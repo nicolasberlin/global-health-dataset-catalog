@@ -72,6 +72,12 @@ these implementations, and `policy.py` needs only the standard library. Containe
 entrypoints can therefore import firewall address rules before loading the
 application's dependency stack. General URL normalization stays in `url_utils.py`.
 
+`collector/classification/llm_client.py` defines `LLMClassificationClient` with
+`classify_payload()`, used by both page and repository-result classifiers.
+`CheckpointedLLMClient` implements the same method while reusing validated votes.
+Bounded access and format checks live in `collector/validation/distributions.py`;
+they inspect response samples rather than downloading whole datasets.
+
 Progress handlers and diagnostics share `api/search_progress.load_search_progress()`.
 It reads an owner-scoped snapshot and passes it to the presenter; no HTTP handler
 calls another route function. Each handler retains its response status, cache
@@ -150,6 +156,8 @@ Votes and collection traces travel back to the event loop through the shared
 `stores._submit_and_wait` bridge. It waits with cooperative cancellation and closes
 an unsubmitted coroutine when the loop rejects submission. Collection's attempt
 budget covers computation; its final SQL transaction runs outside that budget.
+The `PostgresCollectionTraceWriter` callback persists observations under the
+current collection claim version.
 
 The client submits a command and may disconnect immediately. Polling neither
 starts nor advances work. Owner-scoped idempotency receipts bind command keys to
@@ -295,6 +303,17 @@ need them. Request and response models are grouped by domain in
 modules in `backend/app/api/presenters/` build client-safe responses from stored
 data. The search presenter also derives the snapshot's execution status and
 conclusion; these read operations never schedule processing.
+
+Schema names describe their HTTP role without a `Collector` prefix: `Request`
+is a client payload, `Response` is a complete endpoint response, and `View` is a
+public nested object. Search uses `SearchCreateRequest`,
+`SearchSubmissionResponse` and `SearchProgressResponse`; nested candidates,
+classification, collection and catalogue objects use names such as
+`RepositoryCandidateView`, `CandidateClassificationView`, `CollectionJobView` and
+`CatalogDatasetView`. `CatalogDatasetsResponse` wraps the catalogue endpoint
+result, and `HttpErrorResponse` describes an HTTP error body.
+`SearchCreateRequest` declares its query validation directly rather than
+inheriting a separate repository-search request model.
 
 Search Lab, its interface, scenarios and tests remain versioned in `search_lab/`.
 It observes the core API and PostgreSQL without executing application workers.

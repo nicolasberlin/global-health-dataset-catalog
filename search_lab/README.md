@@ -61,6 +61,9 @@ The tool is restricted to loopback clients and laboratory origins.
 
 ## Isolation and evidence
 
+The capture endpoint accepts `SnapshotCaptureRequest`: a candidate ID and research
+notes. It records existing evidence without scheduling collection work.
+
 The lab's separate PostgreSQL pool enforces read-only sessions and transactions.
 It starts no workers, applies no migrations and never marks jobs interrupted.
 Use a SELECT-only database role for additional isolation. `LAB_DATABASE_URL` and

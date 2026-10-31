@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.api.schemas.collection import CollectorAutomaticCollection, CollectorCollectionJob
+from app.api.schemas.collection import CollectionFollowUpView, CollectionJobView
 from app.db.collection.reservations import CollectionJobReservation
 from app.db.collection.traces import safe_coverage, safe_observation
 from collector.diagnostics import Diagnostic, public_diagnostics
 
 
-def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
+def public_collection_job(job: dict[str, Any]) -> CollectionJobView:
     """Select public fields and derive messages without copying internal errors."""
 
     status = job["status"]
@@ -31,7 +31,7 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
         errors = [Diagnostic("legacy_unknown", "collection").to_dict()]
     if status == "done" and outcome == "incomplete":
         messages["done"] = f"Collection incomplete; {saved_count} dataset(s) saved."
-    return CollectorCollectionJob(
+    return CollectionJobView(
         execution_status=(
             "waiting_retry"
             if status == "pending" and any(item["recovery"] == "automatic" for item in errors)
@@ -74,11 +74,11 @@ def public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob:
 
 def public_automatic_collection(
     collection: CollectionJobReservation | None,
-) -> CollectorAutomaticCollection:
+) -> CollectionFollowUpView:
     """Present existing follow-up; this function never reserves or schedules work."""
 
     if collection is not None and collection.already_collected:
-        return CollectorAutomaticCollection(
+        return CollectionFollowUpView(
             state="saved",
             dataset_ids=list(collection.dataset_ids),
             execution_status="finished",
@@ -87,7 +87,7 @@ def public_automatic_collection(
     if collection is None or collection.job is None:
         # Legacy acceptances without follow-up are visible; reading cannot repair
         # them by silently creating new work.
-        return CollectorAutomaticCollection(
+        return CollectionFollowUpView(
             state="error",
             execution_status="failed",
             outcome="incomplete",
@@ -97,7 +97,7 @@ def public_automatic_collection(
         )
     job = public_collection_job(collection.job)
     state = ("saved" if job.saved_count else "empty") if job.status == "done" else job.status
-    return CollectorAutomaticCollection(
+    return CollectionFollowUpView(
         state=state,
         job=job,
         dataset_ids=job.dataset_ids,

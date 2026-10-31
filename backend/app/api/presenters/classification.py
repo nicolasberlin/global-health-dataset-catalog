@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.api.schemas.classification import CollectorRepositoryClassification
+from app.api.schemas.classification import CandidateClassificationView
 from collector.diagnostics import Diagnostic, public_diagnostics
 
 
@@ -36,11 +36,11 @@ def _public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]:
 
 def public_repository_classification(
     classification: dict[str, Any] | None,
-) -> CollectorRepositoryClassification | None:
+) -> CandidateClassificationView | None:
     """Prepare a candidate's saved classification, filtering internal vote failures."""
     if classification is None:
         return None
-    return CollectorRepositoryClassification(
+    return CandidateClassificationView(
         **{**classification, "ensemble": _public_ensemble(classification["ensemble"])},
     )
 

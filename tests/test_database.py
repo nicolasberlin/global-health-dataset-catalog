@@ -26,7 +26,7 @@ from collector.storage.models import (
     DistributionCandidate,
     ValidationResult,
 )
-from collector.validation.downloads import validate_distribution
+from collector.validation.distributions import validate_distribution
 
 pytestmark = pytest.mark.anyio
 

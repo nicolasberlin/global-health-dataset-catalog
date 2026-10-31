@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collector.classification.llm_client import LLMPageClassificationClient
+from collector.classification.llm_client import LLMClassificationClient
 from collector.classification.page import PageClassification, PageClassificationError
 from collector.diagnostics import PipelineFailure
 from collector.storage.models import DistributionCandidate, PageSnapshot
@@ -30,7 +30,7 @@ class LLMPageClassifier:
 
     def __init__(
         self,
-        client: LLMPageClassificationClient,
+        client: LLMClassificationClient,
     ) -> None:
         self._client = client
 
@@ -42,7 +42,7 @@ class LLMPageClassifier:
         payload = _build_llm_payload(page, distributions)
 
         try:
-            raw_classification = self._client.classify_page(payload)
+            raw_classification = self._client.classify_payload(payload)
         except PipelineFailure:
             raise
         except Exception as exception:

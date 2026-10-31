@@ -19,7 +19,7 @@ from app.workers.contracts import Persistence
 from app.workers.failures import FailureHandler
 from app.workers.jobs import CollectionJob
 from app.workers.sql_retries import persist_with_retry
-from app.workers.stores import PostgresCollectionTrace, PostgresVoteStore
+from app.workers.stores import PostgresCollectionTraceWriter, PostgresVoteStore
 from collector.budget import collection_budget
 from collector.classification.checkpoints import VoteStore
 from collector.classification.factory import build_default_page_classifier
@@ -77,7 +77,7 @@ class CollectionWorker:
         *,
         classifier_factory: Callable[..., PageClassifier] | None = None,
         vote_store_factory: Callable[..., VoteStore] | None = None,
-        trace_factory: Callable[..., PostgresCollectionTrace] | None = None,
+        trace_factory: Callable[..., PostgresCollectionTraceWriter] | None = None,
         collect_source: Callable[..., CollectionResult] | None = None,
         collect_record: Callable[..., CollectionResult] | None = None,
         persist: Persistence | None = None,
@@ -89,7 +89,7 @@ class CollectionWorker:
             vote_store_factory if vote_store_factory is not None else PostgresVoteStore
         )
         self._trace_factory = (
-            trace_factory if trace_factory is not None else PostgresCollectionTrace
+            trace_factory if trace_factory is not None else PostgresCollectionTraceWriter
         )
         self._collect_source = (
             collect_source if collect_source is not None else collect_source_with_report

@@ -24,7 +24,7 @@ from collector.network.fetch import (
     open_public_http_url,
 )
 from collector.storage.models import DistributionCandidate, HTTPProbe
-from collector.validation.downloads import probe_url, validate_distribution
+from collector.validation.distributions import probe_url, validate_distribution
 
 
 @pytest.fixture
@@ -186,7 +186,7 @@ def test_validation_rechecks_budget_between_head_and_get(clock, head_duration, e
         ),
         ("collector.discovery.sitemap", lambda: fetch_text_url("https://public.example/sitemap")),
         (
-            "collector.validation.downloads",
+            "collector.validation.distributions",
             lambda: probe_url(
                 "https://public.example/data",
                 method="GET",
@@ -232,7 +232,7 @@ def test_llm_request_respects_remaining_timeout(clock):
 
     with collection_budget(seconds=5):
         clock[0] += 2
-        assert llm_client(request).classify_page({}) == {"accepted": True}
+        assert llm_client(request).classify_payload({}) == {"accepted": True}
     assert timeouts == [3]
 
 
@@ -241,7 +241,7 @@ def test_llm_request_does_not_start_after_deadline(clock):
     with collection_budget(seconds=1):
         clock[0] += 1
         with pytest.raises(CollectionBudgetExceeded):
-            client.classify_page({})
+            client.classify_payload({})
 
 
 @pytest.mark.parametrize(
@@ -253,7 +253,7 @@ def test_llm_timeout_is_retryable_only_while_collection_has_time(clock, duration
         raise TimeoutError("provider timeout")
 
     with collection_budget(seconds=5), pytest.raises(expected) as caught:
-        llm_client(request).classify_page({})
+        llm_client(request).classify_payload({})
     assert caught.value.diagnostics[0].code == (
         "llm_timeout" if duration < 5 else "collection_budget_exhausted"
     )
@@ -323,7 +323,7 @@ def test_http_error_sample_closes_response_on_expiration(clock, monkeypatch):
     def request(*args, **kwargs):
         raise HTTPError("https://public.example/data", 403, "Forbidden", {}, body)
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", request)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
     with collection_budget(seconds=5), pytest.raises(CollectionBudgetExceeded):
         probe_url("https://public.example/data", method="GET", timeout=10, max_bytes=100)
     assert body.closed

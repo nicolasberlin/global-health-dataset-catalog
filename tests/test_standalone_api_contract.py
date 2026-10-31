@@ -84,7 +84,7 @@ def test_openapi_describes_authentication_commands_and_bounded_result_reads(cont
         assert "Location" in create["responses"][status]["headers"]
     assert "Retry-After" in create["responses"]["429"]["headers"]
     assert create["responses"]["503"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/CollectorHTTPError"
+        "$ref": "#/components/schemas/HttpErrorResponse"
     }
     key = next(item for item in create["parameters"] if item["name"] == "Idempotency-Key")
     assert key["required"] and key["schema"]["maxLength"] == 128
@@ -92,7 +92,7 @@ def test_openapi_describes_authentication_commands_and_bounded_result_reads(cont
     assert "security" not in paths["/collector/collected-datasets/by-id"]["get"]
     lookup = paths["/collector/collected-datasets/by-id"]["get"]["parameters"][0]
     assert lookup["schema"]["minItems"] == 1 and lookup["schema"]["maxItems"] == 100
-    progress = schema["components"]["schemas"]["CollectorSearchProgressResponse"]
+    progress = schema["components"]["schemas"]["SearchProgressResponse"]
     assert set(progress["properties"]["execution_status"]["enum"]) == {
         "queued",
         "running",

@@ -29,7 +29,7 @@ from collector.storage.models import (
     PageSnapshot,
     ValidationResult,
 )
-from collector.validation.downloads import validate_distribution
+from collector.validation.distributions import validate_distribution
 
 
 class RejectingPageClassifier:
@@ -74,7 +74,7 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
         return Response(request, b"age,count\n" * 10_000, {"Content-Type": "text/csv"})
 
     monkeypatch.setattr("collector.network.fetch.open_public_http_url", open_response)
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", open_response)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", open_response)
 
     # Consecutive runs must each bind their own settings, including a return
     # to defaults after custom configurations.
@@ -154,7 +154,7 @@ def test_pipeline_config_reaches_default_discovery_and_distribution_requests(mon
         return Response(request, json.dumps(data).encode(), "application/json")
 
     monkeypatch.setattr("collector.discovery.adapters.shared.open_public_http_url", open_url)
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", open_url)
     for config in (
         CollectorConfig(user_agent="Pipeline/1", request_timeout_seconds=1.25, max_sample_bytes=64),
         CollectorConfig(user_agent="Pipeline/2", request_timeout_seconds=2.5, max_sample_bytes=128),

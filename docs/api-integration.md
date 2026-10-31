@@ -113,6 +113,14 @@ credential locally. The access mode is selected by the server. `GET /health` is 
 checks ownership, worker health, local model settings and database availability;
 503 indicates the API cannot currently accept processing work.
 
+OpenAPI component names follow the Python schema names: `Request` identifies a
+client payload, `Response` a complete endpoint response, and `View` a public
+nested object. The former `Collector`-prefixed class and component identifiers
+have intentionally been renamed, for example to `SearchCreateRequest`,
+`SearchSubmissionResponse` and `RepositoryCandidateView`. HTTP JSON fields and
+their validation constraints are unchanged. Clients generated from OpenAPI may
+need to update their model imports when regenerating.
+
 HTTP request bodies are bounded before parsing or admission. The default
 `API_MAX_REQUEST_BODY_BYTES=65536` allows 64 KiB; accepted configuration is
 1024–1048576 bytes. Oversized bodies return 413, including bodies without a

@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.api.presenters.catalog import public_collected_dataset
-from app.api.schemas.catalog import CollectorCollectionResponse
+from app.api.schemas.catalog import CatalogDatasetsResponse
 from app.db.catalog.datasets import get_collected_datasets
 
 router = APIRouter(tags=["collector"])
@@ -26,13 +26,13 @@ async def read_collected_by_id(
             max_length=100,
         ),
     ],
-) -> CollectorCollectionResponse:
+) -> CatalogDatasetsResponse:
     """Read up to 100 saved dataset IDs and prepare their API response.
 
     FastAPI validates the IDs before this handler runs. Missing IDs are omitted;
     this read does not discover, collect or validate any new dataset.
     """
-    return CollectorCollectionResponse(
+    return CatalogDatasetsResponse(
         items=[
             public_collected_dataset(dataset) for dataset in await get_collected_datasets(ids)
         ],

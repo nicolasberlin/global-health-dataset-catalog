@@ -7,7 +7,7 @@ from dataclasses import asdict, replace
 from uuid import uuid4
 
 import pytest
-from app.api.schemas.search import CollectorRepositorySearchItem
+from app.api.schemas.search import RepositoryCandidateView
 from app.policies.quotas import WorkAdmission
 from app.workers.search.discovery import lookup_local, prepare_repository_candidates
 
@@ -53,7 +53,7 @@ def prepare(items, *, warnings=(), max_candidates=None):
 def public_item(item):
     fields = asdict(item)
     fields.pop("search_query")
-    return CollectorRepositorySearchItem(
+    return RepositoryCandidateView(
         candidate_id=uuid4(),
         search_id=uuid4(),
         **fields,

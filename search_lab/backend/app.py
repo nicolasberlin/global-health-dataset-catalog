@@ -42,7 +42,7 @@ async def principal(
 Owner = Annotated[APIPrincipal, Depends(principal)]
 
 
-class Notes(BaseModel):
+class SnapshotCaptureRequest(BaseModel):
     candidate_id: UUID
     label: str = Field(default="", max_length=150)
     expected_result: str = Field(default="", max_length=2000)
@@ -150,7 +150,9 @@ def create_app(settings=None):
         return await observation(search_id, request, owner)
 
     @application.post("/lab/searches/{search_id}/snapshots", status_code=201)
-    async def capture(search_id: UUID, notes: Notes, request: Request, owner: Owner):
+    async def capture(
+        search_id: UUID, notes: SnapshotCaptureRequest, request: Request, owner: Owner
+    ):
         data = await observation(search_id, request, owner)
         try:
             return request.app.state.snapshots.create(

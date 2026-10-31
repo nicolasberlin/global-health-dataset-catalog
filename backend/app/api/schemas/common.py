@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from collector.diagnostics import Recovery, Stage
 
 
-class CollectorDiagnostic(BaseModel):
+class ProcessingDiagnosticView(BaseModel):
     """A controlled processing error or warning that can be sent to the client."""
 
     model_config = ConfigDict(extra="forbid")
@@ -22,7 +22,7 @@ class CollectorDiagnostic(BaseModel):
     voter_id: str | None = None
 
 
-class CollectorHTTPError(BaseModel):
+class HttpErrorResponse(BaseModel):
     """The simple JSON error shape documented for controlled command failures."""
 
     detail: str

@@ -21,7 +21,7 @@ from collector.collection.service import collect_source_with_report
 from collector.discovery.adapters import DiscoveredPage
 from collector.discovery.sitemap import fetch_text_url
 from collector.storage.models import DistributionCandidate
-from collector.validation.downloads import probe_url
+from collector.validation.distributions import probe_url
 
 PROVIDER_URL = "https://llm.example/classify"
 DATA_URL = "https://data.example/health.csv"
@@ -79,7 +79,7 @@ def test_llm_redirect_never_forwards_credentials_and_closes_body(
     )
     expected = CollectionBudgetExceeded if expired else PageClassificationError
     with collection_budget(seconds=5), pytest.raises(expected) as caught:
-        client().classify_page({})
+        client().classify_payload({})
     assert requests == [(PROVIDER_URL, "POST", "Bearer test-key")]
     assert len(responses) == 1
     assert responses[0].closed
@@ -100,7 +100,7 @@ def test_llm_http_errors_close_response_without_reading_it(status):
         raise HTTPError(PROVIDER_URL, status, "Error", {"Retry-After": "30"}, body)
 
     with pytest.raises(PageClassificationError) as caught:
-        client(request).classify_page({})
+        client(request).classify_payload({})
     assert body.closed
     assert caught.value.diagnostics[0].retry_at is not None
 
@@ -112,7 +112,7 @@ def test_deep_json_is_a_recoverable_invalid_llm_response(stage):
     payload = nested_json if stage == "provider_envelope" else json.dumps({"text": nested_json})
     body = io.BytesIO(payload.encode())
     with pytest.raises(PageClassificationError) as caught:
-        client(lambda *args, **kwargs: body).classify_page({})
+        client(lambda *args, **kwargs: body).classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_invalid_response"
     assert caught.value.diagnostics[0].recovery == "manual"
     assert body.closed
@@ -135,7 +135,7 @@ def test_http_error_body_read_failure_is_unconfirmed_and_closed(
     def request(*args, **kwargs):
         raise HTTPError(DATA_URL, 403, "Forbidden", {}, body)
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", request)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
     with collection_budget(seconds=5) if budgeted else nullcontext():
         result = probe_url(DATA_URL, "GET", 1, 100)
     assert result.status_code is None
@@ -154,7 +154,7 @@ def test_bodyless_http_error_retains_probe_metadata(
     def request(*args, **kwargs):
         raise HTTPError(final_url, 403, "Forbidden", headers, None)
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", request)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
     with collection_budget(seconds=5) if budgeted else nullcontext():
         result = probe_url(DATA_URL, method, 1, max_bytes)
     assert result.url == DATA_URL
@@ -176,7 +176,7 @@ def test_http_error_read_timeout_at_deadline_preserves_budget_failure(monkeypatc
     def request(*args, **kwargs):
         raise HTTPError(DATA_URL, 403, "Forbidden", {}, body)
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", request)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
     with collection_budget(seconds=5), pytest.raises(CollectionBudgetExceeded):
         probe_url(DATA_URL, "GET", 10, 100)
     assert body.closed
@@ -210,7 +210,7 @@ def test_collection_tries_next_distribution_after_error_body_timeout(monkeypatch
         def classify(self, page, distributions):
             return PageClassification(accepted=True)
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", request)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
     result = collect_source_with_report(
         "https://data.example/dataset",
         classifier=Classifier(),

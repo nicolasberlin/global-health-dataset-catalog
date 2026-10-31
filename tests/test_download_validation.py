@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 import pytest
 
 from collector.storage.models import DistributionCandidate, HTTPProbe
-from collector.validation.downloads import probe_url, validate_distribution
+from collector.validation.distributions import probe_url, validate_distribution
 from collector.validation.json_sample import read_json_prefix
 
 URL = "https://example.org/data"
@@ -167,7 +167,7 @@ def test_probe_uses_configured_user_agent_for_head_and_bounded_get(monkeypatch):
         requests.append((request, timeout))
         return Response(b"country,value\nCH,1\n" * 100)
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", open_url)
     result = validate_distribution(
         DistributionCandidate(URL, "CSV", .9), timeout=1.25, max_sample_bytes=64,
         user_agent="ConfiguredCollector/1",
@@ -284,7 +284,7 @@ def test_probe_detects_truncation_when_server_ignores_range(monkeypatch, length)
             reads.append(size)
             return super().read(size)
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url",
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url",
                         lambda *a, **kw: Response(body))
     result = probe_url(URL, "GET", 1, 65536)
     assert reads == [65537]
@@ -522,7 +522,7 @@ def test_malformed_html_remains_unconfirmed(code):
 @pytest.mark.parametrize("code", [200, 403])
 @pytest.mark.parametrize("error_type", [AssertionError, NotImplementedError])
 def test_html_parser_failure_remains_unconfirmed(monkeypatch, code, error_type):
-    from collector.validation.downloads import _AccessPage
+    from collector.validation.distributions import _AccessPage
 
     def fail_parse(self, data):
         raise error_type("Malformed markup")
@@ -566,7 +566,7 @@ def test_http_error_body_read_remains_bounded(monkeypatch):
         raise HTTPError(URL, 403, "Forbidden", {"content-type": "text/html"},
                         Body(b"<html>CAPTCHA</html>" + b" " * 1000))
 
-    monkeypatch.setattr("collector.validation.downloads.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", open_url)
     result = validate_distribution(DistributionCandidate(URL, "API", .9), max_sample_bytes=64)
     assert result.status == "unconfirmed"
     assert result.reason == "An anti-bot challenge prevented verification of data access."

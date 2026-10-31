@@ -235,7 +235,7 @@ def test_default_llm_transport_also_bounds_slow_headers(monkeypatch, clock):
     install_sockets(monkeypatch, [connection])
     monkeypatch.setattr("urllib.request.getproxies", lambda: {})
     with pytest.raises(PageClassificationError) as caught:
-        llm_client().classify_page({})
+        llm_client().classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_timeout"
     assert clock[0] == 5 and stream.closed and connection.closed
 

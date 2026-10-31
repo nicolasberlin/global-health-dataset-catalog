@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 
-class CollectorDistribution(BaseModel):
+class DatasetDistributionView(BaseModel):
     url: str
     format: str
     probability: float
@@ -18,7 +18,7 @@ class CollectorDistribution(BaseModel):
     last_checked_at: str = ""
 
 
-class CollectorValidation(BaseModel):
+class DistributionValidationView(BaseModel):
     url: str
     final_url: str
     format: str
@@ -35,7 +35,7 @@ class CollectorValidation(BaseModel):
     error_code: Literal["", "validation_failed"] = ""
 
 
-class CollectorCollectedDataset(BaseModel):
+class CatalogDatasetView(BaseModel):
     """A full saved dataset record returned by catalogue reads, including download links."""
 
     id: int | None = None
@@ -54,15 +54,15 @@ class CollectorCollectedDataset(BaseModel):
     record_identity: dict[str, str] = Field(default_factory=dict)
     discovery_method: str
     dataset_signals: dict[str, Any]
-    distributions: list[CollectorDistribution]
-    validation_results: list[CollectorValidation]
+    distributions: list[DatasetDistributionView]
+    validation_results: list[DistributionValidationView]
     first_seen_at: str = ""
     last_seen_at: str = ""
     updated_at: str = ""
 
 
-class CollectorCollectionResponse(BaseModel):
+class CatalogDatasetsResponse(BaseModel):
     """Dataset records returned by a catalogue read; next_cursor supports paged clients."""
 
     next_cursor: int | None = None
-    items: list[CollectorCollectedDataset]
+    items: list[CatalogDatasetView]

@@ -218,7 +218,7 @@ def test_llm_causes_survive_without_exposing_provider_details(failure, code, rec
         raise failure
 
     with pytest.raises(PageClassificationError) as caught:
-        client(request).classify_page({})
+        client(request).classify_payload({})
     error = caught.value.diagnostics[0]
     assert (error.code, error.recovery) == (code, recovery)
     assert "secret" not in str(error.to_dict())
@@ -229,10 +229,12 @@ def test_llm_causes_survive_without_exposing_provider_details(failure, code, rec
 def test_missing_configuration_and_invalid_json_are_distinct(monkeypatch):
     monkeypatch.delenv("UNSET_TEST_KEY", raising=False)
     with pytest.raises(PageClassificationError) as caught:
-        client(lambda *a, **k: pytest.fail("must not call provider"), api_key="").classify_page({})
+        client(
+            lambda *a, **k: pytest.fail("must not call provider"), api_key="",
+        ).classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_configuration_error"
     with pytest.raises(PageClassificationError) as caught:
-        client(lambda *a, **k: io.BytesIO(b"not json")).classify_page({})
+        client(lambda *a, **k: io.BytesIO(b"not json")).classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_invalid_response"
 
 
@@ -256,7 +258,7 @@ def test_public_diagnostic_rebuilds_message_and_drops_internal_fields():
 
 def test_persistence_failure_is_not_wrapped_as_a_model_failure():
     class FailingStore:
-        def classify_page(self, payload):
+        def classify_payload(self, payload):
             raise PersistenceFailure("SQL private-secret")
 
     with pytest.raises(PersistenceFailure):

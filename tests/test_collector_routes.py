@@ -5,8 +5,8 @@ from uuid import UUID
 
 import pytest
 from app.api.presenters.search import _collector_repository_candidate
-from app.api.schemas.catalog import CollectorCollectedDataset
-from app.api.schemas.search import CollectorRepositorySearchItem, CollectorRepositorySearchRequest
+from app.api.schemas.catalog import CatalogDatasetView
+from app.api.schemas.search import RepositoryCandidateView, SearchCreateRequest
 from app.auth.security import APIPrincipal
 from app.db.catalog.search import normalize_dataset_search_query
 from helpers.workflows import CANDIDATE_ID
@@ -116,13 +116,9 @@ def test_normalize_dataset_search_query(query, expected):
     assert normalize_dataset_search_query(query) == expected
 
 
-def test_collector_search_repositories_request_rejects_too_long_query():
-    try:
-        CollectorRepositorySearchRequest(query="x" * 301)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("Expected validation error.")
+def test_search_create_request_rejects_too_long_query():
+    with pytest.raises(ValueError):
+        SearchCreateRequest(query="x" * 301)
 
 
 @pytest.mark.parametrize(
@@ -148,12 +144,12 @@ def test_collector_repository_item_rejects_oversized_llm_input(
     }
 
     with pytest.raises(ValueError):
-        CollectorRepositorySearchItem(**item_data)
+        RepositoryCandidateView(**item_data)
 
 
 def test_collector_repository_item_rejects_incomplete_classification_contract():
     with pytest.raises(ValueError):
-        CollectorRepositorySearchItem(
+        RepositoryCandidateView(
             candidate_id=CANDIDATE_ID,
             search_id=SEARCH_ID,
             title="Malaria mortality estimates",
@@ -165,7 +161,7 @@ def test_collector_repository_item_rejects_incomplete_classification_contract():
 
 def test_collected_dataset_response_rejects_non_http_dataset_url():
     with pytest.raises(ValueError):
-        CollectorCollectedDataset(
+        CatalogDatasetView(
             dataset_url="javascript:alert(1)",
             title="Invalid dataset",
             description="",
@@ -201,6 +197,6 @@ def test_candidate_errors_are_public_messages_and_keep_internal_diagnostics():
 def test_public_job_schema_does_not_advertise_private_candidate_id():
     from app.main import app
 
-    properties = app.openapi()["components"]["schemas"]["CollectorCollectionJob"]["properties"]
+    properties = app.openapi()["components"]["schemas"]["CollectionJobView"]["properties"]
     assert "repository_candidate_id" not in properties
     assert {"status", "saved_count", "source_url", "error_code"} <= properties.keys()

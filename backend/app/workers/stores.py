@@ -121,7 +121,7 @@ class PostgresVoteStore:
         return response
 
 
-class PostgresCollectionTrace:
+class PostgresCollectionTraceWriter:
     """Save collection observations from a worker thread under its claim version."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop, job_id: int, version: datetime) -> None:

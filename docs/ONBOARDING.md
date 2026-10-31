@@ -120,7 +120,8 @@ installations. No setup script moves or deletes database volumes.
 | HTML/JSON-LD extraction | `collector/extraction/` |
 | Source identity from extracted evidence | `collector/extraction/source_identity.py` |
 | Prompts, voters and classification parsing | `collector/classification/` |
-| Distribution access checks | `collector/validation/downloads.py` |
+| Shared LLM client and durable response checkpoints | `collector/classification/llm_client.py`, `collector/classification/checkpoints.py` |
+| Distribution access checks | `collector/validation/distributions.py` |
 | HTTP fetching and request deadlines | `collector/network/fetch.py`, `collector/network/transport.py` |
 | DNS and shared public-address policy | `collector/network/resolver.py`, `collector/network/policy.py` |
 | Catalogue aggregates and distribution evidence | `backend/app/db/catalog/datasets.py`, `backend/app/db/catalog/distributions.py` |
@@ -185,6 +186,13 @@ not call another HTTP route to obtain a snapshot.
    processing status and conclusion. Presenters for classification, collection and
    catalogue data live alongside it; the matching request and response models live
    in `api/schemas/`. Import from the owning domain module in each package.
+
+Name API schemas by their HTTP role: `Request` for a client payload, `Response`
+for a complete endpoint response, and `View` for a public nested object. Do not
+add a `Collector` prefix. For example, use `SearchCreateRequest`,
+`SearchSubmissionResponse` and `RepositoryCandidateView`; see the
+[architecture guide](technical-design-document.md#dependency-boundary-for-the-private-web-interface)
+for the model boundary.
 
 `collect_source_with_report` in `collector/collection/service.py` is the separate bounded
 source-discovery entrypoint; use the single-record path above for an already

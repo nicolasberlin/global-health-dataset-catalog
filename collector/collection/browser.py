@@ -31,7 +31,7 @@ from collector.network.transport import (
     RejectHTTPRedirects,
 )
 from collector.storage.models import HTTPProbe
-from collector.validation.downloads import validate_distribution
+from collector.validation.distributions import validate_distribution
 
 
 class BrowserSession:

@@ -60,10 +60,10 @@ def extract_chat_completions_message_text(response_payload: object) -> str:
     )
 
 
-class LLMPageClassificationClient(Protocol):
-    """Client capable of returning one structured page-classification decision."""
+class LLMClassificationClient(Protocol):
+    """Client returning structured classification output for pages or repository results."""
 
-    def classify_page(self, payload: dict[str, object]) -> dict[str, object]: ...
+    def classify_payload(self, payload: dict[str, object]) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,7 @@ class HTTPJSONLLMClient:
             DeadlineHTTPHandler(), DeadlineHTTPSHandler(), _RejectLLMRedirects(),
         ).open
 
-    def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
+    def classify_payload(self, payload: dict[str, object]) -> dict[str, object]:
         return self.classify_request(self.prepare_request(payload))
 
     def prepare_request(self, payload: dict[str, object]) -> dict[str, object]:

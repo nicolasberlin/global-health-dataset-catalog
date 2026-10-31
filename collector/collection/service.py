@@ -34,7 +34,7 @@ from collector.storage.models import (
     ValidationResult,
 )
 from collector.url_utils import normalize_http_url
-from collector.validation.downloads import validate_distribution
+from collector.validation.distributions import validate_distribution
 
 DiscoverFunction = Callable[[str], list[DiscoveredPage]]
 FetchHTMLFunction = Callable[[str], FetchedPage]

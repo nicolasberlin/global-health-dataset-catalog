@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.api.schemas.common import CollectorDiagnostic
+from app.api.schemas.common import ProcessingDiagnosticView
 from collector.classification.repository import (
     MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_CHARS,
@@ -24,7 +24,7 @@ RepositoryMissingInformation = Annotated[
 RepositoryVoterId = Annotated[str, Field(min_length=1, max_length=100)]
 
 
-class CollectorRepositoryClassificationVote(BaseModel):
+class ClassificationVoteView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     voter_id: RepositoryVoterId
@@ -40,7 +40,7 @@ class CollectorRepositoryClassificationVote(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_decision(self) -> CollectorRepositoryClassificationVote:
+    def validate_decision(self) -> ClassificationVoteView:
         expected_accepted = (
             self.relevance_label in REPOSITORY_ACCEPTED_RELEVANCE_LABELS
         )
@@ -58,16 +58,16 @@ class CollectorRepositoryClassificationVote(BaseModel):
         return self
 
 
-class CollectorRepositoryClassificationFailure(BaseModel):
+class ClassificationVoteFailureView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     voter_id: RepositoryVoterId
     error: str = Field(min_length=1, max_length=2_000)
     error_code: Literal["classifier_vote_failed"] = "classifier_vote_failed"
-    errors: list[CollectorDiagnostic] = Field(default_factory=list)
+    errors: list[ProcessingDiagnosticView] = Field(default_factory=list)
 
 
-class CollectorRepositoryClassificationEnsemble(BaseModel):
+class ClassificationEnsembleView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     votes_required: int = Field(ge=1, le=10)
@@ -85,17 +85,17 @@ class CollectorRepositoryClassificationEnsemble(BaseModel):
         default_factory=list,
         max_length=10,
     )
-    voters: list[CollectorRepositoryClassificationVote] = Field(
+    voters: list[ClassificationVoteView] = Field(
         default_factory=list,
         max_length=10,
     )
-    failures: list[CollectorRepositoryClassificationFailure] = Field(
+    failures: list[ClassificationVoteFailureView] = Field(
         default_factory=list,
         max_length=10,
     )
 
 
-class CollectorRepositoryClassification(BaseModel):
+class CandidateClassificationView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     accepted: bool
@@ -108,10 +108,10 @@ class CollectorRepositoryClassification(BaseModel):
         default_factory=list,
         max_length=MAX_REPOSITORY_MISSING_INFORMATION_ITEMS,
     )
-    ensemble: CollectorRepositoryClassificationEnsemble
+    ensemble: ClassificationEnsembleView
 
     @model_validator(mode="after")
-    def validate_decision(self) -> CollectorRepositoryClassification:
+    def validate_decision(self) -> CandidateClassificationView:
         expected_accepted = (
             self.relevance_label in REPOSITORY_ACCEPTED_RELEVANCE_LABELS
         )
@@ -131,7 +131,7 @@ class CollectorRepositoryClassification(BaseModel):
         return self
 
 
-class CollectorVoteProgress(BaseModel):
+class VoteProgressView(BaseModel):
     total: int = Field(default=0, ge=0, le=10)
     succeeded: int = Field(default=0, ge=0, le=10)
     failed: int = Field(default=0, ge=0, le=10)

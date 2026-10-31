@@ -6,12 +6,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.schemas.classification import CollectorVoteProgress
-from app.api.schemas.common import CollectorDiagnostic
+from app.api.schemas.classification import VoteProgressView
+from app.api.schemas.common import ProcessingDiagnosticView
 from collector.diagnostics import ExecutionStatus, Outcome
 
 
-class CollectorCollectionJob(BaseModel):
+class CollectionJobView(BaseModel):
     """Public job view; internal rows must pass through the response presenter."""
 
     model_config = ConfigDict(extra="forbid")
@@ -22,9 +22,9 @@ class CollectorCollectionJob(BaseModel):
     status: Literal["pending", "running", "done", "error"]
     execution_status: ExecutionStatus
     outcome: Outcome | None = None
-    errors: list[CollectorDiagnostic] = Field(default_factory=list)
+    errors: list[ProcessingDiagnosticView] = Field(default_factory=list)
     saved_count: int
-    classification_progress: CollectorVoteProgress = Field(default_factory=CollectorVoteProgress)
+    classification_progress: VoteProgressView = Field(default_factory=VoteProgressView)
     dataset_ids: list[int] = Field(default_factory=list)
     discovered_count: int = 0
     analyzed_count: int = 0
@@ -42,14 +42,14 @@ class CollectorCollectionJob(BaseModel):
     finished_at: str = ""
 
 
-class CollectorAutomaticCollection(BaseModel):
+class CollectionFollowUpView(BaseModel):
     """The collection associated with a candidate, including already-saved datasets."""
 
     execution_status: ExecutionStatus
     outcome: Outcome | None = None
-    errors: list[CollectorDiagnostic] = Field(default_factory=list)
+    errors: list[ProcessingDiagnosticView] = Field(default_factory=list)
     dataset_ids: list[int] = Field(default_factory=list)
     state: Literal["pending", "running", "saved", "empty", "error"]
-    job: CollectorCollectionJob | None = None
+    job: CollectionJobView | None = None
     error: str = Field(default="", max_length=2_000)
     error_code: Literal["", "collection_scheduling_failed", "collection_not_scheduled"] = ""

@@ -1,6 +1,6 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **30 October 2026**, based on Git commit `6cc2a2e`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **30 October 2026**, based on Git commit `29e58da`, including the independent core API and public Search Lab. The private web interface is excluded.
 
 This index lists **864 function and method definitions in 134 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
@@ -145,7 +145,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/storage/metadata.py](#collector-storage-metadata-py) — 3 definitions
 - [collector/storage/models.py](#collector-storage-models-py) — 6 definitions
 - [collector/url_utils.py](#collector-url_utils-py) — 5 definitions
-- [collector/validation/downloads.py](#collector-validation-downloads-py) — 19 definitions
+- [collector/validation/distributions.py](#collector-validation-distributions-py) — 19 definitions
 - [collector/validation/json_sample.py](#collector-validation-json_sample-py) — 6 definitions
 - [scripts/api_client.py](#scripts-api_client-py) — 41 definitions
 - [scripts/setup_api.py](#scripts-setup_api-py) — 8 definitions
@@ -180,9 +180,9 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_collector_distribution`](../../backend/app/api/presenters/catalog.py#L14) | `_collector_distribution(distribution: DistributionCandidate) -> CollectorDistribution` | function / method |
-| [`_collector_validation`](../../backend/app/api/presenters/catalog.py#L28) | `_collector_validation(validation: ValidationResult) -> CollectorValidation` | function / method |
-| [`public_collected_dataset`](../../backend/app/api/presenters/catalog.py#L48) | `public_collected_dataset(dataset: CollectedDataset) -> CollectorCollectedDataset` | function / method |
+| [`_collector_distribution`](../../backend/app/api/presenters/catalog.py#L14) | `_collector_distribution(distribution: DistributionCandidate) -> DatasetDistributionView` | function / method |
+| [`_collector_validation`](../../backend/app/api/presenters/catalog.py#L28) | `_collector_validation(validation: ValidationResult) -> DistributionValidationView` | function / method |
+| [`public_collected_dataset`](../../backend/app/api/presenters/catalog.py#L48) | `public_collected_dataset(dataset: CollectedDataset) -> CatalogDatasetView` | function / method |
 
 <a id="backend-app-api-presenters-classification-py"></a>
 
@@ -191,7 +191,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`_public_ensemble`](../../backend/app/api/presenters/classification.py#L11) | `_public_ensemble(ensemble: dict[str, Any]) -> dict[str, Any]` | function / method |
-| [`public_repository_classification`](../../backend/app/api/presenters/classification.py#L37) | `public_repository_classification(classification: dict[str, Any] \| None) -> CollectorRepositoryClassification \| None` | function / method |
+| [`public_repository_classification`](../../backend/app/api/presenters/classification.py#L37) | `public_repository_classification(classification: dict[str, Any] \| None) -> CandidateClassificationView \| None` | function / method |
 | [`public_dataset_signals`](../../backend/app/api/presenters/classification.py#L48) | `public_dataset_signals(signals: dict[str, Any]) -> dict[str, Any]` | function / method |
 
 <a id="backend-app-api-presenters-collection-py"></a>
@@ -200,8 +200,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`public_collection_job`](../../backend/app/api/presenters/collection.py#L13) | `public_collection_job(job: dict[str, Any]) -> CollectorCollectionJob` | function / method |
-| [`public_automatic_collection`](../../backend/app/api/presenters/collection.py#L75) | `public_automatic_collection(collection: CollectionJobReservation \| None) -> CollectorAutomaticCollection` | function / method |
+| [`public_collection_job`](../../backend/app/api/presenters/collection.py#L13) | `public_collection_job(job: dict[str, Any]) -> CollectionJobView` | function / method |
+| [`public_automatic_collection`](../../backend/app/api/presenters/collection.py#L75) | `public_automatic_collection(collection: CollectionJobReservation \| None) -> CollectionFollowUpView` | function / method |
 
 <a id="backend-app-api-presenters-search-py"></a>
 
@@ -210,8 +210,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`summarize_search`](../../backend/app/api/presenters/search.py#L31) | `summarize_search(search: Mapping[str, Any], items: Sequence[Mapping[str, Any]]) -> SearchSummary` | function / method |
-| [`_collector_repository_candidate`](../../backend/app/api/presenters/search.py#L144) | `_collector_repository_candidate(candidate: dict[str, object], *, automatic_collection: CollectorAutomaticCollection \| None=None) -> CollectorRepositorySearchItem` | function / method |
-| [`public_search_progress`](../../backend/app/api/presenters/search.py#L187) | `public_search_progress(search_id, snapshot) -> CollectorSearchProgressResponse` | function / method |
+| [`_collector_repository_candidate`](../../backend/app/api/presenters/search.py#L144) | `_collector_repository_candidate(candidate: dict[str, object], *, automatic_collection: CollectionFollowUpView \| None=None) -> RepositoryCandidateView` | function / method |
+| [`public_search_progress`](../../backend/app/api/presenters/search.py#L187) | `public_search_progress(search_id, snapshot) -> SearchProgressResponse` | function / method |
 
 <a id="backend-app-api-routes-catalog-py"></a>
 
@@ -219,7 +219,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`read_collected_by_id`](../../backend/app/api/routes/catalog.py#L20) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CollectorCollectionResponse` | async |
+| [`read_collected_by_id`](../../backend/app/api/routes/catalog.py#L20) | `read_collected_by_id(ids: Annotated[list[Annotated[int, Query(ge=1, le=2147483647)]], Query(min_length=1, max_length=100)]) -> CatalogDatasetsResponse` | async |
 
 <a id="backend-app-api-routes-diagnostics-py"></a>
 
@@ -235,11 +235,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`create_search`](../../backend/app/api/routes/searches.py#L85) | `create_search(payload: CollectorSearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> CollectorSearchCommandResponse` | async |
+| [`create_search`](../../backend/app/api/routes/searches.py#L85) | `create_search(payload: SearchCreateRequest, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, idempotency_key: CommandKey, request: Request) -> SearchSubmissionResponse` | async |
 | [`_admit_search_command`](../../backend/app/api/routes/searches.py#L105) | `_admit_search_command(payload, principal, response, idempotency_key, request)` | async |
 | [`_search_command_response`](../../backend/app/api/routes/searches.py#L128) | `_search_command_response(row, replayed, principal, response, request)` | async |
-| [`latest_search`](../../backend/app/api/routes/searches.py#L149) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> CollectorSearchProgressResponse` | async |
-| [`search_progress`](../../backend/app/api/routes/searches.py#L174) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> CollectorSearchProgressResponse` | async |
+| [`latest_search`](../../backend/app/api/routes/searches.py#L149) | `latest_search(principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response, with_candidates: bool=False) -> SearchProgressResponse` | async |
+| [`search_progress`](../../backend/app/api/routes/searches.py#L174) | `search_progress(search_id: UUID, principal: Annotated[APIPrincipal, Depends(require_api_principal)], response: Response) -> SearchProgressResponse` | async |
 
 <a id="backend-app-api-routes-sessions-py"></a>
 
@@ -255,8 +255,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`CollectorRepositoryClassificationVote.validate_decision`](../../backend/app/api/schemas/classification.py#L42) | `validate_decision(self) -> CollectorRepositoryClassificationVote` | function / method |
-| [`CollectorRepositoryClassification.validate_decision`](../../backend/app/api/schemas/classification.py#L113) | `validate_decision(self) -> CollectorRepositoryClassification` | function / method |
+| [`ClassificationVoteView.validate_decision`](../../backend/app/api/schemas/classification.py#L42) | `validate_decision(self) -> ClassificationVoteView` | function / method |
+| [`CandidateClassificationView.validate_decision`](../../backend/app/api/schemas/classification.py#L113) | `validate_decision(self) -> CandidateClassificationView` | function / method |
 
 <a id="backend-app-api-schemas-search-py"></a>
 
@@ -264,7 +264,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`CollectorRepositorySearchItem.validate_metadata_size`](../../backend/app/api/schemas/search.py#L74) | `validate_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]` | classmethod |
+| [`RepositoryCandidateView.validate_metadata_size`](../../backend/app/api/schemas/search.py#L74) | `validate_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]` | classmethod |
 
 <a id="backend-app-api-search_progress-py"></a>
 
@@ -272,7 +272,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`load_search_progress`](../../backend/app/api/search_progress.py#L17) | `load_search_progress(search_id: UUID, owner_id: str) -> CollectorSearchProgressResponse` | async |
+| [`load_search_progress`](../../backend/app/api/search_progress.py#L17) | `load_search_progress(search_id: UUID, owner_id: str) -> SearchProgressResponse` | async |
 
 <a id="backend-app-auth-security-py"></a>
 
@@ -733,7 +733,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`_collect_record_job`](../../backend/app/workers/collection/worker.py#L43) | `_collect_record_job(url, *, classifier, observe)` | function / method |
-| [`CollectionWorker.__init__`](../../backend/app/workers/collection/worker.py#L75) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTrace] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`CollectionWorker.__init__`](../../backend/app/workers/collection/worker.py#L75) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTraceWriter] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
 | [`CollectionWorker.claim`](../../backend/app/workers/collection/worker.py#L106) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
 | [`CollectionWorker.execute`](../../backend/app/workers/collection/worker.py#L109) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
 | [`CollectionWorker._retry`](../../backend/app/workers/collection/worker.py#L155) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
@@ -832,8 +832,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`PostgresVoteStore.__init__`](../../backend/app/workers/stores.py#L45) | `__init__(self, loop: asyncio.AbstractEventLoop, *, candidate_id: UUID \| None=None, job_id: int \| None=None, expected_updated_at: datetime \| None=None) -> None` | function / method |
 | [`PostgresVoteStore._wait`](../../backend/app/workers/stores.py#L60) | `_wait(self, operation: Callable[[], Awaitable[T]], *, finalizing: bool=False) -> T` | function / method |
 | [`PostgresVoteStore.run`](../../backend/app/workers/stores.py#L75) | `run(self, snapshot: dict[str, object], voter_id: str, invoke: Callable[[], dict[str, object]]) -> dict[str, object]` | function / method |
-| [`PostgresCollectionTrace.__init__`](../../backend/app/workers/stores.py#L127) | `__init__(self, loop: asyncio.AbstractEventLoop, job_id: int, version: datetime) -> None` | function / method |
-| [`PostgresCollectionTrace.__call__`](../../backend/app/workers/stores.py#L130) | `__call__(self, sequence: int, observation: dict[str, object]) -> None` | function / method |
+| [`PostgresCollectionTraceWriter.__init__`](../../backend/app/workers/stores.py#L127) | `__init__(self, loop: asyncio.AbstractEventLoop, job_id: int, version: datetime) -> None` | function / method |
+| [`PostgresCollectionTraceWriter.__call__`](../../backend/app/workers/stores.py#L130) | `__call__(self, sequence: int, observation: dict[str, object]) -> None` | function / method |
 
 <a id="backend-container_entrypoint-py"></a>
 
@@ -893,8 +893,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`VoteStore.run`](../../collector/classification/checkpoints.py#L12) | `run(self, snapshot: dict[str, object], voter_id: str, invoke: Callable[[], dict[str, object]]) -> dict[str, object]` | function / method |
 | [`CheckpointedLLMClient.__init__`](../../collector/classification/checkpoints.py#L23) | `__init__(self, client: HTTPJSONLLMClient, store: VoteStore, voter_id: str, configuration: list[dict[str, object]], validate: Callable) -> None` | function / method |
-| [`CheckpointedLLMClient.classify_page`](../../collector/classification/checkpoints.py#L37) | `classify_page(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
-| [`CheckpointedLLMClient.classify_page.<local>.invoke`](../../collector/classification/checkpoints.py#L40) | `invoke()` | function / method |
+| [`CheckpointedLLMClient.classify_payload`](../../collector/classification/checkpoints.py#L37) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+| [`CheckpointedLLMClient.classify_payload.<local>.invoke`](../../collector/classification/checkpoints.py#L40) | `invoke()` | function / method |
 
 <a id="collector-classification-ensemble-py"></a>
 
@@ -946,9 +946,9 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`_RejectLLMRedirects.redirect_request`](../../collector/classification/llm_client.py#L35) | `redirect_request(self, req, fp, code, msg, headers, newurl)` | function / method |
 | [`extract_chat_completions_message_text`](../../collector/classification/llm_client.py#L39) | `extract_chat_completions_message_text(response_payload: object) -> str` | function / method |
-| [`LLMPageClassificationClient.classify_page`](../../collector/classification/llm_client.py#L66) | `classify_page(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+| [`LLMClassificationClient.classify_payload`](../../collector/classification/llm_client.py#L66) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
 | [`HTTPJSONLLMClient.__init__`](../../collector/classification/llm_client.py#L88) | `__init__(self, provider: LLMProviderConfig, api_key: str \| None=None, model: str \| None=None, timeout_seconds: float=20.0, request: Callable[..., object] \| None=None) -> None` | function / method |
-| [`HTTPJSONLLMClient.classify_page`](../../collector/classification/llm_client.py#L104) | `classify_page(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+| [`HTTPJSONLLMClient.classify_payload`](../../collector/classification/llm_client.py#L104) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
 | [`HTTPJSONLLMClient.prepare_request`](../../collector/classification/llm_client.py#L107) | `prepare_request(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
 | [`HTTPJSONLLMClient.request_configuration`](../../collector/classification/llm_client.py#L111) | `request_configuration(self) -> dict[str, object]` | function / method |
 | [`HTTPJSONLLMClient.classify_request`](../../collector/classification/llm_client.py#L114) | `classify_request(self, request_body: dict[str, object]) -> dict[str, object]` | function / method |
@@ -970,7 +970,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`LLMPageClassifier.__init__`](../../collector/classification/page_llm_classifier.py#L31) | `__init__(self, client: LLMPageClassificationClient) -> None` | function / method |
+| [`LLMPageClassifier.__init__`](../../collector/classification/page_llm_classifier.py#L31) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
 | [`LLMPageClassifier.classify`](../../collector/classification/page_llm_classifier.py#L37) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
 | [`_build_llm_payload`](../../collector/classification/page_llm_classifier.py#L56) | `_build_llm_payload(page: PageSnapshot, distributions: list[DistributionCandidate]) -> dict[str, object]` | function / method |
 | [`_bounded_metadata_value`](../../collector/classification/page_llm_classifier.py#L96) | `_bounded_metadata_value(key: str, value: str) -> str` | function / method |
@@ -1019,7 +1019,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`LLMRepositoryRelevanceClassifier.__init__`](../../collector/classification/repository_llm_classifier.py#L38) | `__init__(self, client: LLMPageClassificationClient) -> None` | function / method |
+| [`LLMRepositoryRelevanceClassifier.__init__`](../../collector/classification/repository_llm_classifier.py#L38) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
 | [`LLMRepositoryRelevanceClassifier.classify`](../../collector/classification/repository_llm_classifier.py#L44) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
 | [`_build_repository_relevance_payload`](../../collector/classification/repository_llm_classifier.py#L59) | `_build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]` | function / method |
 | [`_repository_metadata_value`](../../collector/classification/repository_llm_classifier.py#L84) | `_repository_metadata_value(key: str, value: str) -> str` | function / method |
@@ -1752,31 +1752,31 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`select_dataset_url`](../../collector/url_utils.py#L61) | `select_dataset_url(page_url: str, canonical_href: str='') -> str` | function / method |
 | [`same_domain`](../../collector/url_utils.py#L73) | `same_domain(left_url: str, right_url: str) -> bool` | function / method |
 
-<a id="collector-validation-downloads-py"></a>
+<a id="collector-validation-distributions-py"></a>
 
-## collector/validation/downloads.py
+## collector/validation/distributions.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`validate_distribution`](../../collector/validation/downloads.py#L34) | `validate_distribution(distribution: DistributionCandidate, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_sample_bytes: int=DEFAULT_CONFIG.max_sample_bytes, probe: ProbeFunction \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> ValidationResult` | function / method |
-| [`page_access_diagnostic`](../../collector/validation/downloads.py#L88) | `page_access_diagnostic(html: str) -> Diagnostic \| None` | function / method |
-| [`probe_url`](../../collector/validation/downloads.py#L105) | `probe_url(url: str, method: str, timeout: float, max_bytes: int, headers: dict[str, str] \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> HTTPProbe` | function / method |
-| [`_needs_partial_get`](../../collector/validation/downloads.py#L170) | `_needs_partial_get(probe: HTTPProbe) -> bool` | function / method |
-| [`_response_status`](../../collector/validation/downloads.py#L177) | `_response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStatus, str]` | function / method |
-| [`_access_barrier`](../../collector/validation/downloads.py#L281) | `_access_barrier(text: str) -> tuple[ValidationStatus, str] \| None` | function / method |
-| [`_AccessPage.__init__`](../../collector/validation/downloads.py#L311) | `__init__(self) -> None` | function / method |
-| [`_AccessPage.handle_starttag`](../../collector/validation/downloads.py#L319) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
-| [`_AccessPage.handle_endtag`](../../collector/validation/downloads.py#L334) | `handle_endtag(self, tag: str) -> None` | function / method |
-| [`_AccessPage.handle_data`](../../collector/validation/downloads.py#L340) | `handle_data(self, data: str) -> None` | function / method |
-| [`_prefix_range`](../../collector/validation/downloads.py#L345) | `_prefix_range(probe: HTTPProbe) -> re.Match \| None` | function / method |
-| [`_sample_is_truncated`](../../collector/validation/downloads.py#L359) | `_sample_is_truncated(probe: HTTPProbe) -> bool` | function / method |
-| [`_total_size`](../../collector/validation/downloads.py#L370) | `_total_size(probe: HTTPProbe, head: HTTPProbe) -> int \| None` | function / method |
-| [`_validated_format`](../../collector/validation/downloads.py#L393) | `_validated_format(distribution: DistributionCandidate, content_type: str, content_disposition: str, probe: HTTPProbe) -> str` | function / method |
-| [`_format_from_body_sample`](../../collector/validation/downloads.py#L419) | `_format_from_body_sample(sample: bytes, truncated: bool=False) -> str` | function / method |
-| [`_decode_tabular_sample`](../../collector/validation/downloads.py#L475) | `_decode_tabular_sample(sample: bytes, truncated: bool) -> str \| None` | function / method |
-| [`_plausible_table`](../../collector/validation/downloads.py#L495) | `_plausible_table(text: str, delimiter: str, truncated: bool) -> bool` | function / method |
-| [`_header`](../../collector/validation/downloads.py#L524) | `_header(probe: HTTPProbe, name: str) -> str` | function / method |
-| [`_parse_content_length`](../../collector/validation/downloads.py#L528) | `_parse_content_length(value: str) -> int \| None` | function / method |
+| [`validate_distribution`](../../collector/validation/distributions.py#L34) | `validate_distribution(distribution: DistributionCandidate, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_sample_bytes: int=DEFAULT_CONFIG.max_sample_bytes, probe: ProbeFunction \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> ValidationResult` | function / method |
+| [`page_access_diagnostic`](../../collector/validation/distributions.py#L88) | `page_access_diagnostic(html: str) -> Diagnostic \| None` | function / method |
+| [`probe_url`](../../collector/validation/distributions.py#L105) | `probe_url(url: str, method: str, timeout: float, max_bytes: int, headers: dict[str, str] \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> HTTPProbe` | function / method |
+| [`_needs_partial_get`](../../collector/validation/distributions.py#L170) | `_needs_partial_get(probe: HTTPProbe) -> bool` | function / method |
+| [`_response_status`](../../collector/validation/distributions.py#L177) | `_response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStatus, str]` | function / method |
+| [`_access_barrier`](../../collector/validation/distributions.py#L281) | `_access_barrier(text: str) -> tuple[ValidationStatus, str] \| None` | function / method |
+| [`_AccessPage.__init__`](../../collector/validation/distributions.py#L311) | `__init__(self) -> None` | function / method |
+| [`_AccessPage.handle_starttag`](../../collector/validation/distributions.py#L319) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
+| [`_AccessPage.handle_endtag`](../../collector/validation/distributions.py#L334) | `handle_endtag(self, tag: str) -> None` | function / method |
+| [`_AccessPage.handle_data`](../../collector/validation/distributions.py#L340) | `handle_data(self, data: str) -> None` | function / method |
+| [`_prefix_range`](../../collector/validation/distributions.py#L345) | `_prefix_range(probe: HTTPProbe) -> re.Match \| None` | function / method |
+| [`_sample_is_truncated`](../../collector/validation/distributions.py#L359) | `_sample_is_truncated(probe: HTTPProbe) -> bool` | function / method |
+| [`_total_size`](../../collector/validation/distributions.py#L370) | `_total_size(probe: HTTPProbe, head: HTTPProbe) -> int \| None` | function / method |
+| [`_validated_format`](../../collector/validation/distributions.py#L393) | `_validated_format(distribution: DistributionCandidate, content_type: str, content_disposition: str, probe: HTTPProbe) -> str` | function / method |
+| [`_format_from_body_sample`](../../collector/validation/distributions.py#L419) | `_format_from_body_sample(sample: bytes, truncated: bool=False) -> str` | function / method |
+| [`_decode_tabular_sample`](../../collector/validation/distributions.py#L475) | `_decode_tabular_sample(sample: bytes, truncated: bool) -> str \| None` | function / method |
+| [`_plausible_table`](../../collector/validation/distributions.py#L495) | `_plausible_table(text: str, delimiter: str, truncated: bool) -> bool` | function / method |
+| [`_header`](../../collector/validation/distributions.py#L524) | `_header(probe: HTTPProbe, name: str) -> str` | function / method |
+| [`_parse_content_length`](../../collector/validation/distributions.py#L528) | `_parse_content_length(value: str) -> int \| None` | function / method |
 
 <a id="collector-validation-json_sample-py"></a>
 
@@ -1878,11 +1878,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`create_app.<local>.searches`](../../search_lab/backend/app.py#L89) | `searches(request: Request, owner: Owner, q: str=Query(default='', max_length=200), origin: Literal['database', 'online']=None, limit: int=Query(default=25, ge=1, le=100), cursor: str=Query(default=None, max_length=500))` | async |
 | [`create_app.<local>.observation`](../../search_lab/backend/app.py#L109) | `observation(search_id, request, owner)` | async |
 | [`create_app.<local>.detail`](../../search_lab/backend/app.py#L148) | `detail(search_id: UUID, request: Request, owner: Owner)` | async |
-| [`create_app.<local>.capture`](../../search_lab/backend/app.py#L152) | `capture(search_id: UUID, notes: Notes, request: Request, owner: Owner)` | async |
-| [`create_app.<local>.snapshots`](../../search_lab/backend/app.py#L162) | `snapshots(request: Request, owner: Owner)` | async |
-| [`create_app.<local>.read_snapshot`](../../search_lab/backend/app.py#L166) | `read_snapshot(request, owner, identifier)` | function / method |
-| [`create_app.<local>.snapshot`](../../search_lab/backend/app.py#L174) | `snapshot(identifier: UUID, request: Request, owner: Owner)` | async |
-| [`create_app.<local>.comparison`](../../search_lab/backend/app.py#L178) | `comparison(before: UUID, after: UUID, request: Request, owner: Owner)` | async |
+| [`create_app.<local>.capture`](../../search_lab/backend/app.py#L152) | `capture(search_id: UUID, notes: SnapshotCaptureRequest, request: Request, owner: Owner)` | async |
+| [`create_app.<local>.snapshots`](../../search_lab/backend/app.py#L164) | `snapshots(request: Request, owner: Owner)` | async |
+| [`create_app.<local>.read_snapshot`](../../search_lab/backend/app.py#L168) | `read_snapshot(request, owner, identifier)` | function / method |
+| [`create_app.<local>.snapshot`](../../search_lab/backend/app.py#L176) | `snapshot(identifier: UUID, request: Request, owner: Owner)` | async |
+| [`create_app.<local>.comparison`](../../search_lab/backend/app.py#L180) | `comparison(before: UUID, after: UUID, request: Request, owner: Owner)` | async |
 
 <a id="search_lab-backend-attempts-py"></a>
 

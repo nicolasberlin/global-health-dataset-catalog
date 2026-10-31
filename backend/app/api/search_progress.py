@@ -10,13 +10,13 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from app.api.presenters.search import public_search_progress
-from app.api.schemas.search import CollectorSearchProgressResponse
+from app.api.schemas.search import SearchProgressResponse
 from app.db.search.progress import read_search_progress
 
 
 async def load_search_progress(
     search_id: UUID, owner_id: str,
-) -> CollectorSearchProgressResponse:
+) -> SearchProgressResponse:
     """Return the owned snapshot; hide absent and foreign searches behind the same 404."""
     snapshot = await read_search_progress(search_id, owner_id)
     if snapshot is None:

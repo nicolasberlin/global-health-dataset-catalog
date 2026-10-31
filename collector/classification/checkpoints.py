@@ -34,7 +34,7 @@ class CheckpointedLLMClient:
         self.configuration = configuration
         self.validate = validate
 
-    def classify_page(self, payload: dict[str, object]) -> dict[str, object]:
+    def classify_payload(self, payload: dict[str, object]) -> dict[str, object]:
         request_body = self.client.prepare_request(payload)
 
         def invoke():

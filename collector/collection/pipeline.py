@@ -18,7 +18,7 @@ from collector.network.fetch import PageFetchError
 from collector.storage.metadata import metadata_evidence, normalize_doi
 from collector.storage.models import CollectedDataset, DistributionCandidate, PageSnapshot
 from collector.url_utils import normalize_http_url
-from collector.validation.downloads import page_access_diagnostic
+from collector.validation.distributions import page_access_diagnostic
 
 
 def analyze_html_page(

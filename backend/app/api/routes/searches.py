@@ -15,11 +15,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
-from app.api.schemas.common import CollectorHTTPError
+from app.api.schemas.common import HttpErrorResponse
 from app.api.schemas.search import (
-    CollectorSearchCommandResponse,
-    CollectorSearchCreateRequest,
-    CollectorSearchProgressResponse,
+    SearchCreateRequest,
+    SearchProgressResponse,
+    SearchSubmissionResponse,
 )
 from app.api.search_progress import load_search_progress
 from app.auth.security import APIPrincipal, api_auth_mode, quota_http_errors, require_api_principal
@@ -39,28 +39,28 @@ _COMMAND_HEADERS = {
 # OpenAPI documentation for command responses; handlers set the actual HTTP status.
 _COMMAND_RESPONSES = {
     200: {
-        "model": CollectorSearchCommandResponse,
+        "model": SearchSubmissionResponse,
         "description": "Existing command, with its current state; no duplicate admission.",
         "headers": _COMMAND_HEADERS,
     },
     202: {
-        "model": CollectorSearchCommandResponse,
+        "model": SearchSubmissionResponse,
         "description": "Command committed; processing continues without this HTTP client.",
         "headers": _COMMAND_HEADERS,
     },
-    400: {"model": CollectorHTTPError, "description": "Search query is blank."},
+    400: {"model": HttpErrorResponse, "description": "Search query is blank."},
     401: {
-        "model": CollectorHTTPError,
+        "model": HttpErrorResponse,
         "description": "Missing or invalid visitor session.",
     },
-    403: {"model": CollectorHTTPError, "description": "Visitor origin or local access rejected."},
+    403: {"model": HttpErrorResponse, "description": "Visitor origin or local access rejected."},
     409: {
-        "model": CollectorHTTPError,
+        "model": HttpErrorResponse,
         "description": "Command key already used for another operation or payload.",
     },
-    413: {"model": CollectorHTTPError, "description": "Request body exceeds the configured limit."},
+    413: {"model": HttpErrorResponse, "description": "Request body exceeds the configured limit."},
     429: {
-        "model": CollectorHTTPError,
+        "model": HttpErrorResponse,
         "description": "Quota or queue capacity exceeded; no new command committed.",
         "headers": {
             "Retry-After": {
@@ -70,7 +70,7 @@ _COMMAND_RESPONSES = {
         },
     },
     503: {
-        "model": CollectorHTTPError,
+        "model": HttpErrorResponse,
         "description": "Authentication, quotas or runtime unavailable.",
     },
 }
@@ -88,12 +88,12 @@ CommandKey = Annotated[
     responses=_COMMAND_RESPONSES,
 )
 async def create_search(
-    payload: CollectorSearchCreateRequest,
+    payload: SearchCreateRequest,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,
     idempotency_key: CommandKey,
     request: Request,
-) -> CollectorSearchCommandResponse:
+) -> SearchSubmissionResponse:
     """Accept a search submitted through POST /collector/searches.
 
     Save the command for background processing and return its ID and progress URL.
@@ -138,7 +138,7 @@ async def _search_command_response(row, replayed, principal, response, request):
     response.status_code = 200 if replayed else 202
     progress_url = request.url_for("search_progress", search_id=str(row["id"])).path
     response.headers["Location"] = progress_url
-    return CollectorSearchCommandResponse(
+    return SearchSubmissionResponse(
         search_id=row["id"],
         execution_status=progress.execution_status,
         attempt=progress.attempt,
@@ -151,7 +151,7 @@ async def latest_search(
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,
     with_candidates: bool = False,
-) -> CollectorSearchProgressResponse:
+) -> SearchProgressResponse:
     """Read the owner's latest search, as requested by the Python client's --latest.
 
     with_candidates=True selects the latest search with saved candidates instead.
@@ -176,7 +176,7 @@ async def search_progress(
     search_id: UUID,
     principal: Annotated[APIPrincipal, Depends(require_api_principal)],
     response: Response,
-) -> CollectorSearchProgressResponse:
+) -> SearchProgressResponse:
     """Read one owned search and prepare its progress response for the client.
 
     Called by GET /collector/searches/{search_id}/progress. The shared

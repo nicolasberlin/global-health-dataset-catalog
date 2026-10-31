@@ -20,7 +20,7 @@ from collector.network.fetch import (
     open_public_http_url,
 )
 from collector.network.transport import DeadlineHTTPSHandler
-from collector.validation.downloads import probe_url
+from collector.validation.distributions import probe_url
 
 
 def test_public_http_fetch_blocks_private_url_before_opening(monkeypatch):

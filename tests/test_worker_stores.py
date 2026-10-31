@@ -29,7 +29,7 @@ async def test_collection_trace_failure_keeps_collection_stage(monkeypatch, fail
     )
     monkeypatch.setattr(stores, "write_collection_trace", write)
     version = datetime(2026, 10, 30, tzinfo=timezone.utc)
-    trace = stores.PostgresCollectionTrace(asyncio.get_running_loop(), 1, version)
+    trace = stores.PostgresCollectionTraceWriter(asyncio.get_running_loop(), 1, version)
     observation = {"method": "direct", "status": "running"}
 
     with pytest.raises(PersistenceFailure) as caught:
@@ -71,7 +71,7 @@ async def test_submission_failure_closes_coroutine_and_keeps_stage(monkeypatch, 
         call = partial(stores.PostgresVoteStore(loop)._wait, AsyncMock())
         stage = "classification"
     else:
-        trace = stores.PostgresCollectionTrace(loop, 1, datetime.now(timezone.utc))
+        trace = stores.PostgresCollectionTraceWriter(loop, 1, datetime.now(timezone.utc))
         call = partial(trace, 0, {})
         stage = "collection"
 
