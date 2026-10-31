@@ -64,3 +64,77 @@ def run_voters(
     finally:
         control = execution_control.get()
         executor.shutdown(wait=control is None or not control.stopped.is_set(), cancel_futures=True)
+
+
+def _validate_voting_thresholds(
+    *,
+    voter_count: int,
+    votes_required: int,
+    minimum_successful_votes: int | None,
+) -> int:
+    minimum = (
+        votes_required
+        if minimum_successful_votes is None
+        else minimum_successful_votes
+    )
+
+    if votes_required < 1:
+        raise ValueError("votes_required must be at least 1.")
+    if minimum < 1:
+        raise ValueError("minimum_successful_votes must be at least 1.")
+    if votes_required > voter_count:
+        raise ValueError("votes_required cannot exceed voter count.")
+    if minimum > voter_count:
+        raise ValueError("minimum_successful_votes cannot exceed voter count.")
+    if minimum < votes_required:
+        raise ValueError(
+            "minimum_successful_votes cannot be lower than votes_required."
+        )
+
+    return minimum
+
+
+def _minimum_votes_error(
+    minimum_successful_votes: int,
+    successful_votes: int,
+    failures: list[dict[str, str]],
+) -> str:
+    failure_summary = "; ".join(
+        f"{failure['voter_id']}: {failure['error']}"
+        for failure in failures
+    )
+
+    message = (
+        f"At least {minimum_successful_votes} classifier votes are required; "
+        f"{successful_votes} succeeded."
+    )
+
+    if failure_summary:
+        return f"{message} Failures: {failure_summary}"
+
+    return message
+
+
+def _ensemble_summary(
+    *,
+    voters: list[dict[str, object]],
+    failures: list[dict[str, object]],
+    votes_required: int,
+    minimum_successful_votes: int,
+    accepted_votes: int,
+    decision: str,
+    decision_reason: str,
+    decision_voter_ids: list[str],
+) -> dict[str, object]:
+    return {
+        "votes_required": votes_required,
+        "minimum_successful_votes": minimum_successful_votes,
+        "successful_votes": len(voters),
+        "failed_votes": len(failures),
+        "accepted_votes": accepted_votes,
+        "decision": decision,
+        "decision_reason": decision_reason,
+        "decision_voter_ids": decision_voter_ids,
+        "voters": voters,
+        "failures": failures,
+    }

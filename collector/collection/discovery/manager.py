@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collector.collection.discovery.adapters import default_adapters
+from collector.collection.discovery.models import DiscoveredPage, DiscoveryAdapter
 from collector.config import DEFAULT_CONFIG, CollectorConfig
-from collector.discovery.adapters import DiscoveredPage, DiscoveryAdapter, default_adapters
 
 
 def discover_source(

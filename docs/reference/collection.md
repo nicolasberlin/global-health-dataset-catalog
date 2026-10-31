@@ -19,6 +19,14 @@ responses with at least two positive votes. Two positive votes plus a technical
 failure are insufficient. Page classification uses the selected record's evidence;
 it does not repeat the query-relevance decision.
 
+The implementations are separated by responsibility under
+`collector/classification/`: `relevance/` owns candidate relevance to the user's
+query, while `eligibility/` owns dataset page acceptance during collection. Each
+contains `models.py`, `llm.py`, `ensemble.py` and `prompts.py`. The shared factory
+constructs both default ensembles; HTTP transport, persisted checkpoints and vote
+execution remain common. See the [architecture guide](../technical-design-document.md)
+for the complete module layout and shared helpers.
+
 Record resolution tries these permitted methods in order:
 
 1. The official API through a recognized, configured connector.
@@ -39,6 +47,13 @@ validated and limited resources, without claiming exhaustive repository coverage
 Dataverse, Zenodo, Figshare, Dryad, InvenioRDM and DSpace 7+ are record connectors,
 not additional search crawlers. CKAN, Socrata and `data.json` source discovery is
 a separate entry path sharing extraction, page classification and validation.
+Source exploration is implemented in `collector/collection/discovery/`: the manager
+selects the first matching adapter in the order CKAN, Socrata, data.json, then
+generic website discovery. The generic adapter explores same-domain sitemaps and
+falls back to the source page. Discovery contracts live in `models.py`; shared
+adapter metadata helpers and resource-format exclusions live in `metadata.py`.
+Bounded JSON fetching lives in `collector/network/json.py`, also used directly by
+DataCite, so external repository search does not depend on collection discovery.
 See [connector contracts](collection-connectors.md) for supported URLs, host/API
 configuration and repository-specific version rules.
 

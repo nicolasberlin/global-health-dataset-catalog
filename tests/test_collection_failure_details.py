@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 import pytest
 from app.db.collection.traces.sanitization import safe_observation
 
-from collector.classification.page import PageClassification
+from collector.classification.eligibility.models import PageClassification
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.failures import CollectionTransportError

@@ -17,7 +17,7 @@ from app.workers.sql_retries import persist_with_retry
 from psycopg.errors import DiskFull, QueryCanceled
 
 from collector.budget import active_collection_budget
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.storage.models import CollectionResult
 

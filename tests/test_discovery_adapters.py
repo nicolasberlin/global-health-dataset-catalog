@@ -5,15 +5,15 @@ import json
 
 import pytest
 
-from collector.config import CollectorConfig
-from collector.discovery.adapters import (
+from collector.collection.discovery.adapters import (
     ADAPTERS,
     CKANAdapter,
     DataJsonAdapter,
     GenericWebsiteAdapter,
     SocrataAdapter,
 )
-from collector.discovery.manager import discover_source
+from collector.collection.discovery.manager import discover_source
+from collector.config import CollectorConfig
 
 
 @pytest.mark.parametrize("kind", ["ckan", "socrata", "data_json", "sitemap"])
@@ -54,8 +54,8 @@ def test_default_discovery_requests_use_each_runs_settings(monkeypatch, kind):
             body = f"<urlset><url><loc>{source}/dataset</loc></url></urlset>".encode()
         return Response(url, body)
 
-    monkeypatch.setattr("collector.discovery.adapters.shared.open_public_http_url", open_url)
-    monkeypatch.setattr("collector.discovery.sitemap.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.network.json.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url", open_url)
     for config in (
         CollectorConfig(user_agent="Discovery/1", request_timeout_seconds=1.5, max_sample_bytes=8),
         CollectorConfig(user_agent="Discovery/2", request_timeout_seconds=2.5),

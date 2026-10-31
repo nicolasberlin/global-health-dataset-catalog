@@ -11,7 +11,7 @@ from app.auth.security import APIPrincipal
 from app.db.connection import _fetchall, _require_database_pool
 from fastapi import Response
 
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 from collector.repository_search import RepositorySearchResult
 
 SOURCE_URL = "https://repository.example.org/mortality"

@@ -92,6 +92,46 @@ compatibility import surface for `collect_source_with_report`,
 `ValidateDistributionFunction` type aliases. Internal callers import the service
 directly. Source identification belongs to `extraction/source_identity.py`.
 
+Source exploration belongs to `collector/collection/discovery/`, distinct from
+external candidate search in `collector/repository_search/`:
+
+```text
+collector/
+├── repository_search/
+├── collection/
+│   └── discovery/
+│       ├── __init__.py
+│       ├── manager.py
+│       ├── models.py
+│       ├── metadata.py
+│       ├── sitemap.py
+│       └── adapters/
+│           ├── __init__.py
+│           ├── ckan.py
+│           ├── socrata.py
+│           ├── data_json.py
+│           └── generic.py
+└── network/
+    ├── json.py
+    └── ...
+```
+
+`manager.py` runs the first adapter that recognizes the source. The registry in
+`adapters/__init__.py` keeps the order CKAN, Socrata, data.json, then generic
+website discovery, with per-run request settings. `models.py` owns `DiscoveredPage`,
+`DiscoveryAdapter` and the injected `JsonFetcher` contract. `metadata.py` owns
+adapter metadata normalization, vocabularies and resource-format exclusions.
+`sitemap.py` retains sitemap parsing, ranking, traversal limits and bounded text
+fetching; these operations are specific to source exploration.
+
+`collector/network/json.py` owns `fetch_json_url()`, `JsonDocument` and
+`document_url()`. DataCite and source adapters share this transport without
+repository search depending on collection discovery. Effective response URLs,
+JSON object/list handling, byte limits, deadlines, public-address and redirect
+checks, exceptions and error messages remain unchanged. Callers import the owning
+modules directly; the former discovery package and mixed `adapters/shared.py`
+module are removed.
+
 `collector/network/` groups HTTP fetching (`fetch.py`), connection and deadline
 handling (`transport.py`), bounded DNS resolution (`resolver.py`) and the shared
 public-address policy (`policy.py`). The package initializer does not import
@@ -99,9 +139,59 @@ these implementations, and `policy.py` needs only the standard library. Containe
 entrypoints can therefore import firewall address rules before loading the
 application's dependency stack. General URL normalization stays in `url_utils.py`.
 
-`collector/classification/llm_client.py` defines `LLMClassificationClient` with
-`classify_payload()`, used by both page and repository-result classifiers.
-`CheckpointedLLMClient` implements the same method while reusing validated votes.
+`collector/classification/` separates query relevance from collection eligibility:
+
+```text
+collector/classification/
+├── __init__.py
+├── relevance/
+│   ├── __init__.py
+│   ├── models.py
+│   ├── llm.py
+│   ├── ensemble.py
+│   └── prompts.py
+├── eligibility/
+│   ├── __init__.py
+│   ├── models.py
+│   ├── llm.py
+│   ├── ensemble.py
+│   └── prompts.py
+├── factory.py
+├── llm_client.py
+├── voting.py
+├── checkpoints.py
+├── prompts.py
+├── errors.py
+└── providers/
+    ├── __init__.py
+    └── epfl_rcp.py
+```
+
+`relevance/` evaluates external repository candidates, including DataCite results,
+against the user's query. The classification worker and repository search service
+use its contracts and classifier. `eligibility/` evaluates dataset pages during
+collection; the collection pipeline uses its contracts and classifier. Each domain
+owns its models, bounded LLM payload and response parser, aggregation rules,
+prompts and response schemas. Domain-specific helpers stay beside their callers.
+
+`factory.py` remains the central construction point for both default classifiers.
+`llm_client.py` defines `LLMClassificationClient.classify_payload()` and the shared
+HTTP implementation. `checkpoints.py` provides `CheckpointedLLMClient`, which
+implements the same method while reusing validated votes. `voting.py` owns parallel
+execution, threshold validation and common ensemble audit summaries; the final
+acceptance and relevance-label rules remain in the domain ensembles.
+
+The root `prompts.py` only builds the common Chat Completions message envelope and
+JSON schema instruction. Provider configuration remains in `providers/epfl_rcp.py`.
+`errors.py` owns `PageClassificationError`, whose existing name is retained even
+though both domains and the HTTP client use it. Shared modules do not depend on
+domain implementations; the factory and provider configuration assemble them.
+Package initializers contain documentation only, and callers import the owning
+modules directly without compatibility re-exports.
+
+This separation preserves prompts, schemas, payload formats, voter identities and
+order, thresholds, checkpoint fingerprints, retries and HTTP behavior.
+
 Bounded access and format checks live in `collector/validation/distributions.py`;
 they inspect response samples rather than downloading whole datasets.
 

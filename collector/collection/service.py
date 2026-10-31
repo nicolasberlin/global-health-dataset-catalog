@@ -8,7 +8,9 @@ from functools import partial
 from urllib.parse import urlsplit
 
 from collector.budget import CollectionBudgetExceeded, check_collection_budget, collection_budget
-from collector.classification.page import PageClassifier
+from collector.classification.eligibility.models import PageClassifier
+from collector.collection.discovery.manager import discover_source
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.pipeline import (
     _classifier_or_default,
     _usable_distribution,
@@ -22,8 +24,6 @@ from collector.collection.pipeline import (
 from collector.collection.resources import ResourceCheckState, retain_validated_resources
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.diagnostics import Diagnostic
-from collector.discovery.adapters import DiscoveredPage
-from collector.discovery.manager import discover_source
 from collector.extraction.errors import ExtractionError
 from collector.network.fetch import FetchedPage, PageFetchError, fetch_public_html
 from collector.storage.models import (

@@ -7,10 +7,10 @@ import re
 from collections.abc import Iterable
 from urllib.parse import urlencode
 
-from collector.discovery.adapters import fetch_json_url
 from collector.extraction.dataset_metadata import build_dataset_metadata
 from collector.extraction.errors import ExtractionError
 from collector.extraction.extractor import html_to_text
+from collector.network.json import fetch_json_url
 from collector.repository_search.filtering import _http_url, _text
 from collector.repository_search.models import (
     INVALID_METADATA_MESSAGE,

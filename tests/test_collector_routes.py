@@ -11,7 +11,7 @@ from app.auth.security import APIPrincipal
 from app.db.catalog.search import normalize_dataset_search_query
 from helpers.workflows import CANDIDATE_ID
 
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 
 pytestmark = pytest.mark.anyio
 

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.schemas.common import ProcessingDiagnosticView
-from collector.classification.repository import (
+from collector.classification.relevance.models import (
     MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_ITEMS,

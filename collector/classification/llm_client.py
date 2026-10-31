@@ -17,7 +17,7 @@ from collector.budget import (
     remaining_timeout,
     request_budget,
 )
-from collector.classification.page import PageClassificationError
+from collector.classification.errors import PageClassificationError
 from collector.diagnostics import retry_after
 from collector.execution import check_execution_active
 from collector.network.fetch import decode_json_body, is_timeout_error

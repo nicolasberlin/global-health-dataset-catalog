@@ -12,10 +12,9 @@ from urllib.request import Request
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget, read_with_budget
+from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.classification.page import PageClassificationError
-from collector.discovery.adapters.shared import fetch_json_url
-from collector.discovery.sitemap import fetch_text_url
+from collector.collection.discovery.sitemap import fetch_text_url
 from collector.network.fetch import (
     _connect_public,
     _PublicHTTPRedirectHandler,
@@ -23,6 +22,7 @@ from collector.network.fetch import (
     fetch_public_html,
     open_public_http_url,
 )
+from collector.network.json import fetch_json_url
 from collector.storage.models import DistributionCandidate, HTTPProbe
 from collector.validation.distributions import probe_url, validate_distribution
 
@@ -181,10 +181,10 @@ def test_validation_rechecks_budget_between_head_and_get(clock, head_duration, e
     [
         ("collector.network.fetch", lambda: fetch_public_html("https://public.example/page")),
         (
-            "collector.discovery.adapters.shared",
+            "collector.network.json",
             lambda: fetch_json_url("https://public.example/json"),
         ),
-        ("collector.discovery.sitemap", lambda: fetch_text_url("https://public.example/sitemap")),
+        ("collector.collection.discovery.sitemap", lambda: fetch_text_url("https://public.example/sitemap")),
         (
             "collector.validation.distributions",
             lambda: probe_url(

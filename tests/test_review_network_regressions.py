@@ -15,11 +15,12 @@ from urllib.response import addinfourl
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
+from collector.classification.eligibility.models import PageClassification
+from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.classification.page import PageClassification, PageClassificationError
+from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.service import collect_source_with_report
-from collector.discovery.adapters import DiscoveredPage
-from collector.discovery.sitemap import fetch_text_url
 from collector.storage.models import DistributionCandidate
 from collector.validation.distributions import probe_url
 
@@ -240,7 +241,7 @@ def test_sitemap_limit_applies_to_decompressed_content(monkeypatch, budgeted, si
 
     response = Response(gzip.compress(b"a" * size))
     assert len(response.getvalue()) < 20_000
-    monkeypatch.setattr("collector.discovery.sitemap.open_public_http_url",
+    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url",
                         lambda *args, **kwargs: response)
     with collection_budget(seconds=5) if budgeted else nullcontext():
         if size > 20_000:
@@ -259,7 +260,7 @@ def test_sitemap_limit_applies_across_multiple_gzip_members(monkeypatch):
             return "https://data.example/sitemap.xml.gz"
 
     response = Response(gzip.compress(b"a" * 12_000) + gzip.compress(b"b" * 12_000))
-    monkeypatch.setattr("collector.discovery.sitemap.open_public_http_url",
+    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url",
                         lambda *args, **kwargs: response)
     with pytest.raises(ValueError, match="Decompressed sitemap is too large"):
         fetch_text_url(response.geturl(), max_bytes=20_000)
@@ -274,7 +275,7 @@ def test_truncated_gzip_sitemap_is_a_closed_controlled_failure(monkeypatch):
             return "https://data.example/sitemap.xml.gz"
 
     response = Response(gzip.compress(b"<urlset></urlset>")[:-8])
-    monkeypatch.setattr("collector.discovery.sitemap.open_public_http_url",
+    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url",
                         lambda *args, **kwargs: response)
     with pytest.raises(ValueError, match="Could not fetch sitemap URL"):
         fetch_text_url(response.geturl(), max_bytes=20_000)

@@ -7,17 +7,8 @@ import pytest
 from helpers.classification import distribution as _distribution
 from helpers.classification import page as _page
 
-from collector.classification.ensemble import (
-    EnsemblePageClassifier,
-    EnsembleRepositoryRelevanceClassifier,
-)
-from collector.classification.factory import (
-    build_default_page_classifier,
-    build_default_repository_result_classifier,
-)
-from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.classification.page import PageClassificationError
-from collector.classification.page_llm_classifier import (
+from collector.classification.eligibility.ensemble import EnsemblePageClassifier
+from collector.classification.eligibility.llm import (
     MAX_DISTRIBUTIONS,
     MAX_HEADINGS,
     MAX_PAGE_DESCRIPTION_CHARS,
@@ -29,13 +20,20 @@ from collector.classification.page_llm_classifier import (
     MAX_PAGE_URL_CHARS,
     LLMPageClassifier,
 )
+from collector.classification.errors import PageClassificationError
+from collector.classification.factory import (
+    build_default_page_classifier,
+    build_default_repository_result_classifier,
+)
+from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.classification.providers.epfl_rcp import (
     DEFAULT_DEEPSEEK_RCP_MODEL,
     EPFL_RCP_CHAT_COMPLETIONS_URL,
     epfl_rcp_chat_completions_provider_config,
     epfl_rcp_repository_relevance_provider_config,
 )
-from collector.classification.repository_llm_classifier import LLMRepositoryRelevanceClassifier
+from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
+from collector.classification.relevance.llm import LLMRepositoryRelevanceClassifier
 from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.storage.models import DistributionCandidate, PageSnapshot
 

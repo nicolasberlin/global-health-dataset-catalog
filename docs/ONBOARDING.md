@@ -121,14 +121,19 @@ installations. No setup script moves or deletes database volumes.
 | Trace recording, history and evidence filtering | `backend/app/db/collection/traces/` |
 | Shared persisted owner ID validation | `backend/app/db/owner_ids.py` |
 | Repository discovery and normalization | `collector/repository_search/` |
+| Source exploration through CKAN, Socrata, data.json and sitemaps | `collector/collection/discovery/manager.py`, `collector/collection/discovery/adapters/`, `collector/collection/discovery/sitemap.py` |
+| Source-discovery contracts and shared adapter metadata normalization | `collector/collection/discovery/models.py`, `collector/collection/discovery/metadata.py` |
 | Record-platform connector | `collector/collection/connectors/`, `collector/collection/registry.py` |
 | Collection entry points and orchestration | `collector/collection/service.py`, `collector/collection/orchestrator.py` |
 | HTML/JSON-LD extraction | `collector/extraction/` |
 | Source identity from extracted evidence | `collector/extraction/source_identity.py` |
-| Prompts, voters and classification parsing | `collector/classification/` |
+| External repository candidate relevance: contracts, prompts, parsing and aggregation | `collector/classification/relevance/` |
+| Dataset page eligibility during collection: contracts, prompts, parsing and aggregation | `collector/classification/eligibility/` |
+| Default classifier construction and shared vote execution | `collector/classification/factory.py`, `collector/classification/voting.py` |
 | Shared LLM client and durable response checkpoints | `collector/classification/llm_client.py`, `collector/classification/checkpoints.py` |
 | Distribution access checks | `collector/validation/distributions.py` |
 | HTTP fetching and request deadlines | `collector/network/fetch.py`, `collector/network/transport.py` |
+| Bounded public JSON fetching and effective document URLs | `collector/network/json.py` |
 | DNS and shared public-address policy | `collector/network/resolver.py`, `collector/network/policy.py` |
 | Catalogue aggregates and distribution evidence | `backend/app/db/catalog/datasets.py`, `backend/app/db/catalog/distributions.py` |
 | Catalogue observations and full-text search | `backend/app/db/catalog/observations.py`, `backend/app/db/catalog/search.py` |

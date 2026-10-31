@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import replace
 
-from collector.classification.repository import MAX_REPOSITORY_URL_CHARS
+from collector.classification.relevance.models import MAX_REPOSITORY_URL_CHARS
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
 from collector.repository_search.models import RepositorySearchResult
 from collector.url_utils import normalize_http_url

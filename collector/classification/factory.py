@@ -5,16 +5,13 @@ from __future__ import annotations
 import os
 
 from collector.classification.checkpoints import CheckpointedLLMClient, VoteStore
-from collector.classification.ensemble import (
-    EnsemblePageClassifier,
-    EnsembleRepositoryRelevanceClassifier,
-)
-from collector.classification.llm_client import HTTPJSONLLMClient
-from collector.classification.page import PageClassifier
-from collector.classification.page_llm_classifier import (
+from collector.classification.eligibility.ensemble import EnsemblePageClassifier
+from collector.classification.eligibility.llm import (
     LLMPageClassifier,
     _parse_page_classification,
 )
+from collector.classification.eligibility.models import PageClassifier
+from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.providers.epfl_rcp import (
     DEFAULT_APERTUS_MEDITRON_MODEL,
     DEFAULT_DEEPSEEK_RCP_MODEL,
@@ -22,11 +19,12 @@ from collector.classification.providers.epfl_rcp import (
     epfl_rcp_chat_completions_provider_config,
     epfl_rcp_repository_relevance_provider_config,
 )
-from collector.classification.repository import RepositoryResultClassifier
-from collector.classification.repository_llm_classifier import (
+from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
+from collector.classification.relevance.llm import (
     LLMRepositoryRelevanceClassifier,
     _parse_repository_relevance_classification,
 )
+from collector.classification.relevance.models import RepositoryResultClassifier
 
 # Each voter has a stable audit ID, an independently configurable model, and
 # an explicit credential source. No model has implicit configuration or key fallback.

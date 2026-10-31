@@ -1,19 +1,15 @@
-"""Discovery adapter registry and public adapter contracts."""
+"""Ordered source-adapter registry and per-run request configuration."""
 
 from functools import partial
 
+from collector.collection.discovery.adapters.ckan import CKANAdapter
+from collector.collection.discovery.adapters.data_json import DataJsonAdapter
+from collector.collection.discovery.adapters.generic import GenericWebsiteAdapter
+from collector.collection.discovery.adapters.socrata import SocrataAdapter
+from collector.collection.discovery.models import DiscoveryAdapter
+from collector.collection.discovery.sitemap import fetch_text_url
 from collector.config import DEFAULT_CONFIG, CollectorConfig
-from collector.discovery.adapters.ckan import CKANAdapter
-from collector.discovery.adapters.data_json import DataJsonAdapter
-from collector.discovery.adapters.generic import GenericWebsiteAdapter
-from collector.discovery.adapters.shared import (
-    DiscoveredPage,
-    DiscoveryAdapter,
-    JsonFetcher,
-    fetch_json_url,
-)
-from collector.discovery.adapters.socrata import SocrataAdapter
-from collector.discovery.sitemap import fetch_text_url
+from collector.network.json import fetch_json_url
 
 
 def default_adapters(config: CollectorConfig = DEFAULT_CONFIG) -> tuple[DiscoveryAdapter, ...]:
@@ -42,11 +38,7 @@ __all__ = [
     "ADAPTERS",
     "CKANAdapter",
     "DataJsonAdapter",
-    "DiscoveredPage",
-    "DiscoveryAdapter",
     "GenericWebsiteAdapter",
-    "JsonFetcher",
     "SocrataAdapter",
-    "fetch_json_url",
     "default_adapters",
 ]

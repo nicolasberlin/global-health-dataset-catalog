@@ -5,9 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from collector.discovery.adapters.shared import (
-    DiscoveredPage,
-    JsonFetcher,
+from collector.collection.discovery.metadata import (
     _dedupe,
     _demographics_from_mapping,
     _diseases_from_mapping,
@@ -16,9 +14,9 @@ from collector.discovery.adapters.shared import (
     _modalities_from_distributions,
     _publication_date_from_mapping,
     _text,
-    document_url,
-    fetch_json_url,
 )
+from collector.collection.discovery.models import DiscoveredPage, JsonFetcher
+from collector.network.json import document_url, fetch_json_url
 from collector.storage.models import DistributionCandidate
 from collector.url_utils import canonicalize_url
 

@@ -10,7 +10,7 @@ from app.db.classification.voting.coordination import _lock_run, _publish_progre
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
 from app.db.serialization import _jsonb
 from app.policies.retries import TRANSIENT, RetryPolicy, as_datetime
-from collector.classification.page import PageClassificationError
+from collector.classification.errors import PageClassificationError
 from collector.diagnostics import Diagnostic, PersistenceFailure
 
 

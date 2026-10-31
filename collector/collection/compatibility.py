@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collector.collection.contracts import StrategyResult
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.records import NormalizedRecord
-from collector.discovery.adapters.shared import DiscoveredPage
 
 
 def to_strategy_result(record: NormalizedRecord, method: str) -> StrategyResult:

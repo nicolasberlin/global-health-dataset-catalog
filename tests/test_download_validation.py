@@ -293,9 +293,9 @@ def test_probe_detects_truncation_when_server_ignores_range(monkeypatch, length)
 
 
 def test_large_json_is_retained_by_collection_pipeline():
-    from collector.classification.page import PageClassification
+    from collector.classification.eligibility.models import PageClassification
+    from collector.collection.discovery.models import DiscoveredPage
     from collector.collection.service import collect_source_with_report
-    from collector.discovery.adapters import DiscoveredPage
 
     class Classifier:
         def classify(self, page, distributions):
@@ -604,9 +604,9 @@ def test_partial_response_uses_total_size(content_range, head_size, head_etag, e
     (410, b"", "unavailable"),
 ])
 def test_failed_validations_survive_dataset_rejection(code, body, status):
-    from collector.classification.page import PageClassification
+    from collector.classification.eligibility.models import PageClassification
+    from collector.collection.discovery.models import DiscoveredPage
     from collector.collection.service import collect_source_with_report
-    from collector.discovery.adapters import DiscoveredPage
 
     class Classifier:
         def classify(self, page, distributions):

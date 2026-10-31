@@ -21,9 +21,9 @@ from collector.budget import (
 )
 from collector.collection.compatibility import to_strategy_result
 from collector.collection.contracts import StrategyResult
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.registry import default_registry
-from collector.discovery.adapters.shared import DiscoveredPage
 from collector.network.fetch import PageFetchError, decode_json_body, is_timeout_error
 from collector.network.transport import (
     DeadlineHTTPHandler,

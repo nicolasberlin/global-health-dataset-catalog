@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from collector.budget import CollectionBudgetExceeded, check_collection_budget, collection_budget
 from collector.collection.compatibility import to_strategy_result
 from collector.collection.contracts import MethodAttempt, StrategyResult, public_url
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.failures import CollectionMetadataError, CollectionStepError
 from collector.collection.http import JsonResponse, fetch_record_json
 from collector.collection.pipeline import classify_resolution, eligible_resources
@@ -17,7 +18,6 @@ from collector.collection.registry import ConnectorRegistry, default_registry
 from collector.collection.resources import ResourceCheckState, retain_validated_resources
 from collector.config import CollectorConfig
 from collector.diagnostics import Diagnostic, PipelineFailure
-from collector.discovery.adapters.shared import DiscoveredPage
 from collector.extraction.errors import ExtractionError
 from collector.network.fetch import PageFetchError, fetch_public_html, is_timeout_error
 from collector.storage.models import CollectionReport, CollectionResult

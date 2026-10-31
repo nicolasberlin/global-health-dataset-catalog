@@ -12,7 +12,7 @@ from app.db.classification.voting.runs import prepare_vote_run
 from app.db.classification.voting.votes import claim_vote, finish_vote
 from app.db.collection.traces.writing import write_collection_trace
 from app.workers.sql_retries import persist_with_retry
-from collector.classification.page import PageClassificationError
+from collector.classification.errors import PageClassificationError
 from collector.diagnostics import PersistenceFailure, PipelineFailure, voter_diagnostics
 from collector.execution import check_execution_active, wait_for_future
 

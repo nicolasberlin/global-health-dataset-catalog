@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import replace
 
-from collector.classification.repository import RepositoryResultClassifier
+from collector.classification.relevance.models import RepositoryResultClassifier
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
 from collector.observability import emit_event

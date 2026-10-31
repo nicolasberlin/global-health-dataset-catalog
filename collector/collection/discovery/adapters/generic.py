@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collector.discovery.adapters.shared import DiscoveredPage
-from collector.discovery.sitemap import TextFetcher, discover_sitemap_entries
+from collector.collection.discovery.models import DiscoveredPage
+from collector.collection.discovery.sitemap import TextFetcher, discover_sitemap_entries
 from collector.url_utils import canonicalize_url
 
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collector.classification.eligibility.models import PageClassification
+from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import LLMClassificationClient
-from collector.classification.page import PageClassification, PageClassificationError
 from collector.diagnostics import PipelineFailure
 from collector.storage.models import DistributionCandidate, PageSnapshot
 

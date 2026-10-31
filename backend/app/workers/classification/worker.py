@@ -19,7 +19,7 @@ from app.workers.sql_retries import persist_with_retry
 from app.workers.stores import PostgresVoteStore
 from collector.classification.checkpoints import VoteStore
 from collector.classification.factory import build_default_repository_result_classifier
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 from collector.diagnostics import Diagnostic
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.repository_search import RepositorySearchResult

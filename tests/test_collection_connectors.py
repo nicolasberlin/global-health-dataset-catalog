@@ -9,15 +9,15 @@ from pathlib import Path
 import pytest
 
 from collector.budget import collection_budget
-from collector.classification.page import PageClassification
+from collector.classification.eligibility.models import PageClassification
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.connectors.zenodo import ZenodoConnector
 from collector.collection.registry import ConnectorRegistry, default_registry
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
-from collector.discovery.adapters.shared import fetch_json_url
 from collector.network.fetch import FetchedPage
+from collector.network.json import fetch_json_url
 from collector.storage.metadata import enrich_from_repository
 from collector.storage.models import ValidationResult
 
@@ -332,7 +332,7 @@ def test_browser_malformed_optional_metadata_does_not_discard_html(monkeypatch):
 
 def test_collection_can_parse_lists_without_weakening_catalog_fetches(monkeypatch):
     monkeypatch.setattr(
-        "collector.discovery.adapters.shared.open_public_http_url",
+        "collector.network.json.open_public_http_url",
         lambda *args, **kwargs: io.BytesIO(b"[]"),
     )
     with pytest.raises(ValueError, match="an object"):

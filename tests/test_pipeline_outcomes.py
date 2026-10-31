@@ -12,12 +12,12 @@ from helpers.classification import page as _page
 from helpers.collection import Accept, collect
 from helpers.workflows import collection_job as _collection_job
 
+from collector.classification.eligibility.llm import LLMPageClassifier
+from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.classification.page import PageClassificationError
-from collector.classification.page_llm_classifier import LLMPageClassifier
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.service import collect_source_with_report
 from collector.diagnostics import Diagnostic, PersistenceFailure, public_diagnostics, retry_after
-from collector.discovery.adapters import DiscoveredPage
 from collector.network.fetch import FetchedPage, PageFetchError
 
 SEARCH = {"status": "completed", "origin": "online", "discovery_complete": True}

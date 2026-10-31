@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **31 October 2026**, based on Git commit `0d327dc`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **31 October 2026**, based on Git commit `349eddb`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **864 function and method definitions in 144 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **864 function and method definitions in 150 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -18,7 +18,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | ---: | ---: |
 | `backend/` | 66 | 294 |
 | `browser/` | 2 | 7 |
-| `collector/` | 65 | 470 |
+| `collector/` | 71 | 470 |
 | `scripts/` | 3 | 52 |
 | `search_lab/` | 8 | 41 |
 
@@ -94,16 +94,20 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [browser/public_proxy.py](#browser-public_proxy-py) — 6 definitions
 - [collector/budget.py](#collector-budget-py) — 12 definitions
 - [collector/classification/checkpoints.py](#collector-classification-checkpoints-py) — 4 definitions
-- [collector/classification/ensemble.py](#collector-classification-ensemble-py) — 24 definitions
+- [collector/classification/eligibility/ensemble.py](#collector-classification-eligibility-ensemble-py) — 9 definitions
+- [collector/classification/eligibility/llm.py](#collector-classification-eligibility-llm-py) — 7 definitions
+- [collector/classification/eligibility/models.py](#collector-classification-eligibility-models-py) — 1 definition
+- [collector/classification/eligibility/prompts.py](#collector-classification-eligibility-prompts-py) — 3 definitions
+- [collector/classification/errors.py](#collector-classification-errors-py) — 1 definition
 - [collector/classification/factory.py](#collector-classification-factory-py) — 4 definitions
 - [collector/classification/llm_client.py](#collector-classification-llm_client-py) — 10 definitions
-- [collector/classification/page.py](#collector-classification-page-py) — 2 definitions
-- [collector/classification/page_llm_classifier.py](#collector-classification-page_llm_classifier-py) — 7 definitions
-- [collector/classification/prompts.py](#collector-classification-prompts-py) — 7 definitions
+- [collector/classification/prompts.py](#collector-classification-prompts-py) — 1 definition
 - [collector/classification/providers/epfl_rcp.py](#collector-classification-providers-epfl_rcp-py) — 2 definitions
-- [collector/classification/repository.py](#collector-classification-repository-py) — 5 definitions
-- [collector/classification/repository_llm_classifier.py](#collector-classification-repository_llm_classifier-py) — 8 definitions
-- [collector/classification/voting.py](#collector-classification-voting-py) — 2 definitions
+- [collector/classification/relevance/ensemble.py](#collector-classification-relevance-ensemble-py) — 12 definitions
+- [collector/classification/relevance/llm.py](#collector-classification-relevance-llm-py) — 8 definitions
+- [collector/classification/relevance/models.py](#collector-classification-relevance-models-py) — 5 definitions
+- [collector/classification/relevance/prompts.py](#collector-classification-relevance-prompts-py) — 3 definitions
+- [collector/classification/voting.py](#collector-classification-voting-py) — 5 definitions
 - [collector/collection/browser.py](#collector-collection-browser-py) — 8 definitions
 - [collector/collection/compatibility.py](#collector-collection-compatibility-py) — 1 definition
 - [collector/collection/connectors/__init__.py](#collector-collection-connectors-__init__-py) — 5 definitions
@@ -116,6 +120,15 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/connectors/shared.py](#collector-collection-connectors-shared-py) — 3 definitions
 - [collector/collection/connectors/zenodo.py](#collector-collection-connectors-zenodo-py) — 7 definitions
 - [collector/collection/contracts.py](#collector-collection-contracts-py) — 1 definition
+- [collector/collection/discovery/adapters/__init__.py](#collector-collection-discovery-adapters-__init__-py) — 1 definition
+- [collector/collection/discovery/adapters/ckan.py](#collector-collection-discovery-adapters-ckan-py) — 10 definitions
+- [collector/collection/discovery/adapters/data_json.py](#collector-collection-discovery-adapters-data_json-py) — 14 definitions
+- [collector/collection/discovery/adapters/generic.py](#collector-collection-discovery-adapters-generic-py) — 3 definitions
+- [collector/collection/discovery/adapters/socrata.py](#collector-collection-discovery-adapters-socrata-py) — 10 definitions
+- [collector/collection/discovery/manager.py](#collector-collection-discovery-manager-py) — 1 definition
+- [collector/collection/discovery/metadata.py](#collector-collection-discovery-metadata-py) — 20 definitions
+- [collector/collection/discovery/models.py](#collector-collection-discovery-models-py) — 2 definitions
+- [collector/collection/discovery/sitemap.py](#collector-collection-discovery-sitemap-py) — 12 definitions
 - [collector/collection/failures.py](#collector-collection-failures-py) — 1 definition
 - [collector/collection/http.py](#collector-collection-http-py) — 3 definitions
 - [collector/collection/orchestrator.py](#collector-collection-orchestrator-py) — 4 definitions
@@ -127,14 +140,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/strategies/dataverse.py](#collector-collection-strategies-dataverse-py) — 2 definitions
 - [collector/config.py](#collector-config-py) — 5 definitions
 - [collector/diagnostics.py](#collector-diagnostics-py) — 8 definitions
-- [collector/discovery/adapters/__init__.py](#collector-discovery-adapters-__init__-py) — 1 definition
-- [collector/discovery/adapters/ckan.py](#collector-discovery-adapters-ckan-py) — 10 definitions
-- [collector/discovery/adapters/data_json.py](#collector-discovery-adapters-data_json-py) — 14 definitions
-- [collector/discovery/adapters/generic.py](#collector-discovery-adapters-generic-py) — 3 definitions
-- [collector/discovery/adapters/shared.py](#collector-discovery-adapters-shared-py) — 25 definitions
-- [collector/discovery/adapters/socrata.py](#collector-discovery-adapters-socrata-py) — 10 definitions
-- [collector/discovery/manager.py](#collector-discovery-manager-py) — 1 definition
-- [collector/discovery/sitemap.py](#collector-discovery-sitemap-py) — 12 definitions
 - [collector/execution.py](#collector-execution-py) — 9 definitions
 - [collector/extraction/dataset_metadata.py](#collector-extraction-dataset_metadata-py) — 4 definitions
 - [collector/extraction/distributions.py](#collector-extraction-distributions-py) — 8 definitions
@@ -144,6 +149,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/extraction/limits.py](#collector-extraction-limits-py) — 5 definitions
 - [collector/extraction/source_identity.py](#collector-extraction-source_identity-py) — 2 definitions
 - [collector/network/fetch.py](#collector-network-fetch-py) — 15 definitions
+- [collector/network/json.py](#collector-network-json-py) — 3 definitions
 - [collector/network/policy.py](#collector-network-policy-py) — 1 definition
 - [collector/network/resolver.py](#collector-network-resolver-py) — 3 definitions
 - [collector/network/transport.py](#collector-network-transport-py) — 20 definitions
@@ -976,36 +982,61 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`CheckpointedLLMClient.classify_payload`](../../collector/classification/checkpoints.py#L37) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
 | [`CheckpointedLLMClient.classify_payload.<local>.invoke`](../../collector/classification/checkpoints.py#L40) | `invoke()` | function / method |
 
-<a id="collector-classification-ensemble-py"></a>
+<a id="collector-classification-eligibility-ensemble-py"></a>
 
-## collector/classification/ensemble.py
+## collector/classification/eligibility/ensemble.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_validate_voting_thresholds`](../../collector/classification/ensemble.py#L30) | `_validate_voting_thresholds(*, voter_count: int, votes_required: int, minimum_successful_votes: int \| None) -> int` | function / method |
-| [`EnsemblePageClassifier.__init__`](../../collector/classification/ensemble.py#L65) | `__init__(self, voters: list[tuple[str, PageClassifier]] \| tuple[tuple[str, PageClassifier], ...], votes_required: int=2, minimum_successful_votes: int \| None=None) -> None` | function / method |
-| [`EnsemblePageClassifier.voter_ids`](../../collector/classification/ensemble.py#L87) | `voter_ids(self) -> tuple[str, ...]` | property |
-| [`EnsemblePageClassifier.votes_required`](../../collector/classification/ensemble.py#L91) | `votes_required(self) -> int` | property |
-| [`EnsemblePageClassifier.minimum_successful_votes`](../../collector/classification/ensemble.py#L95) | `minimum_successful_votes(self) -> int` | property |
-| [`EnsemblePageClassifier.classify`](../../collector/classification/ensemble.py#L99) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
-| [`EnsembleRepositoryRelevanceClassifier.__init__`](../../collector/classification/ensemble.py#L177) | `__init__(self, voters: list[tuple[str, RepositoryResultClassifier]] \| tuple[tuple[str, RepositoryResultClassifier], ...], votes_required: int=2, minimum_successful_votes: int \| None=None) -> None` | function / method |
-| [`EnsembleRepositoryRelevanceClassifier.voter_ids`](../../collector/classification/ensemble.py#L206) | `voter_ids(self) -> tuple[str, ...]` | property |
-| [`EnsembleRepositoryRelevanceClassifier.votes_required`](../../collector/classification/ensemble.py#L210) | `votes_required(self) -> int` | property |
-| [`EnsembleRepositoryRelevanceClassifier.minimum_successful_votes`](../../collector/classification/ensemble.py#L214) | `minimum_successful_votes(self) -> int` | property |
-| [`EnsembleRepositoryRelevanceClassifier.classify`](../../collector/classification/ensemble.py#L218) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
-| [`_page_vote`](../../collector/classification/ensemble.py#L307) | `_page_vote(voter_id: str, classification: PageClassification) -> PageClassificationVote` | function / method |
-| [`_repository_vote`](../../collector/classification/ensemble.py#L318) | `_repository_vote(voter_id: str, classification: RepositoryClassification) -> RepositoryClassificationVote` | function / method |
-| [`_minimum_votes_error`](../../collector/classification/ensemble.py#L330) | `_minimum_votes_error(minimum_successful_votes: int, successful_votes: int, failures: list[dict[str, str]]) -> str` | function / method |
-| [`_ensemble_summary`](../../collector/classification/ensemble.py#L351) | `_ensemble_summary(*, voters: list[dict[str, object]], failures: list[dict[str, object]], votes_required: int, minimum_successful_votes: int, accepted_votes: int, decision: str, decision_reason: str, decision_voter_ids: list[str]) -> dict[str, object]` | function / method |
-| [`_vote_summary`](../../collector/classification/ensemble.py#L376) | `_vote_summary(vote: PageClassificationVote) -> dict[str, object]` | function / method |
-| [`_repository_vote_summary`](../../collector/classification/ensemble.py#L386) | `_repository_vote_summary(vote: RepositoryClassificationVote) -> dict[str, object]` | function / method |
-| [`_decision_votes`](../../collector/classification/ensemble.py#L398) | `_decision_votes(votes: list[PageClassificationVote], accepted: bool) -> list[PageClassificationVote]` | function / method |
-| [`_decision_reason`](../../collector/classification/ensemble.py#L416) | `_decision_reason(*, accepted: bool, votes: list[PageClassificationVote], votes_required: int) -> str` | function / method |
-| [`_repository_decision_votes`](../../collector/classification/ensemble.py#L437) | `_repository_decision_votes(votes: list[RepositoryClassificationVote], accepted: bool) -> list[RepositoryClassificationVote]` | function / method |
-| [`_repository_decision_reason`](../../collector/classification/ensemble.py#L455) | `_repository_decision_reason(*, accepted: bool, votes: list[RepositoryClassificationVote], votes_required: int) -> str` | function / method |
-| [`_majority_relevance_label`](../../collector/classification/ensemble.py#L476) | `_majority_relevance_label(votes: Iterable[RepositoryClassificationVote]) -> RepositoryRelevanceLabel` | function / method |
-| [`_relevance_reason`](../../collector/classification/ensemble.py#L501) | `_relevance_reason(votes: Iterable[RepositoryClassificationVote], relevance_label: RepositoryRelevanceLabel) -> str` | function / method |
-| [`_combined_missing_information`](../../collector/classification/ensemble.py#L518) | `_combined_missing_information(votes: Iterable[RepositoryClassificationVote], relevance_label: RepositoryRelevanceLabel) -> list[str]` | function / method |
+| [`EnsemblePageClassifier.__init__`](../../collector/classification/eligibility/ensemble.py#L27) | `__init__(self, voters: list[tuple[str, PageClassifier]] \| tuple[tuple[str, PageClassifier], ...], votes_required: int=2, minimum_successful_votes: int \| None=None) -> None` | function / method |
+| [`EnsemblePageClassifier.voter_ids`](../../collector/classification/eligibility/ensemble.py#L49) | `voter_ids(self) -> tuple[str, ...]` | property |
+| [`EnsemblePageClassifier.votes_required`](../../collector/classification/eligibility/ensemble.py#L53) | `votes_required(self) -> int` | property |
+| [`EnsemblePageClassifier.minimum_successful_votes`](../../collector/classification/eligibility/ensemble.py#L57) | `minimum_successful_votes(self) -> int` | property |
+| [`EnsemblePageClassifier.classify`](../../collector/classification/eligibility/ensemble.py#L61) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
+| [`_page_vote`](../../collector/classification/eligibility/ensemble.py#L132) | `_page_vote(voter_id: str, classification: PageClassification) -> PageClassificationVote` | function / method |
+| [`_vote_summary`](../../collector/classification/eligibility/ensemble.py#L143) | `_vote_summary(vote: PageClassificationVote) -> dict[str, object]` | function / method |
+| [`_decision_votes`](../../collector/classification/eligibility/ensemble.py#L153) | `_decision_votes(votes: list[PageClassificationVote], accepted: bool) -> list[PageClassificationVote]` | function / method |
+| [`_decision_reason`](../../collector/classification/eligibility/ensemble.py#L171) | `_decision_reason(*, accepted: bool, votes: list[PageClassificationVote], votes_required: int) -> str` | function / method |
+
+<a id="collector-classification-eligibility-llm-py"></a>
+
+## collector/classification/eligibility/llm.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`LLMPageClassifier.__init__`](../../collector/classification/eligibility/llm.py#L32) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
+| [`LLMPageClassifier.classify`](../../collector/classification/eligibility/llm.py#L38) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
+| [`_build_llm_payload`](../../collector/classification/eligibility/llm.py#L57) | `_build_llm_payload(page: PageSnapshot, distributions: list[DistributionCandidate]) -> dict[str, object]` | function / method |
+| [`_bounded_metadata_value`](../../collector/classification/eligibility/llm.py#L97) | `_bounded_metadata_value(key: str, value: str) -> str` | function / method |
+| [`_parse_page_classification`](../../collector/classification/eligibility/llm.py#L110) | `_parse_page_classification(raw: dict[str, object]) -> PageClassification` | function / method |
+| [`_required_bool`](../../collector/classification/eligibility/llm.py#L127) | `_required_bool(raw: dict[str, object], field_name: str) -> bool` | function / method |
+| [`_required_signal_object`](../../collector/classification/eligibility/llm.py#L136) | `_required_signal_object(raw: dict[str, object], field_name: str) -> dict[str, object]` | function / method |
+
+<a id="collector-classification-eligibility-models-py"></a>
+
+## collector/classification/eligibility/models.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`PageClassifier.classify`](../../collector/classification/eligibility/models.py#L41) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
+
+<a id="collector-classification-eligibility-prompts-py"></a>
+
+## collector/classification/eligibility/prompts.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_build_epfl_rcp_chat_completions_request_body`](../../collector/classification/eligibility/prompts.py#L8) | `_build_epfl_rcp_chat_completions_request_body(payload: dict[str, object], model: str) -> dict[str, object]` | function / method |
+| [`_system_prompt`](../../collector/classification/eligibility/prompts.py#L20) | `_system_prompt() -> str` | function / method |
+| [`_classification_schema`](../../collector/classification/eligibility/prompts.py#L40) | `_classification_schema() -> dict[str, object]` | function / method |
+
+<a id="collector-classification-errors-py"></a>
+
+## collector/classification/errors.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`PageClassificationError.__init__`](../../collector/classification/errors.py#L9) | `__init__(self, message: str, *, code='processing_failed', recovery='manual', retry_at=None, diagnostics=None)` | function / method |
 
 <a id="collector-classification-factory-py"></a>
 
@@ -1013,10 +1044,10 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`validate_default_classifier_configuration`](../../collector/classification/factory.py#L50) | `validate_default_classifier_configuration() -> None` | function / method |
-| [`_voters`](../../collector/classification/factory.py#L59) | `_voters(provider_builder, classifier_type, validate, vote_store)` | function / method |
-| [`build_default_page_classifier`](../../collector/classification/factory.py#L95) | `build_default_page_classifier(*, vote_store: VoteStore \| None=None) -> PageClassifier` | function / method |
-| [`build_default_repository_result_classifier`](../../collector/classification/factory.py#L109) | `build_default_repository_result_classifier(*, vote_store: VoteStore \| None=None) -> RepositoryResultClassifier` | function / method |
+| [`validate_default_classifier_configuration`](../../collector/classification/factory.py#L48) | `validate_default_classifier_configuration() -> None` | function / method |
+| [`_voters`](../../collector/classification/factory.py#L57) | `_voters(provider_builder, classifier_type, validate, vote_store)` | function / method |
+| [`build_default_page_classifier`](../../collector/classification/factory.py#L93) | `build_default_page_classifier(*, vote_store: VoteStore \| None=None) -> PageClassifier` | function / method |
+| [`build_default_repository_result_classifier`](../../collector/classification/factory.py#L107) | `build_default_repository_result_classifier(*, vote_store: VoteStore \| None=None) -> RepositoryResultClassifier` | function / method |
 
 <a id="collector-classification-llm_client-py"></a>
 
@@ -1035,42 +1066,13 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`HTTPJSONLLMClient._classify_request`](../../collector/classification/llm_client.py#L125) | `_classify_request(self, request_body, measurement)` | function / method |
 | [`HTTPJSONLLMClient._request_body`](../../collector/classification/llm_client.py#L225) | `_request_body(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
 
-<a id="collector-classification-page-py"></a>
-
-## collector/classification/page.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`PageClassificationError.__init__`](../../collector/classification/page.py#L13) | `__init__(self, message: str, *, code='processing_failed', recovery='manual', retry_at=None, diagnostics=None)` | function / method |
-| [`PageClassifier.classify`](../../collector/classification/page.py#L61) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
-
-<a id="collector-classification-page_llm_classifier-py"></a>
-
-## collector/classification/page_llm_classifier.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`LLMPageClassifier.__init__`](../../collector/classification/page_llm_classifier.py#L31) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
-| [`LLMPageClassifier.classify`](../../collector/classification/page_llm_classifier.py#L37) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
-| [`_build_llm_payload`](../../collector/classification/page_llm_classifier.py#L56) | `_build_llm_payload(page: PageSnapshot, distributions: list[DistributionCandidate]) -> dict[str, object]` | function / method |
-| [`_bounded_metadata_value`](../../collector/classification/page_llm_classifier.py#L96) | `_bounded_metadata_value(key: str, value: str) -> str` | function / method |
-| [`_parse_page_classification`](../../collector/classification/page_llm_classifier.py#L109) | `_parse_page_classification(raw: dict[str, object]) -> PageClassification` | function / method |
-| [`_required_bool`](../../collector/classification/page_llm_classifier.py#L126) | `_required_bool(raw: dict[str, object], field_name: str) -> bool` | function / method |
-| [`_required_signal_object`](../../collector/classification/page_llm_classifier.py#L135) | `_required_signal_object(raw: dict[str, object], field_name: str) -> dict[str, object]` | function / method |
-
 <a id="collector-classification-prompts-py"></a>
 
 ## collector/classification/prompts.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_build_epfl_rcp_chat_completions_request_body`](../../collector/classification/prompts.py#L8) | `_build_epfl_rcp_chat_completions_request_body(payload: dict[str, object], model: str) -> dict[str, object]` | function / method |
-| [`_build_epfl_rcp_repository_relevance_request_body`](../../collector/classification/prompts.py#L20) | `_build_epfl_rcp_repository_relevance_request_body(payload: dict[str, object], model: str) -> dict[str, object]` | function / method |
-| [`_build_chat_completions_request_body`](../../collector/classification/prompts.py#L32) | `_build_chat_completions_request_body(payload: dict[str, object], model: str, *, system_prompt: str, schema: dict[str, object]) -> dict[str, object]` | function / method |
-| [`_system_prompt`](../../collector/classification/prompts.py#L59) | `_system_prompt() -> str` | function / method |
-| [`_repository_relevance_system_prompt`](../../collector/classification/prompts.py#L79) | `_repository_relevance_system_prompt() -> str` | function / method |
-| [`_classification_schema`](../../collector/classification/prompts.py#L203) | `_classification_schema() -> dict[str, object]` | function / method |
-| [`_repository_relevance_schema`](../../collector/classification/prompts.py#L228) | `_repository_relevance_schema() -> dict[str, object]` | function / method |
+| [`_build_chat_completions_request_body`](../../collector/classification/prompts.py#L8) | `_build_chat_completions_request_body(payload: dict[str, object], model: str, *, system_prompt: str, schema: dict[str, object]) -> dict[str, object]` | function / method |
 
 <a id="collector-classification-providers-epfl_rcp-py"></a>
 
@@ -1078,35 +1080,64 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`epfl_rcp_chat_completions_provider_config`](../../collector/classification/providers/epfl_rcp.py#L20) | `epfl_rcp_chat_completions_provider_config(*, name: str, model_env_var: str, default_model: str, api_key_env_var: str) -> LLMProviderConfig` | function / method |
-| [`epfl_rcp_repository_relevance_provider_config`](../../collector/classification/providers/epfl_rcp.py#L39) | `epfl_rcp_repository_relevance_provider_config(*, name: str, model_env_var: str, default_model: str, api_key_env_var: str) -> LLMProviderConfig` | function / method |
+| [`epfl_rcp_chat_completions_provider_config`](../../collector/classification/providers/epfl_rcp.py#L22) | `epfl_rcp_chat_completions_provider_config(*, name: str, model_env_var: str, default_model: str, api_key_env_var: str) -> LLMProviderConfig` | function / method |
+| [`epfl_rcp_repository_relevance_provider_config`](../../collector/classification/providers/epfl_rcp.py#L41) | `epfl_rcp_repository_relevance_provider_config(*, name: str, model_env_var: str, default_model: str, api_key_env_var: str) -> LLMProviderConfig` | function / method |
 
-<a id="collector-classification-repository-py"></a>
+<a id="collector-classification-relevance-ensemble-py"></a>
 
-## collector/classification/repository.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`RepositoryClassification.__post_init__`](../../collector/classification/repository.py#L65) | `__post_init__(self) -> None` | function / method |
-| [`RepositoryClassificationVote.__post_init__`](../../collector/classification/repository.py#L99) | `__post_init__(self) -> None` | function / method |
-| [`RepositoryResultClassifier.classify`](../../collector/classification/repository.py#L121) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
-| [`_validate_relevance_label`](../../collector/classification/repository.py#L125) | `_validate_relevance_label(value: object) -> None` | function / method |
-| [`_normalized_missing_information`](../../collector/classification/repository.py#L130) | `_normalized_missing_information(relevance_label: RepositoryRelevanceLabel, values: list[str]) -> list[str]` | function / method |
-
-<a id="collector-classification-repository_llm_classifier-py"></a>
-
-## collector/classification/repository_llm_classifier.py
+## collector/classification/relevance/ensemble.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`LLMRepositoryRelevanceClassifier.__init__`](../../collector/classification/repository_llm_classifier.py#L38) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
-| [`LLMRepositoryRelevanceClassifier.classify`](../../collector/classification/repository_llm_classifier.py#L44) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
-| [`_build_repository_relevance_payload`](../../collector/classification/repository_llm_classifier.py#L59) | `_build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]` | function / method |
-| [`_repository_metadata_value`](../../collector/classification/repository_llm_classifier.py#L84) | `_repository_metadata_value(key: str, value: str) -> str` | function / method |
-| [`_parse_repository_relevance_classification`](../../collector/classification/repository_llm_classifier.py#L96) | `_parse_repository_relevance_classification(raw: dict[str, object]) -> RepositoryClassification` | function / method |
-| [`_required_relevance_label`](../../collector/classification/repository_llm_classifier.py#L119) | `_required_relevance_label(raw: dict[str, object], field_name: str) -> RepositoryRelevanceLabel` | function / method |
-| [`_required_non_empty_string`](../../collector/classification/repository_llm_classifier.py#L132) | `_required_non_empty_string(raw: dict[str, object], field_name: str) -> str` | function / method |
-| [`_required_string_list`](../../collector/classification/repository_llm_classifier.py#L147) | `_required_string_list(raw: dict[str, object], field_name: str) -> list[str]` | function / method |
+| [`EnsembleRepositoryRelevanceClassifier.__init__`](../../collector/classification/relevance/ensemble.py#L40) | `__init__(self, voters: list[tuple[str, RepositoryResultClassifier]] \| tuple[tuple[str, RepositoryResultClassifier], ...], votes_required: int=2, minimum_successful_votes: int \| None=None) -> None` | function / method |
+| [`EnsembleRepositoryRelevanceClassifier.voter_ids`](../../collector/classification/relevance/ensemble.py#L69) | `voter_ids(self) -> tuple[str, ...]` | property |
+| [`EnsembleRepositoryRelevanceClassifier.votes_required`](../../collector/classification/relevance/ensemble.py#L73) | `votes_required(self) -> int` | property |
+| [`EnsembleRepositoryRelevanceClassifier.minimum_successful_votes`](../../collector/classification/relevance/ensemble.py#L77) | `minimum_successful_votes(self) -> int` | property |
+| [`EnsembleRepositoryRelevanceClassifier.classify`](../../collector/classification/relevance/ensemble.py#L81) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
+| [`_repository_vote`](../../collector/classification/relevance/ensemble.py#L170) | `_repository_vote(voter_id: str, classification: RepositoryClassification) -> RepositoryClassificationVote` | function / method |
+| [`_repository_vote_summary`](../../collector/classification/relevance/ensemble.py#L182) | `_repository_vote_summary(vote: RepositoryClassificationVote) -> dict[str, object]` | function / method |
+| [`_repository_decision_votes`](../../collector/classification/relevance/ensemble.py#L194) | `_repository_decision_votes(votes: list[RepositoryClassificationVote], accepted: bool) -> list[RepositoryClassificationVote]` | function / method |
+| [`_repository_decision_reason`](../../collector/classification/relevance/ensemble.py#L212) | `_repository_decision_reason(*, accepted: bool, votes: list[RepositoryClassificationVote], votes_required: int) -> str` | function / method |
+| [`_majority_relevance_label`](../../collector/classification/relevance/ensemble.py#L233) | `_majority_relevance_label(votes: Iterable[RepositoryClassificationVote]) -> RepositoryRelevanceLabel` | function / method |
+| [`_relevance_reason`](../../collector/classification/relevance/ensemble.py#L258) | `_relevance_reason(votes: Iterable[RepositoryClassificationVote], relevance_label: RepositoryRelevanceLabel) -> str` | function / method |
+| [`_combined_missing_information`](../../collector/classification/relevance/ensemble.py#L275) | `_combined_missing_information(votes: Iterable[RepositoryClassificationVote], relevance_label: RepositoryRelevanceLabel) -> list[str]` | function / method |
+
+<a id="collector-classification-relevance-llm-py"></a>
+
+## collector/classification/relevance/llm.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`LLMRepositoryRelevanceClassifier.__init__`](../../collector/classification/relevance/llm.py#L38) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
+| [`LLMRepositoryRelevanceClassifier.classify`](../../collector/classification/relevance/llm.py#L44) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
+| [`_build_repository_relevance_payload`](../../collector/classification/relevance/llm.py#L59) | `_build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]` | function / method |
+| [`_repository_metadata_value`](../../collector/classification/relevance/llm.py#L84) | `_repository_metadata_value(key: str, value: str) -> str` | function / method |
+| [`_parse_repository_relevance_classification`](../../collector/classification/relevance/llm.py#L96) | `_parse_repository_relevance_classification(raw: dict[str, object]) -> RepositoryClassification` | function / method |
+| [`_required_relevance_label`](../../collector/classification/relevance/llm.py#L119) | `_required_relevance_label(raw: dict[str, object], field_name: str) -> RepositoryRelevanceLabel` | function / method |
+| [`_required_non_empty_string`](../../collector/classification/relevance/llm.py#L132) | `_required_non_empty_string(raw: dict[str, object], field_name: str) -> str` | function / method |
+| [`_required_string_list`](../../collector/classification/relevance/llm.py#L147) | `_required_string_list(raw: dict[str, object], field_name: str) -> list[str]` | function / method |
+
+<a id="collector-classification-relevance-models-py"></a>
+
+## collector/classification/relevance/models.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`RepositoryClassification.__post_init__`](../../collector/classification/relevance/models.py#L65) | `__post_init__(self) -> None` | function / method |
+| [`RepositoryClassificationVote.__post_init__`](../../collector/classification/relevance/models.py#L99) | `__post_init__(self) -> None` | function / method |
+| [`RepositoryResultClassifier.classify`](../../collector/classification/relevance/models.py#L121) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
+| [`_validate_relevance_label`](../../collector/classification/relevance/models.py#L125) | `_validate_relevance_label(value: object) -> None` | function / method |
+| [`_normalized_missing_information`](../../collector/classification/relevance/models.py#L130) | `_normalized_missing_information(relevance_label: RepositoryRelevanceLabel, values: list[str]) -> list[str]` | function / method |
+
+<a id="collector-classification-relevance-prompts-py"></a>
+
+## collector/classification/relevance/prompts.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_build_epfl_rcp_repository_relevance_request_body`](../../collector/classification/relevance/prompts.py#L8) | `_build_epfl_rcp_repository_relevance_request_body(payload: dict[str, object], model: str) -> dict[str, object]` | function / method |
+| [`_repository_relevance_system_prompt`](../../collector/classification/relevance/prompts.py#L20) | `_repository_relevance_system_prompt() -> str` | function / method |
+| [`_repository_relevance_schema`](../../collector/classification/relevance/prompts.py#L144) | `_repository_relevance_schema() -> dict[str, object]` | function / method |
 
 <a id="collector-classification-voting-py"></a>
 
@@ -1116,6 +1147,9 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`run_voters`](../../collector/classification/voting.py#L31) | `run_voters(voters: Sequence[tuple[str, ClassifierT]], *, classify: Callable[[ClassifierT], ClassificationT], make_vote: Callable[[str, ClassificationT], VoteT], handled_errors: tuple[type[Exception], ...]) -> list[VoteOutcome[VoteT]]` | function / method |
 | [`run_voters.<local>.invoke`](../../collector/classification/voting.py#L46) | `invoke(voter: tuple[str, ClassifierT]) -> VoteOutcome[VoteT]` | function / method |
+| [`_validate_voting_thresholds`](../../collector/classification/voting.py#L69) | `_validate_voting_thresholds(*, voter_count: int, votes_required: int, minimum_successful_votes: int \| None) -> int` | function / method |
+| [`_minimum_votes_error`](../../collector/classification/voting.py#L97) | `_minimum_votes_error(minimum_successful_votes: int, successful_votes: int, failures: list[dict[str, str]]) -> str` | function / method |
+| [`_ensemble_summary`](../../collector/classification/voting.py#L118) | `_ensemble_summary(*, voters: list[dict[str, object]], failures: list[dict[str, object]], votes_required: int, minimum_successful_votes: int, accepted_votes: int, decision: str, decision_reason: str, decision_voter_ids: list[str]) -> dict[str, object]` | function / method |
 
 <a id="collector-collection-browser-py"></a>
 
@@ -1271,6 +1305,142 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`public_url`](../../collector/collection/contracts.py#L14) | `public_url(value: str) -> str` | function / method |
 
+<a id="collector-collection-discovery-adapters-__init__-py"></a>
+
+## collector/collection/discovery/adapters/__init__.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`default_adapters`](../../collector/collection/discovery/adapters/__init__.py#L15) | `default_adapters(config: CollectorConfig=DEFAULT_CONFIG) -> tuple[DiscoveryAdapter, ...]` | function / method |
+
+<a id="collector-collection-discovery-adapters-ckan-py"></a>
+
+## collector/collection/discovery/adapters/ckan.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`CKANAdapter.__init__`](../../collector/collection/discovery/adapters/ckan.py#L32) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
+| [`CKANAdapter.detect`](../../collector/collection/discovery/adapters/ckan.py#L40) | `detect(self, source_url: str) -> bool` | function / method |
+| [`CKANAdapter.discover`](../../collector/collection/discovery/adapters/ckan.py#L48) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
+| [`_ckan_action_url`](../../collector/collection/discovery/adapters/ckan.py#L108) | `_ckan_action_url(source_url: str, action: str, params: dict[str, str] \| None=None) -> str` | function / method |
+| [`_ckan_site_root`](../../collector/collection/discovery/adapters/ckan.py#L121) | `_ckan_site_root(source_url: str) -> str` | function / method |
+| [`_ckan_search_params`](../../collector/collection/discovery/adapters/ckan.py#L126) | `_ckan_search_params(source_url: str, rows: int) -> dict[str, str]` | function / method |
+| [`_dataset_page_url`](../../collector/collection/discovery/adapters/ckan.py#L138) | `_dataset_page_url(source_url: str, package: dict[object, object]) -> str` | function / method |
+| [`_distribution_candidates`](../../collector/collection/discovery/adapters/ckan.py#L150) | `_distribution_candidates(source_url: str, package: dict[object, object]) -> list[DistributionCandidate]` | function / method |
+| [`_publisher`](../../collector/collection/discovery/adapters/ckan.py#L192) | `_publisher(package: dict[object, object]) -> str` | function / method |
+| [`_size_from_ckan_package`](../../collector/collection/discovery/adapters/ckan.py#L200) | `_size_from_ckan_package(package: dict[object, object]) -> str` | function / method |
+
+<a id="collector-collection-discovery-adapters-data_json-py"></a>
+
+## collector/collection/discovery/adapters/data_json.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`DataJsonAdapter.__init__`](../../collector/collection/discovery/adapters/data_json.py#L40) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
+| [`DataJsonAdapter.detect`](../../collector/collection/discovery/adapters/data_json.py#L48) | `detect(self, source_url: str) -> bool` | function / method |
+| [`DataJsonAdapter.discover`](../../collector/collection/discovery/adapters/data_json.py#L56) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
+| [`_data_json_url`](../../collector/collection/discovery/adapters/data_json.py#L112) | `_data_json_url(source_url: str) -> str` | function / method |
+| [`_data_json_datasets`](../../collector/collection/discovery/adapters/data_json.py#L120) | `_data_json_datasets(data: dict[str, object]) -> list[dict[object, object]]` | function / method |
+| [`_data_json_dataset_url`](../../collector/collection/discovery/adapters/data_json.py#L136) | `_data_json_dataset_url(data_json_url: str, dataset: dict[object, object]) -> str` | function / method |
+| [`_data_json_distribution_candidates`](../../collector/collection/discovery/adapters/data_json.py#L152) | `_data_json_distribution_candidates(data_json_url: str, dataset: dict[object, object]) -> list[DistributionCandidate]` | function / method |
+| [`_data_json_format`](../../collector/collection/discovery/adapters/data_json.py#L221) | `_data_json_format(resource_url: str, format_text: str, media_type: str, anchor: str, has_download_url: bool) -> tuple[str, str]` | function / method |
+| [`_data_json_publisher`](../../collector/collection/discovery/adapters/data_json.py#L240) | `_data_json_publisher(dataset: dict[object, object]) -> str` | function / method |
+| [`_size_from_data_json_dataset`](../../collector/collection/discovery/adapters/data_json.py#L248) | `_size_from_data_json_dataset(dataset: dict[object, object]) -> str` | function / method |
+| [`_data_json_distribution_items`](../../collector/collection/discovery/adapters/data_json.py#L269) | `_data_json_distribution_items(dataset: dict[object, object]) -> list[dict[object, object]]` | function / method |
+| [`_modalities_from_data_json_dataset`](../../collector/collection/discovery/adapters/data_json.py#L273) | `_modalities_from_data_json_dataset(dataset: dict[object, object], distributions: tuple[DistributionCandidate, ...]) -> tuple[str, ...]` | function / method |
+| [`_data_json_dataset_matches_query`](../../collector/collection/discovery/adapters/data_json.py#L285) | `_data_json_dataset_matches_query(dataset: dict[object, object], query: str) -> bool` | function / method |
+| [`_source_query`](../../collector/collection/discovery/adapters/data_json.py#L298) | `_source_query(source_url: str) -> str` | function / method |
+
+<a id="collector-collection-discovery-adapters-generic-py"></a>
+
+## collector/collection/discovery/adapters/generic.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`GenericWebsiteAdapter.__init__`](../../collector/collection/discovery/adapters/generic.py#L15) | `__init__(self, fetch_text: TextFetcher \| None=None, max_sitemap_urls: int=50) -> None` | function / method |
+| [`GenericWebsiteAdapter.detect`](../../collector/collection/discovery/adapters/generic.py#L23) | `detect(self, source_url: str) -> bool` | function / method |
+| [`GenericWebsiteAdapter.discover`](../../collector/collection/discovery/adapters/generic.py#L26) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
+
+<a id="collector-collection-discovery-adapters-socrata-py"></a>
+
+## collector/collection/discovery/adapters/socrata.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_socrata_pagination`](../../collector/collection/discovery/adapters/socrata.py#L26) | `_socrata_pagination() -> dict[str, object]` | function / method |
+| [`SocrataAdapter.__init__`](../../collector/collection/discovery/adapters/socrata.py#L55) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
+| [`SocrataAdapter.detect`](../../collector/collection/discovery/adapters/socrata.py#L63) | `detect(self, source_url: str) -> bool` | function / method |
+| [`SocrataAdapter.discover`](../../collector/collection/discovery/adapters/socrata.py#L73) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
+| [`_socrata_catalog_url`](../../collector/collection/discovery/adapters/socrata.py#L154) | `_socrata_catalog_url(source_url: str, rows: int, include_source_query: bool) -> str` | function / method |
+| [`_socrata_domain`](../../collector/collection/discovery/adapters/socrata.py#L174) | `_socrata_domain(source_url: str) -> str` | function / method |
+| [`_socrata_results`](../../collector/collection/discovery/adapters/socrata.py#L178) | `_socrata_results(data: dict[str, object], source_url: str) -> list[SocrataCatalogResult]` | function / method |
+| [`_socrata_dataset_url`](../../collector/collection/discovery/adapters/socrata.py#L218) | `_socrata_dataset_url(source_url: str, result: SocrataCatalogResult) -> str` | function / method |
+| [`_socrata_distribution_candidates`](../../collector/collection/discovery/adapters/socrata.py#L241) | `_socrata_distribution_candidates(source_url: str, socrata_id: str) -> list[DistributionCandidate]` | function / method |
+| [`_socrata_site_root`](../../collector/collection/discovery/adapters/socrata.py#L274) | `_socrata_site_root(source_url: str) -> str` | function / method |
+
+<a id="collector-collection-discovery-manager-py"></a>
+
+## collector/collection/discovery/manager.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`discover_source`](../../collector/collection/discovery/manager.py#L10) | `discover_source(source_url: str, adapters: tuple[DiscoveryAdapter, ...] \| None=None, config: CollectorConfig=DEFAULT_CONFIG) -> list[DiscoveredPage]` | function / method |
+
+<a id="collector-collection-discovery-metadata-py"></a>
+
+## collector/collection/discovery/metadata.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_geography_from_mapping`](../../collector/collection/discovery/metadata.py#L74) | `_geography_from_mapping(mapping: dict[object, object]) -> list[str]` | function / method |
+| [`_publication_date_from_mapping`](../../collector/collection/discovery/metadata.py#L110) | `_publication_date_from_mapping(mapping: dict[object, object]) -> str` | function / method |
+| [`_diseases_from_mapping`](../../collector/collection/discovery/metadata.py#L126) | `_diseases_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]` | function / method |
+| [`_demographics_from_mapping`](../../collector/collection/discovery/metadata.py#L159) | `_demographics_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]` | function / method |
+| [`_modalities_from_distributions`](../../collector/collection/discovery/metadata.py#L189) | `_modalities_from_distributions(distributions: tuple[DistributionCandidate, ...]) -> tuple[str, ...]` | function / method |
+| [`_modalities_from_format`](../../collector/collection/discovery/metadata.py#L200) | `_modalities_from_format(value: str) -> list[str]` | function / method |
+| [`_first_mapping_value`](../../collector/collection/discovery/metadata.py#L218) | `_first_mapping_value(mapping: dict[object, object], *keys: str) -> str` | function / method |
+| [`_mapping_values`](../../collector/collection/discovery/metadata.py#L223) | `_mapping_values(mapping: dict[object, object], *keys: str) -> list[str]` | function / method |
+| [`_mapping_dicts`](../../collector/collection/discovery/metadata.py#L239) | `_mapping_dicts(value: object) -> list[dict[object, object]]` | function / method |
+| [`_value_text`](../../collector/collection/discovery/metadata.py#L247) | `_value_text(value: object) -> str` | function / method |
+| [`_country_values`](../../collector/collection/discovery/metadata.py#L255) | `_country_values(value: object) -> list[str]` | function / method |
+| [`_first_text`](../../collector/collection/discovery/metadata.py#L277) | `_first_text(mapping: dict[object, object], *keys: str) -> str` | function / method |
+| [`_first_text_value`](../../collector/collection/discovery/metadata.py#L286) | `_first_text_value(value: object) -> str` | function / method |
+| [`_text_values`](../../collector/collection/discovery/metadata.py#L300) | `_text_values(value: object) -> list[str]` | function / method |
+| [`_dedupe`](../../collector/collection/discovery/metadata.py#L317) | `_dedupe(values: list[str]) -> list[str]` | function / method |
+| [`_first_url`](../../collector/collection/discovery/metadata.py#L321) | `_first_url(*values: object) -> str` | function / method |
+| [`_json_ld_type_matches`](../../collector/collection/discovery/metadata.py#L337) | `_json_ld_type_matches(value: object, expected_type: str) -> bool` | function / method |
+| [`_site_root`](../../collector/collection/discovery/metadata.py#L353) | `_site_root(source_url: str) -> str` | function / method |
+| [`_normalize_format`](../../collector/collection/discovery/metadata.py#L358) | `_normalize_format(value: str) -> str` | function / method |
+| [`_text`](../../collector/collection/discovery/metadata.py#L369) | `_text(value: object) -> str` | function / method |
+
+<a id="collector-collection-discovery-models-py"></a>
+
+## collector/collection/discovery/models.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`DiscoveryAdapter.detect`](../../collector/collection/discovery/models.py#L50) | `detect(self, source_url: str) -> bool` | function / method |
+| [`DiscoveryAdapter.discover`](../../collector/collection/discovery/models.py#L53) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
+
+<a id="collector-collection-discovery-sitemap-py"></a>
+
+## collector/collection/discovery/sitemap.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`sitemap_urls_from_robots`](../../collector/collection/discovery/sitemap.py#L83) | `sitemap_urls_from_robots(robots_text: str, source_url: str) -> list[str]` | function / method |
+| [`default_sitemap_candidates`](../../collector/collection/discovery/sitemap.py#L99) | `default_sitemap_candidates(source_url: str) -> list[str]` | function / method |
+| [`discover_sitemap_entries`](../../collector/collection/discovery/sitemap.py#L109) | `discover_sitemap_entries(source_url: str, fetch_text: TextFetcher \| None=None, max_sitemaps: int=MAX_SITEMAPS_PER_SOURCE, max_urls: int=MAX_URLS_PER_SOURCE) -> list[SitemapEntry]` | function / method |
+| [`parse_sitemap`](../../collector/collection/discovery/sitemap.py#L174) | `parse_sitemap(xml_text: str, sitemap_url: str) -> ParsedSitemap` | function / method |
+| [`score_sitemap_url`](../../collector/collection/discovery/sitemap.py#L192) | `score_sitemap_url(url: str) -> float` | function / method |
+| [`fetch_text_url`](../../collector/collection/discovery/sitemap.py#L223) | `fetch_text_url(url: str, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_bytes: int=5000000, user_agent: str=DEFAULT_CONFIG.user_agent) -> str` | function / method |
+| [`site_root_url`](../../collector/collection/discovery/sitemap.py#L261) | `site_root_url(source_url: str) -> str` | function / method |
+| [`_loc_values`](../../collector/collection/discovery/sitemap.py#L268) | `_loc_values(root: ET.Element, item_name: str, sitemap_url: str) -> list[str]` | function / method |
+| [`_child_text`](../../collector/collection/discovery/sitemap.py#L281) | `_child_text(element: ET.Element, child_name: str) -> str` | function / method |
+| [`_local_name`](../../collector/collection/discovery/sitemap.py#L289) | `_local_name(tag: str) -> str` | function / method |
+| [`_dedupe_urls`](../../collector/collection/discovery/sitemap.py#L293) | `_dedupe_urls(urls: list[str]) -> list[str]` | function / method |
+| [`_decode_text`](../../collector/collection/discovery/sitemap.py#L306) | `_decode_text(body: bytes, content_type: str) -> str` | function / method |
+
 <a id="collector-collection-failures-py"></a>
 
 ## collector/collection/failures.py
@@ -1306,13 +1476,13 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`analyze_html_page`](../../collector/collection/pipeline.py#L24) | `analyze_html_page(url: str, html: str, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None, *, discovered_page: DiscoveredPage \| None=None, distribution_candidates: list[DistributionCandidate] \| None=None, record_url: str \| None=None, record_identity: dict[str, str] \| None=None, page_snapshot: PageSnapshot \| None=None) -> CollectedDataset \| None` | function / method |
-| [`analyze_discovered_page`](../../collector/collection/pipeline.py#L104) | `analyze_discovered_page(discovered_page: DiscoveredPage, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None) -> CollectedDataset \| None` | function / method |
-| [`_classifier_or_default`](../../collector/collection/pipeline.py#L178) | `_classifier_or_default(classifier: PageClassifier \| None) -> PageClassifier` | function / method |
-| [`_usable_distribution`](../../collector/collection/pipeline.py#L183) | `_usable_distribution(distribution: DistributionCandidate) -> bool` | function / method |
-| [`_merge_discovery_metadata`](../../collector/collection/pipeline.py#L193) | `_merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot` | function / method |
-| [`eligible_resources`](../../collector/collection/pipeline.py#L217) | `eligible_resources(resolved: StrategyResult, *, expected_identity: dict[str, str] \| None=None) -> list[DistributionCandidate]` | function / method |
-| [`classify_resolution`](../../collector/collection/pipeline.py#L230) | `classify_resolution(resolved: StrategyResult, resources: list[DistributionCandidate], config: CollectorConfig, classifier: PageClassifier \| None, *, record_url: str \| None=None, known_record: NormalizedRecord \| None=None, record_identity: dict[str, str] \| None=None) -> CollectedDataset \| None` | function / method |
+| [`analyze_html_page`](../../collector/collection/pipeline.py#L25) | `analyze_html_page(url: str, html: str, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None, *, discovered_page: DiscoveredPage \| None=None, distribution_candidates: list[DistributionCandidate] \| None=None, record_url: str \| None=None, record_identity: dict[str, str] \| None=None, page_snapshot: PageSnapshot \| None=None) -> CollectedDataset \| None` | function / method |
+| [`analyze_discovered_page`](../../collector/collection/pipeline.py#L105) | `analyze_discovered_page(discovered_page: DiscoveredPage, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None) -> CollectedDataset \| None` | function / method |
+| [`_classifier_or_default`](../../collector/collection/pipeline.py#L179) | `_classifier_or_default(classifier: PageClassifier \| None) -> PageClassifier` | function / method |
+| [`_usable_distribution`](../../collector/collection/pipeline.py#L184) | `_usable_distribution(distribution: DistributionCandidate) -> bool` | function / method |
+| [`_merge_discovery_metadata`](../../collector/collection/pipeline.py#L194) | `_merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot` | function / method |
+| [`eligible_resources`](../../collector/collection/pipeline.py#L218) | `eligible_resources(resolved: StrategyResult, *, expected_identity: dict[str, str] \| None=None) -> list[DistributionCandidate]` | function / method |
+| [`classify_resolution`](../../collector/collection/pipeline.py#L231) | `classify_resolution(resolved: StrategyResult, resources: list[DistributionCandidate], config: CollectorConfig, classifier: PageClassifier \| None, *, record_url: str \| None=None, known_record: NormalizedRecord \| None=None, record_identity: dict[str, str] \| None=None) -> CollectedDataset \| None` | function / method |
 
 <a id="collector-collection-records-py"></a>
 
@@ -1388,138 +1558,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`public_diagnostics`](../../collector/diagnostics.py#L104) | `public_diagnostics(values: list[dict]) -> list[dict]` | function / method |
 | [`voter_diagnostics`](../../collector/diagnostics.py#L117) | `voter_diagnostics(exception: Exception, voter_id: str, attempt=None) -> list[Diagnostic]` | function / method |
 | [`retry_after`](../../collector/diagnostics.py#L124) | `retry_after(value: str \| None, *, now: datetime \| None=None) -> str \| None` | function / method |
-
-<a id="collector-discovery-adapters-__init__-py"></a>
-
-## collector/discovery/adapters/__init__.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`default_adapters`](../../collector/discovery/adapters/__init__.py#L19) | `default_adapters(config: CollectorConfig=DEFAULT_CONFIG) -> tuple[DiscoveryAdapter, ...]` | function / method |
-
-<a id="collector-discovery-adapters-ckan-py"></a>
-
-## collector/discovery/adapters/ckan.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`CKANAdapter.__init__`](../../collector/discovery/adapters/ckan.py#L34) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
-| [`CKANAdapter.detect`](../../collector/discovery/adapters/ckan.py#L42) | `detect(self, source_url: str) -> bool` | function / method |
-| [`CKANAdapter.discover`](../../collector/discovery/adapters/ckan.py#L50) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-| [`_ckan_action_url`](../../collector/discovery/adapters/ckan.py#L110) | `_ckan_action_url(source_url: str, action: str, params: dict[str, str] \| None=None) -> str` | function / method |
-| [`_ckan_site_root`](../../collector/discovery/adapters/ckan.py#L123) | `_ckan_site_root(source_url: str) -> str` | function / method |
-| [`_ckan_search_params`](../../collector/discovery/adapters/ckan.py#L128) | `_ckan_search_params(source_url: str, rows: int) -> dict[str, str]` | function / method |
-| [`_dataset_page_url`](../../collector/discovery/adapters/ckan.py#L140) | `_dataset_page_url(source_url: str, package: dict[object, object]) -> str` | function / method |
-| [`_distribution_candidates`](../../collector/discovery/adapters/ckan.py#L152) | `_distribution_candidates(source_url: str, package: dict[object, object]) -> list[DistributionCandidate]` | function / method |
-| [`_publisher`](../../collector/discovery/adapters/ckan.py#L194) | `_publisher(package: dict[object, object]) -> str` | function / method |
-| [`_size_from_ckan_package`](../../collector/discovery/adapters/ckan.py#L202) | `_size_from_ckan_package(package: dict[object, object]) -> str` | function / method |
-
-<a id="collector-discovery-adapters-data_json-py"></a>
-
-## collector/discovery/adapters/data_json.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`DataJsonAdapter.__init__`](../../collector/discovery/adapters/data_json.py#L42) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
-| [`DataJsonAdapter.detect`](../../collector/discovery/adapters/data_json.py#L50) | `detect(self, source_url: str) -> bool` | function / method |
-| [`DataJsonAdapter.discover`](../../collector/discovery/adapters/data_json.py#L58) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-| [`_data_json_url`](../../collector/discovery/adapters/data_json.py#L114) | `_data_json_url(source_url: str) -> str` | function / method |
-| [`_data_json_datasets`](../../collector/discovery/adapters/data_json.py#L122) | `_data_json_datasets(data: dict[str, object]) -> list[dict[object, object]]` | function / method |
-| [`_data_json_dataset_url`](../../collector/discovery/adapters/data_json.py#L138) | `_data_json_dataset_url(data_json_url: str, dataset: dict[object, object]) -> str` | function / method |
-| [`_data_json_distribution_candidates`](../../collector/discovery/adapters/data_json.py#L154) | `_data_json_distribution_candidates(data_json_url: str, dataset: dict[object, object]) -> list[DistributionCandidate]` | function / method |
-| [`_data_json_format`](../../collector/discovery/adapters/data_json.py#L223) | `_data_json_format(resource_url: str, format_text: str, media_type: str, anchor: str, has_download_url: bool) -> tuple[str, str]` | function / method |
-| [`_data_json_publisher`](../../collector/discovery/adapters/data_json.py#L242) | `_data_json_publisher(dataset: dict[object, object]) -> str` | function / method |
-| [`_size_from_data_json_dataset`](../../collector/discovery/adapters/data_json.py#L250) | `_size_from_data_json_dataset(dataset: dict[object, object]) -> str` | function / method |
-| [`_data_json_distribution_items`](../../collector/discovery/adapters/data_json.py#L271) | `_data_json_distribution_items(dataset: dict[object, object]) -> list[dict[object, object]]` | function / method |
-| [`_modalities_from_data_json_dataset`](../../collector/discovery/adapters/data_json.py#L275) | `_modalities_from_data_json_dataset(dataset: dict[object, object], distributions: tuple[DistributionCandidate, ...]) -> tuple[str, ...]` | function / method |
-| [`_data_json_dataset_matches_query`](../../collector/discovery/adapters/data_json.py#L287) | `_data_json_dataset_matches_query(dataset: dict[object, object], query: str) -> bool` | function / method |
-| [`_source_query`](../../collector/discovery/adapters/data_json.py#L300) | `_source_query(source_url: str) -> str` | function / method |
-
-<a id="collector-discovery-adapters-generic-py"></a>
-
-## collector/discovery/adapters/generic.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`GenericWebsiteAdapter.__init__`](../../collector/discovery/adapters/generic.py#L15) | `__init__(self, fetch_text: TextFetcher \| None=None, max_sitemap_urls: int=50) -> None` | function / method |
-| [`GenericWebsiteAdapter.detect`](../../collector/discovery/adapters/generic.py#L23) | `detect(self, source_url: str) -> bool` | function / method |
-| [`GenericWebsiteAdapter.discover`](../../collector/discovery/adapters/generic.py#L26) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-
-<a id="collector-discovery-adapters-shared-py"></a>
-
-## collector/discovery/adapters/shared.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`JsonDocument.__init__`](../../collector/discovery/adapters/shared.py#L27) | `__init__(self, payload: dict[str, object], final_url: str) -> None` | function / method |
-| [`document_url`](../../collector/discovery/adapters/shared.py#L32) | `document_url(payload: dict[str, object], requested_url: str) -> str` | function / method |
-| [`DiscoveryAdapter.detect`](../../collector/discovery/adapters/shared.py#L128) | `detect(self, source_url: str) -> bool` | function / method |
-| [`DiscoveryAdapter.discover`](../../collector/discovery/adapters/shared.py#L131) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-| [`fetch_json_url`](../../collector/discovery/adapters/shared.py#L135) | `fetch_json_url(url: str, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_bytes: int=5000000, user_agent: str=DEFAULT_CONFIG.user_agent, *, allow_list: bool=False) -> dict[str, object] \| list` | function / method |
-| [`_geography_from_mapping`](../../collector/discovery/adapters/shared.py#L176) | `_geography_from_mapping(mapping: dict[object, object]) -> list[str]` | function / method |
-| [`_publication_date_from_mapping`](../../collector/discovery/adapters/shared.py#L212) | `_publication_date_from_mapping(mapping: dict[object, object]) -> str` | function / method |
-| [`_diseases_from_mapping`](../../collector/discovery/adapters/shared.py#L228) | `_diseases_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]` | function / method |
-| [`_demographics_from_mapping`](../../collector/discovery/adapters/shared.py#L261) | `_demographics_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]` | function / method |
-| [`_modalities_from_distributions`](../../collector/discovery/adapters/shared.py#L291) | `_modalities_from_distributions(distributions: tuple[DistributionCandidate, ...]) -> tuple[str, ...]` | function / method |
-| [`_modalities_from_format`](../../collector/discovery/adapters/shared.py#L302) | `_modalities_from_format(value: str) -> list[str]` | function / method |
-| [`_first_mapping_value`](../../collector/discovery/adapters/shared.py#L320) | `_first_mapping_value(mapping: dict[object, object], *keys: str) -> str` | function / method |
-| [`_mapping_values`](../../collector/discovery/adapters/shared.py#L325) | `_mapping_values(mapping: dict[object, object], *keys: str) -> list[str]` | function / method |
-| [`_mapping_dicts`](../../collector/discovery/adapters/shared.py#L341) | `_mapping_dicts(value: object) -> list[dict[object, object]]` | function / method |
-| [`_value_text`](../../collector/discovery/adapters/shared.py#L349) | `_value_text(value: object) -> str` | function / method |
-| [`_country_values`](../../collector/discovery/adapters/shared.py#L357) | `_country_values(value: object) -> list[str]` | function / method |
-| [`_first_text`](../../collector/discovery/adapters/shared.py#L379) | `_first_text(mapping: dict[object, object], *keys: str) -> str` | function / method |
-| [`_first_text_value`](../../collector/discovery/adapters/shared.py#L388) | `_first_text_value(value: object) -> str` | function / method |
-| [`_text_values`](../../collector/discovery/adapters/shared.py#L402) | `_text_values(value: object) -> list[str]` | function / method |
-| [`_dedupe`](../../collector/discovery/adapters/shared.py#L419) | `_dedupe(values: list[str]) -> list[str]` | function / method |
-| [`_first_url`](../../collector/discovery/adapters/shared.py#L423) | `_first_url(*values: object) -> str` | function / method |
-| [`_json_ld_type_matches`](../../collector/discovery/adapters/shared.py#L439) | `_json_ld_type_matches(value: object, expected_type: str) -> bool` | function / method |
-| [`_site_root`](../../collector/discovery/adapters/shared.py#L455) | `_site_root(source_url: str) -> str` | function / method |
-| [`_normalize_format`](../../collector/discovery/adapters/shared.py#L460) | `_normalize_format(value: str) -> str` | function / method |
-| [`_text`](../../collector/discovery/adapters/shared.py#L471) | `_text(value: object) -> str` | function / method |
-
-<a id="collector-discovery-adapters-socrata-py"></a>
-
-## collector/discovery/adapters/socrata.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_socrata_pagination`](../../collector/discovery/adapters/socrata.py#L28) | `_socrata_pagination() -> dict[str, object]` | function / method |
-| [`SocrataAdapter.__init__`](../../collector/discovery/adapters/socrata.py#L57) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
-| [`SocrataAdapter.detect`](../../collector/discovery/adapters/socrata.py#L65) | `detect(self, source_url: str) -> bool` | function / method |
-| [`SocrataAdapter.discover`](../../collector/discovery/adapters/socrata.py#L75) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-| [`_socrata_catalog_url`](../../collector/discovery/adapters/socrata.py#L156) | `_socrata_catalog_url(source_url: str, rows: int, include_source_query: bool) -> str` | function / method |
-| [`_socrata_domain`](../../collector/discovery/adapters/socrata.py#L176) | `_socrata_domain(source_url: str) -> str` | function / method |
-| [`_socrata_results`](../../collector/discovery/adapters/socrata.py#L180) | `_socrata_results(data: dict[str, object], source_url: str) -> list[SocrataCatalogResult]` | function / method |
-| [`_socrata_dataset_url`](../../collector/discovery/adapters/socrata.py#L220) | `_socrata_dataset_url(source_url: str, result: SocrataCatalogResult) -> str` | function / method |
-| [`_socrata_distribution_candidates`](../../collector/discovery/adapters/socrata.py#L243) | `_socrata_distribution_candidates(source_url: str, socrata_id: str) -> list[DistributionCandidate]` | function / method |
-| [`_socrata_site_root`](../../collector/discovery/adapters/socrata.py#L276) | `_socrata_site_root(source_url: str) -> str` | function / method |
-
-<a id="collector-discovery-manager-py"></a>
-
-## collector/discovery/manager.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`discover_source`](../../collector/discovery/manager.py#L9) | `discover_source(source_url: str, adapters: tuple[DiscoveryAdapter, ...] \| None=None, config: CollectorConfig=DEFAULT_CONFIG) -> list[DiscoveredPage]` | function / method |
-
-<a id="collector-discovery-sitemap-py"></a>
-
-## collector/discovery/sitemap.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`sitemap_urls_from_robots`](../../collector/discovery/sitemap.py#L83) | `sitemap_urls_from_robots(robots_text: str, source_url: str) -> list[str]` | function / method |
-| [`default_sitemap_candidates`](../../collector/discovery/sitemap.py#L99) | `default_sitemap_candidates(source_url: str) -> list[str]` | function / method |
-| [`discover_sitemap_entries`](../../collector/discovery/sitemap.py#L109) | `discover_sitemap_entries(source_url: str, fetch_text: TextFetcher \| None=None, max_sitemaps: int=MAX_SITEMAPS_PER_SOURCE, max_urls: int=MAX_URLS_PER_SOURCE) -> list[SitemapEntry]` | function / method |
-| [`parse_sitemap`](../../collector/discovery/sitemap.py#L174) | `parse_sitemap(xml_text: str, sitemap_url: str) -> ParsedSitemap` | function / method |
-| [`score_sitemap_url`](../../collector/discovery/sitemap.py#L192) | `score_sitemap_url(url: str) -> float` | function / method |
-| [`fetch_text_url`](../../collector/discovery/sitemap.py#L223) | `fetch_text_url(url: str, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_bytes: int=5000000, user_agent: str=DEFAULT_CONFIG.user_agent) -> str` | function / method |
-| [`site_root_url`](../../collector/discovery/sitemap.py#L261) | `site_root_url(source_url: str) -> str` | function / method |
-| [`_loc_values`](../../collector/discovery/sitemap.py#L268) | `_loc_values(root: ET.Element, item_name: str, sitemap_url: str) -> list[str]` | function / method |
-| [`_child_text`](../../collector/discovery/sitemap.py#L281) | `_child_text(element: ET.Element, child_name: str) -> str` | function / method |
-| [`_local_name`](../../collector/discovery/sitemap.py#L289) | `_local_name(tag: str) -> str` | function / method |
-| [`_dedupe_urls`](../../collector/discovery/sitemap.py#L293) | `_dedupe_urls(urls: list[str]) -> list[str]` | function / method |
-| [`_decode_text`](../../collector/discovery/sitemap.py#L306) | `_decode_text(body: bytes, content_type: str) -> str` | function / method |
 
 <a id="collector-execution-py"></a>
 
@@ -1674,6 +1712,16 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_decode_html`](../../collector/network/fetch.py#L266) | `_decode_html(body: bytes, content_type: str) -> str` | function / method |
 | [`decode_text_body`](../../collector/network/fetch.py#L270) | `decode_text_body(body: bytes, content_type: str) -> str` | function / method |
 | [`decode_json_body`](../../collector/network/fetch.py#L281) | `decode_json_body(body: bytes) -> object` | function / method |
+
+<a id="collector-network-json-py"></a>
+
+## collector/network/json.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`JsonDocument.__init__`](../../collector/network/json.py#L17) | `__init__(self, payload: dict[str, object], final_url: str) -> None` | function / method |
+| [`document_url`](../../collector/network/json.py#L22) | `document_url(payload: dict[str, object], requested_url: str) -> str` | function / method |
+| [`fetch_json_url`](../../collector/network/json.py#L26) | `fetch_json_url(url: str, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_bytes: int=5000000, user_agent: str=DEFAULT_CONFIG.user_agent, *, allow_list: bool=False) -> dict[str, object] \| list` | function / method |
 
 <a id="collector-network-policy-py"></a>
 

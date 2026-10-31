@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
-from collector.classification.page import PageClassification
+from collector.classification.eligibility.models import PageClassification
 from collector.collection.connectors.dryad import DryadConnector
 from collector.collection.connectors.dspace import DSpaceConnector
 from collector.collection.connectors.inveniordm import InvenioRDMConnector

@@ -11,7 +11,7 @@ from app.api.schemas.search import RepositoryCandidateView
 from app.policies.quotas import WorkAdmission
 from app.workers.search.discovery import lookup_local, prepare_repository_candidates
 
-from collector.classification.repository import (
+from collector.classification.relevance.models import (
     MAX_REPOSITORY_DESCRIPTION_CHARS,
     MAX_REPOSITORY_KEYWORD_CHARS,
     MAX_REPOSITORY_KEYWORDS,

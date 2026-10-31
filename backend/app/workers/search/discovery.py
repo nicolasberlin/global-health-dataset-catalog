@@ -11,7 +11,7 @@ from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from app.db.catalog.search import normalize_dataset_search_query, search_collected_datasets
 from app.policies.quotas import WorkAdmission
-from collector.classification.repository import (
+from collector.classification.relevance.models import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
     MAX_REPOSITORY_DOI_CHARS,

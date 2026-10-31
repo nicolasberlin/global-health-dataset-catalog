@@ -20,7 +20,7 @@ from helpers.classification import response as _response
 from helpers.workflows import candidate_for, rows, wait_until
 
 from collector.classification import factory
-from collector.classification.page import PageClassificationError
+from collector.classification.errors import PageClassificationError
 from collector.diagnostics import PersistenceFailure
 
 pytestmark = pytest.mark.anyio

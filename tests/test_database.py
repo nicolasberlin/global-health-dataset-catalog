@@ -15,7 +15,7 @@ from helpers.inspection import stored_candidate, stored_datasets
 from helpers.workflows import start_candidate as _start_candidate
 from psycopg import sql as pg_sql
 
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import CollectorConfig
 from collector.repository_search import RepositorySearchResult
@@ -2083,7 +2083,7 @@ async def test_automatic_collection_reservation_retries_after_terminal_job(
 
 
 async def test_complete_collection_job_saves_refined_distribution_formats(database):
-    from collector.classification.page import PageClassification
+    from collector.classification.eligibility.models import PageClassification
     from collector.network.fetch import FetchedPage
     from collector.storage.models import HTTPProbe
 

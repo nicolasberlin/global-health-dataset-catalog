@@ -2,10 +2,10 @@ from dataclasses import replace
 
 import pytest
 
-from collector.classification.page import PageClassification
+from collector.classification.eligibility.models import PageClassification
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.service import collect_source_with_report
 from collector.config import CollectorConfig
-from collector.discovery.adapters import DiscoveredPage
 from collector.network.fetch import FetchedPage, PageFetchError
 from collector.storage.models import DistributionCandidate, ValidationResult
 

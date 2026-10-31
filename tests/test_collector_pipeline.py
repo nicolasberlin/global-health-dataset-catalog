@@ -6,7 +6,9 @@ import json
 import pytest
 from helpers.collection import DATASET_HTML, AcceptingPageClassifier
 
-from collector.classification.page import PageClassification, PageClassificationError
+from collector.classification.eligibility.models import PageClassification
+from collector.classification.errors import PageClassificationError
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.service import (
     analyze_discovered_page,
     analyze_html_page,
@@ -14,7 +16,6 @@ from collector.collection.service import (
     collect_source_with_report,
 )
 from collector.config import CollectorConfig
-from collector.discovery.adapters import DiscoveredPage
 from collector.extraction.dataset_metadata import (
     DATASET_METADATA_KEYS,
     MISSING_DATASET_METADATA_VALUE,
@@ -153,7 +154,7 @@ def test_pipeline_config_reaches_default_discovery_and_distribution_requests(mon
         }]}}
         return Response(request, json.dumps(data).encode(), "application/json")
 
-    monkeypatch.setattr("collector.discovery.adapters.shared.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.network.json.open_public_http_url", open_url)
     monkeypatch.setattr("collector.validation.distributions.open_public_http_url", open_url)
     for config in (
         CollectorConfig(user_agent="Pipeline/1", request_timeout_seconds=1.25, max_sample_bytes=64),

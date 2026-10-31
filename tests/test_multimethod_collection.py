@@ -6,7 +6,7 @@ from urllib.error import HTTPError
 import pytest
 
 from collector.budget import collection_budget
-from collector.classification.page import PageClassification
+from collector.classification.eligibility.models import PageClassification
 from collector.collection.contracts import public_url
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.collection.strategies.dataverse import record_api_url, resolve_metadata

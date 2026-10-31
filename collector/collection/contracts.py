@@ -6,8 +6,8 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.records import NormalizedRecord
-from collector.discovery.adapters.shared import DiscoveredPage
 from collector.storage.models import PageSnapshot
 
 

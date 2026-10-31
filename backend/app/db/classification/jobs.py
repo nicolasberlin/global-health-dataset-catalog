@@ -21,7 +21,7 @@ from app.db.schema import _require_current_schema
 from app.db.serialization import (
     _jsonb,
 )
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 from collector.diagnostics import Diagnostic
 
 

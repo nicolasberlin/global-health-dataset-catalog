@@ -13,7 +13,7 @@ from app.db.collection.reservations import (
 )
 from app.db.connection import _require_database_pool
 from app.db.schema import _require_current_schema
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 
 
 @dataclass(frozen=True)

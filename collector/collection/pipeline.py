@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from collector.budget import check_collection_budget
+from collector.classification.eligibility.models import PageClassifier
 from collector.classification.factory import build_default_page_classifier
-from collector.classification.page import PageClassifier
 from collector.collection.contracts import StrategyResult
+from collector.collection.discovery.metadata import EXCLUDED_RESOURCE_FORMATS
+from collector.collection.discovery.models import DiscoveredPage
 from collector.collection.records import NormalizedRecord
 from collector.config import DEFAULT_CONFIG, CollectorConfig
-from collector.discovery.adapters.shared import EXCLUDED_RESOURCE_FORMATS, DiscoveredPage
 from collector.extraction.distributions import EXCLUDED_EXTENSIONS, extract_distributions
 from collector.extraction.errors import ExtractionError
 from collector.extraction.extractor import extract_page

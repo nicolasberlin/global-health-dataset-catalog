@@ -22,8 +22,8 @@ from app.workers.sql_retries import persist_with_retry
 from app.workers.stores import PostgresCollectionTraceWriter, PostgresVoteStore
 from collector.budget import collection_budget
 from collector.classification.checkpoints import VoteStore
+from collector.classification.eligibility.models import PageClassifier
 from collector.classification.factory import build_default_page_classifier
-from collector.classification.page import PageClassifier
 from collector.collection.browser import configured_browser
 from collector.collection.service import (
     collect_repository_candidate_with_report,

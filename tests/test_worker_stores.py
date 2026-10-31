@@ -13,7 +13,7 @@ import pytest
 from app.workers import stores
 from psycopg.errors import InsufficientPrivilege
 
-from collector.classification.page import PageClassificationError
+from collector.classification.errors import PageClassificationError
 from collector.diagnostics import PersistenceFailure, exception_diagnostics
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
 

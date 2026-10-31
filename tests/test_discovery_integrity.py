@@ -10,10 +10,10 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 import pytest
 
 from collector.budget import CollectionBudgetExceeded
-from collector.classification.page import PageClassification
+from collector.classification.eligibility.models import PageClassification
+from collector.collection.discovery.adapters import CKANAdapter, DataJsonAdapter, SocrataAdapter
 from collector.collection.service import analyze_discovered_page, collect_source_with_report
-from collector.discovery.adapters import CKANAdapter, DataJsonAdapter, SocrataAdapter
-from collector.discovery.adapters.shared import JsonDocument, fetch_json_url
+from collector.network.json import JsonDocument, fetch_json_url
 from collector.storage.models import ValidationResult
 
 
@@ -127,7 +127,7 @@ def test_redirected_catalog_sets_effective_base_and_metadata_evidence(monkeypatc
     final_url = "https://cdn.example/catalog/v2/data.json"
     response = Response(json.dumps(catalog()).encode(), final_url)
     monkeypatch.setattr(
-        "collector.discovery.adapters.shared.open_public_http_url",
+        "collector.network.json.open_public_http_url",
         lambda *args, **kwargs: response,
     )
     page, = DataJsonAdapter().discover("https://catalog.example/catalog/search")
@@ -244,7 +244,7 @@ def test_socrata_pagination_signals_survive_bounded_collection():
 def test_malformed_or_deep_json_is_controlled_and_closes_response(monkeypatch, body):
     response = Response(body, "https://catalog.example/data.json")
     monkeypatch.setattr(
-        "collector.discovery.adapters.shared.open_public_http_url",
+        "collector.network.json.open_public_http_url",
         lambda *args, **kwargs: response,
     )
     with pytest.raises(ValueError):
@@ -264,8 +264,8 @@ def test_discovery_http_errors_close_even_when_budget_expires(monkeypatch, exhau
         if exhausted:
             raise CollectionBudgetExceeded()
 
-    monkeypatch.setattr("collector.discovery.adapters.shared.open_public_http_url", fail)
-    monkeypatch.setattr("collector.discovery.adapters.shared.check_collection_budget", budget)
+    monkeypatch.setattr("collector.network.json.open_public_http_url", fail)
+    monkeypatch.setattr("collector.network.json.check_collection_budget", budget)
     with pytest.raises(CollectionBudgetExceeded if exhausted else ValueError):
         fetch_json_url("https://catalog.example/data.json")
     assert body.closed

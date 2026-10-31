@@ -20,14 +20,13 @@ from collector.budget import (
     active_request_budget,
     collection_budget,
 )
+from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.classification.page import PageClassificationError
 from collector.collection.browser import BrowserSession
+from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.http import fetch_record_json
 from collector.config import DEFAULT_CONFIG
-from collector.discovery.adapters.shared import fetch_json_url
-from collector.discovery.sitemap import fetch_text_url
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
 from collector.network.fetch import (
     PageFetchError,
@@ -35,6 +34,7 @@ from collector.network.fetch import (
     fetch_public_html,
     open_public_http_url,
 )
+from collector.network.json import fetch_json_url
 
 
 @pytest.fixture
@@ -319,9 +319,9 @@ def test_browser_cleanup_remains_bounded_after_owner_expiry_and_cancellation(mon
 
 @pytest.mark.parametrize("module,call", [
     ("collector.network.fetch", lambda: fetch_public_html("https://public.example/")),
-    ("collector.discovery.adapters.shared", lambda: fetch_json_url("https://public.example/")),
+    ("collector.network.json", lambda: fetch_json_url("https://public.example/")),
     ("collector.collection.http", lambda: fetch_record_json("https://public.example/")),
-    ("collector.discovery.sitemap", lambda: fetch_text_url("https://public.example/")),
+    ("collector.collection.discovery.sitemap", lambda: fetch_text_url("https://public.example/")),
 ])
 @pytest.mark.parametrize("expired", [False, True])
 def test_http_error_closes_even_when_budget_check_raises(monkeypatch, clock, module, call, expired):
@@ -356,7 +356,7 @@ def test_deep_remote_json_is_a_controlled_failure(monkeypatch, transport):
         expected = CollectionResponseError
     else:
         module = "collector.collection.http" if transport == "metadata" else (
-            "collector.discovery.adapters.shared"
+            "collector.network.json"
         )
         monkeypatch.setattr(module + ".open_public_http_url", lambda *a, **k: body)
         def call():

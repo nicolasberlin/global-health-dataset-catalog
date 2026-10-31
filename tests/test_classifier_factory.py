@@ -12,8 +12,8 @@ from helpers.classification import KEY_VARIABLES, KEYS, MODEL_VARIABLES, MODELS,
 from helpers.classification import response as _response
 
 from collector.classification import factory
+from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient
-from collector.classification.page import PageClassificationError
 from collector.classification.providers.epfl_rcp import EPFL_RCP_CHAT_COMPLETIONS_URL
 
 

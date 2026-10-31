@@ -1,2 +1,0 @@
-"""Discovery helpers and adapters."""
-

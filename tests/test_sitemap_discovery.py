@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-from collector.discovery.sitemap import (
+from collector.collection.discovery.sitemap import (
     default_sitemap_candidates,
     discover_sitemap_entries,
     fetch_text_url,
@@ -32,7 +32,7 @@ def test_sitemap_fetch_preserves_bound_with_configured_network_settings(monkeypa
         assert request.get_header("User-agent") == "Sitemaps/1"
         return Response(b"a" * 100)
 
-    monkeypatch.setattr("collector.discovery.sitemap.open_public_http_url", open_url)
+    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url", open_url)
     with pytest.raises(ValueError, match="too large"):
         fetch_text_url("https://example.org/robots.txt", timeout=1.25,
                        max_bytes=32, user_agent="Sitemaps/1")

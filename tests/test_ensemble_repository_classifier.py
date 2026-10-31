@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from collector.classification.ensemble import EnsembleRepositoryRelevanceClassifier
-from collector.classification.page import PageClassificationError
-from collector.classification.repository import (
+from collector.classification.errors import PageClassificationError
+from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
+from collector.classification.relevance.models import (
     RepositoryClassification,
     RepositoryClassificationVote,
 )

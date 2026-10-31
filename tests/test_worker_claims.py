@@ -21,7 +21,7 @@ from app.workers import sql_retries
 from helpers.workers import StubWorker
 from psycopg import OperationalError
 
-from collector.classification.repository import RepositoryClassification
+from collector.classification.relevance.models import RepositoryClassification
 from collector.diagnostics import Diagnostic
 from collector.repository_search import RepositorySearchResult
 

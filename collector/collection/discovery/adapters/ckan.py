@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
-from collector.discovery.adapters.shared import (
+from collector.collection.discovery.metadata import (
     EXCLUDED_RESOURCE_FORMATS,
-    DiscoveredPage,
-    JsonFetcher,
     _demographics_from_mapping,
     _diseases_from_mapping,
     _first_mapping_value,
@@ -18,10 +16,10 @@ from collector.discovery.adapters.shared import (
     _publication_date_from_mapping,
     _text,
     _value_text,
-    document_url,
-    fetch_json_url,
 )
+from collector.collection.discovery.models import DiscoveredPage, JsonFetcher
 from collector.extraction.distributions import guess_format
+from collector.network.json import document_url, fetch_json_url
 from collector.storage.models import DistributionCandidate
 from collector.url_utils import canonicalize_url
 

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collector.classification.eligibility.prompts import (
+    _build_epfl_rcp_chat_completions_request_body,
+)
 from collector.classification.llm_client import (
     LLMProviderConfig,
     extract_chat_completions_message_text,
 )
-from collector.classification.prompts import (
-    _build_epfl_rcp_chat_completions_request_body,
+from collector.classification.relevance.prompts import (
     _build_epfl_rcp_repository_relevance_request_body,
 )
 

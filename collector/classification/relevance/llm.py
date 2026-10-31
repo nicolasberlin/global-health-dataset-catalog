@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import cast
 
+from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import LLMClassificationClient
-from collector.classification.page import PageClassificationError
-from collector.classification.repository import (
+from collector.classification.relevance.models import (
     MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_ITEMS,

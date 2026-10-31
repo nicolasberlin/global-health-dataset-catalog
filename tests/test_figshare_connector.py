@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from collector.classification.page import PageClassification
+from collector.classification.eligibility.models import PageClassification
 from collector.collection.connectors.figshare import FigshareConnector
 from collector.collection.http import JsonResponse
 from collector.collection.registry import default_registry
