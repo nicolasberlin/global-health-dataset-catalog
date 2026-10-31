@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from app.db.classification.voting.state import _lock_run, _publish_progress, _scope
+from app.db.classification.voting.coordination import _lock_run, _publish_progress, _scope
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
 from app.db.serialization import _jsonb
 from app.policies.retries import TRANSIENT, RetryPolicy, as_datetime

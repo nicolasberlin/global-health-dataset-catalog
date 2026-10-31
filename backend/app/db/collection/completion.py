@@ -9,7 +9,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
 from app.db.catalog.datasets import _save_collected_dataset
-from app.db.collection.job_reads import _collection_job_to_dict, _job_dataset_ids
+from app.db.collection.job_queries import _collection_job_to_dict, _job_dataset_ids
 from app.db.collection.jobs import _lock_running_collection_job
 from app.db.collection.traces.sanitization import safe_observation
 from app.db.connection import _fetchall, _fetchone, _require_database_pool

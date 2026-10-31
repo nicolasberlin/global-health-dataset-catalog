@@ -1,6 +1,6 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **31 October 2026**, based on Git commit `af14644`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **31 October 2026**, based on Git commit `0d327dc`, including the independent core API and public Search Lab. The private web interface is excluded.
 
 This index lists **864 function and method definitions in 144 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
@@ -45,12 +45,12 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [backend/app/db/classification/candidates.py](#backend-app-db-classification-candidates-py) — 5 definitions
 - [backend/app/db/classification/completion.py](#backend-app-db-classification-completion-py) — 1 definition
 - [backend/app/db/classification/jobs.py](#backend-app-db-classification-jobs-py) — 4 definitions
+- [backend/app/db/classification/voting/coordination.py](#backend-app-db-classification-voting-coordination-py) — 3 definitions
 - [backend/app/db/classification/voting/history.py](#backend-app-db-classification-voting-history-py) — 3 definitions
 - [backend/app/db/classification/voting/runs.py](#backend-app-db-classification-voting-runs-py) — 1 definition
-- [backend/app/db/classification/voting/state.py](#backend-app-db-classification-voting-state-py) — 3 definitions
 - [backend/app/db/classification/voting/votes.py](#backend-app-db-classification-voting-votes-py) — 4 definitions
 - [backend/app/db/collection/completion.py](#backend-app-db-collection-completion-py) — 4 definitions
-- [backend/app/db/collection/job_reads.py](#backend-app-db-collection-job_reads-py) — 5 definitions
+- [backend/app/db/collection/job_queries.py](#backend-app-db-collection-job_queries-py) — 5 definitions
 - [backend/app/db/collection/jobs.py](#backend-app-db-collection-jobs-py) — 7 definitions
 - [backend/app/db/collection/reservations.py](#backend-app-db-collection-reservations-py) — 4 definitions
 - [backend/app/db/collection/traces/reading.py](#backend-app-db-collection-traces-reading-py) — 1 definition
@@ -394,6 +394,16 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`fail_candidate_classification`](../../backend/app/db/classification/jobs.py#L121) | `fail_candidate_classification(candidate_id: UUID, owner_id: str, error: str, *, errors: list[dict] \| None=None, expected_updated_at: datetime \| None=None) -> dict[str, object] \| None` | async |
 | [`mark_interrupted_candidate_classifications_error`](../../backend/app/db/classification/jobs.py#L163) | `mark_interrupted_candidate_classifications_error() -> int` | async |
 
+<a id="backend-app-db-classification-voting-coordination-py"></a>
+
+## backend/app/db/classification/voting/coordination.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_scope`](../../backend/app/db/classification/voting/coordination.py#L10) | `_scope(connection, candidate_id, job_id, version)` | async |
+| [`_lock_run`](../../backend/app/db/classification/voting/coordination.py#L35) | `_lock_run(connection, run_id)` | async |
+| [`_publish_progress`](../../backend/app/db/classification/voting/coordination.py#L43) | `_publish_progress(connection, run_id, candidate_id, job_id)` | async |
+
 <a id="backend-app-db-classification-voting-history-py"></a>
 
 ## backend/app/db/classification/voting/history.py
@@ -411,16 +421,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | Definition | Signature | Kind |
 | --- | --- | --- |
 | [`prepare_vote_run`](../../backend/app/db/classification/voting/runs.py#L14) | `prepare_vote_run(snapshot, *, candidate_id=None, job_id=None, expected_updated_at=None)` | async |
-
-<a id="backend-app-db-classification-voting-state-py"></a>
-
-## backend/app/db/classification/voting/state.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_scope`](../../backend/app/db/classification/voting/state.py#L10) | `_scope(connection, candidate_id, job_id, version)` | async |
-| [`_lock_run`](../../backend/app/db/classification/voting/state.py#L35) | `_lock_run(connection, run_id)` | async |
-| [`_publish_progress`](../../backend/app/db/classification/voting/state.py#L43) | `_publish_progress(connection, run_id, candidate_id, job_id)` | async |
 
 <a id="backend-app-db-classification-voting-votes-py"></a>
 
@@ -444,17 +444,17 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_mark_collection_job_done`](../../backend/app/db/collection/completion.py#L108) | `_mark_collection_job_done(connection: AsyncConnection[DictRow], job_id: int, saved_count: int, report: CollectionReport) -> dict[str, object] \| None` | async |
 | [`_collection_job_done_message`](../../backend/app/db/collection/completion.py#L166) | `_collection_job_done_message(saved_count: int, report: CollectionReport) -> str` | function / method |
 
-<a id="backend-app-db-collection-job_reads-py"></a>
+<a id="backend-app-db-collection-job_queries-py"></a>
 
-## backend/app/db/collection/job_reads.py
+## backend/app/db/collection/job_queries.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`get_collection_job`](../../backend/app/db/collection/job_reads.py#L17) | `get_collection_job(job_id: int) -> dict[str, object] \| None` | async |
-| [`get_collection_job_for_owner`](../../backend/app/db/collection/job_reads.py#L26) | `get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, object] \| None` | async |
-| [`_get_collection_job_row`](../../backend/app/db/collection/job_reads.py#L51) | `_get_collection_job_row(connection, job_id: int) -> Row \| None` | async |
-| [`_job_dataset_ids`](../../backend/app/db/collection/job_reads.py#L68) | `_job_dataset_ids(connection, job_id: int) -> list[int]` | async |
-| [`_collection_job_to_dict`](../../backend/app/db/collection/job_reads.py#L78) | `_collection_job_to_dict(row: Row) -> dict[str, object]` | function / method |
+| [`get_collection_job`](../../backend/app/db/collection/job_queries.py#L17) | `get_collection_job(job_id: int) -> dict[str, object] \| None` | async |
+| [`get_collection_job_for_owner`](../../backend/app/db/collection/job_queries.py#L26) | `get_collection_job_for_owner(job_id: int, owner_id: str) -> dict[str, object] \| None` | async |
+| [`_get_collection_job_row`](../../backend/app/db/collection/job_queries.py#L51) | `_get_collection_job_row(connection, job_id: int) -> Row \| None` | async |
+| [`_job_dataset_ids`](../../backend/app/db/collection/job_queries.py#L68) | `_job_dataset_ids(connection, job_id: int) -> list[int]` | async |
+| [`_collection_job_to_dict`](../../backend/app/db/collection/job_queries.py#L78) | `_collection_job_to_dict(row: Row) -> dict[str, object]` | function / method |
 
 <a id="backend-app-db-collection-jobs-py"></a>
 

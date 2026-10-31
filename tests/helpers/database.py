@@ -19,7 +19,7 @@ from app.db.classification.jobs import (
     mark_interrupted_candidate_classifications_error,
 )
 from app.db.collection.completion import complete_collection_job, mark_collection_job_done
-from app.db.collection.job_reads import get_collection_job, get_collection_job_for_owner
+from app.db.collection.job_queries import get_collection_job, get_collection_job_for_owner
 from app.db.collection.jobs import (
     claim_pending_collection_job,
     create_collection_job,

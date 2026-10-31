@@ -61,11 +61,11 @@ reservation; collection completion saves datasets with the final job state.
 `classification/candidates.py` stores candidate metadata and its row representation.
 `classification/voting/` serves candidate and collection classifications alike:
 `runs.py` prepares reusable runs, `votes.py` claims and finalizes attempts,
-`history.py` reads bounded owner-scoped history, and `state.py` shares connection-taking
+`history.py` reads bounded owner-scoped history, and `coordination.py` shares connection-taking
 locks and progress writes. The state helpers never open another transaction.
 
 `collection/reservations.py` reserves or reuses follow-up for accepted candidates.
-`collection/job_reads.py` owns queries and the stored-job conversion shared by
+`collection/job_queries.py` owns queries and the stored-job conversion shared by
 reads and lifecycle writes; it does not import `jobs.py`. `collection/traces/`
 separates `writing.py`, `reading.py` and pure `sanitization.py`. Writes and reads
 apply the same evidence filters, including when publishing legacy stored traces.
@@ -79,7 +79,7 @@ database package root. Production callers import the owning module directly,
 without the former `app.database` re-export layer.
 
 The package initializers contain documentation only. Shared leaf modules keep
-imports acyclic: voting runs and votes depend on `voting/state.py`; trace reads
+imports acyclic: voting runs and votes depend on `voting/coordination.py`; trace reads
 depend on vote history and job reads; mutations and reservations use job reads
 for row conversion. The [database refactor report](reference/database-refactor.md)
 contains the concrete file map, function moves and dependency graph.

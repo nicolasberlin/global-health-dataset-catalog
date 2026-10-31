@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from app.db.collection.job_reads import _collection_job_to_dict
+from app.db.collection.job_queries import _collection_job_to_dict
 from app.db.connection import Row, _fetchall, _fetchone, _require_database_pool
 from app.db.execution.worker_claims import read_worker_claim, record_worker_claim
 from app.db.schema import _require_current_schema

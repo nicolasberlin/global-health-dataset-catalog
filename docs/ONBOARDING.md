@@ -117,7 +117,7 @@ installations. No setup script moves or deletes database volumes.
 | Worker queue acquisition and lifecycle | `backend/app/db/search/jobs.py`, `backend/app/db/classification/jobs.py`, `backend/app/db/collection/jobs.py` |
 | Atomic search, classification and collection completion | The corresponding `backend/app/db/<domain>/completion.py` |
 | Reusable model votes and their history | `backend/app/db/classification/voting/` |
-| Collection job reads and row conversion | `backend/app/db/collection/job_reads.py` |
+| Collection job reads and row conversion | `backend/app/db/collection/job_queries.py` |
 | Trace recording, history and evidence filtering | `backend/app/db/collection/traces/` |
 | Shared persisted owner ID validation | `backend/app/db/owner_ids.py` |
 | Repository discovery and normalization | `collector/repository_search/` |

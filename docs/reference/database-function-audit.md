@@ -485,12 +485,12 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 
 </details>
 
-## `classification/voting/state.py`
+## `classification/voting/coordination.py`
 
 <details>
 <summary><code>_scope</code> — Lock the active parent version and resolve its reusable collection vote lineage.</summary>
 
-- Source: [classification/voting/state.py:10](../../backend/app/db/classification/voting/state.py#L10).
+- Source: [classification/voting/coordination.py:10](../../backend/app/db/classification/voting/coordination.py#L10).
 - Arguments: `connection, candidate_id, job_id, version`.
 - Return annotation: `unannotated; see return expressions`.
 - Return expressions: `scope`.
@@ -505,7 +505,7 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 <details>
 <summary><code>_lock_run</code> — Lock the vote run after its parent; callers keep the same connection and transaction.</summary>
 
-- Source: [classification/voting/state.py:35](../../backend/app/db/classification/voting/state.py#L35).
+- Source: [classification/voting/coordination.py:35](../../backend/app/db/classification/voting/coordination.py#L35).
 - Arguments: `connection, run_id`.
 - Return annotation: `unannotated; see return expressions`.
 - Return expressions: `implicit None / generator yield`.
@@ -520,7 +520,7 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 <details>
 <summary><code>_publish_progress</code> — Update stored vote counts without changing the parent claim version.</summary>
 
-- Source: [classification/voting/state.py:43](../../backend/app/db/classification/voting/state.py#L43).
+- Source: [classification/voting/coordination.py:43](../../backend/app/db/classification/voting/coordination.py#L43).
 - Arguments: `connection, run_id, candidate_id, job_id`.
 - Return annotation: `unannotated; see return expressions`.
 - Return expressions: `implicit None / generator yield`.
@@ -656,12 +656,12 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 
 </details>
 
-## `collection/job_reads.py`
+## `collection/job_queries.py`
 
 <details>
 <summary><code>get_collection_job</code> — Read an internal job using the same representation as lifecycle writes.</summary>
 
-- Source: [collection/job_reads.py:17](../../backend/app/db/collection/job_reads.py#L17).
+- Source: [collection/job_queries.py:17](../../backend/app/db/collection/job_queries.py#L17).
 - Arguments: `job_id: int`.
 - Return annotation: `dict[str, object] \| None`.
 - Return expressions: `_collection_job_to_dict(row) if row else None`.
@@ -676,7 +676,7 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 <details>
 <summary><code>get_collection_job_for_owner</code> — Read only jobs explicitly associated with one of the owner's candidates.</summary>
 
-- Source: [collection/job_reads.py:26](../../backend/app/db/collection/job_reads.py#L26).
+- Source: [collection/job_queries.py:26](../../backend/app/db/collection/job_queries.py#L26).
 - Arguments: `job_id: int, owner_id: str`.
 - Return annotation: `dict[str, object] \| None`.
 - Return expressions: `None; job`.
@@ -691,7 +691,7 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 <details>
 <summary><code>_get_collection_job_row</code> — Read the stored fields required to reconstruct one collection job.</summary>
 
-- Source: [collection/job_reads.py:51](../../backend/app/db/collection/job_reads.py#L51).
+- Source: [collection/job_queries.py:51](../../backend/app/db/collection/job_queries.py#L51).
 - Arguments: `connection, job_id: int`.
 - Return annotation: `Row \| None`.
 - Return expressions: `await _fetchone(connection, '\n        SELECT id, source_url, kind, repository_candidate_id,\n               status, saved_count, discovered_count,\n               analyzed_count, accepted_count, rejected_count,\n               invalid_distribution_count, discovery_methods, classification_progress,\n               message, error, errors, outcome, collection_coverage, collection_method_summary,\n               created_at, updated_at, finished_at, collection_deadline_at\n        FROM collection_jobs\n        WHERE id = %s\n        ', (job_id,))`.
@@ -706,7 +706,7 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 <details>
 <summary><code>_job_dataset_ids</code> — Resolve unique dataset IDs associated with a collection job.</summary>
 
-- Source: [collection/job_reads.py:68](../../backend/app/db/collection/job_reads.py#L68).
+- Source: [collection/job_queries.py:68](../../backend/app/db/collection/job_queries.py#L68).
 - Arguments: `connection, job_id: int`.
 - Return annotation: `list[int]`.
 - Return expressions: `[int(row['dataset_id']) for row in rows]`.
@@ -721,7 +721,7 @@ Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB 
 <details>
 <summary><code>_collection_job_to_dict</code> — Decode the shared persisted-job representation for reads and writes.</summary>
 
-- Source: [collection/job_reads.py:78](../../backend/app/db/collection/job_reads.py#L78).
+- Source: [collection/job_queries.py:78](../../backend/app/db/collection/job_queries.py#L78).
 - Arguments: `row: Row`.
 - Return annotation: `dict[str, object]`.
 - Return expressions: `{'id': int(row['id']), 'source_url': str(row['source_url']), 'kind': str(row['kind']), 'repository_candidate_id': UUID(str(row['repository_candidate_id'])) if row['repository_candidate_id'] is not None else None, 'status': str(row['status']), 'coverage': row.get('collection_coverage', {}), 'method_attempts': row.get('collection_method_summary', []), 'classification_progress': row.get('classification_progress', {}), 'saved_count': int(row['saved_count']), 'discovered_count': int(row['discovered_count']), 'analyzed_count': int(row['analyzed_count']), 'accepted_count': int(row['accepted_count']), 'rejected_count': int(row['rejected_count']), 'invalid_distribution_count': int(row['invalid_distribution_count']), 'discovery_methods': _deserialize_discovery_methods(row['discovery_methods']), 'message': str(row['message']), 'error': str(row['error']), 'errors': row.get('errors', []), 'outcome': row.get('outcome'), 'created_at': _format_timestamp(row['created_at']), 'updated_at': _format_timestamp(row['updated_at']), 'finished_at': _format_optional_timestamp(row['finished_at']), 'collection_deadline_at': _format_timestamp(row['collection_deadline_at']) if row.get('collection_deadline_at') is not None else None}`.

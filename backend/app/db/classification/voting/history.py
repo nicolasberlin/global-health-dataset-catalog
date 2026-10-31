@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.db.collection.job_reads import get_collection_job_for_owner
+from app.db.collection.job_queries import get_collection_job_for_owner
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
 from app.db.owner_ids import validate_owner_id
 from app.db.public_history import HistoryPage, PublicVoteAttempt

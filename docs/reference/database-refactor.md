@@ -23,10 +23,10 @@ db/
 │       ├── runs.py
 │       ├── votes.py
 │       ├── history.py
-│       └── state.py
+│       └── coordination.py
 ├── collection/
 │   ├── jobs.py
-│   ├── job_reads.py
+│   ├── job_queries.py
 │   ├── reservations.py
 │   ├── completion.py
 │   └── traces/
@@ -54,10 +54,10 @@ with no compatibility reexports. The former `classification/votes.py` and
 - Candidate lifecycle SQL, including the connection-taking finalization primitive,
   belongs to `classification/jobs.py`. The public completion orchestrator still owns
   the transaction that also reserves collection.
-- `collection/job_reads.py` contains the shared row conversion as requested. It is a
+- `collection/job_queries.py` contains the shared row conversion as requested. It is a
   leaf with respect to job mutations, so lifecycle writers can use the same conversion
   without a circular import or an additional forwarding layer.
-- `voting/state.py` owns only parent/run locks and progress writes. It receives the
+- `voting/coordination.py` owns only parent/run locks and progress writes. It receives the
   caller connection and never starts an independent transaction.
 - `traces/sanitization.py` owns pure evidence filters and the shared per-method check
   bound. The page-wide read bound stays in `reading.py`.
@@ -80,21 +80,21 @@ flowchart TD
     ClassificationJobs --> Candidates
     ClassificationCompletion --> Reservations[collection/reservations]
     Reservations --> Jobs[collection/jobs]
-    Reservations --> JobReads[collection/job_reads]
+    Reservations --> JobQueries[collection/job_queries]
     CollectionCompletion[collection/completion] --> Jobs
-    CollectionCompletion --> JobReads
+    CollectionCompletion --> JobQueries
     CollectionCompletion --> Catalogue[catalog/datasets]
-    Jobs --> JobReads
-    VoteRuns[voting/runs] --> VoteState[voting/state]
-    Votes[voting/votes] --> VoteState
-    VoteHistory[voting/history] --> JobReads
+    Jobs --> JobQueries
+    VoteRuns[voting/runs] --> VoteCoordination[voting/coordination]
+    Votes[voting/votes] --> VoteCoordination
+    VoteHistory[voting/history] --> JobQueries
     TraceReading[traces/reading] --> VoteHistory
-    TraceReading --> JobReads
+    TraceReading --> JobQueries
     TraceReading --> Sanitization[traces/sanitization]
     TraceWriting[traces/writing] --> Sanitization
     CollectionCompletion --> Sanitization
     Progress[search/progress] --> Candidates
-    Progress --> JobReads
+    Progress --> JobQueries
 ```
 
 Shared owner validation and connection/schema/serialization dependencies are omitted
@@ -128,10 +128,10 @@ from this diagram. The complete static DB import graph was checked for cycles.
 | `backend/app/db/classification/jobs.py` | Created. Candidate claims, guarded row transitions and recovery share lifecycle ownership. |
 | `backend/app/db/classification/voting/history.py` | Created. History reads own access checks, retry lineage and bounded public serialization. |
 | `backend/app/db/classification/voting/runs.py` | Created. Prepare a fingerprinted reusable run and its configured votes. |
-| `backend/app/db/classification/voting/state.py` | Created. Shared connection-taking locks and progress helpers prevent sibling cycles. |
+| `backend/app/db/classification/voting/coordination.py` | Created. Shared connection-taking locks and progress helpers prevent sibling cycles. |
 | `backend/app/db/classification/voting/votes.py` | Created. Keep each claim/result/attempt/progress transaction intact, including restart recovery. |
 | `backend/app/db/collection/completion.py` | Reorganized. Preserve both full dataset completion and the narrower report-only completion API. |
-| `backend/app/db/collection/job_reads.py` | Created. Queries and row conversion are shared by lifecycle, reservations and progress reads. |
+| `backend/app/db/collection/job_queries.py` | Created. Queries and row conversion are shared by lifecycle, reservations and progress reads. |
 | `backend/app/db/collection/jobs.py` | Reorganized. Creation, claims, nonterminal/failure state and restart recovery remain lifecycle operations. |
 | `backend/app/db/collection/traces/reading.py` | Created. Owned history assembly and pagination remain distinct from writes and filtering. |
 | `backend/app/db/collection/traces/sanitization.py` | Created. One pure evidence policy is reused before persistence and before public exposure. |
@@ -201,14 +201,14 @@ are covered by the complete audit linked below.
 | `read_candidate_vote_history()` | `classification/votes.py` | `classification/voting/history.py` | History reads own access checks, retry lineage and bounded public serialization. |
 | `read_collection_vote_history()` | `classification/votes.py` | `classification/voting/history.py` | History reads own access checks, retry lineage and bounded public serialization. |
 | `_read_vote_history()` | `classification/votes.py` | `classification/voting/history.py` | History reads own access checks, retry lineage and bounded public serialization. |
-| `_scope()` | `classification/votes.py` | `classification/voting/state.py` | Shared connection-taking locks and progress helpers prevent sibling cycles. |
-| `_lock_run()` | `classification/votes.py` | `classification/voting/state.py` | Shared connection-taking locks and progress helpers prevent sibling cycles. |
-| `_publish_progress()` | `classification/votes.py` | `classification/voting/state.py` | Shared connection-taking locks and progress helpers prevent sibling cycles. |
-| `get_collection_job()` | `collection/jobs.py` | `collection/job_reads.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
-| `get_collection_job_for_owner()` | `collection/jobs.py` | `collection/job_reads.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
-| `_get_collection_job_row()` | `collection/jobs.py` | `collection/job_reads.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
-| `_job_dataset_ids()` | `collection/jobs.py` | `collection/job_reads.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
-| `_collection_job_to_dict()` | `collection/jobs.py` | `collection/job_reads.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
+| `_scope()` | `classification/votes.py` | `classification/voting/coordination.py` | Shared connection-taking locks and progress helpers prevent sibling cycles. |
+| `_lock_run()` | `classification/votes.py` | `classification/voting/coordination.py` | Shared connection-taking locks and progress helpers prevent sibling cycles. |
+| `_publish_progress()` | `classification/votes.py` | `classification/voting/coordination.py` | Shared connection-taking locks and progress helpers prevent sibling cycles. |
+| `get_collection_job()` | `collection/jobs.py` | `collection/job_queries.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
+| `get_collection_job_for_owner()` | `collection/jobs.py` | `collection/job_queries.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
+| `_get_collection_job_row()` | `collection/jobs.py` | `collection/job_queries.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
+| `_job_dataset_ids()` | `collection/jobs.py` | `collection/job_queries.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
+| `_collection_job_to_dict()` | `collection/jobs.py` | `collection/job_queries.py` | Queries and row conversion are shared by lifecycle, reservations and progress reads. |
 | `mark_collection_job_done()` | `collection/jobs.py` | `collection/completion.py` | Preserve both full dataset completion and the narrower report-only completion API. |
 | `_mark_collection_job_done()` | `collection/jobs.py` | `collection/completion.py` | Preserve both full dataset completion and the narrower report-only completion API. |
 | `_collection_job_done_message()` | `collection/jobs.py` | `collection/completion.py` | Preserve both full dataset completion and the narrower report-only completion API. |

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from app.db.classification.voting.history import read_collection_vote_history
-from app.db.collection.job_reads import get_collection_job_for_owner
+from app.db.collection.job_queries import get_collection_job_for_owner
 from app.db.collection.traces.sanitization import (
     MAX_CHECKS_PER_METHOD,
     safe_check,

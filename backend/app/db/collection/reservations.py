@@ -12,7 +12,7 @@ from uuid import UUID
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from app.db.collection.job_reads import _collection_job_to_dict
+from app.db.collection.job_queries import _collection_job_to_dict
 from app.db.collection.jobs import _insert_collection_job
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
 from app.db.owner_ids import validate_owner_id

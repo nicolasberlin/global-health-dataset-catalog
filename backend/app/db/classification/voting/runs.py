@@ -6,7 +6,7 @@ import hashlib
 import json
 from uuid import uuid4
 
-from app.db.classification.voting.state import _publish_progress, _scope
+from app.db.classification.voting.coordination import _publish_progress, _scope
 from app.db.connection import _fetchone, _require_database_pool
 from app.db.serialization import _jsonb
 
