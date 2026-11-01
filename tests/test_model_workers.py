@@ -38,7 +38,7 @@ def attempt(kind, number=1):
         "id": uuid4() if kind == "classification" else number,
         "owner_id": f"owner-{number}",
         "updated_at": (VERSION + timedelta(seconds=number)).isoformat(),
-        "kind": "source",
+        "kind": "repository_candidate",
         "source_url": f"https://example.org/{number}",
     }
 
@@ -54,7 +54,7 @@ def make_worker(kind, compute):
     return collection.CollectionWorker(
         classifier_factory=Mock(),
         vote_store_factory=Mock(),
-        collect_source=compute,
+        collect_record=compute,
         persist=persist,
     )
 
@@ -192,9 +192,8 @@ async def test_shared_worker_keeps_concurrent_results_and_versions_separate(monk
     assert all("_vote_store" not in job for job in jobs)
 
 
-@pytest.mark.parametrize("kind", ["source", "repository_candidate"])
-async def test_collection_budget_covers_compute_and_not_persistence(monkeypatch, kind):
-    job = {**attempt("collection"), "kind": kind}
+async def test_collection_budget_covers_compute_and_not_persistence(monkeypatch):
+    job = attempt("collection")
     budgets = []
     result = CollectionResult()
 
@@ -205,13 +204,12 @@ async def test_collection_budget_covers_compute_and_not_persistence(monkeypatch,
     async def complete(*args, **kwargs):
         assert active_collection_budget() is None
 
-    source, record = Mock(side_effect=compute), Mock(side_effect=compute)
+    record = Mock(side_effect=compute)
     trace_factory = Mock()
     worker = collection.CollectionWorker(
         classifier_factory=Mock(),
         vote_store_factory=Mock(),
         trace_factory=trace_factory,
-        collect_source=source,
         collect_record=record,
     )
     completion = AsyncMock(side_effect=complete)
@@ -225,12 +223,24 @@ async def test_collection_budget_covers_compute_and_not_persistence(monkeypatch,
         result,
         expected_updated_at=datetime.fromisoformat(job["updated_at"]),
     )
-    if kind == "repository_candidate":
-        record.assert_called_once()
-        source.assert_not_called()
-        trace_factory.assert_called_once()
-        assert record.call_args.kwargs["observe"] is trace_factory.return_value
-    else:
-        source.assert_called_once()
-        record.assert_not_called()
-        trace_factory.assert_not_called()
+    record.assert_called_once()
+    trace_factory.assert_called_once()
+    assert record.call_args.kwargs["observe"] is trace_factory.return_value
+
+
+async def test_legacy_source_job_fails_without_invoking_models_or_collection(monkeypatch):
+    job = {**attempt("collection"), "kind": "source"}
+    classify = Mock(side_effect=AssertionError("Legacy source jobs must not invoke models"))
+    collect = Mock(side_effect=AssertionError("Legacy source jobs must not collect records"))
+    failure = AsyncMock()
+    worker = collection.CollectionWorker(classifier_factory=classify, collect_record=collect)
+    monkeypatch.setattr(collection, "mark_collection_job_error", failure)
+    with ThreadPoolExecutor(1) as executor:
+        await worker.execute(job, executor)
+    classify.assert_not_called()
+    collect.assert_not_called()
+    failure.assert_awaited_once()
+    assert failure.call_args.args[:2] == (
+        job["id"], "Source collection jobs are no longer supported.",
+    )
+    assert failure.call_args.kwargs["errors"][0]["code"] == "processing_failed"

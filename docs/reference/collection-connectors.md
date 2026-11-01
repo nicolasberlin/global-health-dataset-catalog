@@ -55,7 +55,6 @@ cookies remain in the browser service.
 | `collection/records.py` | Normalized observations and scoped identity |
 | `collection/contracts.py` | Shared page candidate, resolution/attempt evidence and callback types |
 | `collection/service.py` | Public collection entry points delegating to the workflows |
-| `collection/workflows/source.py` | Bounded source discovery, page analysis and source reports |
 | `collection/connectors/__init__.py` | Record connector protocol |
 | `collection/connectors/dataverse.py` | Dataverse response validation and scope |
 | `collection/connectors/zenodo.py` | Zenodo response validation and scope |
@@ -97,25 +96,19 @@ orchestrating function.
 Dataverse catalogue discovery has no dedicated adapter yet; record collection uses
 the connector.
 
-Public entry points in `collector.collection.service` delegate to the source and
-record workflows, which use the same pipeline. HTML/JSON-LD extraction limits and
+Public entry points in `collector.collection.service` delegate to the individual-record
+workflow and its shared page-analysis functions. HTML/JSON-LD extraction limits and
 unresolved Dataset identity produce
 controlled diagnostics; permitted later methods can recover while retaining the
 failed method's evidence. Context documents are never fetched. Details and
 validation are described in the [collection guide](collection.md).
 
-## Structured source discovery
+## Retired source exploration
 
-CKAN, Socrata and data.json discovery records the effective API/catalogue URL in
-`metadata_source_url`; licence/date provenance therefore identifies the document
-actually read, rather than an unvisited landing page. data.json landing pages and
-download references resolve against the effective catalogue document URL, including
-redirects. Supported JSON-LD Dataset type IRIs and local `@id` URL objects are
-recognized without loading remote contexts or implementing general RDF expansion.
-
-Socrata distributions retain the paginated SODA endpoint and instructions for
-advancing through the dataset. Collection validates a bounded sample rather than
-downloading all pages; see [resource validation and Socrata](collection.md#resource-validation-and-socrata).
+Whole-source adapters (CKAN, Socrata, data.json, generic websites and sitemaps) are
+removed. Existing connectors resolve individual accepted candidates and retain
+their API → HTML → browser behavior. Historical source job evidence stays readable;
+new execution of a legacy source job is reported as unsupported.
 
 ## Supported references
 

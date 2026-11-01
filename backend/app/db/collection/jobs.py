@@ -17,19 +17,6 @@ from app.db.serialization import (
 )
 from collector.config import configured_collection_budget_seconds
 from collector.diagnostics import Diagnostic
-from collector.url_utils import require_http_url
-
-
-async def create_collection_job(source_url: str) -> dict[str, object]:
-    """Create a pending source job without executing collection work."""
-    source_url = require_http_url(source_url)
-    async with _require_database_pool().connection() as connection:
-        await _require_current_schema(connection)
-        row = await _insert_collection_job(connection, source_url)
-
-    if row is None:
-        raise RuntimeError("Collection job insert did not return a row.")
-    return _collection_job_to_dict(row)
 
 
 async def mark_interrupted_collection_jobs_error() -> int:
@@ -124,7 +111,7 @@ async def _insert_collection_job(
     connection: AsyncConnection[DictRow],
     source_url: str,
     *,
-    kind: str = "source",
+    kind: str,
     repository_candidate_id: UUID | None = None,
 ) -> Row | None:
     previous = await _fetchone(

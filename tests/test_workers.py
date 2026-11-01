@@ -106,7 +106,7 @@ async def test_consumer_keeps_slot_until_terminal_write_recovers(monkeypatch):
         nonlocal claims
         claims += 1
         if claims == 1:
-            return {"id": 1, "kind": "source", "source_url": "https://example.org",
+            return {"id": 1, "kind": "repository_candidate", "source_url": "https://example.org",
                     "updated_at": VERSION.isoformat()}
         stop.set()
         return None
@@ -120,7 +120,7 @@ async def test_consumer_keeps_slot_until_terminal_write_recovers(monkeypatch):
         await release.wait()
 
     compute = Mock(return_value=CollectionResult())
-    monkeypatch.setattr(collection_worker, "collect_source_with_report", compute)
+    monkeypatch.setattr(collection_worker, "collect_repository_candidate_with_report", compute)
     monkeypatch.setattr(collection_worker, "build_default_page_classifier", Mock())
     monkeypatch.setattr(collection_worker, "PostgresVoteStore", Mock())
     monkeypatch.setattr(collection_worker, "complete_collection_job", complete)
@@ -171,10 +171,10 @@ async def test_workers_retry_only_persistence(monkeypatch, kind, stage, caplog):
     fail = AsyncMock(side_effect=[PoolTimeout("offline"), OperationalError("offline"), None])
     if kind == "collection":
         monkeypatch.setattr(module, "build_default_page_classifier", Mock())
-        monkeypatch.setattr(module, "collect_source_with_report", compute)
+        monkeypatch.setattr(module, "collect_repository_candidate_with_report", compute)
         monkeypatch.setattr(module, "complete_collection_job", complete)
         monkeypatch.setattr(module, "mark_collection_job_error", fail)
-        item = {"id": 1, "kind": "source", "source_url": "https://example.org",
+        item = {"id": 1, "kind": "repository_candidate", "source_url": "https://example.org",
                 "updated_at": VERSION.isoformat()}
         run = partial(execute_worker, module)
     else:
@@ -210,11 +210,11 @@ async def test_logging_failure_cannot_fail_worker(monkeypatch, kind):
     monkeypatch.setattr(module, "PostgresVoteStore", Mock())
     complete = AsyncMock()
     fail = AsyncMock()
-    item = {"id": 1, "owner_id": "alice", "kind": "source",
+    item = {"id": 1, "owner_id": "alice", "kind": "repository_candidate",
             "source_url": "https://example.org", "updated_at": VERSION.isoformat()}
     if kind == "collection":
         monkeypatch.setattr(module, "build_default_page_classifier", Mock())
-        monkeypatch.setattr(module, "collect_source_with_report",
+        monkeypatch.setattr(module, "collect_repository_candidate_with_report",
                             Mock(return_value=CollectionResult()))
         monkeypatch.setattr(module, "complete_collection_job", complete)
         monkeypatch.setattr(module, "mark_collection_job_error", fail)

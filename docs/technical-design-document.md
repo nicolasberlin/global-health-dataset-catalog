@@ -85,16 +85,19 @@ for row conversion. The [database refactor report](reference/database-refactor.m
 contains the concrete file map, function moves and dependency graph.
 
 The collector's public collection entry points are in `collection/service.py`.
-They delegate to two explicit workflows: `collection/workflows/source.py` owns
-`collect_source_with_report()` and its source-discovery, analysis and validation
-helpers; `collection/workflows/record.py` owns candidate URL validation and
-`collect_record()`, including the API → HTML → browser sequence, attempt history,
-resource limits and reporting. The source workflow calls the record workflow
-directly for its configured browser fallback; neither workflow imports the service.
-The three shared callback type aliases live in `collection/contracts.py`.
-`workflows/__init__.py` contains documentation only. The former `collection/orchestrator.py`
-has been removed. The pipeline, connectors, resource checks and persistence
-boundaries remain unchanged.
+They delegate to `collection/workflows/record.py` for individual accepted repository
+candidates. `collect_record()` keeps the API → HTML → browser sequence, resource
+limits, method history and reporting. Whole-source exploration and its CKAN,
+Socrata, data.json and sitemap adapters have been removed. Shared fetch/validation
+callback contracts remain in `collection/contracts.py`.
+
+`CollectionWorker` runs only `repository_candidate` jobs. A historical `source`
+job is marked as an unsupported error before constructing classifiers, invoking
+providers or collecting data. The old `create_collection_job()` entry point is
+removed; accepted candidates reserve their jobs through classification completion.
+The existing schema and read contracts retain historical source rows; this change
+performs no destructive migration or deletion of recorded evidence. Tests seed
+legacy rows only to verify recovery, ownership and serialization compatibility.
 
 Within `workflows/record.py`, `collect_record()` retains method ordering,
 fallback/stop decisions, phase transitions, exception handling and the `finally`
@@ -108,37 +111,35 @@ so transport failures stay in `fetch` and normalization failures stay in
 `normalize`. Callback order, retry deadlines and partial-success reporting are
 preserved.
 
-`collector/main.py` remains a
-compatibility import surface for `collect_source_with_report`,
-`collect_repository_candidate_with_report`, `analyze_discovered_page` and
-`analyze_html_page`, plus the `DiscoverFunction`, `FetchHTMLFunction` and
-`ValidateDistributionFunction` type aliases. Internal callers import the service
-directly. Source identification belongs to `collection/extraction/source_identity.py`.
+`collector/main.py` retains compatibility imports for record collection,
+`analyze_discovered_page`, `analyze_html_page`, `FetchHTMLFunction` and
+`ValidateDistributionFunction`. Internal callers import the service directly.
+Source identity here means the publisher/hosting-platform inference in
+`collection/extraction/source_identity.py`, not catalogue exploration.
 
-`collection/contracts.py` owns the page candidate shared by source discovery,
-connector mapping, HTML resolution and browser rendering, along with
+`collection/contracts.py` owns the page candidate shared by connector mapping,
+HTML resolution and browser rendering, along with
 `StrategyResult`, `MethodAttempt`, diagnostic URL filtering and callback types.
 The page keeps its existing public name `DiscoveredPage`, fields and defaults;
-there is one definition, outside the discovery package. `collection/records.py`
+there is one definition shared by record resolution methods. `collection/records.py`
 remains the connector-normalized record and identity model, which has a different
 role from a page candidate. `collection/record_mapping.py` explicitly maps that
 record into `StrategyResult` through `to_strategy_result()`; it replaces the
 vaguely named compatibility module without changing the mapping.
 
 `collection/page_analysis.py` owns shared page preparation, evidence merging,
-candidate filtering and classification for HTML and adapter-provided pages.
+candidate filtering and classification for HTML and connector-provided pages.
 `collection/resources.py` owns the shared `EXCLUDED_RESOURCE_FORMATS` policy, resource-check state and bounded
-validation/retention. Both workflows reuse that policy and the same page-analysis functions;
+validation/retention. Record resolution methods reuse that policy and the same page-analysis functions;
 no duplicate page model or additional abstraction layer is introduced. These
 shared modules, the record workflow and the browser do not depend on source
 discovery implementations.
 
-Source exploration belongs to `collector/collection/discovery/`, distinct from
-external candidate search in `collector/search/`.
+External candidate search remains in `collector/search/`; collection resolves one accepted record.
 
 `collector/search/` owns external provider calls, candidate filtering and metadata
 normalization. Local catalogue lookup remains in the backend database layer;
-source exploration remains part of collection. Application callers import the
+whole-source exploration is retired. Application callers import the
 search package directly. The directory rename preserves the existing function
 and model names, the `repository_search` quota scopes and the
 `repository_search_provider` event name.
@@ -174,32 +175,19 @@ collector/
 │   │   └── prompts.py
 │   ├── workflows/
 │   │   ├── __init__.py
-│   │   ├── source.py
 │   │   └── record.py
-│   ├── connectors/
-│   │   ├── __init__.py
-│   │   ├── registry.py
-│   │   ├── http.py
-│   │   ├── metadata.py
-│   │   ├── shared.py
-│   │   ├── dataverse.py
-│   │   ├── zenodo.py
-│   │   ├── dryad.py
-│   │   ├── figshare.py
-│   │   ├── dspace.py
-│   │   └── inveniordm.py
-│   └── discovery/
+│   └── connectors/
 │       ├── __init__.py
-│       ├── manager.py
-│       ├── models.py
+│       ├── registry.py
+│       ├── http.py
 │       ├── metadata.py
-│       ├── sitemap.py
-│       └── adapters/
-│           ├── __init__.py
-│           ├── ckan.py
-│           ├── socrata.py
-│           ├── data_json.py
-│           └── generic.py
+│       ├── shared.py
+│       ├── dataverse.py
+│       ├── zenodo.py
+│       ├── dryad.py
+│       ├── figshare.py
+│       ├── dspace.py
+│       └── inveniordm.py
 └── network/
     ├── json.py
     └── ...
@@ -212,25 +200,9 @@ configured connectors locally and preserves their existing order. `http.py` owns
 workflow and connector metadata readers. It preserves HTTP evidence, request
 limits, retry policy, deadlines and network protections. The protocol initializer
 does not import either implementation, keeping imports acyclic. General public
-JSON fetching for DataCite and source discovery stays in `network/json.py`.
-
-`manager.py` runs the first adapter that recognizes the source. The registry in
-`adapters/__init__.py` keeps the order CKAN, Socrata, data.json, then generic
-website discovery, with per-run request settings. `discovery/models.py` owns
-`DiscoveryAdapter` and the injected `JsonFetcher` contract, using the shared
-`DiscoveredPage` from `collection/contracts.py`. `discovery/metadata.py` owns
-adapter metadata normalization and vocabularies. Resource-format exclusions
-belong to `collection/resources.py` and are imported by adapters and the pipeline.
-`sitemap.py` retains sitemap parsing, ranking, traversal limits and bounded text
-fetching; these operations are specific to source exploration.
-
-`collector/network/json.py` owns `fetch_json_url()`, `JsonDocument` and
-`document_url()`. DataCite and source adapters share this transport without
-repository search depending on collection discovery. Effective response URLs,
-JSON object/list handling, byte limits, deadlines, public-address and redirect
-checks, exceptions and error messages remain unchanged. Callers import the owning
-modules directly; the former discovery package and mixed `adapters/shared.py`
-module are removed.
+JSON fetching for DataCite remains in `network/json.py`, preserving effective
+response URLs, byte limits, deadlines and public-address/redirect protection.
+The retired collection-discovery package has no compatibility facade.
 
 `collector/network/` groups HTTP fetching (`fetch.py`), connection and deadline
 handling (`transport.py`), bounded DNS resolution (`resolver.py`) and the shared

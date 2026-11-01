@@ -14,13 +14,13 @@ from collector.network.fetch import FetchedPage
 
 @dataclass(frozen=True)
 class DiscoveredPage:
-    """Normalized page candidate shared by source and record collection.
+    """Normalized page candidate for record connectors and HTML/browser resolution.
 
-    Source adapters, connector mapping and HTML/browser resolution all supply
+    Connector mapping and HTML/browser resolution supply
     this contract to the shared pipeline. ``discovery_method`` identifies the
-    origin or resolution method. ``priority`` retains source-adapter ranking;
+    origin or resolution method. ``priority`` retains legacy ranking evidence;
     ``distributions`` remain unvalidated candidates. ``discovery_metadata``
-    carries optional source-specific evidence. The existing public class name
+    carries optional provenance evidence. The existing public class name
     is retained so caller signatures and field names remain unchanged.
     """
 
@@ -103,6 +103,5 @@ class StrategyResult:
     snapshot: PageSnapshot | None = None
 
 
-DiscoverFunction = Callable[[str], list[DiscoveredPage]]
 FetchHTMLFunction = Callable[[str], FetchedPage]
 ValidateDistributionFunction = Callable[[DistributionCandidate], ValidationResult]

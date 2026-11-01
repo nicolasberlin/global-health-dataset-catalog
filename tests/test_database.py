@@ -1166,7 +1166,7 @@ async def test_save_does_not_replace_known_metadata_with_empty_values(database):
 
 async def test_save_links_dataset_discovery_observation_to_collection_job(database):
     await database.init_database()
-    job = await database.create_collection_job("https://catalog.example.org/")
+    job = await database.create_legacy_source_job("https://catalog.example.org/")
     dataset = CollectedDataset(
         dataset_url="https://catalog.example.org/dataset/mortality",
         title="Mortality health dataset",
@@ -1719,7 +1719,7 @@ async def test_non_json_serializable_signals_do_not_leave_partial_rows(database)
 async def test_collection_job_lifecycle(database):
     await database.init_database()
 
-    job = await database.create_collection_job("https://catalog.example.org/")
+    job = await database.create_legacy_source_job("https://catalog.example.org/")
 
     assert job["id"] == 1
     assert job["source_url"] == "https://catalog.example.org/"
@@ -1870,8 +1870,6 @@ async def test_repository_candidate_batch_rolls_back_on_invalid_metadata(databas
     assert session_rows[0]["status"] == "running"
 
 
-
-
 async def test_interrupted_candidate_classification_is_made_retryable(database):
     await database.init_database()
     _, candidate = await _create_repository_candidate(database)
@@ -2003,8 +2001,8 @@ async def test_repository_collection_deduplicates_url_across_searches(database):
 
 async def test_restart_preserves_pending_and_fails_only_running_jobs(database):
     await database.init_database()
-    pending = await database.create_collection_job("https://repository.example.org/pending")
-    running = await database.create_collection_job("https://repository.example.org/running")
+    pending = await database.create_legacy_source_job("https://repository.example.org/pending")
+    running = await database.create_legacy_source_job("https://repository.example.org/running")
     await database.mark_collection_job_running(int(running["id"]))
 
     assert await database.mark_interrupted_collection_jobs_error() == 1
@@ -2130,7 +2128,7 @@ async def test_complete_collection_job_saves_refined_distribution_formats(databa
         validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
         classifier=AcceptingClassifier(),
     )
-    job = await database.create_collection_job(candidate_url)
+    job = await database.create_legacy_source_job(candidate_url)
     await database.mark_collection_job_running(job["id"])
     completed = await database.complete_collection_job(job["id"], collection_result)
 
@@ -2148,7 +2146,7 @@ async def test_complete_collection_job_rolls_back_datasets_when_one_save_fails(d
     await database.init_database()
 
     source_url = "https://catalog.example.org/"
-    job = await database.create_collection_job(source_url)
+    job = await database.create_legacy_source_job(source_url)
     job_id = int(job["id"])
     await database.mark_collection_job_running(job_id)
 
@@ -2181,7 +2179,7 @@ async def test_complete_collection_job_uses_source_url_from_job(database):
     await database.init_database()
 
     source_url = "https://job-source.example.org/"
-    job = await database.create_collection_job(source_url)
+    job = await database.create_legacy_source_job(source_url)
     job_id = int(job["id"])
     await database.mark_collection_job_running(job_id)
 
@@ -2203,7 +2201,7 @@ async def test_complete_collection_job_uses_source_url_from_job(database):
 async def test_collection_job_status_transitions_are_guarded(database):
     await database.init_database()
 
-    job = await database.create_collection_job("https://catalog.example.org/")
+    job = await database.create_legacy_source_job("https://catalog.example.org/")
     job_id = int(job["id"])
 
     assert await database.mark_collection_job_done(job_id, 1) is None
@@ -2219,7 +2217,7 @@ async def test_collection_job_status_transitions_are_guarded(database):
     assert await database.mark_collection_job_error(job_id, "late failure") is None
     assert (await database.get_collection_job(job_id))["status"] == "done"
 
-    failed_job = await database.create_collection_job("https://catalog.example.org/fail")
+    failed_job = await database.create_legacy_source_job("https://catalog.example.org/fail")
     failed_job_id = int(failed_job["id"])
 
     failed = await database.mark_collection_job_error(failed_job_id, "startup failure")
@@ -2233,7 +2231,7 @@ async def test_collection_job_status_transitions_are_guarded(database):
 async def test_collection_job_records_errors(database):
     await database.init_database()
 
-    job = await database.create_collection_job("https://catalog.example.org/")
+    job = await database.create_legacy_source_job("https://catalog.example.org/")
     failed = await database.mark_collection_job_error(int(job["id"]), "network timeout")
 
     assert failed["status"] == "error"
@@ -2251,7 +2249,7 @@ async def test_business_operations_do_not_reread_schema_version(database, monkey
     monkeypatch.setattr(db_schema, "_schema_version", unexpected_schema_query)
     assert await stored_datasets(database) == []
     await database.create_search_session("mortality", "alice")
-    await database.create_collection_job("https://example.org/data")
+    await database.create_legacy_source_job("https://example.org/data")
     assert (await database.claim_pending_collection_job())["status"] == "running"
 
 

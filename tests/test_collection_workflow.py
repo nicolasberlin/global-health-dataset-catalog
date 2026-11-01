@@ -102,7 +102,7 @@ async def test_startup_collects_persisted_pending_job_without_http_scheduling(
         candidate["id"], "alice", decision()
     )
     job_id = completed.collection.job["id"]
-    interrupted = await database.create_collection_job("https://example.org/interrupted")
+    interrupted = await database.create_record_job("https://example.org/interrupted")
     await database.mark_collection_job_running(interrupted["id"])
     await database.close_database_pool()
     calls = []
@@ -130,7 +130,7 @@ async def test_startup_collects_persisted_pending_job_without_http_scheduling(
 
 async def test_busy_workers_leave_excess_jobs_pending_and_drain_on_shutdown(database, monkeypatch):
     await database.init_database()
-    jobs = [await database.create_collection_job(f"https://example.org/{i}") for i in range(3)]
+    jobs = [await database.create_record_job(f"https://example.org/{i}") for i in range(3)]
     release = threading.Event()
     started = []
 
@@ -139,7 +139,7 @@ async def test_busy_workers_leave_excess_jobs_pending_and_drain_on_shutdown(data
         assert release.wait(timeout=5)
         return CollectionResult()
 
-    monkeypatch.setattr(collection_worker, "collect_source_with_report", collect)
+    monkeypatch.setattr(collection_worker, "collect_repository_candidate_with_report", collect)
     manager = persisted_workers(
         collection_worker.CollectionWorker(), concurrency=2, poll_interval=0.01
     )
@@ -174,8 +174,8 @@ async def test_busy_workers_leave_excess_jobs_pending_and_drain_on_shutdown(data
 @pytest.mark.parametrize("failure_stage", ["collect", "finalize"])
 async def test_worker_records_error_and_continues_to_next_job(database, monkeypatch, failure_stage):
     await database.init_database()
-    first = await database.create_collection_job("https://example.org/fail")
-    second = await database.create_collection_job("https://example.org/pass")
+    first = await database.create_record_job("https://example.org/fail")
+    second = await database.create_record_job("https://example.org/pass")
     real_complete = collection_worker.complete_collection_job
 
     def collect(url, **kwargs):
@@ -188,7 +188,7 @@ async def test_worker_records_error_and_continues_to_next_job(database, monkeypa
             raise RuntimeError("test persistence failure")
         return await real_complete(job_id, result, **kwargs)
 
-    monkeypatch.setattr(collection_worker, "collect_source_with_report", collect)
+    monkeypatch.setattr(collection_worker, "collect_repository_candidate_with_report", collect)
     monkeypatch.setattr(collection_worker, "complete_collection_job", complete)
     async with persisted_workers(
         collection_worker.CollectionWorker(), concurrency=1, poll_interval=0.01

@@ -14,14 +14,16 @@ candidates receive a persisted collection job, which resolves that record,
 classifies its dataset/health eligibility, validates resource access, then saves
 the metadata and links atomically with job completion.
 
-`collector/collection/service.py` exposes the public entry points and delegates to
-`workflows/source.py` for a whole source or `workflows/record.py` for one accepted
-repository candidate. The source workflow owns discovery limits, page analysis
-and source reporting. The record workflow owns URL validation, `collect_record()`,
-API/HTML/browser attempts, shared attempt limits and record reporting. Source
-collection can call the record workflow for its configured browser fallback without
-going back through the service. Both return transient results; database writes
-and transaction boundaries remain with the backend worker and persistence layer.
+`collector/collection/service.py` delegates individual candidate collection to
+`workflows/record.py`: URL validation, API/HTML/browser attempts, bounded validation
+and record reporting. It returns transient results; database writes and transaction
+boundaries remain with the backend worker and persistence layer.
+
+Whole-source collection, discovery adapters and sitemap exploration are removed.
+No source job can be created through the application collection interface.
+Historical source rows remain readable; the worker marks any claimed legacy source
+job as unsupported before calling models or collection transports. No stored rows
+are deleted by this change.
 
 Inside `workflows/record.py`, private helpers separate API metadata reads,
 resource-check observations and final report construction. `collect_record()`
@@ -83,22 +85,10 @@ ranked and deduplicated; a failed HTTP resource can be checked again in a browse
 session, consuming the same check allowance. Coverage reports discovered, checked,
 validated and limited resources, without claiming exhaustive repository coverage.
 
-Dataverse, Zenodo, Figshare, Dryad, InvenioRDM and DSpace 7+ are record connectors,
-not additional search crawlers. CKAN, Socrata and `data.json` source discovery is
-a separate entry path sharing extraction, page classification and validation.
-Source exploration is implemented in `collector/collection/discovery/`: the manager
-selects the first matching adapter in the order CKAN, Socrata, data.json, then
-generic website discovery. The generic adapter explores same-domain sitemaps and
-falls back to the source page. The discovery-specific `DiscoveryAdapter` and
-`JsonFetcher` contracts live in `discovery/models.py`; adapter metadata helpers
-live in `discovery/metadata.py`. The page candidate `DiscoveredPage` is defined
-once in `collection/contracts.py` and is also used by connector mapping and
-HTML/browser resolution. Resource-format exclusions, validation state and bounded
-retention belong to `collection/resources.py`. `collection/page_analysis.py` owns
-the shared preparation and classification path, and `collection/record_mapping.py`
-maps connector-normalized records to that path without changing metadata.
-Bounded JSON fetching lives in `collector/network/json.py`, also used directly by
-DataCite, so external repository search does not depend on collection discovery.
+Dataverse, Zenodo, Figshare, Dryad, InvenioRDM and DSpace are record connectors.
+They resolve one candidate via the shared `DiscoveredPage` contract, page analysis
+and resource-check policy. They do not explore whole source catalogues. DataCite
+continues to use shared bounded JSON transport in `collector/network/json.py`.
 See [connector contracts](collection-connectors.md) for supported URLs, host/API
 configuration and repository-specific version rules.
 
@@ -125,9 +115,9 @@ disease signals stay within the selected entity's scope.
 
 Provenance records ambiguity and prevents later enrichment from refilling those
 uncertain fields. Bounded raw JSON-LD remains internal evidence, separate from the
-selected entity. Remote contexts are never downloaded. CKAN, Socrata and
-`data.json` provenance identifies the effective API/catalogue URL actually read;
-relative references use that final document URL, including redirects. Supported
+selected entity. Remote contexts are never downloaded. Connector provenance
+identifies the metadata document actually read; relative references use the final
+document URL, including redirects. Supported
 Dataset type IRIs and local `@id` URL objects do not require general RDF expansion.
 
 Shared data contracts such as `PageSnapshot`, `CollectedDataset` and
@@ -246,8 +236,7 @@ do not become successful votes. No subsequent external operation starts late.
 Budget expiry reports `collection_budget_exhausted` and an incomplete outcome.
 Already validated datasets/distributions remain eligible for the final atomic
 save, including when a later probe expires. Unverified/interrupted resources are
-never retained. This does not add general per-page recovery for unrelated fatal
-exceptions in legacy multi-page source collection.
+never retained. Unexpected fatal errors retain the individual-record workflow's existing failure semantics.
 
 ## Model retries and checkpoints
 

@@ -1,5 +1,9 @@
 # Database function audit
 
+> Historical refactor snapshot. Whole-source collection and its public job-creation helper
+> have since been removed. See the [current function index](python-function-index.md)
+> and [collection guide](collection.md) for the active implementation.
+
 Snapshot of the structural refactor on **31 October 2026**. All 163 existing DB functions and methods are inventoried below. Signatures, return expressions, SQL references and connection/transaction ownership were extracted from the pre-refactor source; destinations refer to the new layout. Caller lists cover statically resolved direct calls, not every callback, fixture injection or dynamically selected module. An empty list does not mean a function is unused. Table lists include resolved DB helper calls; caller-supplied SQL and dynamic SQL identifiers remain explicitly subject to caller context. No runtime data or credentials are included.
 
 ## `catalog/datasets.py`

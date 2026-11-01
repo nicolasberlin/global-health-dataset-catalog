@@ -12,13 +12,12 @@ from helpers.classification import page as _page
 from helpers.collection import Accept, collect
 from helpers.workflows import collection_job as _collection_job
 
-from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.classifier import LLMPageClassifier
-from collector.collection.service import collect_source_with_report
+from collector.collection.service import collect_repository_candidate_with_report
 from collector.diagnostics import Diagnostic, PersistenceFailure, public_diagnostics, retry_after
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.llm.errors import ClassificationError
-from collector.network.fetch import FetchedPage, PageFetchError
+from collector.network.fetch import FetchedPage
 
 SEARCH = {"status": "completed", "origin": "online", "discovery_complete": True}
 
@@ -270,11 +269,11 @@ def test_persistence_failure_is_not_wrapped_as_a_model_failure():
     [
         (["unconfirmed"], False, 0),
         (["restricted"], False, 0),
-        (["unavailable"], True, 0),
+        (["unavailable"], False, 0),
         (["unconfirmed", "available"], True, 1),
     ],
 )
-def test_only_failed_necessary_verifications_make_a_collection_incomplete(
+def test_record_requires_confirmed_resource_or_preserves_validation_failure(
     statuses, complete, saved
 ):
     result = collect(statuses)
@@ -284,16 +283,15 @@ def test_only_failed_necessary_verifications_make_a_collection_incomplete(
 
 
 def test_captcha_landing_page_cannot_become_empty():
-    with pytest.raises(PageFetchError) as caught:
-        collect_source_with_report(
-            "https://example.org",
-            classifier=Accept(),
-            discover=lambda _: [DiscoveredPage("https://example.org/dataset", "test")],
-            fetch_html=lambda url: FetchedPage(
-                url, url, '<html><div class="g-recaptcha"></div></html>', 200, "text/html"
-            ),
-        )
-    assert caught.value.diagnostics[0].code == "verification_unconfirmed"
+    result = collect_repository_candidate_with_report(
+        "https://example.org/dataset", classifier=Accept(),
+        fetch_html=lambda url: FetchedPage(
+            url, url, '<html><div class="g-recaptcha"></div></html>', 200, "text/html",
+        ),
+    )
+    assert result.datasets == []
+    assert not result.report.verification_complete
+    assert result.report.errors[0].code == "verification_unconfirmed"
 
 
 def test_historical_zero_saved_is_incomplete_and_legacy_contract_survives():

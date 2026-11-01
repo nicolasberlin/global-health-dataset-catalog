@@ -32,7 +32,7 @@ async def owned_job(database):
 async def test_deadline_starts_at_first_claim(database, monkeypatch, legacy):
     monkeypatch.setenv("COLLECTION_MAX_DURATION_SECONDS", "37.5")
     await database.init_database()
-    pending = await database.create_collection_job("https://example.org/dataset")
+    pending = await database.create_legacy_source_job("https://example.org/dataset")
     assert pending["collection_deadline_at"] is None
     # Time spent queued must not consume the execution budget.
     await sql("UPDATE collection_jobs SET created_at = NOW() - INTERVAL '1 day'")
@@ -52,7 +52,7 @@ async def test_deadline_starts_at_first_claim(database, monkeypatch, legacy):
 async def test_automatic_retry_starts_fresh_budget_only_when_claimed(database, monkeypatch):
     monkeypatch.setenv("COLLECTION_MAX_DURATION_SECONDS", "300")
     await database.init_database()
-    await database.create_collection_job("https://example.org/dataset")
+    await database.create_legacy_source_job("https://example.org/dataset")
     job = await database.claim_pending_collection_job()
     version = datetime.fromisoformat(job["updated_at"])
     scheduled, _ = await task_retries.schedule_llm_retry(
@@ -88,7 +88,7 @@ async def test_interruption_without_new_attempt_does_not_extend_deadline(
 ):
     monkeypatch.setenv("COLLECTION_MAX_DURATION_SECONDS", "300")
     await database.init_database()
-    pending = await database.create_collection_job("https://example.org/dataset")
+    pending = await database.create_legacy_source_job("https://example.org/dataset")
     job = await database.claim_pending_collection_job()
     assert job["id"] == pending["id"]
     await database.mark_interrupted_collection_jobs_error()
@@ -109,7 +109,7 @@ async def test_interruption_without_new_attempt_does_not_extend_deadline(
 @pytest.mark.parametrize("offset", [-1, 0, 1])
 async def test_retry_due_can_fall_after_previous_attempt_deadline(database, monkeypatch, offset):
     await database.init_database()
-    await database.create_collection_job("https://example.org/dataset")
+    await database.create_legacy_source_job("https://example.org/dataset")
     job = await database.claim_pending_collection_job()
     deadline = datetime.fromisoformat(job["collection_deadline_at"])
     due = deadline + timedelta(seconds=offset)
@@ -131,7 +131,7 @@ async def test_retry_due_can_fall_after_previous_attempt_deadline(database, monk
 async def test_retry_after_is_not_shortened_by_previous_attempt_budget(database, monkeypatch):
     monkeypatch.setenv("COLLECTION_MAX_DURATION_SECONDS", "5")
     await database.init_database()
-    await database.create_collection_job("https://example.org/dataset")
+    await database.create_legacy_source_job("https://example.org/dataset")
     job = await database.claim_pending_collection_job()
     deadline = datetime.fromisoformat(job["collection_deadline_at"])
     due = deadline + timedelta(seconds=30)
@@ -150,7 +150,7 @@ async def test_retry_after_is_not_shortened_by_previous_attempt_budget(database,
 
 async def test_exhausted_attempt_cannot_gain_budget_by_scheduling_retry(database):
     await database.init_database()
-    await database.create_collection_job("https://example.org/dataset")
+    await database.create_legacy_source_job("https://example.org/dataset")
     job = await database.claim_pending_collection_job()
     await sql("UPDATE collection_jobs SET collection_deadline_at = NOW() - INTERVAL '1 second'")
     scheduled, errors = await task_retries.schedule_llm_retry(
@@ -168,7 +168,7 @@ async def test_exhausted_attempt_cannot_gain_budget_by_scheduling_retry(database
 async def test_retry_limit_does_not_clear_current_attempt_deadline(database, monkeypatch):
     monkeypatch.setenv("LLM_MAX_ATTEMPTS", "2")
     await database.init_database()
-    await database.create_collection_job("https://example.org/dataset")
+    await database.create_legacy_source_job("https://example.org/dataset")
     job = await database.claim_pending_collection_job()
     await sql("UPDATE collection_jobs SET retry_round = 1")
     scheduled, errors = await task_retries.schedule_llm_retry(
@@ -187,7 +187,7 @@ async def test_exhausted_llm_policy_adds_collection_diagnostic_only_after_expira
     database, expired
 ):
     await database.init_database()
-    await database.create_collection_job("https://example.org/dataset")
+    await database.create_legacy_source_job("https://example.org/dataset")
     job = await database.claim_pending_collection_job()
     if expired:
         await sql("UPDATE collection_jobs SET collection_deadline_at = NOW() - INTERVAL '1 second'")
@@ -207,13 +207,13 @@ async def test_exhausted_llm_policy_adds_collection_diagnostic_only_after_expira
 
 async def test_reinitialization_preserves_jobs_and_starts_pending_budget_on_claim(database):
     await database.init_database()
-    await database.create_collection_job("https://example.org/completed")
+    await database.create_legacy_source_job("https://example.org/completed")
     completed = await database.claim_pending_collection_job()
     await database.mark_collection_job_done(
         completed["id"], 0, CollectionReport(verification_complete=True)
     )
     completed_deadline = completed["collection_deadline_at"]
-    pending = await database.create_collection_job("https://example.org/pending")
+    pending = await database.create_legacy_source_job("https://example.org/pending")
     assert pending["collection_deadline_at"] is None
     await database.init_database()
     await database.init_database()

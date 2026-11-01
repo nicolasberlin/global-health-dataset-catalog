@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
-from collector.collection.service import collect_source_with_report
+from collector.collection.service import collect_repository_candidate_with_report
 from collector.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 DATASET_HTML = """
@@ -61,6 +61,48 @@ class Accept:
         return PageClassification(accepted=True)
 
 
+def collect_record_page(page, *, config=None, validate=None, classifier=None,
+                        fetch_html=None, browser=None):
+    """Run real record collection with a synthetic metadata connector, never live discovery."""
+    from types import SimpleNamespace
+
+    from collector.collection.records import NormalizedRecord, RecordIdentity
+    from collector.config import DEFAULT_CONFIG
+    from collector.network.fetch import FetchedPage
+
+    identity = RecordIdentity("fixture", "https://example.org", "dataset", page.url)
+
+    class Connector:
+        name = "fixture"
+        method = "fixture_api"
+
+        def reference_identity(self, url):
+            return identity
+
+        def normalize(self, url, payload):
+            return NormalizedRecord(
+                identity=identity, landing_url=page.url,
+                metadata_source_url=page.url, title=page.title or "Health data",
+                description=page.description, publisher=page.publisher,
+                publication_date=page.date_of_publication, license=page.sharing_license,
+                doi=page.doi, resources=page.distributions,
+            )
+
+        def scope_resources(self, url, resources, known_record=None):
+            return resources
+
+    class Registry:
+        def select(self, url):
+            return SimpleNamespace(connector=Connector(), api_url=page.url)
+
+    return collect_repository_candidate_with_report(
+        page.url, config=config or DEFAULT_CONFIG,
+        classifier=classifier or Accept(), validate=validate,
+        fetch_json=lambda _: {}, registry=Registry(), browser=browser,
+        fetch_html=fetch_html or (lambda url: FetchedPage(url, url, "", 200, "text/html")),
+    )
+
+
 def collect(validations):
     links = tuple(
         DistributionCandidate(f"https://example.org/{i}.csv", "CSV", 0.9)
@@ -74,12 +116,9 @@ def collect(validations):
             item.url, item.url, "CSV", status == "available", 200, status=status
         )
 
-    return collect_source_with_report(
-        "https://example.org",
+    return collect_record_page(
+        DiscoveredPage("https://example.org/dataset", "fixture_api", distributions=links),
         classifier=Accept(),
-        discover=lambda _: [
-            DiscoveredPage("https://example.org/dataset", "test", distributions=links)
-        ],
         validate=validate,
     )
 

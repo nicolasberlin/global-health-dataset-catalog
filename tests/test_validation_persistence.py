@@ -3,11 +3,11 @@ from dataclasses import replace
 import pytest
 from app.api.presenters.catalog import _build_distribution_validation_view
 from app.db.connection import _fetchone, _require_database_pool
+from helpers.collection import collect_record_page
 from helpers.inspection import stored_datasets
 
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
-from collector.collection.service import collect_source_with_report
 from collector.collection.validation.distributions import validate_distribution
 from collector.models import (
     CollectedDataset,
@@ -43,15 +43,18 @@ async def test_sampled_format_stays_consistent_through_collection_and_storage(
         def classify(self, page, distributions):
             return PageClassification(accepted=True)
 
-    result = collect_source_with_report(
-        "https://example.org", classifier=Classifier(),
-        discover=lambda _: [DiscoveredPage(
-            url="https://example.org/dataset", title="Health", discovery_method="test",
-            distributions=(DistributionCandidate(URL, "CSV", .9),),
-        )],
+    result = collect_record_page(
+        DiscoveredPage(
+            url="https://example.org/dataset",
+            title="Health",
+            discovery_method="test",
+            distributions=(DistributionCandidate(URL, "CSV", 0.9),),
+        ),
+        classifier=Classifier(),
         validate=lambda item: validate_distribution(
-            item, probe=lambda url, method, **kw: HTTPProbe(
-                url, url, 200, {"content-type": "text/csv"}, body if method == "GET" else b"",
+            item,
+            probe=lambda url, method, **kw: HTTPProbe(
+                url, url, 200, {"content-type": "text/csv"}, body if method == "GET" else b""
             ),
         ),
     )
@@ -75,7 +78,7 @@ async def test_plain_errors_at_download_urls_stay_unconfirmed_in_saved_audit(dat
     )
     assert validation.status == "unconfirmed"
     await database.init_database()
-    job = await database.create_collection_job("https://example.org")
+    job = await database.create_legacy_source_job("https://example.org")
     await database.mark_collection_job_running(job["id"])
     await database.complete_collection_job(job["id"], CollectionResult(
         report=CollectionReport(invalid_distribution_count=1, validation_failures=[validation]),
@@ -101,7 +104,7 @@ async def test_validation_status_large_size_and_rejected_audit_are_persisted(dat
     assert stored == validation
 
     failure = replace(validation, status="restricted", reason="Authentication is required.")
-    job = await database.create_collection_job("https://example.org/restricted")
+    job = await database.create_legacy_source_job("https://example.org/restricted")
     await database.mark_collection_job_running(job["id"])
     await database.complete_collection_job(job["id"], CollectionResult(
         report=CollectionReport(invalid_distribution_count=1, validation_failures=[failure]),
@@ -140,7 +143,7 @@ async def test_access_diagnosis_survives_storage_and_public_conversion(
     assert stored.reason == public.reason == validation.reason
     assert stored.ok is public.ok is False
 
-    job = await database.create_collection_job(URL)
+    job = await database.create_legacy_source_job(URL)
     await database.mark_collection_job_running(job["id"])
     await database.complete_collection_job(job["id"], CollectionResult(
         report=CollectionReport(invalid_distribution_count=1, validation_failures=[validation]),

@@ -38,14 +38,14 @@ VERSION = datetime(2026, 10, 14, tzinfo=timezone.utc).isoformat()
 
 
 def install_execution(monkeypatch, kind):
-    item = {"id": 1, "kind": "source", "source_url": "https://example.org",
+    item = {"id": 1, "kind": "repository_candidate", "source_url": "https://example.org",
             "updated_at": VERSION, "owner_id": "alice", "query": "sensitive-query",
             "client_key": None}
     if kind == "collection":
         module = collection_worker
         compute = Mock(return_value=CollectionResult())
         monkeypatch.setattr(module, "build_default_page_classifier", Mock())
-        monkeypatch.setattr(module, "collect_source_with_report", compute)
+        monkeypatch.setattr(module, "collect_repository_candidate_with_report", compute)
         run = partial(execute_worker, module)
         complete_name, fail_name = "complete_collection_job", "mark_collection_job_error"
     elif kind == "classification":
@@ -239,7 +239,7 @@ async def test_inflight_collection_cannot_finalize_after_forced_shutdown(monkeyp
         finished.set()
         return CollectionResult()
 
-    monkeypatch.setattr(module, "collect_source_with_report", collect)
+    monkeypatch.setattr(module, "collect_repository_candidate_with_report", collect)
     monkeypatch.setattr(module, complete_name, complete)
     manager = workers.persisted_workers(
         StubWorker(claim=AsyncMock(return_value=item), execute=run, name="collection"),

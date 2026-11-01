@@ -26,7 +26,6 @@ from collector.collection.eligibility.factory import build_default_page_classifi
 from collector.collection.eligibility.models import PageClassifier
 from collector.collection.service import (
     collect_repository_candidate_with_report,
-    collect_source_with_report,
 )
 from collector.config import (
     DEFAULT_CONFIG,
@@ -78,7 +77,6 @@ class CollectionWorker:
         classifier_factory: Callable[..., PageClassifier] | None = None,
         vote_store_factory: Callable[..., VoteStore] | None = None,
         trace_factory: Callable[..., PostgresCollectionTraceWriter] | None = None,
-        collect_source: Callable[..., CollectionResult] | None = None,
         collect_record: Callable[..., CollectionResult] | None = None,
         persist: Persistence | None = None,
     ) -> None:
@@ -90,9 +88,6 @@ class CollectionWorker:
         )
         self._trace_factory = (
             trace_factory if trace_factory is not None else PostgresCollectionTraceWriter
-        )
-        self._collect_source = (
-            collect_source if collect_source is not None else collect_source_with_report
         )
         self._collect_record = collect_record if collect_record is not None else _collect_record_job
         self._persist = persist if persist is not None else persist_with_retry
@@ -117,6 +112,8 @@ class CollectionWorker:
             emit_event("collection_started", outcome="started")
             saving = False
             try:
+                if job["kind"] != "repository_candidate":
+                    raise ValueError("Source collection jobs are no longer supported.")
                 with collection_budget(
                     seconds=configured_collection_budget_seconds(),
                     deadline_at=job.get("collection_deadline_at"),
@@ -128,15 +125,12 @@ class CollectionWorker:
                         expected_updated_at=version,
                     )
                     classifier = self._classifier_factory(vote_store=vote_store)
-                    if job["kind"] == "repository_candidate":
-                        observe = self._trace_factory(loop, job_id, version)
-                        collect = partial(
-                            self._collect_record,
-                            classifier=classifier,
-                            observe=observe,
-                        )
-                    else:
-                        collect = partial(self._collect_source, classifier=classifier)
+                    observe = self._trace_factory(loop, job_id, version)
+                    collect = partial(
+                        self._collect_record,
+                        classifier=classifier,
+                        observe=observe,
+                    )
                     result = await loop.run_in_executor(
                         executor,
                         copy_context().run,

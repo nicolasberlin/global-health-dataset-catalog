@@ -6,6 +6,7 @@ import zipfile
 from urllib.error import HTTPError
 
 import pytest
+from helpers.collection import collect_record_page
 
 from collector.collection.validation.distributions import probe_url, validate_distribution
 from collector.collection.validation.json_sample import read_json_prefix
@@ -297,7 +298,6 @@ def test_probe_detects_truncation_when_server_ignores_range(monkeypatch, length)
 def test_large_json_is_retained_by_collection_pipeline():
     from collector.collection.contracts import DiscoveredPage
     from collector.collection.eligibility.models import PageClassification
-    from collector.collection.service import collect_source_with_report
 
     class Classifier:
         def classify(self, page, distributions):
@@ -305,10 +305,11 @@ def test_large_json_is_retained_by_collection_pipeline():
 
     distribution = DistributionCandidate(URL, "JSON", .9)
     body = json.dumps({"data": [{"value": i} for i in range(10000)]}).encode()
-    result = collect_source_with_report(
-        URL, classifier=Classifier(),
-        discover=lambda _: [DiscoveredPage(url=URL, discovery_method="test", title="Health data",
-                                          distributions=(distribution,))],
+    result = collect_record_page(
+        DiscoveredPage(
+            url=URL, discovery_method="test", title="Health data", distributions=(distribution,)
+        ),
+        classifier=Classifier(),
         validate=lambda _: json_validation(body[:65536], truncated=True),
     )
     assert len(result.datasets) == 1
@@ -610,21 +611,22 @@ def test_partial_response_uses_total_size(content_range, head_size, head_etag, e
 def test_failed_validations_survive_dataset_rejection(code, body, status):
     from collector.collection.contracts import DiscoveredPage
     from collector.collection.eligibility.models import PageClassification
-    from collector.collection.service import collect_source_with_report
 
     class Classifier:
         def classify(self, page, distributions):
             return PageClassification(accepted=True, dataset_signals={})
 
     distribution = DistributionCandidate(URL, "API", .9)
-    result = collect_source_with_report(
-        URL, classifier=Classifier(),
-        discover=lambda _: [DiscoveredPage(url=URL, discovery_method="test", title="Health data",
-                                          distributions=(distribution,))],
+    result = collect_record_page(
+        DiscoveredPage(
+            url=URL, discovery_method="test", title="Health data", distributions=(distribution,)
+        ),
+        classifier=Classifier(),
         validate=lambda item: validate_distribution(
             item, probe=lambda url, **kw: HTTPProbe(
                 url, url, code, {"content-type": "text/html"}, body,
-            )),
+            ),
+        ),
     )
     assert result.datasets == []
     assert result.report.invalid_distribution_count == 1

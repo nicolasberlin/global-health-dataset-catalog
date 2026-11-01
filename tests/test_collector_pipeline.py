@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import io
-import json
 
 import pytest
-from helpers.collection import DATASET_HTML, AcceptingPageClassifier
+from helpers.collection import DATASET_HTML, AcceptingPageClassifier, collect_record_page
 
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
@@ -14,7 +13,6 @@ from collector.collection.service import (
     analyze_discovered_page,
     analyze_html_page,
     collect_repository_candidate_with_report,
-    collect_source_with_report,
 )
 from collector.collection.validation.distributions import validate_distribution
 from collector.config import CollectorConfig
@@ -41,8 +39,7 @@ class RejectingPageClassifier:
         )
 
 
-@pytest.mark.parametrize("repository_candidate", [False, True])
-def test_collection_passes_config_to_network_operations(monkeypatch, repository_candidate):
+def test_collection_passes_config_to_network_operations(monkeypatch):
     page_url = "https://example.org/datasets/mortality"
     file_url = "https://example.org/files/mortality.csv"
     html = f'<html><a href="{file_url}">Download CSV</a></html>'.encode()
@@ -97,14 +94,7 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
         requests.clear()
         reads.clear()
         kwargs = {"config": config, "classifier": AcceptingPageClassifier()}
-        if repository_candidate:
-            result = collect_repository_candidate_with_report(page_url, **kwargs)
-        else:
-            result = collect_source_with_report(
-                page_url,
-                discover=lambda _: [DiscoveredPage(url=page_url, discovery_method="test")],
-                **kwargs,
-            )
+        result = collect_repository_candidate_with_report(page_url, **kwargs)
 
         assert len(result.datasets) == 1
         assert result.datasets[0].validation_results[0].ok
@@ -123,61 +113,6 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
             (file_url, "GET", min(config.max_sample_bytes + 1, 65_536)),
             *([(file_url, "GET", 1)] if config.max_sample_bytes == 65_536 else []),
         ]
-
-
-def test_pipeline_config_reaches_default_discovery_and_distribution_requests(monkeypatch):
-    requests = []
-    reads = []
-    source = "https://example.org"
-    file_url = source + "/data.csv"
-
-    class Response(io.BytesIO):
-        status = 200
-
-        def __init__(self, request, body, mime):
-            super().__init__(body)
-            self.request = request
-            self.headers = {"Content-Type": mime}
-
-        def geturl(self):
-            return self.request.full_url
-
-        def read1(self, size=-1):
-            reads.append(size)
-            return super().read(size)
-
-    def open_url(request, *, timeout):
-        requests.append((request, timeout))
-        if request.full_url == file_url:
-            return Response(request, b"country,value\nCH,1\n" * 100, "text/csv")
-        data = {"success": True, "result": {"results": [{
-            "name": "health", "title": "Health data",
-            "resources": [{"url": file_url, "format": "CSV"}],
-        }]}}
-        return Response(request, json.dumps(data).encode(), "application/json")
-
-    monkeypatch.setattr("collector.network.json.open_public_http_url", open_url)
-    monkeypatch.setattr(
-        "collector.collection.validation.distributions.open_public_http_url", open_url,
-    )
-    for config in (
-        CollectorConfig(user_agent="Pipeline/1", request_timeout_seconds=1.25, max_sample_bytes=64),
-        CollectorConfig(user_agent="Pipeline/2", request_timeout_seconds=2.5, max_sample_bytes=128),
-        CollectorConfig(),
-    ):
-        requests.clear()
-        reads.clear()
-        result = collect_source_with_report(
-            source, config=config, classifier=AcceptingPageClassifier(),
-        )
-        assert len(result.datasets) == 1
-        assert [request.get_method() for request, _ in requests] == ["GET", "GET", "HEAD", "GET"]
-        assert all(timeout == config.request_timeout_seconds for _, timeout in requests)
-        assert all(request.get_header("User-agent") == config.user_agent for request, _ in requests)
-        assert requests[-1][0].get_header("Range") == f"bytes=0-{config.max_sample_bytes - 1}"
-        assert reads[:4] == [65_536] * 4  # Two bounded JSON discovery responses, then EOF.
-        assert reads[4] == min(65_536, config.max_sample_bytes + 1)
-        assert all(0 < size <= 65_536 for size in reads)
 
 
 def test_collector_extracts_dataset_page_and_distributions():
@@ -520,69 +455,6 @@ def test_distribution_validation_falls_back_to_partial_get():
     assert result.format == "CSV"
 
 
-def test_collect_source_uses_structured_discovery_metadata_without_fetching_html():
-    csv_distribution = DistributionCandidate(
-        url="https://data.example.org/mortality.csv",
-        format="CSV",
-        probability=0.95,
-        mime_type="text/csv",
-    )
-    json_distribution = DistributionCandidate(
-        url="https://data.example.org/mortality.json",
-        format="JSON",
-        probability=0.95,
-        mime_type="application/json",
-    )
-    discovered_page = DiscoveredPage(
-        url="https://catalog.example.org/dataset/mortality",
-        discovery_method="ckan",
-        priority=0.9,
-        title="Mortality health dataset",
-        description="Official epidemiology indicators.",
-        publisher="National Health Agency",
-        geography=("France",),
-        distributions=(csv_distribution, json_distribution),
-    )
-
-    def fake_discover(url):
-        assert url == "https://catalog.example.org"
-        return [discovered_page]
-
-    def fake_fetch_html(url):
-        raise AssertionError(f"Should not fetch structured discovery page: {url}")
-
-    def fake_validate(distribution):
-        return ValidationResult(
-            url=distribution.url,
-            final_url=distribution.url,
-            format=distribution.format,
-            ok=distribution.format == "CSV",
-            http_status=200 if distribution.format == "CSV" else 500,
-            mime_type=distribution.mime_type,
-        )
-
-    result = collect_source_with_report(
-        "https://catalog.example.org",
-        discover=fake_discover,
-        fetch_html=fake_fetch_html,
-        validate=fake_validate,
-        classifier=AcceptingPageClassifier(),
-    )
-    datasets = result.datasets
-
-    assert len(datasets) == 1
-    dataset = datasets[0]
-    assert dataset.dataset_url == "https://catalog.example.org/dataset/mortality"
-    assert dataset.title == "Mortality health dataset"
-    assert dataset.publisher == "National Health Agency"
-    assert dataset.geography == ("France",)
-    assert dataset.discovery_method == "ckan"
-    assert [distribution.url for distribution in dataset.distributions] == [
-        "https://data.example.org/mortality.csv"
-    ]
-    assert [validation.ok for validation in dataset.validation_results] == [True]
-
-
 @pytest.mark.parametrize(
     ("resource_url", "initial_format", "content_type", "expected_format"),
     [
@@ -611,16 +483,13 @@ def test_collect_source_retains_verified_distribution_format(
             else b"country,value\nCH,10\n",
         )
 
-    result = collect_source_with_report(
-        "https://example.org/catalog",
-        discover=lambda _: [
-            DiscoveredPage(
-                url="https://example.org/datasets/mortality",
-                discovery_method="data_json",
-                title="Mortality health dataset",
-                distributions=(distribution,),
-            )
-        ],
+    result = collect_record_page(
+        DiscoveredPage(
+            url="https://example.org/datasets/mortality",
+            discovery_method="data_json",
+            title="Mortality health dataset",
+            distributions=(distribution,),
+        ),
         validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
         classifier=AcceptingPageClassifier(),
     )
@@ -649,20 +518,17 @@ def test_collect_source_deduplicates_distributions_after_format_validation():
             body_sample=b'{"data": [{"country": "CH"}]}',
         )
 
-    result = collect_source_with_report(
-        "https://example.org/catalog",
+    result = collect_record_page(
+        DiscoveredPage(
+            url="https://example.org/datasets/mortality",
+            discovery_method="data_json",
+            title="Mortality health dataset",
+            distributions=(
+                DistributionCandidate(url=resource_url, format="API", probability=0.95),
+                DistributionCandidate(url=resource_url, format="JSON", probability=0.9),
+            ),
+        ),
         config=CollectorConfig(max_distributions_saved=2),
-        discover=lambda _: [
-            DiscoveredPage(
-                url="https://example.org/datasets/mortality",
-                discovery_method="data_json",
-                title="Mortality health dataset",
-                distributions=(
-                    DistributionCandidate(url=resource_url, format="API", probability=0.95),
-                    DistributionCandidate(url=resource_url, format="JSON", probability=0.9),
-                ),
-            )
-        ],
         validate=lambda candidate: validate_distribution(candidate, probe=fake_probe),
         classifier=AcceptingPageClassifier(),
     )
@@ -672,70 +538,6 @@ def test_collect_source_deduplicates_distributions_after_format_validation():
     assert collected.distributions[0].format == "JSON"
     assert collected.validation_results[0].format == "JSON"
     assert result.report.invalid_distribution_count == 0
-
-
-def test_collect_source_falls_back_to_html_analysis_for_generic_discovery():
-    discovered_page = DiscoveredPage(
-        url="https://example.org/datasets/vaccination",
-        discovery_method="generic_website",
-        priority=0.1,
-        geography=("Germany",),
-    )
-
-    def fake_discover(url):
-        assert url == "https://example.org/catalog"
-        return [discovered_page]
-
-    def fake_fetch_html(url):
-        assert url == "https://example.org/datasets/vaccination"
-        return FetchedPage(
-            url=url,
-            final_url=url,
-            status_code=200,
-            content_type="text/html",
-            html="""
-            <html>
-                <head>
-                    <title>Vaccination health dataset</title>
-                    <script type="application/ld+json">
-                    {"@type": "Dataset"}
-                    </script>
-                </head>
-                <body>
-                    <h1>Vaccination health dataset</h1>
-                    <p>Vaccination and epidemiology data.</p>
-                    <a href="https://example.org/files/vaccination.csv">Download CSV</a>
-                </body>
-            </html>
-            """,
-        )
-
-    def fake_validate(distribution):
-        return ValidationResult(
-            url=distribution.url,
-            final_url=distribution.url,
-            format=distribution.format,
-            ok=True,
-            http_status=200,
-            mime_type="text/csv",
-        )
-
-    result = collect_source_with_report(
-        "https://example.org/catalog",
-        discover=fake_discover,
-        fetch_html=fake_fetch_html,
-        validate=fake_validate,
-        classifier=AcceptingPageClassifier(),
-    )
-    datasets = result.datasets
-
-    assert len(datasets) == 1
-    dataset = datasets[0]
-    assert dataset.discovery_method == "generic_website"
-    assert dataset.title == "Vaccination health dataset"
-    assert dataset.geography == ("Germany",)
-    assert [distribution.format for distribution in dataset.distributions] == ["CSV"]
-    assert dataset.validation_results[0].ok is True
 
 
 def test_collect_repository_candidate_analyzes_only_the_candidate_page():
@@ -795,91 +597,3 @@ def test_collect_repository_candidate_records_page_fetch_errors():
     assert not result.report.verification_complete
     assert result.report.errors[0].code == "repository_unavailable"
     assert result.report.method_attempts[0]["status"] == "failed"
-
-
-def test_collect_source_with_report_summarizes_discovery_analysis_and_validation():
-    mortality_distribution = DistributionCandidate(
-        url="https://example.org/files/mortality.csv",
-        format="CSV",
-        probability=0.95,
-        mime_type="text/csv",
-    )
-    cancer_distribution = DistributionCandidate(
-        url="https://example.org/files/cancer.csv",
-        format="CSV",
-        probability=0.95,
-        mime_type="text/csv",
-    )
-    discovered_pages = [
-        DiscoveredPage(
-            url="https://example.org/datasets/mortality",
-            discovery_method="ckan",
-            priority=0.9,
-            title="Mortality health dataset",
-            description="Official mortality and epidemiology indicators.",
-            publisher="National Health Agency",
-            distributions=(mortality_distribution,),
-        ),
-        DiscoveredPage(
-            url="https://example.org/datasets/cancer",
-            discovery_method="sitemap",
-            priority=0.8,
-            title="Cancer health dataset",
-            description="Official cancer health data.",
-            publisher="National Health Agency",
-            distributions=(cancer_distribution,),
-        ),
-        DiscoveredPage(
-            url="https://example.org/news/careers",
-            discovery_method="sitemap",
-            priority=0.1,
-        ),
-    ]
-
-    def fake_discover(url):
-        assert url == "https://example.org"
-        return discovered_pages
-
-    def fake_fetch_html(url):
-        assert url == "https://example.org/news/careers"
-        return FetchedPage(
-            url=url,
-            final_url=url,
-            status_code=200,
-            content_type="text/html",
-            html="""
-            <html>
-                <head><title>Careers and office news</title></head>
-                <body><h1>Join our team</h1><p>Jobs and press events.</p></body>
-            </html>
-            """,
-        )
-
-    def fake_validate(distribution):
-        return ValidationResult(
-            url=distribution.url,
-            final_url=distribution.url,
-            format=distribution.format,
-            ok=distribution.url == "https://example.org/files/mortality.csv",
-            http_status=200,
-            mime_type=distribution.mime_type,
-        )
-
-    result = collect_source_with_report(
-        "https://example.org",
-        discover=fake_discover,
-        fetch_html=fake_fetch_html,
-        validate=fake_validate,
-        classifier=AcceptingPageClassifier(),
-    )
-
-    assert [dataset.dataset_url for dataset in result.datasets] == [
-        "https://example.org/datasets/mortality"
-    ]
-    assert result.report.discovered_count == 3
-    assert result.report.analyzed_count == 3
-    assert result.report.accepted_count == 1
-    assert result.report.rejected_count == 1
-    assert result.report.errors[0].code == "verification_unconfirmed"
-    assert result.report.invalid_distribution_count == 1
-    assert result.report.discovery_methods == ("ckan", "sitemap")

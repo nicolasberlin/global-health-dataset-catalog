@@ -22,7 +22,6 @@ from app.db.collection.completion import complete_collection_job, mark_collectio
 from app.db.collection.job_queries import get_collection_job, get_collection_job_for_owner
 from app.db.collection.jobs import (
     claim_pending_collection_job,
-    create_collection_job,
     mark_collection_job_error,
     mark_collection_job_running,
     mark_interrupted_collection_jobs_error,
@@ -55,7 +54,8 @@ __all__ = (
     "complete_search_session",
     "complete_search_session_with_repository_candidates",
     "consume_api_quota",
-    "create_collection_job",
+    "create_legacy_source_job",
+    "create_record_job",
     "create_search_session",
     "fail_candidate_classification",
     "get_collection_job",
@@ -78,3 +78,29 @@ __all__ = (
     "search_collected_datasets",
     "claim_candidate_classification",
 )
+
+
+async def create_legacy_source_job(source_url):
+    """Seed an old source job for serialization, ownership and recovery regressions only."""
+    from app.db.collection.job_queries import _collection_job_to_dict
+    from app.db.collection.jobs import _insert_collection_job
+    from app.db.connection import _require_database_pool
+
+    from collector.url_utils import require_http_url
+
+    async with _require_database_pool().connection() as connection:
+        row = await _insert_collection_job(connection, require_http_url(source_url), kind="source")
+    return _collection_job_to_dict(row)
+
+
+async def create_record_job(source_url):
+    """Create a real accepted candidate and reserve its normal collection follow-up."""
+    import sys
+
+    from helpers.workflows import candidate_for, decision
+
+    candidate = await candidate_for(sys.modules[__name__], "local-user", url=source_url)
+    completed = await complete_candidate_classification(
+        candidate["id"], "local-user", decision(),
+    )
+    return completed.collection.job

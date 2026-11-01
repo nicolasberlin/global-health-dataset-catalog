@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **1 November 2026**, based on Git commit `f227358`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **1 November 2026**, based on Git commit `cafeb06`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **874 function and method definitions in 160 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **794 function and method definitions in 150 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -16,9 +16,9 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Directory | Files with functions | Definitions |
 | --- | ---: | ---: |
-| `backend/` | 66 | 294 |
+| `backend/` | 66 | 293 |
 | `browser/` | 2 | 7 |
-| `collector/` | 81 | 480 |
+| `collector/` | 71 | 401 |
 | `scripts/` | 3 | 52 |
 | `search_lab/` | 8 | 41 |
 
@@ -51,7 +51,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [backend/app/db/classification/voting/votes.py](#backend-app-db-classification-voting-votes-py) — 4 definitions
 - [backend/app/db/collection/completion.py](#backend-app-db-collection-completion-py) — 4 definitions
 - [backend/app/db/collection/job_queries.py](#backend-app-db-collection-job_queries-py) — 5 definitions
-- [backend/app/db/collection/jobs.py](#backend-app-db-collection-jobs-py) — 7 definitions
+- [backend/app/db/collection/jobs.py](#backend-app-db-collection-jobs-py) — 6 definitions
 - [backend/app/db/collection/reservations.py](#backend-app-db-collection-reservations-py) — 4 definitions
 - [backend/app/db/collection/traces/reading.py](#backend-app-db-collection-traces-reading-py) — 1 definition
 - [backend/app/db/collection/traces/sanitization.py](#backend-app-db-collection-traces-sanitization-py) — 5 definitions
@@ -112,15 +112,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/connectors/shared.py](#collector-collection-connectors-shared-py) — 3 definitions
 - [collector/collection/connectors/zenodo.py](#collector-collection-connectors-zenodo-py) — 7 definitions
 - [collector/collection/contracts.py](#collector-collection-contracts-py) — 1 definition
-- [collector/collection/discovery/adapters/__init__.py](#collector-collection-discovery-adapters-__init__-py) — 1 definition
-- [collector/collection/discovery/adapters/ckan.py](#collector-collection-discovery-adapters-ckan-py) — 10 definitions
-- [collector/collection/discovery/adapters/data_json.py](#collector-collection-discovery-adapters-data_json-py) — 14 definitions
-- [collector/collection/discovery/adapters/generic.py](#collector-collection-discovery-adapters-generic-py) — 3 definitions
-- [collector/collection/discovery/adapters/socrata.py](#collector-collection-discovery-adapters-socrata-py) — 10 definitions
-- [collector/collection/discovery/manager.py](#collector-collection-discovery-manager-py) — 1 definition
-- [collector/collection/discovery/metadata.py](#collector-collection-discovery-metadata-py) — 20 definitions
-- [collector/collection/discovery/models.py](#collector-collection-discovery-models-py) — 2 definitions
-- [collector/collection/discovery/sitemap.py](#collector-collection-discovery-sitemap-py) — 12 definitions
 - [collector/collection/eligibility/classifier.py](#collector-collection-eligibility-classifier-py) — 7 definitions
 - [collector/collection/eligibility/ensemble.py](#collector-collection-eligibility-ensemble-py) — 7 definitions
 - [collector/collection/eligibility/factory.py](#collector-collection-eligibility-factory-py) — 1 definition
@@ -137,12 +128,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/record_mapping.py](#collector-collection-record_mapping-py) — 1 definition
 - [collector/collection/records.py](#collector-collection-records-py) — 1 definition
 - [collector/collection/resources.py](#collector-collection-resources-py) — 1 definition
-- [collector/collection/service.py](#collector-collection-service-py) — 2 definitions
+- [collector/collection/service.py](#collector-collection-service-py) — 1 definition
 - [collector/collection/strategies/dataverse.py](#collector-collection-strategies-dataverse-py) — 2 definitions
 - [collector/collection/validation/distributions.py](#collector-collection-validation-distributions-py) — 19 definitions
 - [collector/collection/validation/json_sample.py](#collector-collection-validation-json_sample-py) — 6 definitions
 - [collector/collection/workflows/record.py](#collector-collection-workflows-record-py) — 8 definitions
-- [collector/collection/workflows/source.py](#collector-collection-workflows-source-py) — 5 definitions
 - [collector/config.py](#collector-config-py) — 5 definitions
 - [collector/diagnostics.py](#collector-diagnostics-py) — 8 definitions
 - [collector/execution.py](#collector-execution-py) — 9 definitions
@@ -478,13 +468,12 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`create_collection_job`](../../backend/app/db/collection/jobs.py#L23) | `create_collection_job(source_url: str) -> dict[str, object]` | async |
-| [`mark_interrupted_collection_jobs_error`](../../backend/app/db/collection/jobs.py#L35) | `mark_interrupted_collection_jobs_error() -> int` | async |
-| [`claim_pending_collection_job`](../../backend/app/db/collection/jobs.py#L74) | `claim_pending_collection_job(*, claim_token: UUID \| None=None) -> dict[str, object] \| None` | async |
-| [`_insert_collection_job`](../../backend/app/db/collection/jobs.py#L123) | `_insert_collection_job(connection: AsyncConnection[DictRow], source_url: str, *, kind: str='source', repository_candidate_id: UUID \| None=None) -> Row \| None` | async |
-| [`mark_collection_job_running`](../../backend/app/db/collection/jobs.py#L164) | `mark_collection_job_running(job_id: int) -> dict[str, object] \| None` | async |
-| [`mark_collection_job_error`](../../backend/app/db/collection/jobs.py#L203) | `mark_collection_job_error(job_id: int, error: str, *, errors: list[dict] \| None=None, expected_updated_at: datetime \| None=None) -> dict[str, object] \| None` | async |
-| [`_lock_running_collection_job`](../../backend/app/db/collection/jobs.py#L244) | `_lock_running_collection_job(connection: AsyncConnection[DictRow], job_id: int) -> Row \| None` | async |
+| [`mark_interrupted_collection_jobs_error`](../../backend/app/db/collection/jobs.py#L22) | `mark_interrupted_collection_jobs_error() -> int` | async |
+| [`claim_pending_collection_job`](../../backend/app/db/collection/jobs.py#L61) | `claim_pending_collection_job(*, claim_token: UUID \| None=None) -> dict[str, object] \| None` | async |
+| [`_insert_collection_job`](../../backend/app/db/collection/jobs.py#L110) | `_insert_collection_job(connection: AsyncConnection[DictRow], source_url: str, *, kind: str, repository_candidate_id: UUID \| None=None) -> Row \| None` | async |
+| [`mark_collection_job_running`](../../backend/app/db/collection/jobs.py#L151) | `mark_collection_job_running(job_id: int) -> dict[str, object] \| None` | async |
+| [`mark_collection_job_error`](../../backend/app/db/collection/jobs.py#L190) | `mark_collection_job_error(job_id: int, error: str, *, errors: list[dict] \| None=None, expected_updated_at: datetime \| None=None) -> dict[str, object] \| None` | async |
+| [`_lock_running_collection_job`](../../backend/app/db/collection/jobs.py#L231) | `_lock_running_collection_job(connection: AsyncConnection[DictRow], job_id: int) -> Row \| None` | async |
 
 <a id="backend-app-db-collection-reservations-py"></a>
 
@@ -828,13 +817,13 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_collect_record_job`](../../backend/app/workers/collection/worker.py#L43) | `_collect_record_job(url, *, classifier, observe)` | function / method |
-| [`CollectionWorker.__init__`](../../backend/app/workers/collection/worker.py#L75) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTraceWriter] \| None=None, collect_source: Callable[..., CollectionResult] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
-| [`CollectionWorker.claim`](../../backend/app/workers/collection/worker.py#L106) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
-| [`CollectionWorker.execute`](../../backend/app/workers/collection/worker.py#L109) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
-| [`CollectionWorker._retry`](../../backend/app/workers/collection/worker.py#L155) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
-| [`CollectionWorker._fail`](../../backend/app/workers/collection/worker.py#L167) | `_fail(self, job: CollectionJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
-| [`CollectionWorker.recover`](../../backend/app/workers/collection/worker.py#L180) | `recover(self, job: CollectionJob) -> object` | async |
+| [`_collect_record_job`](../../backend/app/workers/collection/worker.py#L42) | `_collect_record_job(url, *, classifier, observe)` | function / method |
+| [`CollectionWorker.__init__`](../../backend/app/workers/collection/worker.py#L74) | `__init__(self, *, classifier_factory: Callable[..., PageClassifier] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, trace_factory: Callable[..., PostgresCollectionTraceWriter] \| None=None, collect_record: Callable[..., CollectionResult] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`CollectionWorker.claim`](../../backend/app/workers/collection/worker.py#L101) | `claim(self, *, claim_token: UUID) -> CollectionJob \| None` | async |
+| [`CollectionWorker.execute`](../../backend/app/workers/collection/worker.py#L104) | `execute(self, job: CollectionJob, executor: Executor) -> None` | async |
+| [`CollectionWorker._retry`](../../backend/app/workers/collection/worker.py#L149) | `_retry(self, job: CollectionJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
+| [`CollectionWorker._fail`](../../backend/app/workers/collection/worker.py#L161) | `_fail(self, job: CollectionJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
+| [`CollectionWorker.recover`](../../backend/app/workers/collection/worker.py#L174) | `recover(self, job: CollectionJob) -> object` | async |
 
 <a id="backend-app-workers-contracts-py"></a>
 
@@ -1220,142 +1209,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`public_url`](../../collector/collection/contracts.py#L48) | `public_url(value: str) -> str` | function / method |
 
-<a id="collector-collection-discovery-adapters-__init__-py"></a>
-
-## collector/collection/discovery/adapters/__init__.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`default_adapters`](../../collector/collection/discovery/adapters/__init__.py#L15) | `default_adapters(config: CollectorConfig=DEFAULT_CONFIG) -> tuple[DiscoveryAdapter, ...]` | function / method |
-
-<a id="collector-collection-discovery-adapters-ckan-py"></a>
-
-## collector/collection/discovery/adapters/ckan.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`CKANAdapter.__init__`](../../collector/collection/discovery/adapters/ckan.py#L33) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
-| [`CKANAdapter.detect`](../../collector/collection/discovery/adapters/ckan.py#L41) | `detect(self, source_url: str) -> bool` | function / method |
-| [`CKANAdapter.discover`](../../collector/collection/discovery/adapters/ckan.py#L49) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-| [`_ckan_action_url`](../../collector/collection/discovery/adapters/ckan.py#L109) | `_ckan_action_url(source_url: str, action: str, params: dict[str, str] \| None=None) -> str` | function / method |
-| [`_ckan_site_root`](../../collector/collection/discovery/adapters/ckan.py#L122) | `_ckan_site_root(source_url: str) -> str` | function / method |
-| [`_ckan_search_params`](../../collector/collection/discovery/adapters/ckan.py#L127) | `_ckan_search_params(source_url: str, rows: int) -> dict[str, str]` | function / method |
-| [`_dataset_page_url`](../../collector/collection/discovery/adapters/ckan.py#L139) | `_dataset_page_url(source_url: str, package: dict[object, object]) -> str` | function / method |
-| [`_distribution_candidates`](../../collector/collection/discovery/adapters/ckan.py#L151) | `_distribution_candidates(source_url: str, package: dict[object, object]) -> list[DistributionCandidate]` | function / method |
-| [`_publisher`](../../collector/collection/discovery/adapters/ckan.py#L193) | `_publisher(package: dict[object, object]) -> str` | function / method |
-| [`_size_from_ckan_package`](../../collector/collection/discovery/adapters/ckan.py#L201) | `_size_from_ckan_package(package: dict[object, object]) -> str` | function / method |
-
-<a id="collector-collection-discovery-adapters-data_json-py"></a>
-
-## collector/collection/discovery/adapters/data_json.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`DataJsonAdapter.__init__`](../../collector/collection/discovery/adapters/data_json.py#L41) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
-| [`DataJsonAdapter.detect`](../../collector/collection/discovery/adapters/data_json.py#L49) | `detect(self, source_url: str) -> bool` | function / method |
-| [`DataJsonAdapter.discover`](../../collector/collection/discovery/adapters/data_json.py#L57) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-| [`_data_json_url`](../../collector/collection/discovery/adapters/data_json.py#L113) | `_data_json_url(source_url: str) -> str` | function / method |
-| [`_data_json_datasets`](../../collector/collection/discovery/adapters/data_json.py#L121) | `_data_json_datasets(data: dict[str, object]) -> list[dict[object, object]]` | function / method |
-| [`_data_json_dataset_url`](../../collector/collection/discovery/adapters/data_json.py#L137) | `_data_json_dataset_url(data_json_url: str, dataset: dict[object, object]) -> str` | function / method |
-| [`_data_json_distribution_candidates`](../../collector/collection/discovery/adapters/data_json.py#L153) | `_data_json_distribution_candidates(data_json_url: str, dataset: dict[object, object]) -> list[DistributionCandidate]` | function / method |
-| [`_data_json_format`](../../collector/collection/discovery/adapters/data_json.py#L222) | `_data_json_format(resource_url: str, format_text: str, media_type: str, anchor: str, has_download_url: bool) -> tuple[str, str]` | function / method |
-| [`_data_json_publisher`](../../collector/collection/discovery/adapters/data_json.py#L241) | `_data_json_publisher(dataset: dict[object, object]) -> str` | function / method |
-| [`_size_from_data_json_dataset`](../../collector/collection/discovery/adapters/data_json.py#L249) | `_size_from_data_json_dataset(dataset: dict[object, object]) -> str` | function / method |
-| [`_data_json_distribution_items`](../../collector/collection/discovery/adapters/data_json.py#L270) | `_data_json_distribution_items(dataset: dict[object, object]) -> list[dict[object, object]]` | function / method |
-| [`_modalities_from_data_json_dataset`](../../collector/collection/discovery/adapters/data_json.py#L274) | `_modalities_from_data_json_dataset(dataset: dict[object, object], distributions: tuple[DistributionCandidate, ...]) -> tuple[str, ...]` | function / method |
-| [`_data_json_dataset_matches_query`](../../collector/collection/discovery/adapters/data_json.py#L286) | `_data_json_dataset_matches_query(dataset: dict[object, object], query: str) -> bool` | function / method |
-| [`_source_query`](../../collector/collection/discovery/adapters/data_json.py#L299) | `_source_query(source_url: str) -> str` | function / method |
-
-<a id="collector-collection-discovery-adapters-generic-py"></a>
-
-## collector/collection/discovery/adapters/generic.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`GenericWebsiteAdapter.__init__`](../../collector/collection/discovery/adapters/generic.py#L15) | `__init__(self, fetch_text: TextFetcher \| None=None, max_sitemap_urls: int=50) -> None` | function / method |
-| [`GenericWebsiteAdapter.detect`](../../collector/collection/discovery/adapters/generic.py#L23) | `detect(self, source_url: str) -> bool` | function / method |
-| [`GenericWebsiteAdapter.discover`](../../collector/collection/discovery/adapters/generic.py#L26) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-
-<a id="collector-collection-discovery-adapters-socrata-py"></a>
-
-## collector/collection/discovery/adapters/socrata.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_socrata_pagination`](../../collector/collection/discovery/adapters/socrata.py#L27) | `_socrata_pagination() -> dict[str, object]` | function / method |
-| [`SocrataAdapter.__init__`](../../collector/collection/discovery/adapters/socrata.py#L56) | `__init__(self, fetch_json: JsonFetcher \| None=None, rows: int=5) -> None` | function / method |
-| [`SocrataAdapter.detect`](../../collector/collection/discovery/adapters/socrata.py#L64) | `detect(self, source_url: str) -> bool` | function / method |
-| [`SocrataAdapter.discover`](../../collector/collection/discovery/adapters/socrata.py#L74) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-| [`_socrata_catalog_url`](../../collector/collection/discovery/adapters/socrata.py#L155) | `_socrata_catalog_url(source_url: str, rows: int, include_source_query: bool) -> str` | function / method |
-| [`_socrata_domain`](../../collector/collection/discovery/adapters/socrata.py#L175) | `_socrata_domain(source_url: str) -> str` | function / method |
-| [`_socrata_results`](../../collector/collection/discovery/adapters/socrata.py#L179) | `_socrata_results(data: dict[str, object], source_url: str) -> list[SocrataCatalogResult]` | function / method |
-| [`_socrata_dataset_url`](../../collector/collection/discovery/adapters/socrata.py#L219) | `_socrata_dataset_url(source_url: str, result: SocrataCatalogResult) -> str` | function / method |
-| [`_socrata_distribution_candidates`](../../collector/collection/discovery/adapters/socrata.py#L242) | `_socrata_distribution_candidates(source_url: str, socrata_id: str) -> list[DistributionCandidate]` | function / method |
-| [`_socrata_site_root`](../../collector/collection/discovery/adapters/socrata.py#L275) | `_socrata_site_root(source_url: str) -> str` | function / method |
-
-<a id="collector-collection-discovery-manager-py"></a>
-
-## collector/collection/discovery/manager.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`discover_source`](../../collector/collection/discovery/manager.py#L11) | `discover_source(source_url: str, adapters: tuple[DiscoveryAdapter, ...] \| None=None, config: CollectorConfig=DEFAULT_CONFIG) -> list[DiscoveredPage]` | function / method |
-
-<a id="collector-collection-discovery-metadata-py"></a>
-
-## collector/collection/discovery/metadata.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_geography_from_mapping`](../../collector/collection/discovery/metadata.py#L71) | `_geography_from_mapping(mapping: dict[object, object]) -> list[str]` | function / method |
-| [`_publication_date_from_mapping`](../../collector/collection/discovery/metadata.py#L107) | `_publication_date_from_mapping(mapping: dict[object, object]) -> str` | function / method |
-| [`_diseases_from_mapping`](../../collector/collection/discovery/metadata.py#L123) | `_diseases_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]` | function / method |
-| [`_demographics_from_mapping`](../../collector/collection/discovery/metadata.py#L156) | `_demographics_from_mapping(*mappings: dict[object, object]) -> tuple[str, ...]` | function / method |
-| [`_modalities_from_distributions`](../../collector/collection/discovery/metadata.py#L186) | `_modalities_from_distributions(distributions: tuple[DistributionCandidate, ...]) -> tuple[str, ...]` | function / method |
-| [`_modalities_from_format`](../../collector/collection/discovery/metadata.py#L197) | `_modalities_from_format(value: str) -> list[str]` | function / method |
-| [`_first_mapping_value`](../../collector/collection/discovery/metadata.py#L215) | `_first_mapping_value(mapping: dict[object, object], *keys: str) -> str` | function / method |
-| [`_mapping_values`](../../collector/collection/discovery/metadata.py#L220) | `_mapping_values(mapping: dict[object, object], *keys: str) -> list[str]` | function / method |
-| [`_mapping_dicts`](../../collector/collection/discovery/metadata.py#L236) | `_mapping_dicts(value: object) -> list[dict[object, object]]` | function / method |
-| [`_value_text`](../../collector/collection/discovery/metadata.py#L244) | `_value_text(value: object) -> str` | function / method |
-| [`_country_values`](../../collector/collection/discovery/metadata.py#L252) | `_country_values(value: object) -> list[str]` | function / method |
-| [`_first_text`](../../collector/collection/discovery/metadata.py#L274) | `_first_text(mapping: dict[object, object], *keys: str) -> str` | function / method |
-| [`_first_text_value`](../../collector/collection/discovery/metadata.py#L283) | `_first_text_value(value: object) -> str` | function / method |
-| [`_text_values`](../../collector/collection/discovery/metadata.py#L297) | `_text_values(value: object) -> list[str]` | function / method |
-| [`_dedupe`](../../collector/collection/discovery/metadata.py#L314) | `_dedupe(values: list[str]) -> list[str]` | function / method |
-| [`_first_url`](../../collector/collection/discovery/metadata.py#L318) | `_first_url(*values: object) -> str` | function / method |
-| [`_json_ld_type_matches`](../../collector/collection/discovery/metadata.py#L334) | `_json_ld_type_matches(value: object, expected_type: str) -> bool` | function / method |
-| [`_site_root`](../../collector/collection/discovery/metadata.py#L350) | `_site_root(source_url: str) -> str` | function / method |
-| [`_normalize_format`](../../collector/collection/discovery/metadata.py#L355) | `_normalize_format(value: str) -> str` | function / method |
-| [`_text`](../../collector/collection/discovery/metadata.py#L366) | `_text(value: object) -> str` | function / method |
-
-<a id="collector-collection-discovery-models-py"></a>
-
-## collector/collection/discovery/models.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`DiscoveryAdapter.detect`](../../collector/collection/discovery/models.py#L18) | `detect(self, source_url: str) -> bool` | function / method |
-| [`DiscoveryAdapter.discover`](../../collector/collection/discovery/models.py#L21) | `discover(self, source_url: str) -> list[DiscoveredPage]` | function / method |
-
-<a id="collector-collection-discovery-sitemap-py"></a>
-
-## collector/collection/discovery/sitemap.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`sitemap_urls_from_robots`](../../collector/collection/discovery/sitemap.py#L83) | `sitemap_urls_from_robots(robots_text: str, source_url: str) -> list[str]` | function / method |
-| [`default_sitemap_candidates`](../../collector/collection/discovery/sitemap.py#L99) | `default_sitemap_candidates(source_url: str) -> list[str]` | function / method |
-| [`discover_sitemap_entries`](../../collector/collection/discovery/sitemap.py#L109) | `discover_sitemap_entries(source_url: str, fetch_text: TextFetcher \| None=None, max_sitemaps: int=MAX_SITEMAPS_PER_SOURCE, max_urls: int=MAX_URLS_PER_SOURCE) -> list[SitemapEntry]` | function / method |
-| [`parse_sitemap`](../../collector/collection/discovery/sitemap.py#L174) | `parse_sitemap(xml_text: str, sitemap_url: str) -> ParsedSitemap` | function / method |
-| [`score_sitemap_url`](../../collector/collection/discovery/sitemap.py#L192) | `score_sitemap_url(url: str) -> float` | function / method |
-| [`fetch_text_url`](../../collector/collection/discovery/sitemap.py#L223) | `fetch_text_url(url: str, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_bytes: int=5000000, user_agent: str=DEFAULT_CONFIG.user_agent) -> str` | function / method |
-| [`site_root_url`](../../collector/collection/discovery/sitemap.py#L261) | `site_root_url(source_url: str) -> str` | function / method |
-| [`_loc_values`](../../collector/collection/discovery/sitemap.py#L268) | `_loc_values(root: ET.Element, item_name: str, sitemap_url: str) -> list[str]` | function / method |
-| [`_child_text`](../../collector/collection/discovery/sitemap.py#L281) | `_child_text(element: ET.Element, child_name: str) -> str` | function / method |
-| [`_local_name`](../../collector/collection/discovery/sitemap.py#L289) | `_local_name(tag: str) -> str` | function / method |
-| [`_dedupe_urls`](../../collector/collection/discovery/sitemap.py#L293) | `_dedupe_urls(urls: list[str]) -> list[str]` | function / method |
-| [`_decode_text`](../../collector/collection/discovery/sitemap.py#L306) | `_decode_text(body: bytes, content_type: str) -> str` | function / method |
-
 <a id="collector-collection-eligibility-classifier-py"></a>
 
 ## collector/collection/eligibility/classifier.py
@@ -1540,8 +1393,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`collect_source_with_report`](../../collector/collection/service.py#L18) | `collect_source_with_report(source_url: str, config: CollectorConfig=DEFAULT_CONFIG, discover: DiscoverFunction \| None=None, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, browser=None) -> CollectionResult` | function / method |
-| [`collect_repository_candidate_with_report`](../../collector/collection/service.py#L34) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
+| [`collect_repository_candidate_with_report`](../../collector/collection/service.py#L17) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
 
 <a id="collector-collection-strategies-dataverse-py"></a>
 
@@ -1606,29 +1458,17 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_validate_record_resources.<local>.record_check`](../../collector/collection/workflows/record.py#L403) | `record_check(resource, validation, *, attempt=attempt)` | function / method |
 | [`_build_collection_result`](../../collector/collection/workflows/record.py#L422) | `_build_collection_result(datasets: list[CollectedDataset], *, analyzed: bool, rejected: bool, failed_checks: list[ValidationResult], unresolved: list[Diagnostic], attempts: list[MethodAttempt], coverage: dict[str, object]) -> CollectionResult` | function / method |
 
-<a id="collector-collection-workflows-source-py"></a>
-
-## collector/collection/workflows/source.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`collect_source_with_report`](../../collector/collection/workflows/source.py#L39) | `collect_source_with_report(source_url: str, config: CollectorConfig=DEFAULT_CONFIG, discover: DiscoverFunction \| None=None, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, browser=None) -> CollectionResult` | function / method |
-| [`_collect_source_within_budget`](../../collector/collection/workflows/source.py#L72) | `_collect_source_within_budget(source_url, config, discover, fetch_html, validate, classifier, browser)` | function / method |
-| [`_collect_discovered_page_with_report`](../../collector/collection/workflows/source.py#L175) | `_collect_discovered_page_with_report(discovered_page: DiscoveredPage, config: CollectorConfig, fetch_html: FetchHTMLFunction, validate: ValidateDistributionFunction, classifier: PageClassifier \| None=None, *, validation_failures: list[ValidationResult] \| None=None, browser=None, diagnostics: list[Diagnostic] \| None=None) -> tuple[CollectedDataset \| None, int]` | function / method |
-| [`_collect_discovered_page_with_report.<local>.failed_html`](../../collector/collection/workflows/source.py#L218) | `failed_html(_, *, error=exception)` | function / method |
-| [`_with_valid_distributions_and_report`](../../collector/collection/workflows/source.py#L252) | `_with_valid_distributions_and_report(dataset: CollectedDataset, config: CollectorConfig, validate: ValidateDistributionFunction, *, failures: list[ValidationResult] \| None=None) -> tuple[CollectedDataset \| None, int]` | function / method |
-
 <a id="collector-config-py"></a>
 
 ## collector/config.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`CollectorConfig.__post_init__`](../../collector/config.py#L33) | `__post_init__(self)` | function / method |
-| [`validate_collection_budget_seconds`](../../collector/config.py#L45) | `validate_collection_budget_seconds(value: float) -> float` | function / method |
-| [`configured_collection_budget_seconds`](../../collector/config.py#L51) | `configured_collection_budget_seconds() -> float` | function / method |
-| [`configured_record_transport`](../../collector/config.py#L60) | `configured_record_transport() -> dict[str, float \| int]` | function / method |
-| [`configured_repository_connectors`](../../collector/config.py#L74) | `configured_repository_connectors() -> dict` | function / method |
+| [`CollectorConfig.__post_init__`](../../collector/config.py#L32) | `__post_init__(self)` | function / method |
+| [`validate_collection_budget_seconds`](../../collector/config.py#L44) | `validate_collection_budget_seconds(value: float) -> float` | function / method |
+| [`configured_collection_budget_seconds`](../../collector/config.py#L50) | `configured_collection_budget_seconds() -> float` | function / method |
+| [`configured_record_transport`](../../collector/config.py#L59) | `configured_record_transport() -> dict[str, float \| int]` | function / method |
+| [`configured_repository_connectors`](../../collector/config.py#L73) | `configured_repository_connectors() -> dict` | function / method |
 
 <a id="collector-diagnostics-py"></a>
 

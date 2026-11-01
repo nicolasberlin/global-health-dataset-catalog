@@ -262,7 +262,7 @@ async def test_queue_capacity_includes_collections_and_refusal_charges_nothing(
 ):
     await database.init_database()
     monkeypatch.setenv("API_PUBLIC_MAX_ACTIVE_WORK_ITEMS", "1")
-    await database.create_collection_job("https://example.org/existing")
+    await database.create_legacy_source_job("https://example.org/existing")
     with pytest.raises(QuotaExceeded, match="queue is full"):
         await batch(database, "alice")
     assert await rows("SELECT * FROM api_rate_limits") == []

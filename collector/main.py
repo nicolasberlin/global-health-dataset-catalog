@@ -5,9 +5,6 @@ callers import that module directly; existing public imports remain supported.
 """
 
 from collector.collection.service import (
-    DiscoverFunction as DiscoverFunction,
-)
-from collector.collection.service import (
     FetchHTMLFunction as FetchHTMLFunction,
 )
 from collector.collection.service import (
@@ -21,7 +18,4 @@ from collector.collection.service import (
 )
 from collector.collection.service import (
     collect_repository_candidate_with_report as collect_repository_candidate_with_report,
-)
-from collector.collection.service import (
-    collect_source_with_report as collect_source_with_report,
 )

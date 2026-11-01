@@ -31,7 +31,7 @@ async def scope_for(database, kind):
     if kind == "repository":
         candidate = await candidate_for(database)
         return {"candidate_id": candidate["id"]}
-    job = await database.create_collection_job(PAGE.url)
+    job = await database.create_legacy_source_job(PAGE.url)
     await database.mark_collection_job_running(job["id"])
     return {"job_id": job["id"]}
 
@@ -234,7 +234,7 @@ async def test_new_internal_collection_job_inherits_partial_votes(database, tran
     with pytest.raises(ClassificationError):
         await asyncio.to_thread(classify, "page", scope, loop)
     await database.mark_collection_job_error(scope["job_id"], "Model unavailable")
-    new = await database.create_collection_job(PAGE.url)
+    new = await database.create_legacy_source_job(PAGE.url)
     await database.mark_collection_job_running(new["id"])
     result = await asyncio.to_thread(classify, "page", {"job_id": new["id"]}, loop)
     assert result.accepted

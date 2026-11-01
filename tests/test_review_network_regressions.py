@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import io
 import json
 import sys
@@ -13,12 +12,11 @@ from urllib.request import HTTPSHandler, build_opener
 from urllib.response import addinfourl
 
 import pytest
+from helpers.collection import collect_record_page
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
 from collector.collection.contracts import DiscoveredPage
-from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.eligibility.models import PageClassification
-from collector.collection.service import collect_source_with_report
 from collector.collection.validation.distributions import probe_url
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.llm.errors import ClassificationError
@@ -220,14 +218,17 @@ def test_collection_tries_next_distribution_after_error_body_timeout(monkeypatch
     monkeypatch.setattr(
         "collector.collection.validation.distributions.open_public_http_url", request,
     )
-    result = collect_source_with_report(
-        "https://data.example/dataset",
+    result = collect_record_page(
+        DiscoveredPage(
+            url="https://data.example/dataset",
+            discovery_method="test",
+            title="Health data",
+            distributions=(
+                DistributionCandidate(DATA_URL, "CSV", 1.0),
+                DistributionCandidate(alternative_url, "CSV", 0.9),
+            ),
+        ),
         classifier=Classifier(),
-        discover=lambda _: [DiscoveredPage(
-            url="https://data.example/dataset", discovery_method="test", title="Health data",
-            distributions=(DistributionCandidate(DATA_URL, "CSV", 1.0),
-                           DistributionCandidate(alternative_url, "CSV", .9)),
-        )],
     )
     assert requests == [(DATA_URL, "HEAD"), (DATA_URL, "GET"),
                         (alternative_url, "HEAD"), (alternative_url, "GET")]
@@ -236,55 +237,3 @@ def test_collection_tries_next_distribution_after_error_body_timeout(monkeypatch
     assert result.report.validation_failures[0].status == "unconfirmed"
     assert result.report.verification_complete
     assert all(body.closed for body in failed_bodies)
-
-
-@pytest.mark.parametrize("budgeted", [False, True])
-@pytest.mark.parametrize("size", [20_000, 20_001, 10_000_000])
-def test_sitemap_limit_applies_to_decompressed_content(monkeypatch, budgeted, size):
-    class Response(io.BytesIO):
-        headers = {"Content-Type": "application/gzip"}
-
-        def geturl(self):
-            return "https://data.example/sitemap.xml.gz"
-
-    response = Response(gzip.compress(b"a" * size))
-    assert len(response.getvalue()) < 20_000
-    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url",
-                        lambda *args, **kwargs: response)
-    with collection_budget(seconds=5) if budgeted else nullcontext():
-        if size > 20_000:
-            with pytest.raises(ValueError, match="Decompressed sitemap is too large"):
-                fetch_text_url(response.geturl(), max_bytes=20_000)
-        else:
-            assert fetch_text_url(response.geturl(), max_bytes=20_000) == "a" * size
-    assert response.closed
-
-
-def test_sitemap_limit_applies_across_multiple_gzip_members(monkeypatch):
-    class Response(io.BytesIO):
-        headers = {"Content-Type": "application/gzip"}
-
-        def geturl(self):
-            return "https://data.example/sitemap.xml.gz"
-
-    response = Response(gzip.compress(b"a" * 12_000) + gzip.compress(b"b" * 12_000))
-    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url",
-                        lambda *args, **kwargs: response)
-    with pytest.raises(ValueError, match="Decompressed sitemap is too large"):
-        fetch_text_url(response.geturl(), max_bytes=20_000)
-    assert response.closed
-
-
-def test_truncated_gzip_sitemap_is_a_closed_controlled_failure(monkeypatch):
-    class Response(io.BytesIO):
-        headers = {"Content-Type": "application/gzip"}
-
-        def geturl(self):
-            return "https://data.example/sitemap.xml.gz"
-
-    response = Response(gzip.compress(b"<urlset></urlset>")[:-8])
-    monkeypatch.setattr("collector.collection.discovery.sitemap.open_public_http_url",
-                        lambda *args, **kwargs: response)
-    with pytest.raises(ValueError, match="Could not fetch sitemap URL"):
-        fetch_text_url(response.geturl(), max_bytes=20_000)
-    assert response.closed

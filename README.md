@@ -155,7 +155,7 @@ collector/         Repository discovery, classification and bounded validation
   models.py        Shared immutable collector data contracts
   metadata/        Dataset normalization, provenance and repository enrichment
   parsing/         Shared HTML text parsing, evidence limits and controlled errors
-  collection/      Collection workflows, connectors and source discovery
+  collection/      Individual-record collection workflows and connectors
     page_analysis.py  Page preparation, resource filtering and eligibility classification
     extraction/    HTML/JSON-LD dataset evidence, resource discovery and source identity
     validation/    Bounded HTTP probes, access checks and sampled format validation

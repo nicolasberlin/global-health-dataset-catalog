@@ -12,7 +12,6 @@ from urllib.request import Request
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget, read_with_budget
-from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.validation.distributions import probe_url, validate_distribution
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.llm.errors import ClassificationError
@@ -184,7 +183,6 @@ def test_validation_rechecks_budget_between_head_and_get(clock, head_duration, e
             "collector.network.json",
             lambda: fetch_json_url("https://public.example/json"),
         ),
-        ("collector.collection.discovery.sitemap", lambda: fetch_text_url("https://public.example/sitemap")),
         (
             "collector.collection.validation.distributions",
             lambda: probe_url(

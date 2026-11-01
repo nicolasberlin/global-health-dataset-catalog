@@ -1,5 +1,9 @@
 # Database architecture refactor
 
+> Historical refactor snapshot. Whole-source collection and its public job-creation helper
+> have since been removed. See the [current function index](python-function-index.md)
+> and [collection guide](collection.md) for the active implementation.
+
 The refactor groups persistence by responsibility while retaining the original SQL,
 transaction scopes, lock order, inputs and outputs. The existing route/presenter
 renames and class docstrings were already in the working tree and are preserved.

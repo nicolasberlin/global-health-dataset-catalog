@@ -1,8 +1,7 @@
-"""Public collection entry points delegating to the source and record workflows."""
+"""Public collection entry points for individual repository records."""
 
 from __future__ import annotations
 
-from collector.collection.contracts import DiscoverFunction as DiscoverFunction
 from collector.collection.contracts import FetchHTMLFunction as FetchHTMLFunction
 from collector.collection.contracts import (
     ValidateDistributionFunction as ValidateDistributionFunction,
@@ -10,25 +9,9 @@ from collector.collection.contracts import (
 from collector.collection.eligibility.models import PageClassifier
 from collector.collection.page_analysis import analyze_discovered_page as analyze_discovered_page
 from collector.collection.page_analysis import analyze_html_page as analyze_html_page
-from collector.collection.workflows import record, source
+from collector.collection.workflows import record
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.models import CollectionResult
-
-
-def collect_source_with_report(
-    source_url: str,
-    config: CollectorConfig = DEFAULT_CONFIG,
-    discover: DiscoverFunction | None = None,
-    fetch_html: FetchHTMLFunction | None = None,
-    validate: ValidateDistributionFunction | None = None,
-    classifier: PageClassifier | None = None,
-    *,
-    browser=None,
-) -> CollectionResult:
-    """Collect a bounded source through its discovery, analysis and validation workflow."""
-    return source.collect_source_with_report(
-        source_url, config, discover, fetch_html, validate, classifier, browser=browser,
-    )
 
 
 def collect_repository_candidate_with_report(

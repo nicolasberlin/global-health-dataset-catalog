@@ -1,1 +1,1 @@
-"""Source and record collection workflows using shared collection contracts."""
+"""Individual-record collection using shared collection contracts."""

@@ -13,7 +13,7 @@ from app.db.connection import _require_database_pool
 from app.workers.collection import worker as collection_worker
 from app.workers.runtime import persisted_workers
 from fastapi import Response
-from helpers.collection import DATASET_HTML, AcceptingPageClassifier
+from helpers.collection import DATASET_HTML, AcceptingPageClassifier, collect_record_page
 from helpers.workflows import candidate_for, decision, wait_until
 
 from collector.budget import (
@@ -25,7 +25,6 @@ from collector.budget import (
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.service import (
     collect_repository_candidate_with_report,
-    collect_source_with_report,
 )
 from collector.config import CollectorConfig, configured_collection_budget_seconds
 from collector.llm.voting import run_voters
@@ -61,9 +60,8 @@ def available(distribution):
 
 
 def collect(pages, *, validate=available, classifier=None, config=None):
-    return collect_source_with_report(
-        "https://example.org",
-        discover=lambda _: pages,
+    return collect_record_page(
+        pages[0],
         validate=validate,
         classifier=classifier or AcceptingPageClassifier(),
         config=config or CollectorConfig(collection_max_duration_seconds=5),
@@ -105,30 +103,6 @@ def test_nested_collection_inherits_deadline_and_context_is_cleared(clock):
         check_collection_budget()
 
 
-def test_cancellation_after_discovery_stops_before_first_page_request():
-    from unittest.mock import Mock
-
-    from collector.execution import ExecutionControl, ExecutionStopped, execution_control
-
-    control = ExecutionControl()
-    token = execution_control.set(control)
-    fetch = Mock()
-
-    def discover(_):
-        control.abort()
-        return [page()]
-
-    try:
-        with pytest.raises(ExecutionStopped):
-            collect_source_with_report(
-                "https://example.org", discover=discover, fetch_html=fetch,
-                classifier=AcceptingPageClassifier(),
-            )
-    finally:
-        execution_control.reset(token)
-    fetch.assert_not_called()
-
-
 def test_cancelled_collection_does_not_start_body_read_without_a_time_budget():
     from unittest.mock import Mock
 
@@ -145,34 +119,6 @@ def test_cancelled_collection_does_not_start_body_read_without_a_time_budget():
     finally:
         execution_control.reset(token)
     response.read.assert_not_called()
-
-
-def test_expiry_during_discovery_is_incomplete_even_without_candidates(clock):
-    def discover(_):
-        clock[0] += 6
-        return []
-
-    result = collect_source_with_report(
-        "https://example.org",
-        discover=discover,
-        classifier=AcceptingPageClassifier(),
-        config=CollectorConfig(collection_max_duration_seconds=5),
-    )
-    assert_expired(result)
-    assert result.report.analyzed_count == result.report.rejected_count == 0
-
-
-def test_expiry_preserves_first_dataset_and_stops_before_second_page(clock):
-    def validate(distribution):
-        clock[0] += 5
-        return available(distribution)
-
-    result = collect([page("one"), page("two")], validate=validate)
-    assert_expired(result)
-    assert len(result.datasets) == 1
-    assert result.datasets[0].dataset_url.endswith("one")
-    assert result.report.discovered_count == 2 and result.report.analyzed_count == 1
-    assert result.report.accepted_count == 1 and result.report.rejected_count == 0
 
 
 def test_expiry_retains_valid_link_when_later_probe_is_interrupted(clock):
@@ -261,7 +207,7 @@ async def test_worker_keeps_slot_and_persists_partial_result_after_expiration(
     await database.complete_search_session(candidate["search_session_id"], "alice", origin="online")
     result = await database.complete_candidate_classification(candidate["id"], "alice", decision())
     job_id = result.collection.job["id"]
-    other = await database.create_collection_job("https://example.org/another")
+    other = await database.create_record_job("https://example.org/another")
     entered, release = threading.Event(), threading.Event()
 
     def validate(distribution):
@@ -272,13 +218,15 @@ async def test_worker_keeps_slot_and_persists_partial_result_after_expiration(
         return available(distribution)
 
     def collect_owned(_url, *, classifier, **options):
-        return collect([page("one"), page("two")], validate=validate)
+        return collect(
+            [page("one", links=2)], validate=validate,
+            config=CollectorConfig(collection_max_duration_seconds=5, max_distributions_saved=2),
+        )
 
-    monkeypatch.setattr(
-        collection_worker, "collect_repository_candidate_with_report", collect_owned
-    )
     # Stop a second job without making a provider call if the worker claims it after release.
-    monkeypatch.setattr(collection_worker, "collect_source_with_report", collect_owned)
+    monkeypatch.setattr(
+        collection_worker, "collect_repository_candidate_with_report", collect_owned,
+    )
     async with persisted_workers(
         collection_worker.CollectionWorker(), concurrency=1, poll_interval=0.01
     ):
