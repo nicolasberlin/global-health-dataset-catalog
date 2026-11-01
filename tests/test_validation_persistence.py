@@ -5,8 +5,8 @@ from app.api.presenters.catalog import _build_distribution_validation_view
 from app.db.connection import _fetchone, _require_database_pool
 from helpers.inspection import stored_datasets
 
-from collector.classification.eligibility.models import PageClassification
 from collector.collection.contracts import DiscoveredPage
+from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
 from collector.search import RepositorySearchResult
 from collector.storage.models import (

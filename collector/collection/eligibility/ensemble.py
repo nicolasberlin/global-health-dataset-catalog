@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from collector.classification.eligibility.models import (
-    PageClassification,
-    PageClassificationVote,
-    PageClassifier,
-)
 from collector.classification.errors import PageClassificationError
 from collector.classification.voting import (
     _ensemble_summary,
     _minimum_votes_error,
     _validate_voting_thresholds,
     run_voters,
+)
+from collector.collection.eligibility.models import (
+    PageClassification,
+    PageClassificationVote,
+    PageClassifier,
 )
 from collector.storage.models import DistributionCandidate, PageSnapshot
 

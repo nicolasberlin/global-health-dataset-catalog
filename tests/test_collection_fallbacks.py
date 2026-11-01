@@ -2,8 +2,8 @@ from dataclasses import replace
 
 import pytest
 
-from collector.classification.eligibility.models import PageClassification
 from collector.collection.contracts import DiscoveredPage
+from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
 from collector.config import CollectorConfig
 from collector.network.fetch import FetchedPage, PageFetchError

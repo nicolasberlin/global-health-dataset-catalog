@@ -4,12 +4,12 @@ from threading import Barrier, Event
 
 import pytest
 
-from collector.classification.eligibility.ensemble import EnsemblePageClassifier
-from collector.classification.eligibility.models import PageClassification
 from collector.classification.errors import PageClassificationError
 from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
 from collector.classification.relevance.models import RepositoryClassification
 from collector.classification.voting import run_voters
+from collector.collection.eligibility.ensemble import EnsemblePageClassifier
+from collector.collection.eligibility.models import PageClassification
 from collector.storage.models import PageSnapshot
 
 

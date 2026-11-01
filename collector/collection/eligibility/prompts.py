@@ -5,19 +5,19 @@ from __future__ import annotations
 from collector.classification.prompts import _build_chat_completions_request_body
 
 
-def _build_epfl_rcp_chat_completions_request_body(
+def _build_dataset_page_eligibility_request_body(
     payload: dict[str, object],
     model: str,
 ) -> dict[str, object]:
     return _build_chat_completions_request_body(
         payload,
         model,
-        system_prompt=_system_prompt(),
-        schema=_classification_schema(),
+        system_prompt=_dataset_page_eligibility_system_prompt(),
+        schema=_dataset_page_eligibility_response_schema(),
     )
 
 
-def _system_prompt() -> str:
+def _dataset_page_eligibility_system_prompt() -> str:
     return (
         "Classify whether this page describes an individual global health dataset. "
         "Treat the normalized metadata object as the primary evidence: it contains "
@@ -37,7 +37,7 @@ def _system_prompt() -> str:
     )
 
 
-def _classification_schema() -> dict[str, object]:
+def _dataset_page_eligibility_response_schema() -> dict[str, object]:
     signal_schema = {
         "type": "object",
         "properties": {

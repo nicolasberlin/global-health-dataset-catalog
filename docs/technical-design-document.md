@@ -153,6 +153,13 @@ collector/
 │   ├── record_mapping.py
 │   ├── pipeline.py
 │   ├── resources.py
+│   ├── eligibility/
+│   │   ├── __init__.py
+│   │   ├── factory.py
+│   │   ├── models.py
+│   │   ├── llm.py
+│   │   ├── ensemble.py
+│   │   └── prompts.py
 │   ├── workflows/
 │   │   ├── __init__.py
 │   │   ├── source.py
@@ -287,53 +294,74 @@ rules and output fields are preserved. The extraction parser tests import privat
 classes from `html.py` and `text.py`; collection, classification and validation
 implementations remain unchanged.
 
-`collector/classification/` separates query relevance from collection eligibility:
+Relevance and eligibility classifiers are owned by their features:
 
 ```text
-collector/classification/
-├── __init__.py
-├── relevance/
+collector/
+├── classification/
 │   ├── __init__.py
-│   ├── models.py
-│   ├── llm.py
-│   ├── ensemble.py
-│   └── prompts.py
-├── eligibility/
-│   ├── __init__.py
-│   ├── models.py
-│   ├── llm.py
-│   ├── ensemble.py
-│   └── prompts.py
-├── factory.py
-├── llm_client.py
-├── voting.py
-├── checkpoints.py
-├── prompts.py
-├── errors.py
-└── providers/
-    ├── __init__.py
-    └── epfl_rcp.py
+│   ├── relevance/
+│   │   ├── __init__.py
+│   │   ├── factory.py
+│   │   ├── models.py
+│   │   ├── llm.py
+│   │   ├── ensemble.py
+│   │   └── prompts.py
+│   ├── voter_factory.py
+│   ├── llm_client.py
+│   ├── voting.py
+│   ├── checkpoints.py
+│   ├── prompts.py
+│   ├── errors.py
+│   └── providers/
+│       ├── __init__.py
+│       └── epfl_rcp.py
+└── collection/
+    └── eligibility/
+        ├── __init__.py
+        ├── factory.py
+        ├── models.py
+        ├── llm.py
+        ├── ensemble.py
+        └── prompts.py
 ```
 
-`relevance/` evaluates external repository candidates, including DataCite results,
-against the user's query. The classification worker and repository search service
-use its contracts and classifier. `eligibility/` evaluates dataset pages during
-collection; the collection pipeline uses its contracts and classifier. Each domain
+`classification/relevance/` evaluates external repository candidates, including
+DataCite results, against the user's query. The classification worker and search
+service use its contracts and classifier. `collection/eligibility/` evaluates
+dataset pages during collection; the collection pipeline uses its contracts and
+classifier. Each domain
 owns its models, bounded LLM payload and response parser, aggregation rules,
 prompts and response schemas. Domain-specific helpers stay beside their callers.
 
-`factory.py` remains the central construction point for both default classifiers.
-`llm_client.py` defines `LLMClassificationClient.classify_payload()` and the shared
+`classification/relevance/factory.py` owns
+`build_default_repository_result_classifier()`, used by `ClassificationWorker`.
+`collection/eligibility/factory.py` owns `build_default_page_classifier()`, used by
+`CollectionWorker`, the pipeline default and AI-enabled Search Lab. Both import
+the same `_voters()` from `classification/voter_factory.py`. That shared module
+retains the ordered model/credential configuration, checkpoint-aware client
+construction and `validate_default_classifier_configuration()` used by readiness.
+The former central classification factory is removed; internal callers import
+the owning feature factory directly.
+
+`classification/llm_client.py` defines `LLMClassificationClient.classify_payload()` and the shared
 HTTP implementation. `checkpoints.py` provides `CheckpointedLLMClient`, which
 implements the same method while reusing validated votes. `voting.py` owns parallel
 execution, threshold validation and common ensemble audit summaries; the final
 acceptance and relevance-label rules remain in the domain ensembles.
 
-The root `prompts.py` only builds the common Chat Completions message envelope and
-JSON schema instruction. Provider configuration remains in `providers/epfl_rcp.py`.
+The eligibility prompt belongs to `collection/eligibility/prompts.py`: it defines
+the collection-specific accepted-page decision and the `accepted`/`dataset_signals`
+response schema, which evolve with that feature's models and parser. The
+relevance prompt belongs to `classification/relevance/prompts.py`. Only
+`classification/prompts.py` builds the common Chat Completions message envelope
+and JSON schema instruction. Provider configuration remains in
+`classification/providers/epfl_rcp.py` and wires these feature-owned prompts to
+the common HTTP conventions.
+
 `errors.py` owns `PageClassificationError`, whose existing name is retained even
-though both domains and the HTTP client use it. Shared modules do not depend on
-domain implementations; the factory and provider configuration assemble them.
+though both domains and the HTTP client use it. Feature factories and provider
+configuration assemble the classifiers using the shared transport and voting code.
 Package initializers contain documentation only, and callers import the owning
 modules directly without compatibility re-exports.
 

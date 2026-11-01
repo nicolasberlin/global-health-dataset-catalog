@@ -19,8 +19,9 @@ from helpers.classification import KEYS, MODELS, PAGE
 from helpers.classification import response as _response
 from helpers.workflows import candidate_for, rows, wait_until
 
-from collector.classification import factory
 from collector.classification.errors import PageClassificationError
+from collector.classification.relevance import factory as relevance_factory
+from collector.collection.eligibility import factory as eligibility_factory
 from collector.diagnostics import PersistenceFailure
 
 pytestmark = pytest.mark.anyio
@@ -38,8 +39,12 @@ async def scope_for(database, kind):
 def classify(kind, scope, loop, page=PAGE):
     store = PostgresVoteStore(loop, **scope)
     if kind == "page":
-        return factory.build_default_page_classifier(vote_store=store).classify(page, [])
-    return factory.build_default_repository_result_classifier(vote_store=store).classify(page)
+        return eligibility_factory.build_default_page_classifier(
+            vote_store=store,
+        ).classify(page, [])
+    return relevance_factory.build_default_repository_result_classifier(
+        vote_store=store,
+    ).classify(page)
 
 
 @pytest.mark.parametrize("kind", ["repository", "page"])
@@ -191,7 +196,7 @@ async def test_changed_inputs_or_configuration_start_fresh_run(
     if change == "model":
         monkeypatch.setenv("RCP_DEEPSEEK_MODEL", "new-model")
     elif change == "prompt":
-        original = factory.epfl_rcp_repository_relevance_provider_config
+        original = relevance_factory.epfl_rcp_repository_relevance_provider_config
 
         def changed_provider(**kwargs):
             provider = original(**kwargs)
@@ -204,7 +209,7 @@ async def test_changed_inputs_or_configuration_start_fresh_run(
             return replace(provider, request_body_builder=builder)
 
         monkeypatch.setattr(
-            factory, "epfl_rcp_repository_relevance_provider_config", changed_provider
+            relevance_factory, "epfl_rcp_repository_relevance_provider_config", changed_provider
         )
     page = replace(PAGE, search_query="different query") if change == "input" else PAGE
     await asyncio.to_thread(classify, "repository", scope, loop, page)

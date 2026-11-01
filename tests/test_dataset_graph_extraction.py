@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from collector.classification.eligibility.llm import _build_llm_payload
+from collector.collection.eligibility.llm import _build_llm_payload
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.errors import ExtractionError
 from collector.extraction.extractor import extract_page

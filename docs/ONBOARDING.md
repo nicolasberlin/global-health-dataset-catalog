@@ -138,8 +138,10 @@ installations. No setup script moves or deletes database volumes.
 | Dataset identity selection, resource discovery and extraction bounds | `collector/extraction/graph.py`, `collector/extraction/distributions.py`, `collector/extraction/limits.py` |
 | Source identity from extracted evidence | `collector/extraction/source_identity.py` |
 | External repository candidate relevance: contracts, prompts, parsing and aggregation | `collector/classification/relevance/` |
-| Dataset page eligibility during collection: contracts, prompts, parsing and aggregation | `collector/classification/eligibility/` |
-| Default classifier construction and shared vote execution | `collector/classification/factory.py`, `collector/classification/voting.py` |
+| Dataset page eligibility during collection: contracts, prompts, parsing and aggregation | `collector/collection/eligibility/` |
+| Default relevance classifier construction | `collector/classification/relevance/factory.py` |
+| Default collection eligibility classifier construction | `collector/collection/eligibility/factory.py` |
+| Shared voter construction, readiness checks and vote execution | `collector/classification/voter_factory.py`, `collector/classification/voting.py` |
 | Shared LLM client and durable response checkpoints | `collector/classification/llm_client.py`, `collector/classification/checkpoints.py` |
 | Distribution access checks | `collector/validation/distributions.py` |
 | HTTP fetching and request deadlines | `collector/network/fetch.py`, `collector/network/transport.py` |

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from collector.classification.eligibility.ensemble import EnsemblePageClassifier
-from collector.classification.eligibility.models import PageClassification
 from collector.classification.errors import PageClassificationError
+from collector.collection.eligibility.ensemble import EnsemblePageClassifier
+from collector.collection.eligibility.models import PageClassification
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 

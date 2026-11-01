@@ -1,1 +1,1 @@
-"""Page eligibility and repository-result relevance classification."""
+"""Repository relevance classification and shared model-voting infrastructure."""

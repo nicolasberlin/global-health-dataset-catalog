@@ -7,7 +7,6 @@ from functools import partial
 from urllib.parse import urlsplit
 
 from collector.budget import CollectionBudgetExceeded, check_collection_budget, collection_budget
-from collector.classification.eligibility.models import PageClassifier
 from collector.collection.contracts import (
     DiscoveredPage,
     DiscoverFunction,
@@ -15,6 +14,7 @@ from collector.collection.contracts import (
     ValidateDistributionFunction,
 )
 from collector.collection.discovery.manager import discover_source
+from collector.collection.eligibility.models import PageClassifier
 from collector.collection.pipeline import (
     _classifier_or_default,
     _usable_distribution,

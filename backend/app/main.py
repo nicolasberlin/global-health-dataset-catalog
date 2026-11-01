@@ -24,7 +24,7 @@ from app.db.connection import (
 )
 from app.lifecycle import lifespan
 from app.workers.state import workers_ready
-from collector.classification.factory import validate_default_classifier_configuration
+from collector.classification.voter_factory import validate_default_classifier_configuration
 
 
 async def database_timeout(request, exception) -> JSONResponse:

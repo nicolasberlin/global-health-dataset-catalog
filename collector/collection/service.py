@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collector.classification.eligibility.models import PageClassifier
 from collector.collection.contracts import DiscoverFunction as DiscoverFunction
 from collector.collection.contracts import FetchHTMLFunction as FetchHTMLFunction
 from collector.collection.contracts import (
     ValidateDistributionFunction as ValidateDistributionFunction,
 )
+from collector.collection.eligibility.models import PageClassifier
 from collector.collection.pipeline import analyze_discovered_page as analyze_discovered_page
 from collector.collection.pipeline import analyze_html_page as analyze_html_page
 from collector.collection.workflows import record, source

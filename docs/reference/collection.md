@@ -34,13 +34,21 @@ responses with at least two positive votes. Two positive votes plus a technical
 failure are insufficient. Page classification uses the selected record's evidence;
 it does not repeat the query-relevance decision.
 
-The implementations are separated by responsibility under
-`collector/classification/`: `relevance/` owns candidate relevance to the user's
-query, while `eligibility/` owns dataset page acceptance during collection. Each
-contains `models.py`, `llm.py`, `ensemble.py` and `prompts.py`. The shared factory
-constructs both default ensembles; HTTP transport, persisted checkpoints and vote
-execution remain common. See the [architecture guide](../technical-design-document.md)
-for the complete module layout and shared helpers.
+The implementations belong to their features:
+`collector/classification/relevance/` owns candidate relevance to the user's query,
+while `collector/collection/eligibility/` owns dataset page acceptance during
+collection. Each contains `models.py`, `llm.py`, `ensemble.py`, `prompts.py` and
+its own `factory.py`. The classification worker uses the relevance factory;
+the collection worker, pipeline default and AI-enabled Search Lab use the
+eligibility factory. Both delegate voter construction to
+`collector/classification/voter_factory.py`; HTTP transport, persisted checkpoints
+and vote execution remain common.
+
+The eligibility prompt and response schema live with the collection feature
+because they define the accepted-page decision consumed by collection. Only
+generic Chat Completions message construction belongs to the shared
+`collector/classification/prompts.py`. See the
+[architecture guide](../technical-design-document.md) for the complete layout.
 
 Record resolution tries these permitted methods in order:
 

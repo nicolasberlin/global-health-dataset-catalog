@@ -9,7 +9,6 @@ from functools import partial
 from urllib.error import HTTPError, URLError
 
 from collector.budget import CollectionBudgetExceeded, check_collection_budget, collection_budget
-from collector.classification.eligibility.models import PageClassifier
 from collector.collection.connectors.http import JsonResponse, fetch_record_json
 from collector.collection.connectors.registry import (
     ConnectorRegistry,
@@ -24,6 +23,7 @@ from collector.collection.contracts import (
     ValidateDistributionFunction,
     public_url,
 )
+from collector.collection.eligibility.models import PageClassifier
 from collector.collection.failures import CollectionMetadataError, CollectionStepError
 from collector.collection.pipeline import classify_resolution, eligible_resources
 from collector.collection.record_mapping import to_strategy_result

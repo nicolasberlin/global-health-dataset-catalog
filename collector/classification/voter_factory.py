@@ -1,30 +1,16 @@
-"""Construct the classifiers used by default at pipeline entry points."""
+"""Shared default-voter configuration, client construction and readiness checks."""
 
 from __future__ import annotations
 
 import os
 
-from collector.classification.checkpoints import CheckpointedLLMClient, VoteStore
-from collector.classification.eligibility.ensemble import EnsemblePageClassifier
-from collector.classification.eligibility.llm import (
-    LLMPageClassifier,
-    _parse_page_classification,
-)
-from collector.classification.eligibility.models import PageClassifier
+from collector.classification.checkpoints import CheckpointedLLMClient
 from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.providers.epfl_rcp import (
     DEFAULT_APERTUS_MEDITRON_MODEL,
     DEFAULT_DEEPSEEK_RCP_MODEL,
     DEFAULT_GEMMA_MEDITRON_MODEL,
-    epfl_rcp_chat_completions_provider_config,
-    epfl_rcp_repository_relevance_provider_config,
 )
-from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
-from collector.classification.relevance.llm import (
-    LLMRepositoryRelevanceClassifier,
-    _parse_repository_relevance_classification,
-)
-from collector.classification.relevance.models import RepositoryResultClassifier
 
 # Each voter has a stable audit ID, an independently configurable model, and
 # an explicit credential source. No model has implicit configuration or key fallback.
@@ -88,34 +74,3 @@ def _voters(provider_builder, classifier_type, validate, vote_store):
         )
         for voter_id, client in clients
     ]
-
-
-def build_default_page_classifier(*, vote_store: VoteStore | None = None) -> PageClassifier:
-    """Require three usable responses and two positives; optionally checkpoint each vote."""
-    return EnsemblePageClassifier(
-        _voters(
-            epfl_rcp_chat_completions_provider_config,
-            LLMPageClassifier,
-            _parse_page_classification,
-            vote_store,
-        ),
-        votes_required=2,
-        minimum_successful_votes=3,
-    )
-
-
-def build_default_repository_result_classifier(
-    *,
-    vote_store: VoteStore | None = None,
-) -> RepositoryResultClassifier:
-    """Use the same durable voting policy with a separate repository relevance prompt."""
-    return EnsembleRepositoryRelevanceClassifier(
-        _voters(
-            epfl_rcp_repository_relevance_provider_config,
-            LLMRepositoryRelevanceClassifier,
-            _parse_repository_relevance_classification,
-            vote_store,
-        ),
-        votes_required=2,
-        minimum_successful_votes=3,
-    )

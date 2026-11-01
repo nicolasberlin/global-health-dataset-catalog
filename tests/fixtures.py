@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from helpers.access import inject_owners
 from helpers.classification import KEY_VARIABLES, KEYS
 
-from collector.classification import factory
+from collector.classification import voter_factory
 from collector.classification.llm_client import HTTPJSONLLMClient
 
 
@@ -94,12 +94,12 @@ def api(monkeypatch):
 def transport(monkeypatch):
     for name, key in zip(KEY_VARIABLES, KEYS):
         monkeypatch.setenv(name, key)
-    for _, variable, _, _ in factory._DEFAULT_VOTERS:
+    for _, variable, _, _ in voter_factory._DEFAULT_VOTERS:
         monkeypatch.delenv(variable, raising=False)
 
     def install(request):
         monkeypatch.setattr(
-            factory, "HTTPJSONLLMClient", partial(HTTPJSONLLMClient, request=request)
+            voter_factory, "HTTPJSONLLMClient", partial(HTTPJSONLLMClient, request=request)
         )
 
     return install

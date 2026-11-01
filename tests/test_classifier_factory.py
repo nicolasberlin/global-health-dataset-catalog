@@ -11,10 +11,12 @@ import pytest
 from helpers.classification import KEY_VARIABLES, KEYS, MODEL_VARIABLES, MODELS, PAGE
 from helpers.classification import response as _response
 
-from collector.classification import factory
+from collector.classification import voter_factory
 from collector.classification.errors import PageClassificationError
 from collector.classification.llm_client import HTTPJSONLLMClient
 from collector.classification.providers.epfl_rcp import EPFL_RCP_CHAT_COMPLETIONS_URL
+from collector.classification.relevance import factory as relevance_factory
+from collector.collection.eligibility import factory as eligibility_factory
 
 
 @pytest.fixture(autouse=True)
@@ -27,12 +29,14 @@ def configure_keys(monkeypatch):
 
 def _classify(kind):
     if kind == "page":
-        return factory.build_default_page_classifier().classify(PAGE, [])
-    return factory.build_default_repository_result_classifier().classify(PAGE)
+        return eligibility_factory.build_default_page_classifier().classify(PAGE, [])
+    return relevance_factory.build_default_repository_result_classifier().classify(PAGE)
 
 
 def _inject_transport(monkeypatch, request):
-    monkeypatch.setattr(factory, "HTTPJSONLLMClient", partial(HTTPJSONLLMClient, request=request))
+    monkeypatch.setattr(
+        voter_factory, "HTTPJSONLLMClient", partial(HTTPJSONLLMClient, request=request),
+    )
 
 
 @pytest.mark.parametrize("kind", ["page", "repository"])
@@ -130,22 +134,22 @@ def test_failed_model_is_an_error_even_when_other_two_accept(
 def test_readiness_rejects_blank_required_configuration(monkeypatch, variable, value):
     monkeypatch.setenv(variable, value)
     with pytest.raises(ValueError, match="Required model configuration is missing or blank"):
-        factory.validate_default_classifier_configuration()
+        voter_factory.validate_default_classifier_configuration()
 
 
 @pytest.mark.parametrize("variable", KEY_VARIABLES)
 def test_readiness_rejects_missing_keys(monkeypatch, variable):
     monkeypatch.delenv(variable)
     with pytest.raises(ValueError):
-        factory.validate_default_classifier_configuration()
+        voter_factory.validate_default_classifier_configuration()
 
 
 def test_readiness_accepts_default_and_overridden_models_without_clients(monkeypatch):
     def unexpected_client(*args, **kwargs):
         pytest.fail("Configuration checks must not create provider clients")
 
-    monkeypatch.setattr(factory, "HTTPJSONLLMClient", unexpected_client)
-    factory.validate_default_classifier_configuration()
+    monkeypatch.setattr(voter_factory, "HTTPJSONLLMClient", unexpected_client)
+    voter_factory.validate_default_classifier_configuration()
     for variable in MODEL_VARIABLES:
         monkeypatch.setenv(variable, "test-model")
-    factory.validate_default_classifier_configuration()
+    voter_factory.validate_default_classifier_configuration()

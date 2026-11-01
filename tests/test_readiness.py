@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from psycopg import OperationalError
 from psycopg_pool import PoolTimeout
 
-from collector.classification import factory
+from collector.classification import voter_factory
 
 pytestmark = pytest.mark.anyio
 
@@ -21,7 +21,7 @@ async def client(monkeypatch):
     monkeypatch.setattr(main.app.state, "ready", True, raising=False)
     monkeypatch.setattr(main.app.state, "runtime_enforced", False, raising=False)
     monkeypatch.setattr(main.app.state, "ownership", None, raising=False)
-    for _, model_var, _, key_var in factory._DEFAULT_VOTERS:
+    for _, model_var, _, key_var in voter_factory._DEFAULT_VOTERS:
         monkeypatch.setenv(key_var, "private-test-key")
         monkeypatch.delenv(model_var, raising=False)
     async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as c:
@@ -55,7 +55,7 @@ async def test_success_reuses_pool_and_does_not_initialize_or_call_models(
     initialize = AsyncMock(side_effect=AssertionError("Must not migrate during probes"))
     create_client = Mock(side_effect=AssertionError("Must not construct an LLM client"))
     monkeypatch.setattr(lifecycle, "init_database", initialize)
-    monkeypatch.setattr(factory, "HTTPJSONLLMClient", create_client)
+    monkeypatch.setattr(voter_factory, "HTTPJSONLLMClient", create_client)
     for _ in range(2):
         response = await client.get("/ready")
         assert response.status_code == 200
@@ -84,7 +84,7 @@ async def test_uninitialized_state_is_unavailable(client, pool, monkeypatch, sta
 async def test_missing_configuration_recovers_without_database_or_provider_calls(
     client, pool, monkeypatch,
 ):
-    variable = factory._DEFAULT_VOTERS[0][3]
+    variable = voter_factory._DEFAULT_VOTERS[0][3]
     monkeypatch.delenv(variable)
     assert (await client.get("/ready")).status_code == 503
     pool.connection.assert_not_called()

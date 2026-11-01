@@ -129,7 +129,7 @@ def execute(mode, url, *, offline_json=None, include_ai=False):
             }
         if not include_ai:
             raise ValueError("Collection requires --include-ai to authorize model calls.")
-        from collector.classification.factory import build_default_page_classifier
+        from collector.collection.eligibility.factory import build_default_page_classifier
 
         result = collect_record(
             url, DEFAULT_CONFIG, browser=browser, classifier=build_default_page_classifier()

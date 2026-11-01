@@ -10,8 +10,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 import pytest
 
 from collector.budget import CollectionBudgetExceeded
-from collector.classification.eligibility.models import PageClassification
 from collector.collection.discovery.adapters import CKANAdapter, DataJsonAdapter, SocrataAdapter
+from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import analyze_discovered_page, collect_source_with_report
 from collector.network.json import JsonDocument, fetch_json_url
 from collector.storage.models import ValidationResult

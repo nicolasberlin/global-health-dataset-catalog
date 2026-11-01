@@ -10,11 +10,11 @@ from urllib.error import HTTPError
 import pytest
 from app.db.collection.traces.sanitization import safe_observation
 
-from collector.classification.eligibility.models import PageClassification
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.connectors.http import JsonResponse
 from collector.collection.contracts import public_url
+from collector.collection.eligibility.models import PageClassification
 from collector.collection.failures import CollectionTransportError
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG

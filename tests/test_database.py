@@ -2083,7 +2083,7 @@ async def test_automatic_collection_reservation_retries_after_terminal_job(
 
 
 async def test_complete_collection_job_saves_refined_distribution_formats(database):
-    from collector.classification.eligibility.models import PageClassification
+    from collector.collection.eligibility.models import PageClassification
     from collector.network.fetch import FetchedPage
     from collector.storage.models import HTTPProbe
 

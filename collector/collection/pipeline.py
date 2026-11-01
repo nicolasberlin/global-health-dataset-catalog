@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 from collector.budget import check_collection_budget
-from collector.classification.eligibility.models import PageClassifier
-from collector.classification.factory import build_default_page_classifier
 from collector.collection.contracts import DiscoveredPage, StrategyResult
+from collector.collection.eligibility.factory import build_default_page_classifier
+from collector.collection.eligibility.models import PageClassifier
 from collector.collection.records import NormalizedRecord
 from collector.collection.resources import EXCLUDED_RESOURCE_FORMATS
 from collector.config import DEFAULT_CONFIG, CollectorConfig
