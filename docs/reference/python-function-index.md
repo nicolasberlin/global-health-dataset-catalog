@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **1 November 2026**, based on Git commit `8f1b81c`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **1 November 2026**, based on Git commit `f227358`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **874 function and method definitions in 159 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **874 function and method definitions in 160 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -18,7 +18,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | ---: | ---: |
 | `backend/` | 66 | 294 |
 | `browser/` | 2 | 7 |
-| `collector/` | 80 | 480 |
+| `collector/` | 81 | 480 |
 | `scripts/` | 3 | 52 |
 | `search_lab/` | 8 | 41 |
 
@@ -98,6 +98,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/classification/relevance/factory.py](#collector-classification-relevance-factory-py) — 1 definition
 - [collector/classification/relevance/models.py](#collector-classification-relevance-models-py) — 5 definitions
 - [collector/classification/relevance/prompts.py](#collector-classification-relevance-prompts-py) — 3 definitions
+- [collector/classification/relevance/service.py](#collector-classification-relevance-service-py) — 4 definitions
 - [collector/collection/browser.py](#collector-collection-browser-py) — 8 definitions
 - [collector/collection/connectors/__init__.py](#collector-collection-connectors-__init__-py) — 5 definitions
 - [collector/collection/connectors/dataverse.py](#collector-collection-connectors-dataverse-py) — 6 definitions
@@ -170,7 +171,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/search/providers/datacite/client.py](#collector-search-providers-datacite-client-py) — 3 definitions
 - [collector/search/providers/datacite/mapping.py](#collector-search-providers-datacite-mapping-py) — 3 definitions
 - [collector/search/providers/datacite/metadata.py](#collector-search-providers-datacite-metadata-py) — 22 definitions
-- [collector/search/service.py](#collector-search-service-py) — 5 definitions
+- [collector/search/service.py](#collector-search-service-py) — 1 definition
 - [collector/url_utils.py](#collector-url_utils-py) — 5 definitions
 - [scripts/api_client.py](#scripts-api_client-py) — 41 definitions
 - [scripts/setup_api.py](#scripts-setup_api-py) — 8 definitions
@@ -812,14 +813,14 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_classify`](../../backend/app/workers/classification/worker.py#L29) | `_classify(candidate: ClassificationJob, vote_store: VoteStore) -> RepositoryClassification \| None` | function / method |
-| [`ClassificationWorker.__init__`](../../backend/app/workers/classification/worker.py#L45) | `__init__(self, *, classify: Callable[[ClassificationJob, VoteStore], RepositoryClassification \| None] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
-| [`ClassificationWorker.claim`](../../backend/app/workers/classification/worker.py#L65) | `claim(self, *, claim_token: UUID) -> ClassificationJob \| None` | async |
-| [`ClassificationWorker.execute`](../../backend/app/workers/classification/worker.py#L68) | `execute(self, candidate: ClassificationJob, executor: Executor) -> None` | async |
-| [`ClassificationWorker._retry`](../../backend/app/workers/classification/worker.py#L108) | `_retry(self, candidate: ClassificationJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
-| [`ClassificationWorker._fail`](../../backend/app/workers/classification/worker.py#L120) | `_fail(self, candidate: ClassificationJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
-| [`ClassificationWorker.recover`](../../backend/app/workers/classification/worker.py#L134) | `recover(self, candidate: ClassificationJob) -> object` | async |
-| [`_repository_search_result_from_candidate`](../../backend/app/workers/classification/worker.py#L143) | `_repository_search_result_from_candidate(candidate: ClassificationJob) -> RepositorySearchResult` | function / method |
+| [`_classify`](../../backend/app/workers/classification/worker.py#L31) | `_classify(candidate: ClassificationJob, vote_store: VoteStore) -> RepositoryClassification \| None` | function / method |
+| [`ClassificationWorker.__init__`](../../backend/app/workers/classification/worker.py#L47) | `__init__(self, *, classify: Callable[[ClassificationJob, VoteStore], RepositoryClassification \| None] \| None=None, vote_store_factory: Callable[..., VoteStore] \| None=None, persist: Persistence \| None=None) -> None` | function / method |
+| [`ClassificationWorker.claim`](../../backend/app/workers/classification/worker.py#L67) | `claim(self, *, claim_token: UUID) -> ClassificationJob \| None` | async |
+| [`ClassificationWorker.execute`](../../backend/app/workers/classification/worker.py#L70) | `execute(self, candidate: ClassificationJob, executor: Executor) -> None` | async |
+| [`ClassificationWorker._retry`](../../backend/app/workers/classification/worker.py#L110) | `_retry(self, candidate: ClassificationJob, diagnostics: list[Diagnostic]) -> tuple[bool, list[Diagnostic]]` | async |
+| [`ClassificationWorker._fail`](../../backend/app/workers/classification/worker.py#L122) | `_fail(self, candidate: ClassificationJob, error: str, diagnostics: list[Diagnostic]) -> object` | async |
+| [`ClassificationWorker.recover`](../../backend/app/workers/classification/worker.py#L136) | `recover(self, candidate: ClassificationJob) -> object` | async |
+| [`_repository_search_result_from_candidate`](../../backend/app/workers/classification/worker.py#L145) | `_repository_search_result_from_candidate(candidate: ClassificationJob) -> RepositorySearchResult` | function / method |
 
 <a id="backend-app-workers-collection-worker-py"></a>
 
@@ -1041,6 +1042,17 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_build_epfl_rcp_repository_relevance_request_body`](../../collector/classification/relevance/prompts.py#L8) | `_build_epfl_rcp_repository_relevance_request_body(payload: dict[str, object], model: str) -> dict[str, object]` | function / method |
 | [`_repository_relevance_system_prompt`](../../collector/classification/relevance/prompts.py#L20) | `_repository_relevance_system_prompt() -> str` | function / method |
 | [`_repository_relevance_schema`](../../collector/classification/relevance/prompts.py#L144) | `_repository_relevance_schema() -> dict[str, object]` | function / method |
+
+<a id="collector-classification-relevance-service-py"></a>
+
+## collector/classification/relevance/service.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`classify_repository_result`](../../collector/classification/relevance/service.py#L13) | `classify_repository_result(result: RepositorySearchResult, classifier: RepositoryResultClassifier) -> RepositorySearchResult` | function / method |
+| [`_repository_result_page`](../../collector/classification/relevance/service.py#L28) | `_repository_result_page(result: RepositorySearchResult) -> PageSnapshot` | function / method |
+| [`_metadata_text`](../../collector/classification/relevance/service.py#L66) | `_metadata_text(value: str, *, fallback: str='') -> str` | function / method |
+| [`_metadata_items`](../../collector/classification/relevance/service.py#L70) | `_metadata_items(value: str) -> tuple[str, ...]` | function / method |
 
 <a id="collector-collection-browser-py"></a>
 
@@ -1983,11 +1995,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`search_repository_metadata`](../../collector/search/service.py#L29) | `search_repository_metadata(query: str, providers: Iterable[RepositorySearchProvider] \| None=None) -> RepositorySearchResponse` | function / method |
-| [`classify_repository_result`](../../collector/search/service.py#L81) | `classify_repository_result(result: RepositorySearchResult, classifier: RepositoryResultClassifier) -> RepositorySearchResult` | function / method |
-| [`_repository_result_page`](../../collector/search/service.py#L96) | `_repository_result_page(result: RepositorySearchResult) -> PageSnapshot` | function / method |
-| [`_metadata_text`](../../collector/search/service.py#L134) | `_metadata_text(value: str, *, fallback: str='') -> str` | function / method |
-| [`_metadata_items`](../../collector/search/service.py#L138) | `_metadata_items(value: str) -> tuple[str, ...]` | function / method |
+| [`search_repository_metadata`](../../collector/search/service.py#L25) | `search_repository_metadata(query: str, providers: Iterable[RepositorySearchProvider] \| None=None) -> RepositorySearchResponse` | function / method |
 
 <a id="collector-url_utils-py"></a>
 

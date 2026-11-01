@@ -141,6 +141,7 @@ installations. No setup script moves or deletes database volumes.
 | Source identity from extracted evidence | `collector/collection/extraction/source_identity.py` |
 | External repository candidate relevance: contracts, prompts, parsing and aggregation | `collector/classification/relevance/` |
 | Dataset page eligibility during collection: contracts, prompts, parsing and aggregation | `collector/collection/eligibility/` |
+| Candidate-to-classifier evidence and relevance service | `collector/classification/relevance/service.py` |
 | Default relevance classifier construction | `collector/classification/relevance/factory.py` |
 | Default collection eligibility classifier construction | `collector/collection/eligibility/factory.py` |
 | Shared voter construction, readiness checks and ensemble voting | `collector/llm/voter_factory.py`, `collector/llm/voting.py` |

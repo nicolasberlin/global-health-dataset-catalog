@@ -352,6 +352,7 @@ collector/
 │   └── relevance/
 │       ├── __init__.py
 │       ├── factory.py
+│       ├── service.py
 │       ├── models.py
 │       ├── classifier.py
 │       ├── ensemble.py
@@ -367,12 +368,23 @@ collector/
 ```
 
 `classification/relevance/` evaluates external repository candidates, including
-DataCite results, against the user's query. The classification worker and search
-service use its contracts and classifier. `collection/eligibility/` evaluates
-dataset pages during collection; the collection pipeline uses its contracts and
+DataCite results, against the user's query. `ClassificationWorker` uses its service
+and classifier. Search results still reference the shared relevance decision model,
+but search orchestration does not invoke classification.
+`collection/eligibility/` evaluates dataset pages during collection; the collection pipeline uses its contracts and
 classifier. Each domain
 owns its models, bounded LLM payload and response parser, aggregation rules,
 prompts and response schemas. Domain-specific helpers stay beside their callers.
+
+`classification/relevance/service.py` owns `classify_repository_result()` and its
+private candidate-to-`PageSnapshot` and metadata adaptation helpers. The
+`ClassificationWorker` imports this service directly. `search/service.py` retains
+only `search_repository_metadata()` and `RepositorySearchFailure`; `SearchWorker`
+uses it to query providers and filter candidates without invoking classification.
+`collector.search` no longer re-exports the classification function, avoiding a
+reverse dependency from the search package initializer to the relevance service.
+The moved functions retain their signatures, metadata fallbacks, result replacement
+and failure propagation; neither service performs persistence.
 
 `classification/relevance/factory.py` owns
 `build_default_repository_result_classifier()`, used by `ClassificationWorker`.

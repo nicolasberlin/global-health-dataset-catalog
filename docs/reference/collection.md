@@ -34,6 +34,12 @@ responses with at least two positive votes. Two positive votes plus a technical
 failure are insufficient. Page classification uses the selected record's evidence;
 it does not repeat the query-relevance decision.
 
+External candidate discovery runs through `collector/search/service.py` in the
+search worker. `collector/classification/relevance/service.py` adapts candidate
+metadata to classifier evidence and attaches a relevance decision in the
+classification worker. These services keep discovery and classification separate;
+provider metadata, fallbacks, decisions and error handling are unchanged.
+
 The implementations belong to their features:
 `collector/classification/relevance/` owns candidate relevance to the user's query,
 while `collector/collection/eligibility/` owns dataset page acceptance during

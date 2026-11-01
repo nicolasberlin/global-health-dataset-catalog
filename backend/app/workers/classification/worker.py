@@ -19,11 +19,13 @@ from app.workers.sql_retries import persist_with_retry
 from app.workers.stores import PostgresVoteStore
 from collector.classification.relevance.factory import build_default_repository_result_classifier
 from collector.classification.relevance.models import RepositoryClassification
+from collector.classification.relevance.service import (
+    classify_repository_result as classify_one_repository_result,
+)
 from collector.diagnostics import Diagnostic
 from collector.llm.checkpoints import VoteStore
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.search import RepositorySearchResult
-from collector.search import classify_repository_result as classify_one_repository_result
 
 
 def _classify(

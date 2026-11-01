@@ -1,4 +1,4 @@
-"""Repository metadata search, filtering, and classification interfaces."""
+"""Repository metadata search providers, filtering and response contracts."""
 
 from collector.search.filtering import filter_repository_results
 from collector.search.models import (
@@ -12,10 +12,7 @@ from collector.search.models import (
     RepositorySearchWarning,
 )
 from collector.search.providers.datacite import DataCiteRepositorySearchProvider
-from collector.search.service import (
-    classify_repository_result,
-    search_repository_metadata,
-)
+from collector.search.service import search_repository_metadata
 
 __all__ = [
     "DataCiteRepositorySearchProvider",
@@ -27,7 +24,6 @@ __all__ = [
     "RepositorySearchResponse",
     "RepositorySearchResult",
     "RepositorySearchWarning",
-    "classify_repository_result",
     "filter_repository_results",
     "search_repository_metadata",
 ]
