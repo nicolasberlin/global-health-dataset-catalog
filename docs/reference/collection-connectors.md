@@ -82,6 +82,14 @@ cookies remain in the browser service.
 | `backend/app/db/collection/completion.py` | Existing guarded atomic finalization |
 | `backend/app/db/catalog/` | Dataset aggregates, distributions, observations and catalogue search |
 
+The record workflow keeps the API → HTML → browser loop and all stop/recovery
+decisions in `collect_record()`. Its private helpers remain in the same file:
+`_fetch_record_metadata()` owns API-read evidence and request accounting,
+`_validate_record_resources()` owns per-resource audit checks around the shared
+retention policy, and `_build_collection_result()` owns final report assembly.
+The fetch/normalize phase boundary and final observation callback remain in the
+orchestrating function.
+
 `collection/strategies/dataverse.py` remains a compatibility wrapper. The former
 `collector.main` entry points remain compatibility imports from
 `collector.collection.service`; internal callers use the service directly.

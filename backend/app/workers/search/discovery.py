@@ -27,12 +27,12 @@ from collector.classification.relevance.models import (
 )
 from collector.diagnostics import Diagnostic
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
-from collector.repository_search import (
+from collector.search import (
     RepositorySearchResponse,
     RepositorySearchResult,
     RepositorySearchWarning,
 )
-from collector.repository_search.filtering import filter_repository_results
+from collector.search.filtering import filter_repository_results
 from collector.storage.models import CollectedDataset
 
 _REPOSITORY_URL_ADAPTER = TypeAdapter(HttpUrl)

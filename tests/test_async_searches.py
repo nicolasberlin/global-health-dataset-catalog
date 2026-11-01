@@ -26,7 +26,7 @@ from helpers.workflows import candidate, headers, read, rows, wait_until
 from helpers.workflows import classification_decision as decision
 from httpx import ASGITransport, AsyncClient
 
-from collector.repository_search import (
+from collector.search import (
     DataCiteRepositorySearchProvider,
     RepositorySearchResponse,
     RepositorySearchResult,

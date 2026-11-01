@@ -12,7 +12,7 @@ from app.db.connection import _fetchall, _require_database_pool
 from fastapi import Response
 
 from collector.classification.relevance.models import RepositoryClassification
-from collector.repository_search import RepositorySearchResult
+from collector.search import RepositorySearchResult
 
 SOURCE_URL = "https://repository.example.org/mortality"
 

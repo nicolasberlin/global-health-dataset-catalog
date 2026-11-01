@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from helpers.workflows import candidate_for, decision, headers, read
 from httpx import ASGITransport, AsyncClient
 
-from collector.repository_search import RepositorySearchResult
+from collector.search import RepositorySearchResult
 
 pytestmark = pytest.mark.anyio
 

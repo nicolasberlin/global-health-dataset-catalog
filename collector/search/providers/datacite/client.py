@@ -5,13 +5,13 @@ from __future__ import annotations
 from urllib.parse import urlencode
 
 from collector.network.json import fetch_json_url
-from collector.repository_search.models import (
+from collector.search.models import (
     INVALID_METADATA_MESSAGE,
     JsonFetcher,
     RepositorySearchResponse,
     RepositorySearchWarning,
 )
-from collector.repository_search.providers.datacite.mapping import _map_search_results
+from collector.search.providers.datacite.mapping import _map_search_results
 
 
 class DataCiteRepositorySearchProvider:

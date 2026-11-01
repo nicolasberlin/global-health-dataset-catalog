@@ -9,8 +9,8 @@ from collector.classification.relevance.models import RepositoryResultClassifier
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.extraction.dataset_metadata import normalize_dataset_metadata
 from collector.observability import emit_event
-from collector.repository_search.filtering import filter_repository_results
-from collector.repository_search.models import (
+from collector.search.filtering import filter_repository_results
+from collector.search.models import (
     INVALID_METADATA_MESSAGE,
     MISSING_METADATA_VALUE,
     RepositorySearchProvider,
@@ -18,7 +18,7 @@ from collector.repository_search.models import (
     RepositorySearchResult,
     RepositorySearchWarning,
 )
-from collector.repository_search.providers.datacite import DataCiteRepositorySearchProvider
+from collector.search.providers.datacite import DataCiteRepositorySearchProvider
 from collector.storage.models import PageSnapshot
 
 

@@ -22,8 +22,8 @@ from collector.classification.factory import build_default_repository_result_cla
 from collector.classification.relevance.models import RepositoryClassification
 from collector.diagnostics import Diagnostic
 from collector.observability import emit_event, measure_operation, operation_context
-from collector.repository_search import RepositorySearchResult
-from collector.repository_search import classify_repository_result as classify_one_repository_result
+from collector.search import RepositorySearchResult
+from collector.search import classify_repository_result as classify_one_repository_result
 
 
 def _classify(

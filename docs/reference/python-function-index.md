@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **31 October 2026**, based on Git commit `4287b81`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **1 November 2026**, based on Git commit `c1c3f06`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **867 function and method definitions in 156 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **870 function and method definitions in 156 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -18,7 +18,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | ---: | ---: |
 | `backend/` | 66 | 294 |
 | `browser/` | 2 | 7 |
-| `collector/` | 77 | 473 |
+| `collector/` | 77 | 476 |
 | `scripts/` | 3 | 52 |
 | `search_lab/` | 8 | 41 |
 
@@ -137,7 +137,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/resources.py](#collector-collection-resources-py) — 1 definition
 - [collector/collection/service.py](#collector-collection-service-py) — 2 definitions
 - [collector/collection/strategies/dataverse.py](#collector-collection-strategies-dataverse-py) — 2 definitions
-- [collector/collection/workflows/record.py](#collector-collection-workflows-record-py) — 5 definitions
+- [collector/collection/workflows/record.py](#collector-collection-workflows-record-py) — 8 definitions
 - [collector/collection/workflows/source.py](#collector-collection-workflows-source-py) — 5 definitions
 - [collector/config.py](#collector-config-py) — 5 definitions
 - [collector/diagnostics.py](#collector-diagnostics-py) — 8 definitions
@@ -158,12 +158,12 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/network/resolver.py](#collector-network-resolver-py) — 3 definitions
 - [collector/network/transport.py](#collector-network-transport-py) — 20 definitions
 - [collector/observability.py](#collector-observability-py) — 5 definitions
-- [collector/repository_search/filtering.py](#collector-repository_search-filtering-py) — 4 definitions
-- [collector/repository_search/models.py](#collector-repository_search-models-py) — 1 definition
-- [collector/repository_search/providers/datacite/client.py](#collector-repository_search-providers-datacite-client-py) — 3 definitions
-- [collector/repository_search/providers/datacite/mapping.py](#collector-repository_search-providers-datacite-mapping-py) — 3 definitions
-- [collector/repository_search/providers/datacite/metadata.py](#collector-repository_search-providers-datacite-metadata-py) — 22 definitions
-- [collector/repository_search/service.py](#collector-repository_search-service-py) — 5 definitions
+- [collector/search/filtering.py](#collector-search-filtering-py) — 4 definitions
+- [collector/search/models.py](#collector-search-models-py) — 1 definition
+- [collector/search/providers/datacite/client.py](#collector-search-providers-datacite-client-py) — 3 definitions
+- [collector/search/providers/datacite/mapping.py](#collector-search-providers-datacite-mapping-py) — 3 definitions
+- [collector/search/providers/datacite/metadata.py](#collector-search-providers-datacite-metadata-py) — 22 definitions
+- [collector/search/service.py](#collector-search-service-py) — 5 definitions
 - [collector/storage/metadata.py](#collector-storage-metadata-py) — 3 definitions
 - [collector/storage/models.py](#collector-storage-models-py) — 6 definitions
 - [collector/url_utils.py](#collector-url_utils-py) — 5 definitions
@@ -1529,11 +1529,14 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`now`](../../collector/collection/workflows/record.py#L35) | `now()` | function / method |
-| [`collect_record`](../../collector/collection/workflows/record.py#L39) | `collect_record(url: str, config: CollectorConfig, *, fetch_html=None, fetch_json=None, validate=None, classifier=None, browser=None, observe=None, registry: ConnectorRegistry \| None=None) -> CollectionResult` | function / method |
-| [`collect_record.<local>.related_json`](../../collector/collection/workflows/record.py#L112) | `related_json(metadata_url, *, evidence=evidence, request_count=request_count)` | function / method |
-| [`collect_record.<local>.record_check`](../../collector/collection/workflows/record.py#L228) | `record_check(resource, validation, *, attempt=attempt)` | function / method |
-| [`collect_repository_candidate_with_report`](../../collector/collection/workflows/record.py#L348) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
+| [`now`](../../collector/collection/workflows/record.py#L50) | `now()` | function / method |
+| [`collect_record`](../../collector/collection/workflows/record.py#L54) | `collect_record(url: str, config: CollectorConfig, *, fetch_html=None, fetch_json=None, validate=None, classifier=None, browser=None, observe=None, registry: ConnectorRegistry \| None=None) -> CollectionResult` | function / method |
+| [`collect_repository_candidate_with_report`](../../collector/collection/workflows/record.py#L295) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
+| [`_fetch_record_metadata`](../../collector/collection/workflows/record.py#L324) | `_fetch_record_metadata(url: str, selection: ConnectorSelection, api_url: str, fetch_json: Callable[[str], object], attempt: MethodAttempt) -> object` | function / method |
+| [`_fetch_record_metadata.<local>.related_json`](../../collector/collection/workflows/record.py#L341) | `related_json(metadata_url, *, evidence=evidence, request_count=request_count)` | function / method |
+| [`_validate_record_resources`](../../collector/collection/workflows/record.py#L385) | `_validate_record_resources(resources: list[DistributionCandidate], config: CollectorConfig, validate: ValidateDistributionFunction, *, attempt: MethodAttempt, check_state: ResourceCheckState, coverage: dict[str, object], context: str) -> ResourceSelection` | function / method |
+| [`_validate_record_resources.<local>.record_check`](../../collector/collection/workflows/record.py#L400) | `record_check(resource, validation, *, attempt=attempt)` | function / method |
+| [`_build_collection_result`](../../collector/collection/workflows/record.py#L419) | `_build_collection_result(datasets: list[CollectedDataset], *, analyzed: bool, rejected: bool, failed_checks: list[ValidationResult], unresolved: list[Diagnostic], attempts: list[MethodAttempt], coverage: dict[str, object]) -> CollectionResult` | function / method |
 
 <a id="collector-collection-workflows-source-py"></a>
 
@@ -1816,85 +1819,85 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`operation_context`](../../collector/observability.py#L60) | `operation_context(*, job_id=None, candidate_id=None, search_id=None, queue=None)` | contextmanager |
 | [`measure_operation`](../../collector/observability.py#L75) | `measure_operation(event: str)` | contextmanager |
 
-<a id="collector-repository_search-filtering-py"></a>
+<a id="collector-search-filtering-py"></a>
 
-## collector/repository_search/filtering.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`filter_repository_results`](../../collector/repository_search/filtering.py#L14) | `filter_repository_results(results: Iterable[RepositorySearchResult]) -> tuple[list[RepositorySearchResult], int]` | function / method |
-| [`_valid_provider_text`](../../collector/repository_search/filtering.py#L60) | `_valid_provider_text(value: str) -> bool` | function / method |
-| [`_http_url`](../../collector/repository_search/filtering.py#L71) | `_http_url(value: str) -> str` | function / method |
-| [`_text`](../../collector/repository_search/filtering.py#L78) | `_text(value: object) -> str` | function / method |
-
-<a id="collector-repository_search-models-py"></a>
-
-## collector/repository_search/models.py
+## collector/search/filtering.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`RepositorySearchProvider.search`](../../collector/repository_search/models.py#L65) | `search(self, query: str) -> RepositorySearchResponse` | function / method |
+| [`filter_repository_results`](../../collector/search/filtering.py#L14) | `filter_repository_results(results: Iterable[RepositorySearchResult]) -> tuple[list[RepositorySearchResult], int]` | function / method |
+| [`_valid_provider_text`](../../collector/search/filtering.py#L60) | `_valid_provider_text(value: str) -> bool` | function / method |
+| [`_http_url`](../../collector/search/filtering.py#L71) | `_http_url(value: str) -> str` | function / method |
+| [`_text`](../../collector/search/filtering.py#L78) | `_text(value: object) -> str` | function / method |
 
-<a id="collector-repository_search-providers-datacite-client-py"></a>
+<a id="collector-search-models-py"></a>
 
-## collector/repository_search/providers/datacite/client.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`DataCiteRepositorySearchProvider.__init__`](../../collector/repository_search/providers/datacite/client.py#L23) | `__init__(self, fetch_json: JsonFetcher \| None=None, page_size: int=10) -> None` | function / method |
-| [`DataCiteRepositorySearchProvider.search`](../../collector/repository_search/providers/datacite/client.py#L31) | `search(self, query: str) -> RepositorySearchResponse` | function / method |
-| [`DataCiteRepositorySearchProvider._search_url`](../../collector/repository_search/providers/datacite/client.py#L44) | `_search_url(self, query: str) -> str` | function / method |
-
-<a id="collector-repository_search-providers-datacite-mapping-py"></a>
-
-## collector/repository_search/providers/datacite/mapping.py
+## collector/search/models.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_map_search_results`](../../collector/repository_search/providers/datacite/mapping.py#L19) | `_map_search_results(data: dict[str, object]) -> tuple[list[RepositorySearchResult], bool]` | function / method |
-| [`_datacite_result`](../../collector/repository_search/providers/datacite/mapping.py#L47) | `_datacite_result(item: dict[object, object]) -> RepositorySearchResult \| None` | function / method |
-| [`_doi_url`](../../collector/repository_search/providers/datacite/mapping.py#L83) | `_doi_url(doi: str) -> str` | function / method |
+| [`RepositorySearchProvider.search`](../../collector/search/models.py#L65) | `search(self, query: str) -> RepositorySearchResponse` | function / method |
 
-<a id="collector-repository_search-providers-datacite-metadata-py"></a>
+<a id="collector-search-providers-datacite-client-py"></a>
 
-## collector/repository_search/providers/datacite/metadata.py
+## collector/search/providers/datacite/client.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_search_result_metadata`](../../collector/repository_search/providers/datacite/metadata.py#L106) | `_search_result_metadata(attributes: dict[object, object], *, title: str, url: str, date: str, description: str, subjects: list[str]) -> dict[str, str]` | function / method |
-| [`_metadata_values`](../../collector/repository_search/providers/datacite/metadata.py#L130) | `_metadata_values(values: Iterable[str]) -> str` | function / method |
-| [`_geography`](../../collector/repository_search/providers/datacite/metadata.py#L140) | `_geography(attributes: dict[object, object]) -> list[str]` | function / method |
-| [`_diseases`](../../collector/repository_search/providers/datacite/metadata.py#L175) | `_diseases(subjects: list[str], searchable_text: str) -> list[str]` | function / method |
-| [`_dataset_sizes`](../../collector/repository_search/providers/datacite/metadata.py#L193) | `_dataset_sizes(attributes: dict[object, object], description: str) -> list[str]` | function / method |
-| [`_demographic_information`](../../collector/repository_search/providers/datacite/metadata.py#L213) | `_demographic_information(searchable_text: str) -> list[str]` | function / method |
-| [`_sharing_license`](../../collector/repository_search/providers/datacite/metadata.py#L218) | `_sharing_license(attributes: dict[object, object]) -> list[str]` | function / method |
-| [`_data_modalities`](../../collector/repository_search/providers/datacite/metadata.py#L237) | `_data_modalities(attributes: dict[object, object], searchable_text: str) -> list[str]` | function / method |
-| [`_modalities_from_format`](../../collector/repository_search/providers/datacite/metadata.py#L250) | `_modalities_from_format(data_format: str) -> list[str]` | function / method |
-| [`_metadata_text_values`](../../collector/repository_search/providers/datacite/metadata.py#L269) | `_metadata_text_values(value: object, *, keys: tuple[str, ...]=()) -> list[str]` | function / method |
-| [`_metadata_dict_items`](../../collector/repository_search/providers/datacite/metadata.py#L300) | `_metadata_dict_items(value: object) -> list[dict[object, object]]` | function / method |
-| [`_geo_point`](../../collector/repository_search/providers/datacite/metadata.py#L308) | `_geo_point(value: object) -> str` | function / method |
-| [`_geo_box`](../../collector/repository_search/providers/datacite/metadata.py#L324) | `_geo_box(value: object) -> str` | function / method |
-| [`_coordinate`](../../collector/repository_search/providers/datacite/metadata.py#L339) | `_coordinate(value: object, *, maximum: int) -> str` | function / method |
-| [`_normalize_for_matching`](../../collector/repository_search/providers/datacite/metadata.py#L353) | `_normalize_for_matching(value: str) -> str` | function / method |
-| [`_contains_term`](../../collector/repository_search/providers/datacite/metadata.py#L357) | `_contains_term(normalized_text: str, normalized_term: str) -> bool` | function / method |
-| [`_title`](../../collector/repository_search/providers/datacite/metadata.py#L361) | `_title(attributes: dict[object, object]) -> str` | function / method |
-| [`_description`](../../collector/repository_search/providers/datacite/metadata.py#L375) | `_description(attributes: dict[object, object]) -> str` | function / method |
-| [`_publisher`](../../collector/repository_search/providers/datacite/metadata.py#L397) | `_publisher(attributes: dict[object, object]) -> str` | function / method |
-| [`_date`](../../collector/repository_search/providers/datacite/metadata.py#L405) | `_date(attributes: dict[object, object]) -> str` | function / method |
-| [`_doi`](../../collector/repository_search/providers/datacite/metadata.py#L439) | `_doi(item: dict[object, object], attributes: dict[object, object]) -> str` | function / method |
-| [`_subjects`](../../collector/repository_search/providers/datacite/metadata.py#L447) | `_subjects(attributes: dict[object, object]) -> list[str]` | function / method |
+| [`DataCiteRepositorySearchProvider.__init__`](../../collector/search/providers/datacite/client.py#L23) | `__init__(self, fetch_json: JsonFetcher \| None=None, page_size: int=10) -> None` | function / method |
+| [`DataCiteRepositorySearchProvider.search`](../../collector/search/providers/datacite/client.py#L31) | `search(self, query: str) -> RepositorySearchResponse` | function / method |
+| [`DataCiteRepositorySearchProvider._search_url`](../../collector/search/providers/datacite/client.py#L44) | `_search_url(self, query: str) -> str` | function / method |
 
-<a id="collector-repository_search-service-py"></a>
+<a id="collector-search-providers-datacite-mapping-py"></a>
 
-## collector/repository_search/service.py
+## collector/search/providers/datacite/mapping.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`search_repository_metadata`](../../collector/repository_search/service.py#L29) | `search_repository_metadata(query: str, providers: Iterable[RepositorySearchProvider] \| None=None) -> RepositorySearchResponse` | function / method |
-| [`classify_repository_result`](../../collector/repository_search/service.py#L81) | `classify_repository_result(result: RepositorySearchResult, classifier: RepositoryResultClassifier) -> RepositorySearchResult` | function / method |
-| [`_repository_result_page`](../../collector/repository_search/service.py#L96) | `_repository_result_page(result: RepositorySearchResult) -> PageSnapshot` | function / method |
-| [`_metadata_text`](../../collector/repository_search/service.py#L134) | `_metadata_text(value: str, *, fallback: str='') -> str` | function / method |
-| [`_metadata_items`](../../collector/repository_search/service.py#L138) | `_metadata_items(value: str) -> tuple[str, ...]` | function / method |
+| [`_map_search_results`](../../collector/search/providers/datacite/mapping.py#L19) | `_map_search_results(data: dict[str, object]) -> tuple[list[RepositorySearchResult], bool]` | function / method |
+| [`_datacite_result`](../../collector/search/providers/datacite/mapping.py#L47) | `_datacite_result(item: dict[object, object]) -> RepositorySearchResult \| None` | function / method |
+| [`_doi_url`](../../collector/search/providers/datacite/mapping.py#L83) | `_doi_url(doi: str) -> str` | function / method |
+
+<a id="collector-search-providers-datacite-metadata-py"></a>
+
+## collector/search/providers/datacite/metadata.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_search_result_metadata`](../../collector/search/providers/datacite/metadata.py#L106) | `_search_result_metadata(attributes: dict[object, object], *, title: str, url: str, date: str, description: str, subjects: list[str]) -> dict[str, str]` | function / method |
+| [`_metadata_values`](../../collector/search/providers/datacite/metadata.py#L130) | `_metadata_values(values: Iterable[str]) -> str` | function / method |
+| [`_geography`](../../collector/search/providers/datacite/metadata.py#L140) | `_geography(attributes: dict[object, object]) -> list[str]` | function / method |
+| [`_diseases`](../../collector/search/providers/datacite/metadata.py#L175) | `_diseases(subjects: list[str], searchable_text: str) -> list[str]` | function / method |
+| [`_dataset_sizes`](../../collector/search/providers/datacite/metadata.py#L193) | `_dataset_sizes(attributes: dict[object, object], description: str) -> list[str]` | function / method |
+| [`_demographic_information`](../../collector/search/providers/datacite/metadata.py#L213) | `_demographic_information(searchable_text: str) -> list[str]` | function / method |
+| [`_sharing_license`](../../collector/search/providers/datacite/metadata.py#L218) | `_sharing_license(attributes: dict[object, object]) -> list[str]` | function / method |
+| [`_data_modalities`](../../collector/search/providers/datacite/metadata.py#L237) | `_data_modalities(attributes: dict[object, object], searchable_text: str) -> list[str]` | function / method |
+| [`_modalities_from_format`](../../collector/search/providers/datacite/metadata.py#L250) | `_modalities_from_format(data_format: str) -> list[str]` | function / method |
+| [`_metadata_text_values`](../../collector/search/providers/datacite/metadata.py#L269) | `_metadata_text_values(value: object, *, keys: tuple[str, ...]=()) -> list[str]` | function / method |
+| [`_metadata_dict_items`](../../collector/search/providers/datacite/metadata.py#L300) | `_metadata_dict_items(value: object) -> list[dict[object, object]]` | function / method |
+| [`_geo_point`](../../collector/search/providers/datacite/metadata.py#L308) | `_geo_point(value: object) -> str` | function / method |
+| [`_geo_box`](../../collector/search/providers/datacite/metadata.py#L324) | `_geo_box(value: object) -> str` | function / method |
+| [`_coordinate`](../../collector/search/providers/datacite/metadata.py#L339) | `_coordinate(value: object, *, maximum: int) -> str` | function / method |
+| [`_normalize_for_matching`](../../collector/search/providers/datacite/metadata.py#L353) | `_normalize_for_matching(value: str) -> str` | function / method |
+| [`_contains_term`](../../collector/search/providers/datacite/metadata.py#L357) | `_contains_term(normalized_text: str, normalized_term: str) -> bool` | function / method |
+| [`_title`](../../collector/search/providers/datacite/metadata.py#L361) | `_title(attributes: dict[object, object]) -> str` | function / method |
+| [`_description`](../../collector/search/providers/datacite/metadata.py#L375) | `_description(attributes: dict[object, object]) -> str` | function / method |
+| [`_publisher`](../../collector/search/providers/datacite/metadata.py#L397) | `_publisher(attributes: dict[object, object]) -> str` | function / method |
+| [`_date`](../../collector/search/providers/datacite/metadata.py#L405) | `_date(attributes: dict[object, object]) -> str` | function / method |
+| [`_doi`](../../collector/search/providers/datacite/metadata.py#L439) | `_doi(item: dict[object, object], attributes: dict[object, object]) -> str` | function / method |
+| [`_subjects`](../../collector/search/providers/datacite/metadata.py#L447) | `_subjects(attributes: dict[object, object]) -> list[str]` | function / method |
+
+<a id="collector-search-service-py"></a>
+
+## collector/search/service.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`search_repository_metadata`](../../collector/search/service.py#L29) | `search_repository_metadata(query: str, providers: Iterable[RepositorySearchProvider] \| None=None) -> RepositorySearchResponse` | function / method |
+| [`classify_repository_result`](../../collector/search/service.py#L81) | `classify_repository_result(result: RepositorySearchResult, classifier: RepositoryResultClassifier) -> RepositorySearchResult` | function / method |
+| [`_repository_result_page`](../../collector/search/service.py#L96) | `_repository_result_page(result: RepositorySearchResult) -> PageSnapshot` | function / method |
+| [`_metadata_text`](../../collector/search/service.py#L134) | `_metadata_text(value: str, *, fallback: str='') -> str` | function / method |
+| [`_metadata_items`](../../collector/search/service.py#L138) | `_metadata_items(value: str) -> tuple[str, ...]` | function / method |
 
 <a id="collector-storage-metadata-py"></a>
 

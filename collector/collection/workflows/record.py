@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from functools import partial
@@ -10,7 +11,11 @@ from urllib.error import HTTPError, URLError
 from collector.budget import CollectionBudgetExceeded, check_collection_budget, collection_budget
 from collector.classification.eligibility.models import PageClassifier
 from collector.collection.connectors.http import JsonResponse, fetch_record_json
-from collector.collection.connectors.registry import ConnectorRegistry, default_registry
+from collector.collection.connectors.registry import (
+    ConnectorRegistry,
+    ConnectorSelection,
+    default_registry,
+)
 from collector.collection.contracts import (
     DiscoveredPage,
     FetchHTMLFunction,
@@ -22,12 +27,22 @@ from collector.collection.contracts import (
 from collector.collection.failures import CollectionMetadataError, CollectionStepError
 from collector.collection.pipeline import classify_resolution, eligible_resources
 from collector.collection.record_mapping import to_strategy_result
-from collector.collection.resources import ResourceCheckState, retain_validated_resources
+from collector.collection.resources import (
+    ResourceCheckState,
+    ResourceSelection,
+    retain_validated_resources,
+)
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.extraction.errors import ExtractionError
 from collector.network.fetch import PageFetchError, fetch_public_html, is_timeout_error
-from collector.storage.models import CollectionReport, CollectionResult
+from collector.storage.models import (
+    CollectedDataset,
+    CollectionReport,
+    CollectionResult,
+    DistributionCandidate,
+    ValidationResult,
+)
 from collector.url_utils import normalize_http_url
 from collector.validation.distributions import page_access_diagnostic, validate_distribution
 
@@ -48,6 +63,7 @@ def collect_record(
     observe=None,
     registry: ConnectorRegistry | None = None,
 ) -> CollectionResult:
+    """Run record methods while owning fallback decisions, error phases and observations."""
     custom_html = fetch_html is not None
     fetch_html = fetch_html or partial(
         fetch_public_html, timeout=config.request_timeout_seconds, user_agent=config.user_agent
@@ -104,51 +120,9 @@ def collect_record(
             try:
                 check_collection_budget()
                 if method == api_method:
-                    attempt.requested_url = public_url(api_url)
-                    fetch_metadata = getattr(selection.connector, "fetch_metadata", None)
-                    if fetch_metadata:
-                        evidence, request_count = {}, [0]
-
-                        def related_json(
-                            metadata_url, *, evidence=evidence, request_count=request_count,
-                        ):
-                            try:
-                                result = fetch_json(metadata_url)
-                            except CollectionStepError as exc:
-                                request_count[0] += getattr(exc, "request_attempts", None) or 1
-                                exc.request_attempts = request_count[0]
-                                raise
-                            if isinstance(result, JsonResponse):
-                                evidence.update(
-                                    http_status=result.http_status, final_url=result.final_url,
-                                )
-                                request_count[0] += result.request_attempts
-                            else:
-                                request_count[0] += 1
-                            return result
-
-                        try:
-                            response = fetch_metadata(url, related_json)
-                        except CollectionStepError as exc:
-                            exc.request_attempts = request_count[0] or None
-                            raise
-                        except ValueError as exc:
-                            if isinstance(exc.__cause__, HTTPError):
-                                raise  # Preserve legacy injected transport failures.
-                            error = CollectionMetadataError(
-                                "repository_metadata_invalid", "normalize", **evidence,
-                            )
-                            error.request_attempts = request_count[0] or None
-                            raise error from exc
-                    else:
-                        response = fetch_json(api_url)
-                    if isinstance(response, JsonResponse):
-                        attempt.request_attempts = response.request_attempts
-                        attempt.http_status = response.http_status
-                        attempt.final_url = public_url(response.final_url)
-                        payload = response.payload
-                    else:
-                        payload = response  # Legacy injected fetchers supply no HTTP evidence.
+                    payload = _fetch_record_metadata(
+                        url, selection, api_url, fetch_json, attempt,
+                    )
                     phase = "normalize"
                     try:
                         record = selection.connector.normalize(url, payload)
@@ -225,24 +199,10 @@ def collect_record(
                     break  # A valid semantic rejection is not retried for a more favorable vote.
                 phase = "validate"
 
-                def record_check(resource, validation, *, attempt=attempt):
-                    key = str(resource.signals.get("resource_key") or resource.url)
-                    attempt.checks.append(
-                        {
-                            "resource_key": public_url(key) if "://" in key else key,
-                            "url": public_url(resource.url),
-                            "format": validation.format,
-                            "status": validation.status,
-                            "http_status": validation.http_status,
-                            "code": "" if validation.ok else "verification_unconfirmed",
-                        }
-                    )
-                    coverage["checked"] = check_state.checked
-
-                selected = retain_validated_resources(
+                selected = _validate_record_resources(
                     resources, config, browser.validate if method == "browser" else validate,
-                    state=check_state, context="browser" if method == "browser" else "http",
-                    on_check=record_check,
+                    attempt=attempt, check_state=check_state, coverage=coverage,
+                    context="browser" if method == "browser" else "http",
                 )
                 retained, validations = selected.resources, selected.validations
                 coverage["validated"] = len(retained)
@@ -326,22 +286,9 @@ def collect_record(
                     attempt.reason = Diagnostic(attempt.code, "collection").message
                 if observe:
                     observe(index, asdict(attempt))
-        unique_errors = list({(e.code, e.stage, e.recovery): e for e in unresolved}.values())
-        return CollectionResult(
-            datasets=datasets,
-            report=CollectionReport(
-                discovered_count=1,
-                analyzed_count=int(analyzed),
-                accepted_count=len(datasets),
-                rejected_count=int(rejected or (not datasets and not unique_errors)),
-                invalid_distribution_count=len(failed_checks),
-                validation_failures=failed_checks,
-                errors=unique_errors,
-                verification_complete=not unique_errors,
-                discovery_methods=tuple(a.method for a in attempts),
-                method_attempts=[asdict(a) for a in attempts],
-                coverage=coverage,
-            ),
+        return _build_collection_result(
+            datasets, analyzed=analyzed, rejected=rejected, failed_checks=failed_checks,
+            unresolved=unresolved, attempts=attempts, coverage=coverage,
         )
 
 
@@ -371,4 +318,129 @@ def collect_repository_candidate_with_report(
         browser=browser,
         observe=observe,
         registry=registry,
+    )
+
+
+def _fetch_record_metadata(
+    url: str,
+    selection: ConnectorSelection,
+    api_url: str,
+    fetch_json: Callable[[str], object],
+    attempt: MethodAttempt,
+) -> object:
+    """Read API metadata and retain HTTP evidence and cumulative request attempts.
+
+    The caller keeps the fetch phase active until this returns; connector
+    normalization runs afterward under its own phase in ``collect_record``.
+    """
+    attempt.requested_url = public_url(api_url)
+    fetch_metadata = getattr(selection.connector, "fetch_metadata", None)
+    if fetch_metadata:
+        evidence, request_count = {}, [0]
+
+        def related_json(
+            metadata_url, *, evidence=evidence, request_count=request_count,
+        ):
+            try:
+                result = fetch_json(metadata_url)
+            except CollectionStepError as exc:
+                request_count[0] += getattr(exc, "request_attempts", None) or 1
+                exc.request_attempts = request_count[0]
+                raise
+            if isinstance(result, JsonResponse):
+                evidence.update(
+                    http_status=result.http_status, final_url=result.final_url,
+                )
+                request_count[0] += result.request_attempts
+            else:
+                request_count[0] += 1
+            return result
+
+        try:
+            response = fetch_metadata(url, related_json)
+        except CollectionStepError as exc:
+            exc.request_attempts = request_count[0] or None
+            raise
+        except ValueError as exc:
+            if isinstance(exc.__cause__, HTTPError):
+                raise  # Preserve legacy injected transport failures.
+            error = CollectionMetadataError(
+                "repository_metadata_invalid", "normalize", **evidence,
+            )
+            error.request_attempts = request_count[0] or None
+            raise error from exc
+    else:
+        response = fetch_json(api_url)
+    if isinstance(response, JsonResponse):
+        attempt.request_attempts = response.request_attempts
+        attempt.http_status = response.http_status
+        attempt.final_url = public_url(response.final_url)
+        payload = response.payload
+    else:
+        payload = response  # Legacy injected fetchers supply no HTTP evidence.
+
+    return payload
+
+
+def _validate_record_resources(
+    resources: list[DistributionCandidate],
+    config: CollectorConfig,
+    validate: ValidateDistributionFunction,
+    *,
+    attempt: MethodAttempt,
+    check_state: ResourceCheckState,
+    coverage: dict[str, object],
+    context: str,
+) -> ResourceSelection:
+    """Validate through the selected transport and append each check to its attempt.
+
+    The shared check state enforces limits across methods; coverage records
+    completed checks even if a later validation raises.
+    """
+    def record_check(resource, validation, *, attempt=attempt):
+        key = str(resource.signals.get("resource_key") or resource.url)
+        attempt.checks.append(
+            {
+                "resource_key": public_url(key) if "://" in key else key,
+                "url": public_url(resource.url),
+                "format": validation.format,
+                "status": validation.status,
+                "http_status": validation.http_status,
+                "code": "" if validation.ok else "verification_unconfirmed",
+            }
+        )
+        coverage["checked"] = check_state.checked
+
+    return retain_validated_resources(
+        resources, config, validate, state=check_state, context=context, on_check=record_check,
+    )
+
+
+def _build_collection_result(
+    datasets: list[CollectedDataset],
+    *,
+    analyzed: bool,
+    rejected: bool,
+    failed_checks: list[ValidationResult],
+    unresolved: list[Diagnostic],
+    attempts: list[MethodAttempt],
+    coverage: dict[str, object],
+) -> CollectionResult:
+    """Build the final report from retained datasets and unresolved diagnostics."""
+    unique_errors = list({(e.code, e.stage, e.recovery): e for e in unresolved}.values())
+    return CollectionResult(
+        datasets=datasets,
+        report=CollectionReport(
+            discovered_count=1,
+            analyzed_count=int(analyzed),
+            accepted_count=len(datasets),
+            rejected_count=int(rejected or (not datasets and not unique_errors)),
+            invalid_distribution_count=len(failed_checks),
+            validation_failures=failed_checks,
+            errors=unique_errors,
+            verification_complete=not unique_errors,
+            discovery_methods=tuple(a.method for a in attempts),
+            method_attempts=[asdict(a) for a in attempts],
+            coverage=coverage,
+        ),
     )

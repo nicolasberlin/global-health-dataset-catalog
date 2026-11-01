@@ -21,7 +21,7 @@ from collector.classification.relevance.models import (
     MAX_REPOSITORY_TITLE_CHARS,
 )
 from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
-from collector.repository_search import (
+from collector.search import (
     DataCiteRepositorySearchProvider,
     RepositorySearchResponse,
     RepositorySearchResult,

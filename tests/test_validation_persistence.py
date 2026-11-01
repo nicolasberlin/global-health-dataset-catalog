@@ -8,7 +8,7 @@ from helpers.inspection import stored_datasets
 from collector.classification.eligibility.models import PageClassification
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.service import collect_source_with_report
-from collector.repository_search import RepositorySearchResult
+from collector.search import RepositorySearchResult
 from collector.storage.models import (
     CollectedDataset,
     CollectionReport,

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collector.extraction.errors import ExtractionError
-from collector.repository_search.filtering import _http_url, _text
-from collector.repository_search.models import RepositorySearchResult
-from collector.repository_search.providers.datacite.metadata import (
+from collector.search.filtering import _http_url, _text
+from collector.search.models import RepositorySearchResult
+from collector.search.providers.datacite.metadata import (
     _date,
     _description,
     _doi,

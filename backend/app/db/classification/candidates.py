@@ -16,7 +16,7 @@ from app.db.serialization import (
     _format_timestamp,
     _jsonb,
 )
-from collector.repository_search.models import RepositorySearchResult
+from collector.search.models import RepositorySearchResult
 from collector.url_utils import require_http_url
 
 

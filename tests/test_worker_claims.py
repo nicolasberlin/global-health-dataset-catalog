@@ -23,7 +23,7 @@ from psycopg import OperationalError
 
 from collector.classification.relevance.models import RepositoryClassification
 from collector.diagnostics import Diagnostic
-from collector.repository_search import RepositorySearchResult
+from collector.search import RepositorySearchResult
 
 pytestmark = pytest.mark.anyio
 QUEUES = ("search", "classification", "collection")

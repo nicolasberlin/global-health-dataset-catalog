@@ -8,8 +8,8 @@ from collections.abc import Iterable
 
 from collector.extraction.dataset_metadata import build_dataset_metadata
 from collector.extraction.extractor import html_to_text
-from collector.repository_search.filtering import _text
-from collector.repository_search.models import MISSING_METADATA_VALUE
+from collector.search.filtering import _text
+from collector.search.models import MISSING_METADATA_VALUE
 
 # These vocabularies infer metadata fields only; relevance is decided later.
 DISEASE_TERMS = (

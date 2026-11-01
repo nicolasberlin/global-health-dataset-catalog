@@ -23,7 +23,7 @@ from app.policies.quotas import (
     classification_admission,
 )
 from collector.diagnostics import Diagnostic
-from collector.repository_search.models import RepositorySearchResult
+from collector.search.models import RepositorySearchResult
 
 
 async def complete_discovery(job, result):

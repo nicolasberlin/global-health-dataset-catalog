@@ -12,7 +12,7 @@ from app.workers.search import worker as search_worker
 from helpers.workflows import candidate_for, decision, headers
 from httpx import ASGITransport, AsyncClient
 
-from collector.repository_search import RepositorySearchResponse
+from collector.search import RepositorySearchResponse
 
 pytestmark = pytest.mark.anyio
 

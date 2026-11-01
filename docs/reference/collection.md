@@ -23,6 +23,12 @@ collection can call the record workflow for its configured browser fallback with
 going back through the service. Both return transient results; database writes
 and transaction boundaries remain with the backend worker and persistence layer.
 
+Inside `workflows/record.py`, private helpers separate API metadata reads,
+resource-check observations and final report construction. `collect_record()`
+keeps the shared budget, ordered methods, failure phases, fallback decisions and
+completion callbacks. These extractions preserve request counts, validation
+limits, retained partial results and diagnostic formats.
+
 Both classification stages use three configured voters and require three usable
 responses with at least two positive votes. Two positive votes plus a technical
 failure are insufficient. Page classification uses the selected record's evidence;

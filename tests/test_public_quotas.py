@@ -19,7 +19,7 @@ from app.workers.search import worker as search_worker
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 
-from collector.repository_search import RepositorySearchResponse, RepositorySearchResult
+from collector.search import RepositorySearchResponse, RepositorySearchResult
 
 pytestmark = pytest.mark.anyio
 ORIGIN = "https://health.example"

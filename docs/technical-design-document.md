@@ -96,6 +96,18 @@ The three shared callback type aliases live in `collection/contracts.py`.
 has been removed. The pipeline, connectors, resource checks and persistence
 boundaries remain unchanged.
 
+Within `workflows/record.py`, `collect_record()` retains method ordering,
+fallback/stop decisions, phase transitions, exception handling and the `finally`
+that publishes completed observations. Three private helpers keep the detailed
+operations in the same module: `_fetch_record_metadata()` reads API metadata and
+retains HTTP evidence and cumulative request attempts;
+`_validate_record_resources()` runs the selected validator with shared check state
+and records each resource check; `_build_collection_result()` assembles the
+final report. Connector normalization remains after the fetch helper returns,
+so transport failures stay in `fetch` and normalization failures stay in
+`normalize`. Callback order, retry deadlines and partial-success reporting are
+preserved.
+
 `collector/main.py` remains a
 compatibility import surface for `collect_source_with_report`,
 `collect_repository_candidate_with_report`, `analyze_discovered_page` and
@@ -122,11 +134,18 @@ shared modules, the record workflow and the browser do not depend on source
 discovery implementations.
 
 Source exploration belongs to `collector/collection/discovery/`, distinct from
-external candidate search in `collector/repository_search/`:
+external candidate search in `collector/search/`.
+
+`collector/search/` owns external provider calls, candidate filtering and metadata
+normalization. Local catalogue lookup remains in the backend database layer;
+source exploration remains part of collection. Application callers import the
+search package directly. The directory rename preserves the existing function
+and model names, the `repository_search` quota scopes and the
+`repository_search_provider` event name.
 
 ```text
 collector/
-├── repository_search/
+├── search/
 ├── collection/
 │   ├── service.py
 │   ├── contracts.py
@@ -205,7 +224,7 @@ The DataCite provider separates request orchestration, result conversion and
 metadata extraction:
 
 ```text
-collector/repository_search/providers/datacite/
+collector/search/providers/datacite/
 ├── __init__.py
 ├── client.py
 ├── mapping.py
@@ -222,9 +241,9 @@ fetch failures and unexpected normalization errors retain their propagation.
 normalized dataset metadata mapping, without network calls. Request parameters,
 page-size behavior, filtering, metadata defaults and errors are preserved.
 
-The package initializer exports `DataCiteRepositorySearchProvider`, preserving
-the existing `collector.repository_search.providers.datacite` import as well as
-the parent providers and repository-search imports. Private conversion mocks
+The package initializer exports `DataCiteRepositorySearchProvider` through
+`collector.search.providers.datacite`, the parent `collector.search.providers`
+package and `collector.search`. Private conversion mocks
 target `datacite.mapping`; default public JSON transport remains in
 `collector/network/json.py`. Dependencies run from client to mapping to metadata,
 without reverse imports.

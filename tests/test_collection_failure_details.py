@@ -14,6 +14,7 @@ from collector.classification.eligibility.models import PageClassification
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.dataverse import DataverseConnector
 from collector.collection.connectors.http import JsonResponse
+from collector.collection.contracts import public_url
 from collector.collection.failures import CollectionTransportError
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
@@ -120,6 +121,61 @@ def test_real_metadata_shape_fails_normalization_not_transport():
     assert attempt["failure_phase"] == "normalize"
     assert attempt["final_url"].startswith(API)
     assert not result.datasets and not result.report.verification_complete
+
+
+@pytest.mark.parametrize(
+    "outcome,expected_phase,expected_code,expected_status,expected_attempts",
+    [
+        ("transport", "fetch", "repository_http_error", 503, None),
+        ("metadata", "normalize", "repository_metadata_invalid", 200, None),
+        ("success", None, "", 200, 3),
+    ],
+)
+def test_api_observations_preserve_phase_and_http_evidence(
+    outcome, expected_phase, expected_code, expected_status, expected_attempts,
+):
+    observations = []
+
+    def fetch(api):
+        if outcome == "transport":
+            raise ValueError("Injected transport failure") from HTTPError(
+                api, 503, "Unavailable", {}, None,
+            )
+        payload = {"label": "incomplete metadata"}
+        if outcome == "success":
+            payload = {"status": "OK", "data": {"dataFile": {
+                "id": 178154, "filename": "survey.tab", "persistentId": PID,
+                "contentType": "text/tab-separated-values",
+            }}}
+        return JsonResponse(api, api, 200, "application/json", payload, request_attempts=3)
+
+    result = collect_repository_candidate_with_report(
+        URL,
+        fetch_json=fetch,
+        fetch_html=lambda url: FetchedPage(url, url, "<html>No links</html>", 200, "text/html"),
+        classifier=Accept(),
+        validate=lambda resource: ValidationResult(
+            resource.url, resource.url, resource.format, True, 206,
+        ),
+        observe=lambda index, value: observations.append((index, value)),
+    )
+
+    expected_events = (
+        [(0, "running"), (0, "succeeded")] if outcome == "success" else
+        [(0, "running"), (0, "failed"), (1, "running"), (1, "empty")]
+    )
+    assert [(index, value["status"]) for index, value in observations] == expected_events
+    assert observations[0][1]["requested_url"] == public_url(URL)
+    finished = observations[1][1]
+    assert finished == result.report.method_attempts[0]
+    assert finished["failure_phase"] == expected_phase
+    assert finished["code"] == expected_code
+    assert finished["http_status"] == expected_status
+    assert finished["request_attempts"] == expected_attempts
+    assert finished["requested_url"].startswith(API)
+    assert finished["finished_at"]
+    assert bool(result.datasets) is (outcome == "success")
+    assert result.report.verification_complete is (outcome == "success")
 
 
 def test_complete_file_representation_uses_datafile_id_not_metadata_id():

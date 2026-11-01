@@ -18,7 +18,7 @@ from psycopg import sql as pg_sql
 from collector.classification.relevance.models import RepositoryClassification
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import CollectorConfig
-from collector.repository_search import RepositorySearchResult
+from collector.search import RepositorySearchResult
 from collector.storage.models import (
     CollectedDataset,
     CollectionReport,

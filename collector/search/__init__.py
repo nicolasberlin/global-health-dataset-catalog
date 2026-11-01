@@ -1,7 +1,7 @@
 """Repository metadata search, filtering, and classification interfaces."""
 
-from collector.repository_search.filtering import filter_repository_results
-from collector.repository_search.models import (
+from collector.search.filtering import filter_repository_results
+from collector.search.models import (
     INVALID_METADATA_MESSAGE,
     MISSING_METADATA_VALUE,
     PROVIDER_UNAVAILABLE_MESSAGE,
@@ -11,8 +11,8 @@ from collector.repository_search.models import (
     RepositorySearchResult,
     RepositorySearchWarning,
 )
-from collector.repository_search.providers.datacite import DataCiteRepositorySearchProvider
-from collector.repository_search.service import (
+from collector.search.providers.datacite import DataCiteRepositorySearchProvider
+from collector.search.service import (
     classify_repository_result,
     search_repository_metadata,
 )

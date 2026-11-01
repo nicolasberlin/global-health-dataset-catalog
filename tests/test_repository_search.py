@@ -9,7 +9,7 @@ from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.execution import ExecutionStopped
 from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.extraction.errors import ExtractionError
-from collector.repository_search import (
+from collector.search import (
     INVALID_METADATA_MESSAGE,
     PROVIDER_UNAVAILABLE_MESSAGE,
     DataCiteRepositorySearchProvider,
@@ -18,7 +18,7 @@ from collector.repository_search import (
     RepositorySearchWarning,
     search_repository_metadata,
 )
-from collector.repository_search.providers.datacite import mapping as datacite_mapping
+from collector.search.providers.datacite import mapping as datacite_mapping
 
 
 def test_datacite_provider_builds_query_url_and_normalizes_results():

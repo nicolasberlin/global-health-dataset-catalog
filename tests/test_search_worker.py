@@ -18,7 +18,7 @@ from app.workers.sql_retries import persist_with_retry
 from psycopg.errors import DiskFull
 
 from collector.execution import ExecutionControl, execution_control
-from collector.repository_search import RepositorySearchResponse
+from collector.search import RepositorySearchResponse
 from collector.storage.models import CollectedDataset
 
 pytestmark = pytest.mark.anyio
