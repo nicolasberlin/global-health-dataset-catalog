@@ -8,19 +8,13 @@ from helpers.classification import distribution as _distribution
 from helpers.classification import page as _page
 
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
-from collector.classification.providers.epfl_rcp import (
-    DEFAULT_DEEPSEEK_RCP_MODEL,
-    EPFL_RCP_CHAT_COMPLETIONS_URL,
-    epfl_rcp_chat_completions_provider_config,
-    epfl_rcp_repository_relevance_provider_config,
-)
+from collector.classification.relevance.classifier import LLMRepositoryRelevanceClassifier
 from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
 from collector.classification.relevance.factory import build_default_repository_result_classifier
-from collector.classification.relevance.llm import LLMRepositoryRelevanceClassifier
-from collector.collection.eligibility.ensemble import EnsemblePageClassifier
-from collector.collection.eligibility.factory import build_default_page_classifier
-from collector.collection.eligibility.llm import (
+from collector.classification.relevance.prompts import (
+    _build_epfl_rcp_repository_relevance_request_body,
+)
+from collector.collection.eligibility.classifier import (
     MAX_DISTRIBUTIONS,
     MAX_HEADINGS,
     MAX_PAGE_DESCRIPTION_CHARS,
@@ -32,7 +26,16 @@ from collector.collection.eligibility.llm import (
     MAX_PAGE_URL_CHARS,
     LLMPageClassifier,
 )
+from collector.collection.eligibility.ensemble import EnsemblePageClassifier
+from collector.collection.eligibility.factory import build_default_page_classifier
+from collector.collection.eligibility.prompts import _build_dataset_page_eligibility_request_body
 from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
+from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
+from collector.llm.providers.epfl_rcp import (
+    DEFAULT_DEEPSEEK_RCP_MODEL,
+    EPFL_RCP_CHAT_COMPLETIONS_URL,
+    epfl_rcp_chat_completions_provider_config,
+)
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 
@@ -272,6 +275,7 @@ def test_epfl_rcp_provider_config_builds_chat_completions_request():
     provider = epfl_rcp_chat_completions_provider_config(
         name="EPFL RCP", model_env_var="RCP_DEEPSEEK_MODEL",
         default_model=DEFAULT_DEEPSEEK_RCP_MODEL, api_key_env_var="RCP_DEEPSEEK_API_KEY",
+        request_body_builder=_build_dataset_page_eligibility_request_body,
     )
 
     payload = {"page": {"title": "Mortality dataset"}}
@@ -432,9 +436,10 @@ def test_repository_relevance_classifier_bounds_untrusted_payload():
 
 
 def test_epfl_rcp_repository_provider_uses_relevance_prompt_and_schema():
-    provider = epfl_rcp_repository_relevance_provider_config(
+    provider = epfl_rcp_chat_completions_provider_config(
         name="EPFL RCP", model_env_var="RCP_DEEPSEEK_MODEL",
         default_model=DEFAULT_DEEPSEEK_RCP_MODEL, api_key_env_var="RCP_DEEPSEEK_API_KEY",
+        request_body_builder=_build_epfl_rcp_repository_relevance_request_body,
     )
 
     payload = {
@@ -453,7 +458,7 @@ def test_epfl_rcp_repository_provider_uses_relevance_prompt_and_schema():
 
 @pytest.mark.parametrize("extra_bytes", [0, 1, 100_000])
 def test_http_json_llm_client_bounds_response_before_parsing(extra_bytes):
-    from collector.classification.llm_client import MAX_LLM_RESPONSE_BYTES
+    from collector.llm.client import MAX_LLM_RESPONSE_BYTES
 
     body = json.dumps({"output_text": json.dumps(_valid_llm_response())}).encode()
     body += b" " * (MAX_LLM_RESPONSE_BYTES - len(body) + extra_bytes)

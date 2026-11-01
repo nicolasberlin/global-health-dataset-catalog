@@ -13,8 +13,8 @@ import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget, read_with_budget
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.collection.discovery.sitemap import fetch_text_url
+from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.network.fetch import (
     _connect_public,
     _PublicHTTPRedirectHandler,

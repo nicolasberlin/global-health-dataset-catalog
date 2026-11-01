@@ -21,7 +21,6 @@ from app.workers.jobs import CollectionJob
 from app.workers.sql_retries import persist_with_retry
 from app.workers.stores import PostgresCollectionTraceWriter, PostgresVoteStore
 from collector.budget import collection_budget
-from collector.classification.checkpoints import VoteStore
 from collector.collection.browser import configured_browser
 from collector.collection.eligibility.factory import build_default_page_classifier
 from collector.collection.eligibility.models import PageClassifier
@@ -36,6 +35,7 @@ from collector.config import (
     configured_repository_connectors,
 )
 from collector.diagnostics import Diagnostic
+from collector.llm.checkpoints import VoteStore
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.storage.models import CollectionResult
 

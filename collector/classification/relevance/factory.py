@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
-from collector.classification.checkpoints import VoteStore
-from collector.classification.providers.epfl_rcp import (
-    epfl_rcp_repository_relevance_provider_config,
-)
-from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
-from collector.classification.relevance.llm import (
+from functools import partial
+
+from collector.classification.relevance.classifier import (
     LLMRepositoryRelevanceClassifier,
     _parse_repository_relevance_classification,
 )
+from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
 from collector.classification.relevance.models import RepositoryResultClassifier
-from collector.classification.voter_factory import _voters
+from collector.classification.relevance.prompts import (
+    _build_epfl_rcp_repository_relevance_request_body,
+)
+from collector.llm.checkpoints import VoteStore
+from collector.llm.providers.epfl_rcp import (
+    epfl_rcp_chat_completions_provider_config,
+)
+from collector.llm.voter_factory import _voters
 
 
 def build_default_repository_result_classifier(
@@ -22,7 +27,10 @@ def build_default_repository_result_classifier(
     """Use the same durable voting policy with a separate repository relevance prompt."""
     return EnsembleRepositoryRelevanceClassifier(
         _voters(
-            epfl_rcp_repository_relevance_provider_config,
+            partial(
+                epfl_rcp_chat_completions_provider_config,
+                request_body_builder=_build_epfl_rcp_repository_relevance_request_body,
+            ),
             LLMRepositoryRelevanceClassifier,
             _parse_repository_relevance_classification,
             vote_store,

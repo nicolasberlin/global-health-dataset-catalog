@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import cast
 
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import LLMClassificationClient
 from collector.classification.relevance.models import (
     MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_CHARS,
@@ -18,6 +17,7 @@ from collector.classification.relevance.models import (
     RepositoryRelevanceLabel,
 )
 from collector.diagnostics import PipelineFailure
+from collector.llm.client import LLMClassificationClient
 from collector.storage.models import PageSnapshot
 
 # PageSnapshot permits larger values; these tighter limits keep prompts bounded.

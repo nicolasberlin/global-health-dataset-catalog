@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from collector.classification.llm_client import HTTPJSONLLMClient
+from collector.llm.client import HTTPJSONLLMClient
 
 
 class VoteStore(Protocol):

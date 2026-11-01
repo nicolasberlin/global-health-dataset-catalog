@@ -21,13 +21,13 @@ from collector.budget import (
     collection_budget,
 )
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.http import fetch_record_json
 from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.config import DEFAULT_CONFIG
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
+from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.network.fetch import (
     PageFetchError,
     decode_text_body,

@@ -13,8 +13,8 @@ from fastapi import FastAPI
 from helpers.access import inject_owners
 from helpers.classification import KEY_VARIABLES, KEYS
 
-from collector.classification import voter_factory
-from collector.classification.llm_client import HTTPJSONLLMClient
+from collector.llm import voter_factory
+from collector.llm.client import HTTPJSONLLMClient
 
 
 @pytest.fixture

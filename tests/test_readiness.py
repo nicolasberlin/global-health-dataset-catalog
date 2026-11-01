@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from psycopg import OperationalError
 from psycopg_pool import PoolTimeout
 
-from collector.classification import voter_factory
+from collector.llm import voter_factory
 
 pytestmark = pytest.mark.anyio
 

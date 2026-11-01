@@ -10,7 +10,7 @@ import pytest
 from collector.budget import check_collection_budget
 from collector.classification.errors import PageClassificationError
 from collector.collection.contracts import DiscoveredPage, StrategyResult
-from collector.collection.eligibility.llm import LLMPageClassifier
+from collector.collection.eligibility.classifier import LLMPageClassifier
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import (
     collect_repository_candidate_with_report,

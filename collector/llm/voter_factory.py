@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 
-from collector.classification.checkpoints import CheckpointedLLMClient
-from collector.classification.llm_client import HTTPJSONLLMClient
-from collector.classification.providers.epfl_rcp import (
+from collector.llm.checkpoints import CheckpointedLLMClient
+from collector.llm.client import HTTPJSONLLMClient
+from collector.llm.providers.epfl_rcp import (
     DEFAULT_APERTUS_MEDITRON_MODEL,
     DEFAULT_DEEPSEEK_RCP_MODEL,
     DEFAULT_GEMMA_MEDITRON_MODEL,

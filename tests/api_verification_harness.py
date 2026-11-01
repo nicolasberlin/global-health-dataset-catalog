@@ -18,8 +18,8 @@ from urllib.parse import parse_qs, urlsplit
 from app import lifecycle, main
 
 from collector.budget import check_collection_budget
-from collector.classification import llm_client
 from collector.execution import check_execution_active
+from collector.llm import client as llm_client
 from collector.network import fetch
 
 LANDING_URL = "https://fixtures.example/records/malaria"

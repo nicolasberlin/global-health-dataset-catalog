@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collector.classification.prompts import _build_chat_completions_request_body
+from collector.llm.prompts import _build_chat_completions_request_body
 
 
 def _build_dataset_page_eligibility_request_body(

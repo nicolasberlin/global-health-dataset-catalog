@@ -1,8 +1,8 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **1 November 2026**, based on Git commit `27d295f`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **1 November 2026**, based on Git commit `66930c8`, including the independent core API and public Search Lab. The private web interface is excluded.
 
-This index lists **870 function and method definitions in 158 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
+This index lists **869 function and method definitions in 158 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
 For an overview of the application, read the [technical design document](../technical-design-document.md). For the public HTTP contract, see the [API integration guide](../api-integration.md). This index helps locate exact signatures; it does not attempt to reconstruct dynamic calls.
 
@@ -18,7 +18,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | ---: | ---: |
 | `backend/` | 66 | 294 |
 | `browser/` | 2 | 7 |
-| `collector/` | 79 | 476 |
+| `collector/` | 79 | 475 |
 | `scripts/` | 3 | 52 |
 | `search_lab/` | 8 | 41 |
 
@@ -93,17 +93,12 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [browser/container_entrypoint.py](#browser-container_entrypoint-py) — 1 definition
 - [browser/public_proxy.py](#browser-public_proxy-py) — 6 definitions
 - [collector/budget.py](#collector-budget-py) — 12 definitions
-- [collector/classification/checkpoints.py](#collector-classification-checkpoints-py) — 4 definitions
 - [collector/classification/errors.py](#collector-classification-errors-py) — 1 definition
-- [collector/classification/llm_client.py](#collector-classification-llm_client-py) — 10 definitions
-- [collector/classification/prompts.py](#collector-classification-prompts-py) — 1 definition
-- [collector/classification/providers/epfl_rcp.py](#collector-classification-providers-epfl_rcp-py) — 2 definitions
+- [collector/classification/relevance/classifier.py](#collector-classification-relevance-classifier-py) — 8 definitions
 - [collector/classification/relevance/ensemble.py](#collector-classification-relevance-ensemble-py) — 12 definitions
 - [collector/classification/relevance/factory.py](#collector-classification-relevance-factory-py) — 1 definition
-- [collector/classification/relevance/llm.py](#collector-classification-relevance-llm-py) — 8 definitions
 - [collector/classification/relevance/models.py](#collector-classification-relevance-models-py) — 5 definitions
 - [collector/classification/relevance/prompts.py](#collector-classification-relevance-prompts-py) — 3 definitions
-- [collector/classification/voter_factory.py](#collector-classification-voter_factory-py) — 2 definitions
 - [collector/classification/voting.py](#collector-classification-voting-py) — 5 definitions
 - [collector/collection/browser.py](#collector-collection-browser-py) — 8 definitions
 - [collector/collection/connectors/__init__.py](#collector-collection-connectors-__init__-py) — 5 definitions
@@ -127,9 +122,9 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/discovery/metadata.py](#collector-collection-discovery-metadata-py) — 20 definitions
 - [collector/collection/discovery/models.py](#collector-collection-discovery-models-py) — 2 definitions
 - [collector/collection/discovery/sitemap.py](#collector-collection-discovery-sitemap-py) — 12 definitions
+- [collector/collection/eligibility/classifier.py](#collector-collection-eligibility-classifier-py) — 7 definitions
 - [collector/collection/eligibility/ensemble.py](#collector-collection-eligibility-ensemble-py) — 9 definitions
 - [collector/collection/eligibility/factory.py](#collector-collection-eligibility-factory-py) — 1 definition
-- [collector/collection/eligibility/llm.py](#collector-collection-eligibility-llm-py) — 7 definitions
 - [collector/collection/eligibility/models.py](#collector-collection-eligibility-models-py) — 1 definition
 - [collector/collection/eligibility/prompts.py](#collector-collection-eligibility-prompts-py) — 3 definitions
 - [collector/collection/failures.py](#collector-collection-failures-py) — 1 definition
@@ -154,6 +149,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/extraction/limits.py](#collector-extraction-limits-py) — 5 definitions
 - [collector/extraction/source_identity.py](#collector-extraction-source_identity-py) — 2 definitions
 - [collector/extraction/text.py](#collector-extraction-text-py) — 15 definitions
+- [collector/llm/checkpoints.py](#collector-llm-checkpoints-py) — 4 definitions
+- [collector/llm/client.py](#collector-llm-client-py) — 10 definitions
+- [collector/llm/prompts.py](#collector-llm-prompts-py) — 1 definition
+- [collector/llm/providers/epfl_rcp.py](#collector-llm-providers-epfl_rcp-py) — 1 definition
+- [collector/llm/voter_factory.py](#collector-llm-voter_factory-py) — 2 definitions
 - [collector/network/fetch.py](#collector-network-fetch-py) — 15 definitions
 - [collector/network/json.py](#collector-network-json-py) — 3 definitions
 - [collector/network/policy.py](#collector-network-policy-py) — 1 definition
@@ -979,17 +979,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`remaining_timeout`](../../collector/budget.py#L143) | `remaining_timeout(timeout: float) -> float` | function / method |
 | [`read_with_budget`](../../collector/budget.py#L152) | `read_with_budget(response, max_bytes: int) -> bytes` | function / method |
 
-<a id="collector-classification-checkpoints-py"></a>
-
-## collector/classification/checkpoints.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`VoteStore.run`](../../collector/classification/checkpoints.py#L12) | `run(self, snapshot: dict[str, object], voter_id: str, invoke: Callable[[], dict[str, object]]) -> dict[str, object]` | function / method |
-| [`CheckpointedLLMClient.__init__`](../../collector/classification/checkpoints.py#L23) | `__init__(self, client: HTTPJSONLLMClient, store: VoteStore, voter_id: str, configuration: list[dict[str, object]], validate: Callable) -> None` | function / method |
-| [`CheckpointedLLMClient.classify_payload`](../../collector/classification/checkpoints.py#L37) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
-| [`CheckpointedLLMClient.classify_payload.<local>.invoke`](../../collector/classification/checkpoints.py#L40) | `invoke()` | function / method |
-
 <a id="collector-classification-errors-py"></a>
 
 ## collector/classification/errors.py
@@ -998,39 +987,20 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`PageClassificationError.__init__`](../../collector/classification/errors.py#L9) | `__init__(self, message: str, *, code='processing_failed', recovery='manual', retry_at=None, diagnostics=None)` | function / method |
 
-<a id="collector-classification-llm_client-py"></a>
+<a id="collector-classification-relevance-classifier-py"></a>
 
-## collector/classification/llm_client.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_RejectLLMRedirects.redirect_request`](../../collector/classification/llm_client.py#L35) | `redirect_request(self, req, fp, code, msg, headers, newurl)` | function / method |
-| [`extract_chat_completions_message_text`](../../collector/classification/llm_client.py#L39) | `extract_chat_completions_message_text(response_payload: object) -> str` | function / method |
-| [`LLMClassificationClient.classify_payload`](../../collector/classification/llm_client.py#L66) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
-| [`HTTPJSONLLMClient.__init__`](../../collector/classification/llm_client.py#L88) | `__init__(self, provider: LLMProviderConfig, api_key: str \| None=None, model: str \| None=None, timeout_seconds: float=20.0, request: Callable[..., object] \| None=None) -> None` | function / method |
-| [`HTTPJSONLLMClient.classify_payload`](../../collector/classification/llm_client.py#L104) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
-| [`HTTPJSONLLMClient.prepare_request`](../../collector/classification/llm_client.py#L107) | `prepare_request(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
-| [`HTTPJSONLLMClient.request_configuration`](../../collector/classification/llm_client.py#L111) | `request_configuration(self) -> dict[str, object]` | function / method |
-| [`HTTPJSONLLMClient.classify_request`](../../collector/classification/llm_client.py#L114) | `classify_request(self, request_body: dict[str, object]) -> dict[str, object]` | function / method |
-| [`HTTPJSONLLMClient._classify_request`](../../collector/classification/llm_client.py#L125) | `_classify_request(self, request_body, measurement)` | function / method |
-| [`HTTPJSONLLMClient._request_body`](../../collector/classification/llm_client.py#L225) | `_request_body(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
-
-<a id="collector-classification-prompts-py"></a>
-
-## collector/classification/prompts.py
+## collector/classification/relevance/classifier.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`_build_chat_completions_request_body`](../../collector/classification/prompts.py#L8) | `_build_chat_completions_request_body(payload: dict[str, object], model: str, *, system_prompt: str, schema: dict[str, object]) -> dict[str, object]` | function / method |
-
-<a id="collector-classification-providers-epfl_rcp-py"></a>
-
-## collector/classification/providers/epfl_rcp.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`epfl_rcp_chat_completions_provider_config`](../../collector/classification/providers/epfl_rcp.py#L20) | `epfl_rcp_chat_completions_provider_config(*, name: str, model_env_var: str, default_model: str, api_key_env_var: str) -> LLMProviderConfig` | function / method |
-| [`epfl_rcp_repository_relevance_provider_config`](../../collector/classification/providers/epfl_rcp.py#L39) | `epfl_rcp_repository_relevance_provider_config(*, name: str, model_env_var: str, default_model: str, api_key_env_var: str) -> LLMProviderConfig` | function / method |
+| [`LLMRepositoryRelevanceClassifier.__init__`](../../collector/classification/relevance/classifier.py#L38) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
+| [`LLMRepositoryRelevanceClassifier.classify`](../../collector/classification/relevance/classifier.py#L44) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
+| [`_build_repository_relevance_payload`](../../collector/classification/relevance/classifier.py#L59) | `_build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]` | function / method |
+| [`_repository_metadata_value`](../../collector/classification/relevance/classifier.py#L84) | `_repository_metadata_value(key: str, value: str) -> str` | function / method |
+| [`_parse_repository_relevance_classification`](../../collector/classification/relevance/classifier.py#L96) | `_parse_repository_relevance_classification(raw: dict[str, object]) -> RepositoryClassification` | function / method |
+| [`_required_relevance_label`](../../collector/classification/relevance/classifier.py#L119) | `_required_relevance_label(raw: dict[str, object], field_name: str) -> RepositoryRelevanceLabel` | function / method |
+| [`_required_non_empty_string`](../../collector/classification/relevance/classifier.py#L132) | `_required_non_empty_string(raw: dict[str, object], field_name: str) -> str` | function / method |
+| [`_required_string_list`](../../collector/classification/relevance/classifier.py#L147) | `_required_string_list(raw: dict[str, object], field_name: str) -> list[str]` | function / method |
 
 <a id="collector-classification-relevance-ensemble-py"></a>
 
@@ -1057,22 +1027,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`build_default_repository_result_classifier`](../../collector/classification/relevance/factory.py#L18) | `build_default_repository_result_classifier(*, vote_store: VoteStore \| None=None) -> RepositoryResultClassifier` | function / method |
-
-<a id="collector-classification-relevance-llm-py"></a>
-
-## collector/classification/relevance/llm.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`LLMRepositoryRelevanceClassifier.__init__`](../../collector/classification/relevance/llm.py#L38) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
-| [`LLMRepositoryRelevanceClassifier.classify`](../../collector/classification/relevance/llm.py#L44) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
-| [`_build_repository_relevance_payload`](../../collector/classification/relevance/llm.py#L59) | `_build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]` | function / method |
-| [`_repository_metadata_value`](../../collector/classification/relevance/llm.py#L84) | `_repository_metadata_value(key: str, value: str) -> str` | function / method |
-| [`_parse_repository_relevance_classification`](../../collector/classification/relevance/llm.py#L96) | `_parse_repository_relevance_classification(raw: dict[str, object]) -> RepositoryClassification` | function / method |
-| [`_required_relevance_label`](../../collector/classification/relevance/llm.py#L119) | `_required_relevance_label(raw: dict[str, object], field_name: str) -> RepositoryRelevanceLabel` | function / method |
-| [`_required_non_empty_string`](../../collector/classification/relevance/llm.py#L132) | `_required_non_empty_string(raw: dict[str, object], field_name: str) -> str` | function / method |
-| [`_required_string_list`](../../collector/classification/relevance/llm.py#L147) | `_required_string_list(raw: dict[str, object], field_name: str) -> list[str]` | function / method |
+| [`build_default_repository_result_classifier`](../../collector/classification/relevance/factory.py#L23) | `build_default_repository_result_classifier(*, vote_store: VoteStore \| None=None) -> RepositoryResultClassifier` | function / method |
 
 <a id="collector-classification-relevance-models-py"></a>
 
@@ -1095,15 +1050,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_build_epfl_rcp_repository_relevance_request_body`](../../collector/classification/relevance/prompts.py#L8) | `_build_epfl_rcp_repository_relevance_request_body(payload: dict[str, object], model: str) -> dict[str, object]` | function / method |
 | [`_repository_relevance_system_prompt`](../../collector/classification/relevance/prompts.py#L20) | `_repository_relevance_system_prompt() -> str` | function / method |
 | [`_repository_relevance_schema`](../../collector/classification/relevance/prompts.py#L144) | `_repository_relevance_schema() -> dict[str, object]` | function / method |
-
-<a id="collector-classification-voter_factory-py"></a>
-
-## collector/classification/voter_factory.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`validate_default_classifier_configuration`](../../collector/classification/voter_factory.py#L34) | `validate_default_classifier_configuration() -> None` | function / method |
-| [`_voters`](../../collector/classification/voter_factory.py#L43) | `_voters(provider_builder, classifier_type, validate, vote_store)` | function / method |
 
 <a id="collector-classification-voting-py"></a>
 
@@ -1419,6 +1365,20 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_dedupe_urls`](../../collector/collection/discovery/sitemap.py#L293) | `_dedupe_urls(urls: list[str]) -> list[str]` | function / method |
 | [`_decode_text`](../../collector/collection/discovery/sitemap.py#L306) | `_decode_text(body: bytes, content_type: str) -> str` | function / method |
 
+<a id="collector-collection-eligibility-classifier-py"></a>
+
+## collector/collection/eligibility/classifier.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`LLMPageClassifier.__init__`](../../collector/collection/eligibility/classifier.py#L32) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
+| [`LLMPageClassifier.classify`](../../collector/collection/eligibility/classifier.py#L38) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
+| [`_build_llm_payload`](../../collector/collection/eligibility/classifier.py#L57) | `_build_llm_payload(page: PageSnapshot, distributions: list[DistributionCandidate]) -> dict[str, object]` | function / method |
+| [`_bounded_metadata_value`](../../collector/collection/eligibility/classifier.py#L97) | `_bounded_metadata_value(key: str, value: str) -> str` | function / method |
+| [`_parse_page_classification`](../../collector/collection/eligibility/classifier.py#L110) | `_parse_page_classification(raw: dict[str, object]) -> PageClassification` | function / method |
+| [`_required_bool`](../../collector/collection/eligibility/classifier.py#L127) | `_required_bool(raw: dict[str, object], field_name: str) -> bool` | function / method |
+| [`_required_signal_object`](../../collector/collection/eligibility/classifier.py#L136) | `_required_signal_object(raw: dict[str, object], field_name: str) -> dict[str, object]` | function / method |
+
 <a id="collector-collection-eligibility-ensemble-py"></a>
 
 ## collector/collection/eligibility/ensemble.py
@@ -1441,21 +1401,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`build_default_page_classifier`](../../collector/collection/eligibility/factory.py#L15) | `build_default_page_classifier(*, vote_store: VoteStore \| None=None) -> PageClassifier` | function / method |
-
-<a id="collector-collection-eligibility-llm-py"></a>
-
-## collector/collection/eligibility/llm.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`LLMPageClassifier.__init__`](../../collector/collection/eligibility/llm.py#L32) | `__init__(self, client: LLMClassificationClient) -> None` | function / method |
-| [`LLMPageClassifier.classify`](../../collector/collection/eligibility/llm.py#L38) | `classify(self, page: PageSnapshot, distributions: list[DistributionCandidate]) -> PageClassification` | function / method |
-| [`_build_llm_payload`](../../collector/collection/eligibility/llm.py#L57) | `_build_llm_payload(page: PageSnapshot, distributions: list[DistributionCandidate]) -> dict[str, object]` | function / method |
-| [`_bounded_metadata_value`](../../collector/collection/eligibility/llm.py#L97) | `_bounded_metadata_value(key: str, value: str) -> str` | function / method |
-| [`_parse_page_classification`](../../collector/collection/eligibility/llm.py#L110) | `_parse_page_classification(raw: dict[str, object]) -> PageClassification` | function / method |
-| [`_required_bool`](../../collector/collection/eligibility/llm.py#L127) | `_required_bool(raw: dict[str, object], field_name: str) -> bool` | function / method |
-| [`_required_signal_object`](../../collector/collection/eligibility/llm.py#L136) | `_required_signal_object(raw: dict[str, object], field_name: str) -> dict[str, object]` | function / method |
+| [`build_default_page_classifier`](../../collector/collection/eligibility/factory.py#L21) | `build_default_page_classifier(*, vote_store: VoteStore \| None=None) -> PageClassifier` | function / method |
 
 <a id="collector-collection-eligibility-models-py"></a>
 
@@ -1745,6 +1691,59 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_TextHTMLParser.handle_starttag`](../../collector/extraction/text.py#L107) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
 | [`_TextHTMLParser.handle_endtag`](../../collector/extraction/text.py#L110) | `handle_endtag(self, tag: str) -> None` | function / method |
 | [`_TextHTMLParser.handle_data`](../../collector/extraction/text.py#L113) | `handle_data(self, data: str) -> None` | function / method |
+
+<a id="collector-llm-checkpoints-py"></a>
+
+## collector/llm/checkpoints.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`VoteStore.run`](../../collector/llm/checkpoints.py#L12) | `run(self, snapshot: dict[str, object], voter_id: str, invoke: Callable[[], dict[str, object]]) -> dict[str, object]` | function / method |
+| [`CheckpointedLLMClient.__init__`](../../collector/llm/checkpoints.py#L23) | `__init__(self, client: HTTPJSONLLMClient, store: VoteStore, voter_id: str, configuration: list[dict[str, object]], validate: Callable) -> None` | function / method |
+| [`CheckpointedLLMClient.classify_payload`](../../collector/llm/checkpoints.py#L37) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+| [`CheckpointedLLMClient.classify_payload.<local>.invoke`](../../collector/llm/checkpoints.py#L40) | `invoke()` | function / method |
+
+<a id="collector-llm-client-py"></a>
+
+## collector/llm/client.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_RejectLLMRedirects.redirect_request`](../../collector/llm/client.py#L35) | `redirect_request(self, req, fp, code, msg, headers, newurl)` | function / method |
+| [`extract_chat_completions_message_text`](../../collector/llm/client.py#L39) | `extract_chat_completions_message_text(response_payload: object) -> str` | function / method |
+| [`LLMClassificationClient.classify_payload`](../../collector/llm/client.py#L66) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+| [`HTTPJSONLLMClient.__init__`](../../collector/llm/client.py#L88) | `__init__(self, provider: LLMProviderConfig, api_key: str \| None=None, model: str \| None=None, timeout_seconds: float=20.0, request: Callable[..., object] \| None=None) -> None` | function / method |
+| [`HTTPJSONLLMClient.classify_payload`](../../collector/llm/client.py#L104) | `classify_payload(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+| [`HTTPJSONLLMClient.prepare_request`](../../collector/llm/client.py#L107) | `prepare_request(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+| [`HTTPJSONLLMClient.request_configuration`](../../collector/llm/client.py#L111) | `request_configuration(self) -> dict[str, object]` | function / method |
+| [`HTTPJSONLLMClient.classify_request`](../../collector/llm/client.py#L114) | `classify_request(self, request_body: dict[str, object]) -> dict[str, object]` | function / method |
+| [`HTTPJSONLLMClient._classify_request`](../../collector/llm/client.py#L125) | `_classify_request(self, request_body, measurement)` | function / method |
+| [`HTTPJSONLLMClient._request_body`](../../collector/llm/client.py#L225) | `_request_body(self, payload: dict[str, object]) -> dict[str, object]` | function / method |
+
+<a id="collector-llm-prompts-py"></a>
+
+## collector/llm/prompts.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_build_chat_completions_request_body`](../../collector/llm/prompts.py#L8) | `_build_chat_completions_request_body(payload: dict[str, object], model: str, *, system_prompt: str, schema: dict[str, object]) -> dict[str, object]` | function / method |
+
+<a id="collector-llm-providers-epfl_rcp-py"></a>
+
+## collector/llm/providers/epfl_rcp.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`epfl_rcp_chat_completions_provider_config`](../../collector/llm/providers/epfl_rcp.py#L17) | `epfl_rcp_chat_completions_provider_config(*, name: str, model_env_var: str, default_model: str, api_key_env_var: str, request_body_builder: RequestBodyBuilder) -> LLMProviderConfig` | function / method |
+
+<a id="collector-llm-voter_factory-py"></a>
+
+## collector/llm/voter_factory.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`validate_default_classifier_configuration`](../../collector/llm/voter_factory.py#L34) | `validate_default_classifier_configuration() -> None` | function / method |
+| [`_voters`](../../collector/llm/voter_factory.py#L43) | `_voters(provider_builder, classifier_type, validate, vote_store)` | function / method |
 
 <a id="collector-network-fetch-py"></a>
 

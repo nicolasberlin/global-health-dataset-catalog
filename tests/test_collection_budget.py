@@ -325,7 +325,7 @@ async def test_expired_job_concludes_without_any_external_call(database, monkeyp
         lambda *a, **kw: pytest.fail("fetch"),
     )
     monkeypatch.setattr(
-        "collector.classification.llm_client.HTTPJSONLLMClient._classify_request",
+        "collector.llm.client.HTTPJSONLLMClient._classify_request",
         lambda *a, **kw: pytest.fail("LLM"),
     )
     with ThreadPoolExecutor(1) as executor:

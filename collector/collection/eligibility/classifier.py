@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import LLMClassificationClient
 from collector.collection.eligibility.models import PageClassification
 from collector.diagnostics import PipelineFailure
+from collector.llm.client import LLMClassificationClient
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 # Bound untrusted evidence so model requests have predictable size.

@@ -157,7 +157,7 @@ collector/
 │   │   ├── __init__.py
 │   │   ├── factory.py
 │   │   ├── models.py
-│   │   ├── llm.py
+│   │   ├── classifier.py
 │   │   ├── ensemble.py
 │   │   └── prompts.py
 │   ├── workflows/
@@ -294,34 +294,37 @@ rules and output fields are preserved. The extraction parser tests import privat
 classes from `html.py` and `text.py`; collection, classification and validation
 implementations remain unchanged.
 
-Relevance and eligibility classifiers are owned by their features:
+Relevance and eligibility classifiers are owned by their features; LLM infrastructure
+is shared independently:
 
 ```text
 collector/
+├── llm/
+│   ├── __init__.py
+│   ├── client.py
+│   ├── voter_factory.py
+│   ├── checkpoints.py
+│   ├── prompts.py
+│   └── providers/
+│       ├── __init__.py
+│       └── epfl_rcp.py
 ├── classification/
 │   ├── __init__.py
 │   ├── relevance/
 │   │   ├── __init__.py
 │   │   ├── factory.py
 │   │   ├── models.py
-│   │   ├── llm.py
+│   │   ├── classifier.py
 │   │   ├── ensemble.py
 │   │   └── prompts.py
-│   ├── voter_factory.py
-│   ├── llm_client.py
 │   ├── voting.py
-│   ├── checkpoints.py
-│   ├── prompts.py
-│   ├── errors.py
-│   └── providers/
-│       ├── __init__.py
-│       └── epfl_rcp.py
+│   └── errors.py
 └── collection/
     └── eligibility/
         ├── __init__.py
         ├── factory.py
         ├── models.py
-        ├── llm.py
+        ├── classifier.py
         ├── ensemble.py
         └── prompts.py
 ```
@@ -338,15 +341,15 @@ prompts and response schemas. Domain-specific helpers stay beside their callers.
 `build_default_repository_result_classifier()`, used by `ClassificationWorker`.
 `collection/eligibility/factory.py` owns `build_default_page_classifier()`, used by
 `CollectionWorker`, the pipeline default and AI-enabled Search Lab. Both import
-the same `_voters()` from `classification/voter_factory.py`. That shared module
+the same `_voters()` from `llm/voter_factory.py`. That shared module
 retains the ordered model/credential configuration, checkpoint-aware client
 construction and `validate_default_classifier_configuration()` used by readiness.
 The former central classification factory is removed; internal callers import
 the owning feature factory directly.
 
-`classification/llm_client.py` defines `LLMClassificationClient.classify_payload()` and the shared
-HTTP implementation. `checkpoints.py` provides `CheckpointedLLMClient`, which
-implements the same method while reusing validated votes. `voting.py` owns parallel
+`llm/client.py` defines `LLMClassificationClient.classify_payload()` and the shared
+HTTP implementation. `llm/checkpoints.py` provides `CheckpointedLLMClient`, which
+implements the same method while reusing validated votes. `classification/voting.py` owns parallel
 execution, threshold validation and common ensemble audit summaries; the final
 acceptance and relevance-label rules remain in the domain ensembles.
 
@@ -354,12 +357,14 @@ The eligibility prompt belongs to `collection/eligibility/prompts.py`: it define
 the collection-specific accepted-page decision and the `accepted`/`dataset_signals`
 response schema, which evolve with that feature's models and parser. The
 relevance prompt belongs to `classification/relevance/prompts.py`. Only
-`classification/prompts.py` builds the common Chat Completions message envelope
-and JSON schema instruction. Provider configuration remains in
-`classification/providers/epfl_rcp.py` and wires these feature-owned prompts to
-the common HTTP conventions.
+`llm/prompts.py` builds the common Chat Completions message envelope
+and JSON schema instruction. Each feature factory supplies its own request-body
+builder to `llm/providers/epfl_rcp.py` via `request_body_builder`. The provider
+configures HTTP conventions without importing either feature. The two formerly
+duplicated provider configuration functions are replaced by this single injectable
+configuration builder; HTTP transport injection remains available to tests.
 
-`errors.py` owns `PageClassificationError`, whose existing name is retained even
+`classification/errors.py` owns `PageClassificationError`, whose existing name is retained even
 though both domains and the HTTP client use it. Feature factories and provider
 configuration assemble the classifiers using the shared transport and voting code.
 Package initializers contain documentation only, and callers import the owning

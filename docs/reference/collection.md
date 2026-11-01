@@ -37,17 +37,19 @@ it does not repeat the query-relevance decision.
 The implementations belong to their features:
 `collector/classification/relevance/` owns candidate relevance to the user's query,
 while `collector/collection/eligibility/` owns dataset page acceptance during
-collection. Each contains `models.py`, `llm.py`, `ensemble.py`, `prompts.py` and
+collection. Each contains `models.py`, `classifier.py`, `ensemble.py`, `prompts.py` and
 its own `factory.py`. The classification worker uses the relevance factory;
 the collection worker, pipeline default and AI-enabled Search Lab use the
 eligibility factory. Both delegate voter construction to
-`collector/classification/voter_factory.py`; HTTP transport, persisted checkpoints
-and vote execution remain common.
+`collector/llm/voter_factory.py`; HTTP transport and persisted checkpoints
+are also shared in `collector/llm/`, while common vote execution stays in
+`collector/classification/voting.py`.
 
 The eligibility prompt and response schema live with the collection feature
 because they define the accepted-page decision consumed by collection. Only
 generic Chat Completions message construction belongs to the shared
-`collector/classification/prompts.py`. See the
+`collector/llm/prompts.py`. Each feature factory injects its own request-body
+builder into the shared EPFL provider, which does not import feature prompts. See the
 [architecture guide](../technical-design-document.md) for the complete layout.
 
 Record resolution tries these permitted methods in order:

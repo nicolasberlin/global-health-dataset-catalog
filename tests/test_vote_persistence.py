@@ -196,7 +196,7 @@ async def test_changed_inputs_or_configuration_start_fresh_run(
     if change == "model":
         monkeypatch.setenv("RCP_DEEPSEEK_MODEL", "new-model")
     elif change == "prompt":
-        original = relevance_factory.epfl_rcp_repository_relevance_provider_config
+        original = relevance_factory.epfl_rcp_chat_completions_provider_config
 
         def changed_provider(**kwargs):
             provider = original(**kwargs)
@@ -209,7 +209,7 @@ async def test_changed_inputs_or_configuration_start_fresh_run(
             return replace(provider, request_body_builder=builder)
 
         monkeypatch.setattr(
-            relevance_factory, "epfl_rcp_repository_relevance_provider_config", changed_provider
+            relevance_factory, "epfl_rcp_chat_completions_provider_config", changed_provider
         )
     page = replace(PAGE, search_query="different query") if change == "input" else PAGE
     await asyncio.to_thread(classify, "repository", scope, loop, page)

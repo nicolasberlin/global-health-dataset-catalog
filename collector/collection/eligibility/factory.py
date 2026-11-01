@@ -2,21 +2,30 @@
 
 from __future__ import annotations
 
-from collector.classification.checkpoints import VoteStore
-from collector.classification.providers.epfl_rcp import (
+from functools import partial
+
+from collector.collection.eligibility.classifier import (
+    LLMPageClassifier,
+    _parse_page_classification,
+)
+from collector.collection.eligibility.ensemble import EnsemblePageClassifier
+from collector.collection.eligibility.models import PageClassifier
+from collector.collection.eligibility.prompts import _build_dataset_page_eligibility_request_body
+from collector.llm.checkpoints import VoteStore
+from collector.llm.providers.epfl_rcp import (
     epfl_rcp_chat_completions_provider_config,
 )
-from collector.classification.voter_factory import _voters
-from collector.collection.eligibility.ensemble import EnsemblePageClassifier
-from collector.collection.eligibility.llm import LLMPageClassifier, _parse_page_classification
-from collector.collection.eligibility.models import PageClassifier
+from collector.llm.voter_factory import _voters
 
 
 def build_default_page_classifier(*, vote_store: VoteStore | None = None) -> PageClassifier:
     """Require three usable responses and two positives; optionally checkpoint each vote."""
     return EnsemblePageClassifier(
         _voters(
-            epfl_rcp_chat_completions_provider_config,
+            partial(
+                epfl_rcp_chat_completions_provider_config,
+                request_body_builder=_build_dataset_page_eligibility_request_body,
+            ),
             LLMPageClassifier,
             _parse_page_classification,
             vote_store,

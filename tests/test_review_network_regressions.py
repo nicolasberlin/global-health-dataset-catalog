@@ -16,11 +16,11 @@ import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
+from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.storage.models import DistributionCandidate
 from collector.validation.distributions import probe_url
 
@@ -75,7 +75,7 @@ def test_llm_redirect_never_forwards_credentials_and_closes_body(
     # Exercise the default client's opener, redirect and HTTP error machinery,
     # replacing only the final HTTPS transport (no sockets/DNS/provider calls).
     monkeypatch.setattr(
-        "collector.classification.llm_client.build_opener",
+        "collector.llm.client.build_opener",
         lambda *handlers: build_opener(RedirectingTransport(), *handlers),
     )
     expected = CollectionBudgetExceeded if expired else PageClassificationError

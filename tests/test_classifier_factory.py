@@ -11,12 +11,12 @@ import pytest
 from helpers.classification import KEY_VARIABLES, KEYS, MODEL_VARIABLES, MODELS, PAGE
 from helpers.classification import response as _response
 
-from collector.classification import voter_factory
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import HTTPJSONLLMClient
-from collector.classification.providers.epfl_rcp import EPFL_RCP_CHAT_COMPLETIONS_URL
 from collector.classification.relevance import factory as relevance_factory
 from collector.collection.eligibility import factory as eligibility_factory
+from collector.llm import voter_factory
+from collector.llm.client import HTTPJSONLLMClient
+from collector.llm.providers.epfl_rcp import EPFL_RCP_CHAT_COMPLETIONS_URL
 
 
 @pytest.fixture(autouse=True)

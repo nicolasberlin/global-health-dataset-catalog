@@ -12,8 +12,8 @@ from app.workers import sql_retries
 
 from collector import observability
 from collector.classification.errors import PageClassificationError
-from collector.classification.llm_client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.classification.voting import run_voters
+from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 
 
 @pytest.fixture
