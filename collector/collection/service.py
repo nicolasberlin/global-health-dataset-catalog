@@ -7,8 +7,8 @@ from collector.collection.contracts import (
     ValidateDistributionFunction as ValidateDistributionFunction,
 )
 from collector.collection.eligibility.models import PageClassifier
-from collector.collection.page_analysis import analyze_discovered_page as analyze_discovered_page
 from collector.collection.page_analysis import analyze_html_page as analyze_html_page
+from collector.collection.page_analysis import analyze_structured_page as analyze_structured_page
 from collector.collection.workflows import record
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.models import CollectionResult

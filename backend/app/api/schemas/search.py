@@ -14,7 +14,8 @@ from app.api.schemas.classification import (
 )
 from app.api.schemas.collection import CollectionFollowUpView
 from app.api.schemas.common import ProcessingDiagnosticView
-from collector.classification.relevance.models import (
+from collector.diagnostics import ExecutionStatus, Outcome, Stage
+from collector.search.limits import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
     MAX_REPOSITORY_DOI_CHARS,
@@ -26,7 +27,6 @@ from collector.classification.relevance.models import (
     MAX_REPOSITORY_SOURCE_CHARS,
     MAX_REPOSITORY_TITLE_CHARS,
 )
-from collector.diagnostics import ExecutionStatus, Outcome, Stage
 
 
 class SearchCreateRequest(BaseModel):

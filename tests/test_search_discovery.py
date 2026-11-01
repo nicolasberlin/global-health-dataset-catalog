@@ -11,15 +11,6 @@ from app.api.schemas.search import RepositoryCandidateView
 from app.policies.quotas import WorkAdmission
 from app.workers.search.discovery import lookup_local, prepare_repository_candidates
 
-from collector.classification.relevance.models import (
-    MAX_REPOSITORY_DESCRIPTION_CHARS,
-    MAX_REPOSITORY_KEYWORD_CHARS,
-    MAX_REPOSITORY_KEYWORDS,
-    MAX_REPOSITORY_METADATA_BYTES,
-    MAX_REPOSITORY_METADATA_DESCRIPTION_CHARS,
-    MAX_REPOSITORY_METADATA_VALUE_CHARS,
-    MAX_REPOSITORY_TITLE_CHARS,
-)
 from collector.metadata.dataset import DATASET_METADATA_KEYS
 from collector.search import (
     DataCiteRepositorySearchProvider,
@@ -27,6 +18,15 @@ from collector.search import (
     RepositorySearchResult,
     RepositorySearchWarning,
     search_repository_metadata,
+)
+from collector.search.limits import (
+    MAX_REPOSITORY_DESCRIPTION_CHARS,
+    MAX_REPOSITORY_KEYWORD_CHARS,
+    MAX_REPOSITORY_KEYWORDS,
+    MAX_REPOSITORY_METADATA_BYTES,
+    MAX_REPOSITORY_METADATA_DESCRIPTION_CHARS,
+    MAX_REPOSITORY_METADATA_VALUE_CHARS,
+    MAX_REPOSITORY_TITLE_CHARS,
 )
 from collector.url_utils import normalize_http_url
 

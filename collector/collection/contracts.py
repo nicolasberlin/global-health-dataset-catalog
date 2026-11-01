@@ -13,15 +13,13 @@ from collector.network.fetch import FetchedPage
 
 
 @dataclass(frozen=True)
-class DiscoveredPage:
-    """Normalized page candidate for record connectors and HTML/browser resolution.
+class ResolvedPage:
+    """Page evidence prepared by a connector or HTML/browser resolution.
 
-    Connector mapping and HTML/browser resolution supply
-    this contract to the shared pipeline. ``discovery_method`` identifies the
-    origin or resolution method. ``priority`` retains legacy ranking evidence;
-    ``distributions`` remain unvalidated candidates. ``discovery_metadata``
-    carries optional provenance evidence. The existing public class name
-    is retained so caller signatures and field names remain unchanged.
+    ``discovery_method`` records the resolution method; ``distributions`` are
+    unvalidated resource candidates. ``priority`` and ``discovery_metadata``
+    retain legacy ranking/provenance evidence. Field names and defaults remain
+    unchanged so existing evidence and serializers keep the same format.
     """
 
     url: str
@@ -91,7 +89,7 @@ class StrategyResult:
     This is not an accepted catalogue dataset or a persistence payload.
     """
 
-    page: DiscoveredPage
+    page: ResolvedPage
     html: str = ""
     http_status: int | None = None
     final_url: str = ""

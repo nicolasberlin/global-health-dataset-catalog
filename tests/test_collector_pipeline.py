@@ -5,13 +5,13 @@ import io
 import pytest
 from helpers.collection import DATASET_HTML, AcceptingPageClassifier, collect_record_page
 
-from collector.collection.contracts import DiscoveredPage
+from collector.collection.contracts import ResolvedPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.extraction.distributions import extract_distributions
 from collector.collection.extraction.extractor import extract_page, html_to_text
 from collector.collection.service import (
-    analyze_discovered_page,
     analyze_html_page,
+    analyze_structured_page,
     collect_repository_candidate_with_report,
 )
 from collector.collection.validation.distributions import validate_distribution
@@ -152,13 +152,13 @@ def test_extract_page_falls_back_when_canonical_is_not_acceptable(canonical_href
     assert page.dataset_url == "https://example.org/catalog/page"
 
 
-def test_analyze_discovered_page_rejects_invalid_url_before_classification():
+def test_analyze_structured_page_rejects_invalid_url_before_classification():
     class ClassifierThatMustNotRun:
         def classify(self, page, distributions):
             raise AssertionError("The classifier must not receive an invalid URL.")
 
-    result = analyze_discovered_page(
-        DiscoveredPage(
+    result = analyze_structured_page(
+        ResolvedPage(
             url="javascript:alert(1)",
             discovery_method="data_json",
             title="Invalid dataset",
@@ -484,7 +484,7 @@ def test_collect_source_retains_verified_distribution_format(
         )
 
     result = collect_record_page(
-        DiscoveredPage(
+        ResolvedPage(
             url="https://example.org/datasets/mortality",
             discovery_method="data_json",
             title="Mortality health dataset",
@@ -519,7 +519,7 @@ def test_collect_source_deduplicates_distributions_after_format_validation():
         )
 
     result = collect_record_page(
-        DiscoveredPage(
+        ResolvedPage(
             url="https://example.org/datasets/mortality",
             discovery_method="data_json",
             title="Mortality health dataset",

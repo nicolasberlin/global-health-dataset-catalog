@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 from helpers.collection import collect_record_page
 
-from collector.collection.contracts import DiscoveredPage
+from collector.collection.contracts import ResolvedPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import CollectorConfig
@@ -34,7 +34,7 @@ def test_ranked_distinct_links_are_tried_until_success_or_three_attempts(first_a
              for index in range(4)]
     # Same URL with a different format must not consume a second attempt.
     duplicate = replace(links[0], format="API", probability=.85)
-    discovered = DiscoveredPage(PAGE_URL, "ckan", title="Health data",
+    discovered = ResolvedPage(PAGE_URL, "ckan", title="Health data",
                                 distributions=tuple(reversed([*links, duplicate])))
     probes = []
     classifier = Classifier()
@@ -75,7 +75,7 @@ def test_attempt_and_saved_limits_are_independent():
         return available(item)
 
     result = collect_record_page(
-        DiscoveredPage(PAGE_URL, "ckan", distributions=links),
+        ResolvedPage(PAGE_URL, "ckan", distributions=links),
         config=CollectorConfig(max_distribution_attempts=2, max_distributions_saved=3),
         classifier=Classifier(),
         validate=validate,

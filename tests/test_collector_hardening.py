@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 
 from collector.budget import check_collection_budget
-from collector.collection.contracts import DiscoveredPage, StrategyResult
+from collector.collection.contracts import ResolvedPage, StrategyResult
 from collector.collection.eligibility.classifier import LLMPageClassifier
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.extraction.distributions import extract_distributions
@@ -45,7 +45,7 @@ class Browser:
 
     def render(self, url, *, metadata_url=None):
         self.calls.append("render")
-        return StrategyResult(DiscoveredPage(url, "browser"), html=HTML, http_status=200)
+        return StrategyResult(ResolvedPage(url, "browser"), html=HTML, http_status=200)
 
     def validate(self, resource):
         self.calls.append("validate")
@@ -178,7 +178,7 @@ def test_collection_keeps_proven_links_when_a_later_probe_exhausts_budget(
         class PartialBrowser(Browser):
             def render(self, url, *, metadata_url=None):
                 return StrategyResult(
-                    DiscoveredPage(url, "browser"), html=expanded, http_status=200,
+                    ResolvedPage(url, "browser"), html=expanded, http_status=200,
                 )
 
             def validate(self, resource):

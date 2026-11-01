@@ -6,7 +6,7 @@ from app.db.connection import _fetchone, _require_database_pool
 from helpers.collection import collect_record_page
 from helpers.inspection import stored_datasets
 
-from collector.collection.contracts import DiscoveredPage
+from collector.collection.contracts import ResolvedPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.validation.distributions import validate_distribution
 from collector.models import (
@@ -44,7 +44,7 @@ async def test_sampled_format_stays_consistent_through_collection_and_storage(
             return PageClassification(accepted=True)
 
     result = collect_record_page(
-        DiscoveredPage(
+        ResolvedPage(
             url="https://example.org/dataset",
             title="Health",
             discovery_method="test",

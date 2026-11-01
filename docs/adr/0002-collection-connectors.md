@@ -26,7 +26,7 @@ Do not introduce a separate service per platform.
 - `NormalizedRecord` is an observation before acceptance. It has a scoped
   `RecordIdentity`, metadata source, resource candidates and optional parent PID.
 - `collection/record_mapping.py` maps normalized records to `StrategyResult`
-  using the shared `DiscoveredPage` from `collection/contracts.py`. The pipeline
+  using the shared `ResolvedPage` from `collection/contracts.py`. The pipeline
   reuses `PageSnapshot` and `DistributionCandidate`. The fixed display/classification
   metadata mapping is not the catalogue's identity model.
 - The shared pipeline prepares classifier evidence. The record workflow in

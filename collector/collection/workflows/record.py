@@ -16,9 +16,9 @@ from collector.collection.connectors.registry import (
     default_registry,
 )
 from collector.collection.contracts import (
-    DiscoveredPage,
     FetchHTMLFunction,
     MethodAttempt,
+    ResolvedPage,
     StrategyResult,
     ValidateDistributionFunction,
     public_url,
@@ -141,7 +141,7 @@ def collect_record(
                             "Non-HTML landing response", code="verification_unconfirmed"
                         )
                     resolved = StrategyResult(
-                        page=DiscoveredPage(url=fetched.final_url, discovery_method="html"),
+                        page=ResolvedPage(url=fetched.final_url, discovery_method="html"),
                         html=fetched.html,
                         final_url=fetched.final_url,
                         http_status=fetched.status_code,

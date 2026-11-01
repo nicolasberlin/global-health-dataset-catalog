@@ -112,7 +112,7 @@ so transport failures stay in `fetch` and normalization failures stay in
 preserved.
 
 `collector/main.py` retains compatibility imports for record collection,
-`analyze_discovered_page`, `analyze_html_page`, `FetchHTMLFunction` and
+`analyze_structured_page`, `analyze_html_page`, `FetchHTMLFunction` and
 `ValidateDistributionFunction`. Internal callers import the service directly.
 Source identity here means the publisher/hosting-platform inference in
 `collection/extraction/source_identity.py`, not catalogue exploration.
@@ -120,10 +120,17 @@ Source identity here means the publisher/hosting-platform inference in
 `collection/contracts.py` owns the page candidate shared by connector mapping,
 HTML resolution and browser rendering, along with
 `StrategyResult`, `MethodAttempt`, diagnostic URL filtering and callback types.
-The page keeps its existing public name `DiscoveredPage`, fields and defaults;
-there is one definition shared by record resolution methods. `collection/records.py`
+The shared page contract is named `ResolvedPage`, reflecting connector and
+HTML/browser resolution. Its fields and defaults are unchanged; one definition
+is used by all record resolution methods. `collection/records.py`
 remains the connector-normalized record and identity model, which has a different
-role from a page candidate. `collection/record_mapping.py` explicitly maps that
+role from a page candidate. `analyze_structured_page()` classifies normalized
+connector metadata; `_merge_record_metadata()` fills missing HTML page fields
+from known record metadata. The existing `discovered_page` keyword argument is
+retained for callers, and stored names such as `discovery_method`,
+`discovery_coverage` and provenance kind `"adapter"` are unchanged.
+
+`collection/record_mapping.py` explicitly maps that
 record into `StrategyResult` through `to_strategy_result()`; it replaces the
 vaguely named compatibility module without changing the mapping.
 
@@ -143,6 +150,14 @@ whole-source exploration is retired. Application callers import the
 search package directly. The directory rename preserves the existing function
 and model names, the `repository_search` quota scopes and the
 `repository_search_provider` event name.
+
+`collector/search/limits.py` owns the thirteen size/count limits for candidate
+fields, queries, URLs, keywords and serialized metadata. Search filtering, worker
+candidate preparation, search API schemas and relevance payload preparation import
+these constants directly. Names and values are unchanged. Relevance models retain
+the separate justification/missing-information output limits; the classifier keeps
+its tighter LLM-specific payload bounds. No compatibility re-export is added to
+relevance models, keeping ownership and dependency direction explicit.
 
 ```text
 collector/
@@ -361,7 +376,7 @@ and failure propagation; neither service performs persistence.
 `classification/relevance/factory.py` owns
 `build_default_repository_result_classifier()`, used by `ClassificationWorker`.
 `collection/eligibility/factory.py` owns `build_default_page_classifier()`, used by
-`CollectionWorker`, the pipeline default and AI-enabled Search Lab. Both import
+`CollectionWorker`, default page analysis and AI-enabled Search Lab. Both import
 the same `build_llm_voters()` from `llm/voter_factory.py`. Its frozen
 `LLMVoterConfig` dataclasses name each voter ID, model environment variable, default
 model and API-key environment variable. The ordered `_DEFAULT_VOTERS` tuple retains
@@ -571,7 +586,7 @@ standalone dataset batch is rolled back in full if any member fails.
 Catalogue records conflict on normalized dataset URL; distributions conflict on
 `(dataset_id, url, format)`. Empty incoming descriptions preserve existing values.
 Identity/provenance-aware enrichment can fill missing metadata after collection,
-without making provider evidence authoritative over identified page/adapter evidence.
+without making provider evidence authoritative over identified page/connector evidence.
 
 The catalogue is shared and publicly readable; search state, candidate decisions,
 job reads and diagnostic histories are owner-scoped. Catalogue deduplication does

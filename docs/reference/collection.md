@@ -51,7 +51,7 @@ its own `factory.py`. Both feature classifiers inherit `BaseLLMClassifier` from
 keeping their payload limits, response validation and public signatures. Parsing
 errors retain their own meaning and are not wrapped as client failures.
 The classification worker uses the relevance factory;
-the collection worker, pipeline default and AI-enabled Search Lab use the
+the collection worker, default page analysis and AI-enabled Search Lab use the
 eligibility factory. Both delegate voter construction to
 `collector/llm/voter_factory.py`; HTTP transport and persisted checkpoints
 are also shared in `collector/llm/`. Both feature ensembles delegate parallel voting,
@@ -86,7 +86,7 @@ session, consuming the same check allowance. Coverage reports discovered, checke
 validated and limited resources, without claiming exhaustive repository coverage.
 
 Dataverse, Zenodo, Figshare, Dryad, InvenioRDM and DSpace are record connectors.
-They resolve one candidate via the shared `DiscoveredPage` contract, page analysis
+They resolve one candidate via the shared `ResolvedPage` contract, page analysis
 and resource-check policy. They do not explore whole source catalogues. DataCite
 continues to use shared bounded JSON transport in `collector/network/json.py`.
 See [connector contracts](collection-connectors.md) for supported URLs, host/API
@@ -374,7 +374,7 @@ does not authorize browser navigation. Cookies stay in the isolated session.
 JavaScript and normal navigation are supported; CAPTCHA solving, copied user
 sessions, stealth identities and interactive login are unsupported. Persistent
 barriers remain incomplete. Probes currently support same-origin resources;
-cross-origin downloads, guestbooks and repository-specific flows need an adapter.
+cross-origin downloads, guestbooks and repository-specific flows need a connector.
 
 The service has no published port, application/database volume or model/database
 secrets. Separate control/egress networks, a DNS-pinned HTTPS proxy and a container

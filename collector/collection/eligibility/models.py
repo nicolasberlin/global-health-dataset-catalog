@@ -36,7 +36,7 @@ class PageClassificationVote:
 
 
 class PageClassifier(Protocol):
-    """Interface implemented by discovered-page classifiers."""
+    """Interface implemented by dataset-page eligibility classifiers."""
 
     def classify(
         self,

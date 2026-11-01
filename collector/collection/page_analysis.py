@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from collector.budget import check_collection_budget
-from collector.collection.contracts import DiscoveredPage, StrategyResult
+from collector.collection.contracts import ResolvedPage, StrategyResult
 from collector.collection.eligibility.factory import build_default_page_classifier
 from collector.collection.eligibility.models import PageClassifier
 from collector.collection.extraction.distributions import EXCLUDED_EXTENSIONS, extract_distributions
@@ -27,7 +27,7 @@ def analyze_html_page(
     config: CollectorConfig = DEFAULT_CONFIG,
     classifier: PageClassifier | None = None,
     *,
-    discovered_page: DiscoveredPage | None = None,
+    discovered_page: ResolvedPage | None = None,
     distribution_candidates: list[DistributionCandidate] | None = None,
     record_url: str | None = None,
     record_identity: dict[str, str] | None = None,
@@ -35,6 +35,7 @@ def analyze_html_page(
 ) -> CollectedDataset | None:
     """Extract and classify one HTML page before distribution validation.
 
+    ``discovered_page`` is the retained keyword for optional resolved record metadata.
     A valid rejection returns ``None``. Classifier failures, including an
     unavailable default EPFL RCP voter, propagate as errors rather than being
     counted as rejected pages. This function performs no persistence.
@@ -53,7 +54,7 @@ def analyze_html_page(
         page = replace(page, doi=normalize_doi(record_identity.get("persistent_id")))
     evidence = metadata_evidence(page, kind="page", source_url=page.url)
     if discovered_page is not None and not page.dataset_metadata_ambiguous:
-        page = _merge_discovery_metadata(page, discovered_page)
+        page = _merge_record_metadata(page, discovered_page)
         for field in ("date_of_publication", "sharing_license", "doi"):
             value = getattr(discovered_page, field)
             if value:
@@ -101,15 +102,16 @@ def analyze_html_page(
         distributions=distributions,
     )
 
-def analyze_discovered_page(
-    discovered_page: DiscoveredPage,
+def analyze_structured_page(
+    discovered_page: ResolvedPage,
     config: CollectorConfig = DEFAULT_CONFIG,
     classifier: PageClassifier | None = None,
 ) -> CollectedDataset | None:
-    """Classify structured adapter metadata without fetching its landing page.
+    """Classify structured connector metadata without fetching its landing page.
 
     The returned dataset is still transient and its distribution candidates
     must pass validation before the collection result can contain it.
+    Connector provenance retains the stored "adapter" label for compatibility.
     """
 
     dataset_url = normalize_http_url(discovered_page.url)
@@ -190,7 +192,7 @@ def _usable_distribution(distribution: DistributionCandidate) -> bool:
         and "html" not in distribution.mime_type.lower()
     )
 
-def _merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot:
+def _merge_record_metadata(page: PageSnapshot, discovered: ResolvedPage) -> PageSnapshot:
     """Fill missing page fields before classification, retaining the extracted links."""
     fields = (
         "title",
@@ -246,6 +248,6 @@ def classify_resolution(
             discovered_page=to_strategy_result(known_record, resolved.page.discovery_method).page
             if known_record else None,
         )
-    return analyze_discovered_page(
+    return analyze_structured_page(
         replace(resolved.page, distributions=tuple(resources)), config, classifier,
     )

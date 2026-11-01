@@ -11,7 +11,16 @@ from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from app.db.catalog.search import normalize_dataset_search_query, search_collected_datasets
 from app.policies.quotas import WorkAdmission
-from collector.classification.relevance.models import (
+from collector.diagnostics import Diagnostic
+from collector.metadata.dataset import normalize_dataset_metadata
+from collector.models import CollectedDataset
+from collector.search import (
+    RepositorySearchResponse,
+    RepositorySearchResult,
+    RepositorySearchWarning,
+)
+from collector.search.filtering import filter_repository_results
+from collector.search.limits import (
     MAX_REPOSITORY_DATE_CHARS,
     MAX_REPOSITORY_DESCRIPTION_CHARS,
     MAX_REPOSITORY_DOI_CHARS,
@@ -25,15 +34,6 @@ from collector.classification.relevance.models import (
     MAX_REPOSITORY_SOURCE_CHARS,
     MAX_REPOSITORY_TITLE_CHARS,
 )
-from collector.diagnostics import Diagnostic
-from collector.metadata.dataset import normalize_dataset_metadata
-from collector.models import CollectedDataset
-from collector.search import (
-    RepositorySearchResponse,
-    RepositorySearchResult,
-    RepositorySearchWarning,
-)
-from collector.search.filtering import filter_repository_results
 
 _REPOSITORY_URL_ADAPTER = TypeAdapter(HttpUrl)
 

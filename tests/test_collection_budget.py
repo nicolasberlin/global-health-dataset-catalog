@@ -22,7 +22,7 @@ from collector.budget import (
     check_collection_budget,
     collection_budget,
 )
-from collector.collection.contracts import DiscoveredPage
+from collector.collection.contracts import ResolvedPage
 from collector.collection.service import (
     collect_repository_candidate_with_report,
 )
@@ -40,7 +40,7 @@ def clock(monkeypatch):
 
 
 def page(name="one", links=1):
-    return DiscoveredPage(
+    return ResolvedPage(
         url=f"https://example.org/datasets/{name}",
         title="Health data",
         discovery_method="test",

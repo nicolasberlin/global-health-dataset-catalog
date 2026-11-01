@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collector.collection.contracts import DiscoveredPage
+from collector.collection.contracts import ResolvedPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.models import CollectedDataset, DistributionCandidate, ValidationResult
@@ -117,7 +117,7 @@ def collect(validations):
         )
 
     return collect_record_page(
-        DiscoveredPage("https://example.org/dataset", "fixture_api", distributions=links),
+        ResolvedPage("https://example.org/dataset", "fixture_api", distributions=links),
         classifier=Accept(),
         validate=validate,
     )

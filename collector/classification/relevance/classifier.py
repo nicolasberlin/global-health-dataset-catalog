@@ -8,9 +8,6 @@ from collector.classification.relevance.models import (
     MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_ITEMS,
-    MAX_REPOSITORY_PUBLISHER_CHARS,
-    MAX_REPOSITORY_SEARCH_QUERY_CHARS,
-    MAX_REPOSITORY_TITLE_CHARS,
     REPOSITORY_RELEVANCE_LABELS,
     RepositoryClassification,
     RepositoryRelevanceLabel,
@@ -18,6 +15,11 @@ from collector.classification.relevance.models import (
 from collector.llm.classifier import BaseLLMClassifier
 from collector.llm.errors import ClassificationError
 from collector.models import PageSnapshot
+from collector.search.limits import (
+    MAX_REPOSITORY_PUBLISHER_CHARS,
+    MAX_REPOSITORY_SEARCH_QUERY_CHARS,
+    MAX_REPOSITORY_TITLE_CHARS,
+)
 
 # PageSnapshot permits larger values; these tighter limits keep prompts bounded.
 MAX_REPOSITORY_LLM_DESCRIPTION_CHARS = 6_000

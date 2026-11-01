@@ -296,7 +296,7 @@ def test_probe_detects_truncation_when_server_ignores_range(monkeypatch, length)
 
 
 def test_large_json_is_retained_by_collection_pipeline():
-    from collector.collection.contracts import DiscoveredPage
+    from collector.collection.contracts import ResolvedPage
     from collector.collection.eligibility.models import PageClassification
 
     class Classifier:
@@ -306,7 +306,7 @@ def test_large_json_is_retained_by_collection_pipeline():
     distribution = DistributionCandidate(URL, "JSON", .9)
     body = json.dumps({"data": [{"value": i} for i in range(10000)]}).encode()
     result = collect_record_page(
-        DiscoveredPage(
+        ResolvedPage(
             url=URL, discovery_method="test", title="Health data", distributions=(distribution,)
         ),
         classifier=Classifier(),
@@ -609,7 +609,7 @@ def test_partial_response_uses_total_size(content_range, head_size, head_etag, e
     (410, b"", "unavailable"),
 ])
 def test_failed_validations_survive_dataset_rejection(code, body, status):
-    from collector.collection.contracts import DiscoveredPage
+    from collector.collection.contracts import ResolvedPage
     from collector.collection.eligibility.models import PageClassification
 
     class Classifier:
@@ -618,7 +618,7 @@ def test_failed_validations_survive_dataset_rejection(code, body, status):
 
     distribution = DistributionCandidate(URL, "API", .9)
     result = collect_record_page(
-        DiscoveredPage(
+        ResolvedPage(
             url=URL, discovery_method="test", title="Health data", distributions=(distribution,)
         ),
         classifier=Classifier(),

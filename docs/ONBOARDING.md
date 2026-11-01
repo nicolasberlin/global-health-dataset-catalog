@@ -120,6 +120,7 @@ installations. No setup script moves or deletes database volumes.
 | Collection job reads and row conversion | `backend/app/db/collection/job_queries.py` |
 | Trace recording, history and evidence filtering | `backend/app/db/collection/traces/` |
 | Shared persisted owner ID validation | `backend/app/db/owner_ids.py` |
+| Repository candidate size/count limits shared by workers, API schemas and classification | `collector/search/limits.py` |
 | External candidate search, provider filtering and metadata normalization | `collector/search/` |
 | DataCite requests, result mapping and metadata extraction | `collector/search/providers/datacite/client.py`, `collector/search/providers/datacite/mapping.py`, `collector/search/providers/datacite/metadata.py` |
 | Shared page candidates, resolution/attempt evidence and callback contracts | `collector/collection/contracts.py` |

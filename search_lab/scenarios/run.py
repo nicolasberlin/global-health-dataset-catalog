@@ -17,7 +17,7 @@ from collector.budget import collection_budget
 from collector.collection.browser import configured_browser
 from collector.collection.connectors.http import fetch_record_json
 from collector.collection.connectors.registry import default_registry
-from collector.collection.contracts import DiscoveredPage, StrategyResult, public_url
+from collector.collection.contracts import ResolvedPage, StrategyResult, public_url
 from collector.collection.failures import CollectionStepError
 from collector.collection.page_analysis import eligible_resources
 from collector.collection.validation.distributions import page_access_diagnostic
@@ -102,7 +102,7 @@ def execute(mode, url, *, offline_json=None, include_ai=False):
         raise ValueError("Offline JSON is only supported for the API scenario.")
     if mode == "html":
         page = fetch_public_html(url)
-        resolved = StrategyResult(DiscoveredPage(page.final_url, "html"), html=page.html)
+        resolved = StrategyResult(ResolvedPage(page.final_url, "html"), html=page.html)
         barrier = page_access_diagnostic(page.html)
         return {
             "status": "blocked" if barrier else "observed",

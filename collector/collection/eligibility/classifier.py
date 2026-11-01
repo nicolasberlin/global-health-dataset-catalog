@@ -1,4 +1,4 @@
-"""LLM-backed classification of discovered dataset pages."""
+"""LLM-backed classification of resolved dataset pages."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ MAX_DISTRIBUTIONS = 10
 
 
 class LLMPageClassifier(BaseLLMClassifier[PageClassification]):
-    """Ask an LLM whether a discovered page is eligible for collection.
+    """Ask an LLM whether a resolved page is eligible for collection.
 
     The payload independently bounds page text, metadata, headings, and the
     first ``MAX_DISTRIBUTIONS`` candidates. Provider errors and malformed

@@ -1,6 +1,6 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **1 November 2026**, based on Git commit `cafeb06`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **1 November 2026**, based on Git commit `cb21b87`, including the independent core API and public Search Lab. The private web interface is excluded.
 
 This index lists **794 function and method definitions in 150 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
@@ -976,14 +976,14 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`LLMRepositoryRelevanceClassifier.classify`](../../collector/classification/relevance/classifier.py#L39) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
-| [`LLMRepositoryRelevanceClassifier._parse_response`](../../collector/classification/relevance/classifier.py#L44) | `_parse_response(self, response: dict[str, object]) -> RepositoryClassification` | function / method |
-| [`_build_repository_relevance_payload`](../../collector/classification/relevance/classifier.py#L48) | `_build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]` | function / method |
-| [`_repository_metadata_value`](../../collector/classification/relevance/classifier.py#L73) | `_repository_metadata_value(key: str, value: str) -> str` | function / method |
-| [`_parse_repository_relevance_classification`](../../collector/classification/relevance/classifier.py#L85) | `_parse_repository_relevance_classification(raw: dict[str, object]) -> RepositoryClassification` | function / method |
-| [`_required_relevance_label`](../../collector/classification/relevance/classifier.py#L108) | `_required_relevance_label(raw: dict[str, object], field_name: str) -> RepositoryRelevanceLabel` | function / method |
-| [`_required_non_empty_string`](../../collector/classification/relevance/classifier.py#L121) | `_required_non_empty_string(raw: dict[str, object], field_name: str) -> str` | function / method |
-| [`_required_string_list`](../../collector/classification/relevance/classifier.py#L136) | `_required_string_list(raw: dict[str, object], field_name: str) -> list[str]` | function / method |
+| [`LLMRepositoryRelevanceClassifier.classify`](../../collector/classification/relevance/classifier.py#L41) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
+| [`LLMRepositoryRelevanceClassifier._parse_response`](../../collector/classification/relevance/classifier.py#L46) | `_parse_response(self, response: dict[str, object]) -> RepositoryClassification` | function / method |
+| [`_build_repository_relevance_payload`](../../collector/classification/relevance/classifier.py#L50) | `_build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]` | function / method |
+| [`_repository_metadata_value`](../../collector/classification/relevance/classifier.py#L75) | `_repository_metadata_value(key: str, value: str) -> str` | function / method |
+| [`_parse_repository_relevance_classification`](../../collector/classification/relevance/classifier.py#L87) | `_parse_repository_relevance_classification(raw: dict[str, object]) -> RepositoryClassification` | function / method |
+| [`_required_relevance_label`](../../collector/classification/relevance/classifier.py#L110) | `_required_relevance_label(raw: dict[str, object], field_name: str) -> RepositoryRelevanceLabel` | function / method |
+| [`_required_non_empty_string`](../../collector/classification/relevance/classifier.py#L123) | `_required_non_empty_string(raw: dict[str, object], field_name: str) -> str` | function / method |
+| [`_required_string_list`](../../collector/classification/relevance/classifier.py#L138) | `_required_string_list(raw: dict[str, object], field_name: str) -> list[str]` | function / method |
 
 <a id="collector-classification-relevance-ensemble-py"></a>
 
@@ -1016,11 +1016,11 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`RepositoryClassification.__post_init__`](../../collector/classification/relevance/models.py#L65) | `__post_init__(self) -> None` | function / method |
-| [`RepositoryClassificationVote.__post_init__`](../../collector/classification/relevance/models.py#L99) | `__post_init__(self) -> None` | function / method |
-| [`RepositoryResultClassifier.classify`](../../collector/classification/relevance/models.py#L121) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
-| [`_validate_relevance_label`](../../collector/classification/relevance/models.py#L125) | `_validate_relevance_label(value: object) -> None` | function / method |
-| [`_normalized_missing_information`](../../collector/classification/relevance/models.py#L130) | `_normalized_missing_information(relevance_label: RepositoryRelevanceLabel, values: list[str]) -> list[str]` | function / method |
+| [`RepositoryClassification.__post_init__`](../../collector/classification/relevance/models.py#L51) | `__post_init__(self) -> None` | function / method |
+| [`RepositoryClassificationVote.__post_init__`](../../collector/classification/relevance/models.py#L85) | `__post_init__(self) -> None` | function / method |
+| [`RepositoryResultClassifier.classify`](../../collector/classification/relevance/models.py#L107) | `classify(self, page: PageSnapshot) -> RepositoryClassification` | function / method |
+| [`_validate_relevance_label`](../../collector/classification/relevance/models.py#L111) | `_validate_relevance_label(value: object) -> None` | function / method |
+| [`_normalized_missing_information`](../../collector/classification/relevance/models.py#L116) | `_normalized_missing_information(relevance_label: RepositoryRelevanceLabel, values: list[str]) -> list[str]` | function / method |
 
 <a id="collector-classification-relevance-prompts-py"></a>
 
@@ -1207,7 +1207,7 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`public_url`](../../collector/collection/contracts.py#L48) | `public_url(value: str) -> str` | function / method |
+| [`public_url`](../../collector/collection/contracts.py#L46) | `public_url(value: str) -> str` | function / method |
 
 <a id="collector-collection-eligibility-classifier-py"></a>
 
@@ -1355,13 +1355,13 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`analyze_html_page`](../../collector/collection/page_analysis.py#L24) | `analyze_html_page(url: str, html: str, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None, *, discovered_page: DiscoveredPage \| None=None, distribution_candidates: list[DistributionCandidate] \| None=None, record_url: str \| None=None, record_identity: dict[str, str] \| None=None, page_snapshot: PageSnapshot \| None=None) -> CollectedDataset \| None` | function / method |
-| [`analyze_discovered_page`](../../collector/collection/page_analysis.py#L104) | `analyze_discovered_page(discovered_page: DiscoveredPage, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None) -> CollectedDataset \| None` | function / method |
-| [`_classifier_or_default`](../../collector/collection/page_analysis.py#L178) | `_classifier_or_default(classifier: PageClassifier \| None) -> PageClassifier` | function / method |
-| [`_usable_distribution`](../../collector/collection/page_analysis.py#L183) | `_usable_distribution(distribution: DistributionCandidate) -> bool` | function / method |
-| [`_merge_discovery_metadata`](../../collector/collection/page_analysis.py#L193) | `_merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot` | function / method |
-| [`eligible_resources`](../../collector/collection/page_analysis.py#L217) | `eligible_resources(resolved: StrategyResult, *, expected_identity: dict[str, str] \| None=None) -> list[DistributionCandidate]` | function / method |
-| [`classify_resolution`](../../collector/collection/page_analysis.py#L230) | `classify_resolution(resolved: StrategyResult, resources: list[DistributionCandidate], config: CollectorConfig, classifier: PageClassifier \| None, *, record_url: str \| None=None, known_record: NormalizedRecord \| None=None, record_identity: dict[str, str] \| None=None) -> CollectedDataset \| None` | function / method |
+| [`analyze_html_page`](../../collector/collection/page_analysis.py#L24) | `analyze_html_page(url: str, html: str, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None, *, discovered_page: ResolvedPage \| None=None, distribution_candidates: list[DistributionCandidate] \| None=None, record_url: str \| None=None, record_identity: dict[str, str] \| None=None, page_snapshot: PageSnapshot \| None=None) -> CollectedDataset \| None` | function / method |
+| [`analyze_structured_page`](../../collector/collection/page_analysis.py#L105) | `analyze_structured_page(discovered_page: ResolvedPage, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None) -> CollectedDataset \| None` | function / method |
+| [`_classifier_or_default`](../../collector/collection/page_analysis.py#L180) | `_classifier_or_default(classifier: PageClassifier \| None) -> PageClassifier` | function / method |
+| [`_usable_distribution`](../../collector/collection/page_analysis.py#L185) | `_usable_distribution(distribution: DistributionCandidate) -> bool` | function / method |
+| [`_merge_record_metadata`](../../collector/collection/page_analysis.py#L195) | `_merge_record_metadata(page: PageSnapshot, discovered: ResolvedPage) -> PageSnapshot` | function / method |
+| [`eligible_resources`](../../collector/collection/page_analysis.py#L219) | `eligible_resources(resolved: StrategyResult, *, expected_identity: dict[str, str] \| None=None) -> list[DistributionCandidate]` | function / method |
+| [`classify_resolution`](../../collector/collection/page_analysis.py#L232) | `classify_resolution(resolved: StrategyResult, resources: list[DistributionCandidate], config: CollectorConfig, classifier: PageClassifier \| None, *, record_url: str \| None=None, known_record: NormalizedRecord \| None=None, record_identity: dict[str, str] \| None=None) -> CollectedDataset \| None` | function / method |
 
 <a id="collector-collection-record_mapping-py"></a>
 

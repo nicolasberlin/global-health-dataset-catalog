@@ -20,7 +20,7 @@ from collector.budget import (
     request_budget,
 )
 from collector.collection.connectors.registry import default_registry
-from collector.collection.contracts import DiscoveredPage, StrategyResult
+from collector.collection.contracts import ResolvedPage, StrategyResult
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.record_mapping import to_strategy_result
 from collector.collection.validation.distributions import validate_distribution
@@ -158,7 +158,7 @@ class BrowserSession:
                 "browser_invalid_response", "render", http_status=data.get("http_status"),
             )
         return StrategyResult(
-            page=DiscoveredPage(url=data["final_url"], discovery_method="browser"),
+            page=ResolvedPage(url=data["final_url"], discovery_method="browser"),
             html=data["html"],
             final_url=data["final_url"],
             http_status=data.get("http_status"),

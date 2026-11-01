@@ -11,10 +11,10 @@ from collector.collection.service import (
     ValidateDistributionFunction as ValidateDistributionFunction,
 )
 from collector.collection.service import (
-    analyze_discovered_page as analyze_discovered_page,
+    analyze_html_page as analyze_html_page,
 )
 from collector.collection.service import (
-    analyze_html_page as analyze_html_page,
+    analyze_structured_page as analyze_structured_page,
 )
 from collector.collection.service import (
     collect_repository_candidate_with_report as collect_repository_candidate_with_report,

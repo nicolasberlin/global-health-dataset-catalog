@@ -15,7 +15,7 @@ import pytest
 from helpers.collection import collect_record_page
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
-from collector.collection.contracts import DiscoveredPage
+from collector.collection.contracts import ResolvedPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.validation.distributions import probe_url
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
@@ -219,7 +219,7 @@ def test_collection_tries_next_distribution_after_error_body_timeout(monkeypatch
         "collector.collection.validation.distributions.open_public_http_url", request,
     )
     result = collect_record_page(
-        DiscoveredPage(
+        ResolvedPage(
             url="https://data.example/dataset",
             discovery_method="test",
             title="Health data",

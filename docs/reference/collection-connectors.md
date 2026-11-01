@@ -93,8 +93,8 @@ orchestrating function.
 `collection/strategies/dataverse.py` remains a compatibility wrapper. The former
 `collector.main` entry points remain compatibility imports from
 `collector.collection.service`; internal callers use the service directly.
-Dataverse catalogue discovery has no dedicated adapter yet; record collection uses
-the connector.
+Dataverse collection resolves individual records through its connector;
+whole-catalogue exploration is retired.
 
 Public entry points in `collector.collection.service` delegate to the individual-record
 workflow and its shared page-analysis functions. HTML/JSON-LD extraction limits and

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collector.collection.contracts import DiscoveredPage, StrategyResult
+from collector.collection.contracts import ResolvedPage, StrategyResult
 from collector.collection.records import NormalizedRecord
 
 
 def to_strategy_result(record: NormalizedRecord, method: str) -> StrategyResult:
     return StrategyResult(
-        page=DiscoveredPage(
+        page=ResolvedPage(
             url=record.landing_url,
             discovery_method=method,
             title=record.title,

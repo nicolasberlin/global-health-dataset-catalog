@@ -528,8 +528,8 @@ policy before running either command; no entrypoint override is needed.
 
 The `/sources` administration routes, storage helpers, creation quota and seed
 inserts are removed. The schema retains `data_sources` for existing internal
-relationships. Source-discovery adapters operate from URLs independently of the
-retired administration subsystem.
+relationships. Whole-source discovery and its adapters are also removed;
+collection resolves accepted repository candidates through record connectors.
 
 ## Explicit retention maintenance
 
