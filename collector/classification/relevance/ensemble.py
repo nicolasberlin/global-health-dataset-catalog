@@ -13,7 +13,7 @@ from collector.classification.relevance.models import (
 )
 from collector.llm.errors import ClassificationError
 from collector.llm.voting import VotingEnsemble
-from collector.storage.models import PageSnapshot
+from collector.models import PageSnapshot
 
 # Ties are resolved by selecting the first matching, most conservative label.
 REPOSITORY_RELEVANCE_CONSERVATIVE_ORDER: tuple[RepositoryRelevanceLabel, ...] = (

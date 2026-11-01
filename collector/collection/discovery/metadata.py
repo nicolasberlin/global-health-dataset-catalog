@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from collector.storage.models import DistributionCandidate
+from collector.models import DistributionCandidate
 
 # These vocabularies enrich metadata only; they do not accept or reject a page.
 DISEASE_TERMS = (

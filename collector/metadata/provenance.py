@@ -6,8 +6,8 @@ import re
 from dataclasses import replace
 from urllib.parse import unquote
 
-from collector.extraction.dataset_metadata import MISSING_DATASET_METADATA_VALUE
-from collector.storage.models import CollectedDataset, PageSnapshot
+from collector.metadata.dataset import MISSING_DATASET_METADATA_VALUE
+from collector.models import CollectedDataset, PageSnapshot
 
 METADATA_FIELDS = ("date_of_publication", "sharing_license", "doi")
 

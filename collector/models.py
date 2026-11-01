@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from collector.diagnostics import Diagnostic
-from collector.extraction.dataset_metadata import (
+from collector.metadata.dataset import (
     build_dataset_metadata,
 )
 from collector.url_utils import require_http_url

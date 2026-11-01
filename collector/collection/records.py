@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-from collector.storage.models import DistributionCandidate
+from collector.models import DistributionCandidate
 
 
 @dataclass(frozen=True)

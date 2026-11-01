@@ -21,9 +21,9 @@ async def client(monkeypatch):
     monkeypatch.setattr(main.app.state, "ready", True, raising=False)
     monkeypatch.setattr(main.app.state, "runtime_enforced", False, raising=False)
     monkeypatch.setattr(main.app.state, "ownership", None, raising=False)
-    for _, model_var, _, key_var in voter_factory._DEFAULT_VOTERS:
-        monkeypatch.setenv(key_var, "private-test-key")
-        monkeypatch.delenv(model_var, raising=False)
+    for config in voter_factory._DEFAULT_VOTERS:
+        monkeypatch.setenv(config.api_key_env_var, "private-test-key")
+        monkeypatch.delenv(config.model_env_var, raising=False)
     async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as c:
         yield c
 
@@ -84,7 +84,7 @@ async def test_uninitialized_state_is_unavailable(client, pool, monkeypatch, sta
 async def test_missing_configuration_recovers_without_database_or_provider_calls(
     client, pool, monkeypatch,
 ):
-    variable = voter_factory._DEFAULT_VOTERS[0][3]
+    variable = voter_factory._DEFAULT_VOTERS[0].api_key_env_var
     monkeypatch.delenv(variable)
     assert (await client.get("/ready")).status_code == 503
     pool.connection.assert_not_called()

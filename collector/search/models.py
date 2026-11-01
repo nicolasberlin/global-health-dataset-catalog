@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from collector.classification.relevance.models import RepositoryClassification
-from collector.extraction.dataset_metadata import MISSING_DATASET_METADATA_VALUE
+from collector.metadata.dataset import MISSING_DATASET_METADATA_VALUE
 
 JsonFetcher = Callable[[str], dict[str, object]]
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collector.extraction.errors import ExtractionError
+from collector.parsing.errors import ExtractionError
 from collector.search.filtering import _http_url, _text
 from collector.search.models import RepositorySearchResult
 from collector.search.providers.datacite.metadata import (

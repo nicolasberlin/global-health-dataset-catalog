@@ -17,8 +17,8 @@ from collector.collection.discovery.metadata import (
     _text,
 )
 from collector.collection.discovery.models import JsonFetcher
+from collector.models import DistributionCandidate
 from collector.network.json import document_url, fetch_json_url
-from collector.storage.models import DistributionCandidate
 from collector.url_utils import canonicalize_url
 
 SOCRATA_PAGE_SIZE = 1_000

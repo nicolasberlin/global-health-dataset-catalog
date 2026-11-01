@@ -16,10 +16,10 @@ from collector.collection.connectors.zenodo import ZenodoConnector
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
+from collector.metadata.provenance import enrich_from_repository
+from collector.models import ValidationResult
 from collector.network.fetch import FetchedPage
 from collector.network.json import fetch_json_url
-from collector.storage.metadata import enrich_from_repository
-from collector.storage.models import ValidationResult
 
 ZENODO = "https://zenodo.org/records/123"
 DATAVERSE = "https://dataverse.harvard.edu/file.xhtml?fileId=123"

@@ -7,9 +7,9 @@ from urllib.parse import unquote, urljoin, urlsplit
 
 from collector.budget import check_collection_budget
 from collector.collection.connectors.http import JsonResponse
+from collector.collection.extraction.distributions import guess_format
 from collector.collection.failures import CollectionMetadataError, CollectionResponseError
-from collector.extraction.distributions import guess_format
-from collector.storage.models import DistributionCandidate
+from collector.models import DistributionCandidate
 from collector.url_utils import normalize_http_url
 
 

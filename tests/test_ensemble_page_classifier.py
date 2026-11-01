@@ -5,7 +5,7 @@ import pytest
 from collector.collection.eligibility.ensemble import EnsemblePageClassifier
 from collector.collection.eligibility.models import PageClassification
 from collector.llm.errors import ClassificationError
-from collector.storage.models import DistributionCandidate, PageSnapshot
+from collector.models import DistributionCandidate, PageSnapshot
 
 
 def test_ensemble_classifier_accepts_when_two_of_three_voters_accept():

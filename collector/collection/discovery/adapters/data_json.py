@@ -26,10 +26,10 @@ from collector.collection.discovery.metadata import (
     _value_text,
 )
 from collector.collection.discovery.models import JsonFetcher
+from collector.collection.extraction.distributions import guess_format
 from collector.collection.resources import EXCLUDED_RESOURCE_FORMATS
-from collector.extraction.distributions import guess_format
+from collector.models import DistributionCandidate
 from collector.network.json import document_url, fetch_json_url
-from collector.storage.models import DistributionCandidate
 from collector.url_utils import canonicalize_url
 
 

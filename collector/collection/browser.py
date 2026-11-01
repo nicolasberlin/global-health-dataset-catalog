@@ -23,14 +23,14 @@ from collector.collection.connectors.registry import default_registry
 from collector.collection.contracts import DiscoveredPage, StrategyResult
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.record_mapping import to_strategy_result
+from collector.collection.validation.distributions import validate_distribution
+from collector.models import HTTPProbe
 from collector.network.fetch import PageFetchError, decode_json_body, is_timeout_error
 from collector.network.transport import (
     DeadlineHTTPHandler,
     DeadlineHTTPSHandler,
     RejectHTTPRedirects,
 )
-from collector.storage.models import HTTPProbe
-from collector.validation.distributions import validate_distribution
 
 
 class BrowserSession:

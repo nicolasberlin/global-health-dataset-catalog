@@ -126,17 +126,19 @@ installations. No setup script moves or deletes database volumes.
 | Source-discovery contracts and shared adapter metadata normalization | `collector/collection/discovery/models.py`, `collector/collection/discovery/metadata.py` |
 | Shared page candidates, resolution/attempt evidence and callback contracts | `collector/collection/contracts.py` |
 | Connector-normalized records and mapping to collection contracts | `collector/collection/records.py`, `collector/collection/record_mapping.py` |
-| Shared page preparation/classification and resource-validation policy | `collector/collection/pipeline.py`, `collector/collection/resources.py` |
+| Shared collector data contracts | `collector/models.py` |
+| Metadata provenance, DOI normalization and repository enrichment | `collector/metadata/provenance.py` |
+| Shared page preparation/classification and resource-validation policy | `collector/collection/page_analysis.py`, `collector/collection/resources.py` |
 | Record-platform connectors and selection | `collector/collection/connectors/`, `collector/collection/connectors/registry.py` |
 | Connector metadata HTTP transport, evidence and retries | `collector/collection/connectors/http.py` |
 | Public collection entry points | `collector/collection/service.py` |
 | Whole-source collection, bounded analysis and reporting | `collector/collection/workflows/source.py` |
 | Single-record API, HTML and browser collection | `collector/collection/workflows/record.py` |
-| Public page extraction and snapshot assembly | `collector/extraction/extractor.py` |
-| HTML page structure and bounded HTML-to-text parsing | `collector/extraction/html.py`, `collector/extraction/text.py` |
-| Selected JSON-LD fields and dataset metadata normalization | `collector/extraction/json_ld.py`, `collector/extraction/dataset_metadata.py` |
-| Dataset identity selection, resource discovery and extraction bounds | `collector/extraction/graph.py`, `collector/extraction/distributions.py`, `collector/extraction/limits.py` |
-| Source identity from extracted evidence | `collector/extraction/source_identity.py` |
+| Public page extraction and snapshot assembly | `collector/collection/extraction/extractor.py` |
+| HTML page structure and bounded HTML-to-text parsing | `collector/collection/extraction/html.py`, `collector/parsing/html_text.py` |
+| Selected JSON-LD fields and dataset metadata normalization | `collector/collection/extraction/json_ld.py`, `collector/metadata/dataset.py` |
+| Dataset identity selection, resource discovery and extraction bounds | `collector/collection/extraction/graph.py`, `collector/collection/extraction/distributions.py`, `collector/parsing/limits.py` |
+| Source identity from extracted evidence | `collector/collection/extraction/source_identity.py` |
 | External repository candidate relevance: contracts, prompts, parsing and aggregation | `collector/classification/relevance/` |
 | Dataset page eligibility during collection: contracts, prompts, parsing and aggregation | `collector/collection/eligibility/` |
 | Default relevance classifier construction | `collector/classification/relevance/factory.py` |
@@ -144,7 +146,7 @@ installations. No setup script moves or deletes database volumes.
 | Shared voter construction, readiness checks and ensemble voting | `collector/llm/voter_factory.py`, `collector/llm/voting.py` |
 | Shared LLM classifier invocation and error handling | `collector/llm/classifier.py` |
 | Shared LLM client and durable response checkpoints | `collector/llm/client.py`, `collector/llm/checkpoints.py` |
-| Distribution access checks | `collector/validation/distributions.py` |
+| Distribution access checks | `collector/collection/validation/distributions.py` |
 | HTTP fetching and request deadlines | `collector/network/fetch.py`, `collector/network/transport.py` |
 | Bounded public JSON fetching and effective document URLs | `collector/network/json.py` |
 | DNS and shared public-address policy | `collector/network/resolver.py`, `collector/network/policy.py` |

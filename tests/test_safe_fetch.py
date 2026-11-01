@@ -12,6 +12,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 import pytest
 
 from collector.budget import request_budget
+from collector.collection.validation.distributions import probe_url
 from collector.network.fetch import (
     PageFetchError,
     _connect_public,
@@ -20,7 +21,6 @@ from collector.network.fetch import (
     open_public_http_url,
 )
 from collector.network.transport import DeadlineHTTPSHandler
-from collector.validation.distributions import probe_url
 
 
 def test_public_http_fetch_blocks_private_url_before_opening(monkeypatch):

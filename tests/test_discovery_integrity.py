@@ -13,8 +13,8 @@ from collector.budget import CollectionBudgetExceeded
 from collector.collection.discovery.adapters import CKANAdapter, DataJsonAdapter, SocrataAdapter
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import analyze_discovered_page, collect_source_with_report
+from collector.models import ValidationResult
 from collector.network.json import JsonDocument, fetch_json_url
-from collector.storage.models import ValidationResult
 
 
 class Accept:

@@ -13,8 +13,8 @@ from collector.collection.connectors.registry import default_registry
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
+from collector.models import DistributionCandidate, ValidationResult
 from collector.network.fetch import FetchedPage
-from collector.storage.models import DistributionCandidate, ValidationResult
 
 URL = "https://springernature.figshare.com/articles/dataset/BCG_data/20522745/1"
 API = "https://api.figshare.com/v2/articles/20522745/versions/1"

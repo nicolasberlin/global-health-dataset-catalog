@@ -17,7 +17,7 @@ from collector.classification.relevance.models import (
 )
 from collector.llm.classifier import BaseLLMClassifier
 from collector.llm.errors import ClassificationError
-from collector.storage.models import PageSnapshot
+from collector.models import PageSnapshot
 
 # PageSnapshot permits larger values; these tighter limits keep prompts bounded.
 MAX_REPOSITORY_LLM_DESCRIPTION_CHARS = 6_000

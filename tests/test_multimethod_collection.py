@@ -10,10 +10,10 @@ from collector.collection.contracts import public_url
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.collection.strategies.dataverse import record_api_url, resolve_metadata
+from collector.collection.validation.distributions import page_access_diagnostic
 from collector.config import DEFAULT_CONFIG
+from collector.models import ValidationResult
 from collector.network.fetch import FetchedPage, PageFetchError
-from collector.storage.models import ValidationResult
-from collector.validation.distributions import page_access_diagnostic
 
 URL = "https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi%3A10.7910%2FDVN%2FMGQGKG"
 BARRIER = Path("tests/fixtures/collection/harvard-verification.html").read_text()

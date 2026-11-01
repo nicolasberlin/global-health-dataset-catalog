@@ -6,11 +6,11 @@ import re
 from urllib.parse import parse_qs, urlsplit
 
 from collector.collection.connectors.shared import positive_id, repository_origin, text
+from collector.collection.extraction.distributions import guess_format
 from collector.collection.records import NormalizedRecord, RecordIdentity
-from collector.extraction.distributions import guess_format
-from collector.extraction.extractor import html_to_text
-from collector.storage.metadata import normalize_doi
-from collector.storage.models import DistributionCandidate
+from collector.metadata.provenance import normalize_doi
+from collector.models import DistributionCandidate
+from collector.parsing.html_text import html_to_text
 from collector.url_utils import normalize_http_url
 
 ARTICLE_PATH = re.compile(

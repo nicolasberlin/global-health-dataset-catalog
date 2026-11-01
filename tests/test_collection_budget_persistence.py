@@ -11,7 +11,7 @@ from app.db.schema import CURRENT_SCHEMA_VERSION
 from helpers.workflows import candidate_for, decision
 
 from collector.diagnostics import Diagnostic
-from collector.storage.models import CollectionReport
+from collector.models import CollectionReport
 
 pytestmark = pytest.mark.anyio
 

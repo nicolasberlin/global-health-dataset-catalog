@@ -94,8 +94,8 @@ def api(monkeypatch):
 def transport(monkeypatch):
     for name, key in zip(KEY_VARIABLES, KEYS):
         monkeypatch.setenv(name, key)
-    for _, variable, _, _ in voter_factory._DEFAULT_VOTERS:
-        monkeypatch.delenv(variable, raising=False)
+    for config in voter_factory._DEFAULT_VOTERS:
+        monkeypatch.delenv(config.model_env_var, raising=False)
 
     def install(request):
         monkeypatch.setattr(

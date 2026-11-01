@@ -5,16 +5,16 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 
-from collector.extraction.dataset_metadata import _country_values
-from collector.extraction.limits import ExtractionLimits, enforce_limit, load_json_ld
-from collector.extraction.text import (
+from collector.metadata.dataset import _country_values
+from collector.metadata.provenance import normalize_doi
+from collector.models import LinkCandidate
+from collector.parsing.html_text import (
     SKIP_TEXT_TAGS,
     _BoundedHTMLParser,
     _normalize_text,
     html_to_text,
 )
-from collector.storage.metadata import normalize_doi
-from collector.storage.models import LinkCandidate
+from collector.parsing.limits import ExtractionLimits, enforce_limit, load_json_ld
 from collector.url_utils import canonicalize_url, same_domain
 
 BLOCKED_LINK_SCHEMES = {"mailto", "tel", "javascript"}

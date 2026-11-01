@@ -19,8 +19,8 @@ from collector.collection.failures import CollectionTransportError
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic
+from collector.models import ValidationResult
 from collector.network.fetch import FetchedPage
-from collector.storage.models import ValidationResult
 
 PID = "doi:10.7910/DVN/AXRYQD/RTPFQI"
 URL = "https://dataverse.harvard.edu/file.xhtml?persistentId=" + PID

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
-from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
+from collector.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 DATASET_HTML = """
 <!doctype html>

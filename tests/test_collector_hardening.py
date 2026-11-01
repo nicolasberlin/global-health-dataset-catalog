@@ -11,16 +11,16 @@ from collector.budget import check_collection_budget
 from collector.collection.contracts import DiscoveredPage, StrategyResult
 from collector.collection.eligibility.classifier import LLMPageClassifier
 from collector.collection.eligibility.models import PageClassification
+from collector.collection.extraction.distributions import extract_distributions
+from collector.collection.extraction.extractor import extract_page
 from collector.collection.service import (
     collect_repository_candidate_with_report,
     collect_source_with_report,
 )
 from collector.config import CollectorConfig
-from collector.extraction.distributions import extract_distributions
-from collector.extraction.extractor import extract_page
 from collector.llm.errors import ClassificationError
+from collector.models import PageSnapshot, ValidationResult
 from collector.network.fetch import FetchedPage
-from collector.storage.models import PageSnapshot, ValidationResult
 
 URL = "https://example.org/health/record"
 HTML = '<title>Health dataset</title><a href="/data.csv">Download CSV</a>'
@@ -137,16 +137,16 @@ def test_embedded_dataset_type_with_full_fragment_iri_keeps_its_metadata_and_sco
 
 
 def test_html_is_parsed_once_before_classification(monkeypatch):
-    from collector.collection import pipeline
+    from collector.collection import page_analysis
 
-    real_extract = pipeline.extract_page
+    real_extract = page_analysis.extract_page
     parsed = []
 
     def extract(*args, **kwargs):
         parsed.append(args[0])
         return real_extract(*args, **kwargs)
 
-    monkeypatch.setattr(pipeline, "extract_page", extract)
+    monkeypatch.setattr(page_analysis, "extract_page", extract)
     result = collect_repository_candidate_with_report(
         URL, fetch_html=lambda url: fetched(url, HTML), classifier=Accept(), validate=available,
     )

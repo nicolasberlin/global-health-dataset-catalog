@@ -16,17 +16,17 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from collector.budget import check_collection_budget, read_with_budget, remaining_timeout
+from collector.collection.extraction.distributions import guess_format
+from collector.collection.validation.json_sample import read_json_prefix, reject_json_constant
 from collector.config import DEFAULT_CONFIG
 from collector.diagnostics import Diagnostic
-from collector.extraction.distributions import guess_format
-from collector.network.fetch import open_public_http_url
-from collector.storage.models import (
+from collector.models import (
     DistributionCandidate,
     HTTPProbe,
     ValidationResult,
     ValidationStatus,
 )
-from collector.validation.json_sample import read_json_prefix, reject_json_constant
+from collector.network.fetch import open_public_http_url
 
 ProbeFunction = Callable[..., HTTPProbe]
 

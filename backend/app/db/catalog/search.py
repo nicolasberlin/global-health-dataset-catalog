@@ -7,7 +7,7 @@ import string
 from app.db.catalog.datasets import _collected_dataset_from_rows
 from app.db.connection import Row, _fetchall, _require_database_pool
 from app.db.schema import DATASET_SEARCH_TEXT_CONFIGURATION, _require_current_schema
-from collector.storage.models import CollectedDataset
+from collector.models import CollectedDataset
 
 # Keep this catalog-specific list small; PostgreSQL's language dictionary owns
 # grammatical stop words and stemming.

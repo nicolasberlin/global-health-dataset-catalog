@@ -26,14 +26,14 @@ from collector.classification.relevance.models import (
     MAX_REPOSITORY_TITLE_CHARS,
 )
 from collector.diagnostics import Diagnostic
-from collector.extraction.dataset_metadata import normalize_dataset_metadata
+from collector.metadata.dataset import normalize_dataset_metadata
+from collector.models import CollectedDataset
 from collector.search import (
     RepositorySearchResponse,
     RepositorySearchResult,
     RepositorySearchWarning,
 )
 from collector.search.filtering import filter_repository_results
-from collector.storage.models import CollectedDataset
 
 _REPOSITORY_URL_ADAPTER = TypeAdapter(HttpUrl)
 

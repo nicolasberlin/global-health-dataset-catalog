@@ -29,7 +29,7 @@ from helpers.inspection import stored_candidate
 from helpers.workflows import candidate_for, decision
 
 from collector.diagnostics import Diagnostic, PersistenceFailure
-from collector.storage.models import CollectionReport, CollectionResult
+from collector.models import CollectionReport, CollectionResult
 
 NOW = datetime(2026, 10, 6, tzinfo=timezone.utc)
 

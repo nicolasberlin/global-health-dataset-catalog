@@ -14,7 +14,7 @@ from app.workers.runtime import persisted_workers
 from helpers.inspection import stored_candidate
 from helpers.workflows import SOURCE_URL, candidate_for, decision, rows, wait_until
 
-from collector.storage.models import CollectionResult
+from collector.models import CollectionResult
 
 pytestmark = pytest.mark.anyio
 

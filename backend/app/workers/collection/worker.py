@@ -36,8 +36,8 @@ from collector.config import (
 )
 from collector.diagnostics import Diagnostic
 from collector.llm.checkpoints import VoteStore
+from collector.models import CollectionResult
 from collector.observability import emit_event, measure_operation, operation_context
-from collector.storage.models import CollectionResult
 
 
 def _collect_record_job(url, *, classifier, observe):

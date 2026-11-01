@@ -17,16 +17,16 @@ from psycopg import sql as pg_sql
 
 from collector.classification.relevance.models import RepositoryClassification
 from collector.collection.service import collect_repository_candidate_with_report
+from collector.collection.validation.distributions import validate_distribution
 from collector.config import CollectorConfig
-from collector.search import RepositorySearchResult
-from collector.storage.models import (
+from collector.models import (
     CollectedDataset,
     CollectionReport,
     CollectionResult,
     DistributionCandidate,
     ValidationResult,
 )
-from collector.validation.distributions import validate_distribution
+from collector.search import RepositorySearchResult
 
 pytestmark = pytest.mark.anyio
 
@@ -2084,8 +2084,8 @@ async def test_automatic_collection_reservation_retries_after_terminal_job(
 
 async def test_complete_collection_job_saves_refined_distribution_formats(database):
     from collector.collection.eligibility.models import PageClassification
+    from collector.models import HTTPProbe
     from collector.network.fetch import FetchedPage
-    from collector.storage.models import HTTPProbe
 
     await database.init_database()
     candidate_url = "https://catalog.example.org/datasets/mortality"

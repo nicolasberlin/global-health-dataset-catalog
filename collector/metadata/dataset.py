@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 
-from collector.extraction.text import _normalize_text, html_to_text
+from collector.parsing.html_text import _normalize_text, html_to_text
 
 DATASET_METADATA_KEYS = (
     "Title",

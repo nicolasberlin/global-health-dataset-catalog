@@ -7,8 +7,8 @@ import pytest
 
 from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.execution import ExecutionStopped
-from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
-from collector.extraction.errors import ExtractionError
+from collector.metadata.dataset import DATASET_METADATA_KEYS
+from collector.parsing.errors import ExtractionError
 from collector.search import (
     INVALID_METADATA_MESSAGE,
     PROVIDER_UNAVAILABLE_MESSAGE,

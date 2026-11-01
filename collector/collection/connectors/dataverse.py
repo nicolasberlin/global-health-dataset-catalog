@@ -5,10 +5,10 @@ from __future__ import annotations
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from collector.collection.connectors.shared import positive_id, repository_origin, text
+from collector.collection.extraction.distributions import guess_format
 from collector.collection.records import NormalizedRecord, RecordIdentity
-from collector.extraction.distributions import guess_format
-from collector.storage.metadata import normalize_doi
-from collector.storage.models import DistributionCandidate
+from collector.metadata.provenance import normalize_doi
+from collector.models import DistributionCandidate
 
 
 class DataverseConnector:

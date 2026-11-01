@@ -1,6 +1,6 @@
 # Python Function Index
 
-Snapshot of the working-tree code on **1 November 2026**, based on Git commit `6ef0c60`, including the independent core API and public Search Lab. The private web interface is excluded.
+Snapshot of the working-tree code on **1 November 2026**, based on Git commit `8f1b81c`, including the independent core API and public Search Lab. The private web interface is excluded.
 
 This index lists **874 function and method definitions in 159 project Python source files**, excluding tests. It includes private functions, methods, properties and named local functions. Lambdas and methods generated automatically by dataclasses are not named source definitions and are excluded.
 
@@ -125,28 +125,26 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/collection/eligibility/factory.py](#collector-collection-eligibility-factory-py) — 1 definition
 - [collector/collection/eligibility/models.py](#collector-collection-eligibility-models-py) — 1 definition
 - [collector/collection/eligibility/prompts.py](#collector-collection-eligibility-prompts-py) — 3 definitions
+- [collector/collection/extraction/distributions.py](#collector-collection-extraction-distributions-py) — 8 definitions
+- [collector/collection/extraction/extractor.py](#collector-collection-extraction-extractor-py) — 1 definition
+- [collector/collection/extraction/graph.py](#collector-collection-extraction-graph-py) — 9 definitions
+- [collector/collection/extraction/html.py](#collector-collection-extraction-html-py) — 7 definitions
+- [collector/collection/extraction/json_ld.py](#collector-collection-extraction-json_ld-py) — 9 definitions
+- [collector/collection/extraction/source_identity.py](#collector-collection-extraction-source_identity-py) — 2 definitions
 - [collector/collection/failures.py](#collector-collection-failures-py) — 1 definition
-- [collector/collection/pipeline.py](#collector-collection-pipeline-py) — 7 definitions
+- [collector/collection/page_analysis.py](#collector-collection-page_analysis-py) — 7 definitions
 - [collector/collection/record_mapping.py](#collector-collection-record_mapping-py) — 1 definition
 - [collector/collection/records.py](#collector-collection-records-py) — 1 definition
 - [collector/collection/resources.py](#collector-collection-resources-py) — 1 definition
 - [collector/collection/service.py](#collector-collection-service-py) — 2 definitions
 - [collector/collection/strategies/dataverse.py](#collector-collection-strategies-dataverse-py) — 2 definitions
+- [collector/collection/validation/distributions.py](#collector-collection-validation-distributions-py) — 19 definitions
+- [collector/collection/validation/json_sample.py](#collector-collection-validation-json_sample-py) — 6 definitions
 - [collector/collection/workflows/record.py](#collector-collection-workflows-record-py) — 8 definitions
 - [collector/collection/workflows/source.py](#collector-collection-workflows-source-py) — 5 definitions
 - [collector/config.py](#collector-config-py) — 5 definitions
 - [collector/diagnostics.py](#collector-diagnostics-py) — 8 definitions
 - [collector/execution.py](#collector-execution-py) — 9 definitions
-- [collector/extraction/dataset_metadata.py](#collector-extraction-dataset_metadata-py) — 10 definitions
-- [collector/extraction/distributions.py](#collector-extraction-distributions-py) — 8 definitions
-- [collector/extraction/errors.py](#collector-extraction-errors-py) — 1 definition
-- [collector/extraction/extractor.py](#collector-extraction-extractor-py) — 1 definition
-- [collector/extraction/graph.py](#collector-extraction-graph-py) — 9 definitions
-- [collector/extraction/html.py](#collector-extraction-html-py) — 7 definitions
-- [collector/extraction/json_ld.py](#collector-extraction-json_ld-py) — 9 definitions
-- [collector/extraction/limits.py](#collector-extraction-limits-py) — 5 definitions
-- [collector/extraction/source_identity.py](#collector-extraction-source_identity-py) — 2 definitions
-- [collector/extraction/text.py](#collector-extraction-text-py) — 15 definitions
 - [collector/llm/checkpoints.py](#collector-llm-checkpoints-py) — 4 definitions
 - [collector/llm/classifier.py](#collector-llm-classifier-py) — 4 definitions
 - [collector/llm/client.py](#collector-llm-client-py) — 10 definitions
@@ -155,23 +153,25 @@ Source links point to line numbers in this snapshot. Positions may change when t
 - [collector/llm/providers/epfl_rcp.py](#collector-llm-providers-epfl_rcp-py) — 1 definition
 - [collector/llm/voter_factory.py](#collector-llm-voter_factory-py) — 2 definitions
 - [collector/llm/voting.py](#collector-llm-voting-py) — 10 definitions
+- [collector/metadata/dataset.py](#collector-metadata-dataset-py) — 10 definitions
+- [collector/metadata/provenance.py](#collector-metadata-provenance-py) — 3 definitions
+- [collector/models.py](#collector-models-py) — 6 definitions
 - [collector/network/fetch.py](#collector-network-fetch-py) — 15 definitions
 - [collector/network/json.py](#collector-network-json-py) — 3 definitions
 - [collector/network/policy.py](#collector-network-policy-py) — 1 definition
 - [collector/network/resolver.py](#collector-network-resolver-py) — 3 definitions
 - [collector/network/transport.py](#collector-network-transport-py) — 20 definitions
 - [collector/observability.py](#collector-observability-py) — 5 definitions
+- [collector/parsing/errors.py](#collector-parsing-errors-py) — 1 definition
+- [collector/parsing/html_text.py](#collector-parsing-html_text-py) — 15 definitions
+- [collector/parsing/limits.py](#collector-parsing-limits-py) — 5 definitions
 - [collector/search/filtering.py](#collector-search-filtering-py) — 4 definitions
 - [collector/search/models.py](#collector-search-models-py) — 1 definition
 - [collector/search/providers/datacite/client.py](#collector-search-providers-datacite-client-py) — 3 definitions
 - [collector/search/providers/datacite/mapping.py](#collector-search-providers-datacite-mapping-py) — 3 definitions
 - [collector/search/providers/datacite/metadata.py](#collector-search-providers-datacite-metadata-py) — 22 definitions
 - [collector/search/service.py](#collector-search-service-py) — 5 definitions
-- [collector/storage/metadata.py](#collector-storage-metadata-py) — 3 definitions
-- [collector/storage/models.py](#collector-storage-models-py) — 6 definitions
 - [collector/url_utils.py](#collector-url_utils-py) — 5 definitions
-- [collector/validation/distributions.py](#collector-validation-distributions-py) — 19 definitions
-- [collector/validation/json_sample.py](#collector-validation-json_sample-py) — 6 definitions
 - [scripts/api_client.py](#scripts-api_client-py) — 41 definitions
 - [scripts/setup_api.py](#scripts-setup_api-py) — 8 definitions
 - [scripts/start_api.py](#scripts-start_api-py) — 3 definitions
@@ -1398,6 +1398,84 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_dataset_page_eligibility_system_prompt`](../../collector/collection/eligibility/prompts.py#L20) | `_dataset_page_eligibility_system_prompt() -> str` | function / method |
 | [`_dataset_page_eligibility_response_schema`](../../collector/collection/eligibility/prompts.py#L40) | `_dataset_page_eligibility_response_schema() -> dict[str, object]` | function / method |
 
+<a id="collector-collection-extraction-distributions-py"></a>
+
+## collector/collection/extraction/distributions.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`extract_distributions`](../../collector/collection/extraction/distributions.py#L58) | `extract_distributions(page: PageSnapshot) -> list[DistributionCandidate]` | function / method |
+| [`guess_format`](../../collector/collection/extraction/distributions.py#L83) | `guess_format(url: str, anchor: str='', mime_type: str='') -> tuple[str, str]` | function / method |
+| [`_candidate_from_link`](../../collector/collection/extraction/distributions.py#L103) | `_candidate_from_link(link: LinkCandidate) -> DistributionCandidate \| None` | function / method |
+| [`_schema_distribution_candidates`](../../collector/collection/extraction/distributions.py#L146) | `_schema_distribution_candidates(page: PageSnapshot, scoped: tuple[object, ...]) -> list[DistributionCandidate]` | function / method |
+| [`_deduplicate_candidates`](../../collector/collection/extraction/distributions.py#L191) | `_deduplicate_candidates(candidates: list[DistributionCandidate]) -> list[DistributionCandidate]` | function / method |
+| [`_guess_path_extension`](../../collector/collection/extraction/distributions.py#L205) | `_guess_path_extension(url: str) -> str` | function / method |
+| [`_guess_query_extension`](../../collector/collection/extraction/distributions.py#L219) | `_guess_query_extension(url: str) -> str` | function / method |
+| [`_looks_like_api`](../../collector/collection/extraction/distributions.py#L229) | `_looks_like_api(url: str, anchor: str='') -> bool` | function / method |
+
+<a id="collector-collection-extraction-extractor-py"></a>
+
+## collector/collection/extraction/extractor.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`extract_page`](../../collector/collection/extraction/extractor.py#L31) | `extract_page(url: str, html: str, *, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS, expected_identity: dict[str, str] \| None=None) -> PageSnapshot` | function / method |
+
+<a id="collector-collection-extraction-graph-py"></a>
+
+## collector/collection/extraction/graph.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`select_dataset_scope`](../../collector/collection/extraction/graph.py#L26) | `select_dataset_scope(evidence: object, page_url: str, canonical_url: str='', *, citation_doi: str='', expected_identity: dict[str, str] \| None=None, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS) -> DatasetScope` | function / method |
+| [`_is_type`](../../collector/collection/extraction/graph.py#L92) | `_is_type(node: dict, name: str) -> bool` | function / method |
+| [`_identifiers`](../../collector/collection/extraction/graph.py#L102) | `_identifiers(value: object) -> list[str]` | function / method |
+| [`_embedded_objects`](../../collector/collection/extraction/graph.py#L113) | `_embedded_objects(value: object) -> list[dict]` | function / method |
+| [`_reference_id`](../../collector/collection/extraction/graph.py#L119) | `_reference_id(value: object, page_url: str) -> str` | function / method |
+| [`_matches_url`](../../collector/collection/extraction/graph.py#L128) | `_matches_url(node: dict, urls: set[str], page_url: str) -> bool` | function / method |
+| [`_identity_score`](../../collector/collection/extraction/graph.py#L135) | `_identity_score(node: dict, urls: set[str], dois: set[str], entities: set[str], base: str, identifiers: set[str], values: list[str], is_main_entity: bool)` | function / method |
+| [`_LocalResolver.__init__`](../../collector/collection/extraction/graph.py#L148) | `__init__(self, index, page_url: str, limits: ExtractionLimits)` | function / method |
+| [`_LocalResolver.resolve`](../../collector/collection/extraction/graph.py#L152) | `resolve(self, value, depth: int=0, active: frozenset[str]=frozenset())` | function / method |
+
+<a id="collector-collection-extraction-html-py"></a>
+
+## collector/collection/extraction/html.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_PageHTMLParser.__init__`](../../collector/collection/extraction/html.py#L24) | `__init__(self, url: str, limits: ExtractionLimits) -> None` | function / method |
+| [`_PageHTMLParser.handle_starttag`](../../collector/collection/extraction/html.py#L45) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
+| [`_PageHTMLParser.handle_endtag`](../../collector/collection/extraction/html.py#L84) | `handle_endtag(self, tag: str) -> None` | function / method |
+| [`_PageHTMLParser.handle_data`](../../collector/collection/extraction/html.py#L108) | `handle_data(self, data: str) -> None` | function / method |
+| [`_PageHTMLParser._handle_meta`](../../collector/collection/extraction/html.py#L136) | `_handle_meta(self, attributes: dict[str, str]) -> None` | function / method |
+| [`_PageHTMLParser._parse_json_ld`](../../collector/collection/extraction/html.py#L184) | `_parse_json_ld(self, script_text: str) -> None` | function / method |
+| [`_url_extension`](../../collector/collection/extraction/html.py#L193) | `_url_extension(url: str) -> str` | function / method |
+
+<a id="collector-collection-extraction-json_ld-py"></a>
+
+## collector/collection/extraction/json_ld.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_publisher_from_json_ld`](../../collector/collection/extraction/json_ld.py#L15) | `_publisher_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
+| [`_geography_from_json_ld`](../../collector/collection/extraction/json_ld.py#L28) | `_geography_from_json_ld(json_ld_items: list[object]) -> list[str]` | function / method |
+| [`_date_from_json_ld`](../../collector/collection/extraction/json_ld.py#L47) | `_date_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
+| [`_license_from_json_ld`](../../collector/collection/extraction/json_ld.py#L57) | `_license_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
+| [`_size_from_json_ld`](../../collector/collection/extraction/json_ld.py#L71) | `_size_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
+| [`_modalities_from_json_ld`](../../collector/collection/extraction/json_ld.py#L81) | `_modalities_from_json_ld(json_ld_items: list[object]) -> list[str]` | function / method |
+| [`_iter_json_objects`](../../collector/collection/extraction/json_ld.py#L99) | `_iter_json_objects(value: object) -> list[dict[str, object]]` | function / method |
+| [`_root_objects`](../../collector/collection/extraction/json_ld.py#L103) | `_root_objects(value: list[object])` | function / method |
+| [`_doi_from_json_ld`](../../collector/collection/extraction/json_ld.py#L107) | `_doi_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
+
+<a id="collector-collection-extraction-source_identity-py"></a>
+
+## collector/collection/extraction/source_identity.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`identify_source`](../../collector/collection/extraction/source_identity.py#L24) | `identify_source(url: str) -> SourceIdentity` | function / method |
+| [`_kaggle_uploader`](../../collector/collection/extraction/source_identity.py#L38) | `_kaggle_uploader(path: str) -> str` | function / method |
+
 <a id="collector-collection-failures-py"></a>
 
 ## collector/collection/failures.py
@@ -1406,19 +1484,19 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | --- | --- | --- |
 | [`CollectionStepError.__init__`](../../collector/collection/failures.py#L11) | `__init__(self, code: str, phase: str, *, http_status: int \| None=None, final_url: str='', service_http_status: int \| None=None)` | function / method |
 
-<a id="collector-collection-pipeline-py"></a>
+<a id="collector-collection-page_analysis-py"></a>
 
-## collector/collection/pipeline.py
+## collector/collection/page_analysis.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`analyze_html_page`](../../collector/collection/pipeline.py#L24) | `analyze_html_page(url: str, html: str, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None, *, discovered_page: DiscoveredPage \| None=None, distribution_candidates: list[DistributionCandidate] \| None=None, record_url: str \| None=None, record_identity: dict[str, str] \| None=None, page_snapshot: PageSnapshot \| None=None) -> CollectedDataset \| None` | function / method |
-| [`analyze_discovered_page`](../../collector/collection/pipeline.py#L104) | `analyze_discovered_page(discovered_page: DiscoveredPage, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None) -> CollectedDataset \| None` | function / method |
-| [`_classifier_or_default`](../../collector/collection/pipeline.py#L178) | `_classifier_or_default(classifier: PageClassifier \| None) -> PageClassifier` | function / method |
-| [`_usable_distribution`](../../collector/collection/pipeline.py#L183) | `_usable_distribution(distribution: DistributionCandidate) -> bool` | function / method |
-| [`_merge_discovery_metadata`](../../collector/collection/pipeline.py#L193) | `_merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot` | function / method |
-| [`eligible_resources`](../../collector/collection/pipeline.py#L217) | `eligible_resources(resolved: StrategyResult, *, expected_identity: dict[str, str] \| None=None) -> list[DistributionCandidate]` | function / method |
-| [`classify_resolution`](../../collector/collection/pipeline.py#L230) | `classify_resolution(resolved: StrategyResult, resources: list[DistributionCandidate], config: CollectorConfig, classifier: PageClassifier \| None, *, record_url: str \| None=None, known_record: NormalizedRecord \| None=None, record_identity: dict[str, str] \| None=None) -> CollectedDataset \| None` | function / method |
+| [`analyze_html_page`](../../collector/collection/page_analysis.py#L24) | `analyze_html_page(url: str, html: str, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None, *, discovered_page: DiscoveredPage \| None=None, distribution_candidates: list[DistributionCandidate] \| None=None, record_url: str \| None=None, record_identity: dict[str, str] \| None=None, page_snapshot: PageSnapshot \| None=None) -> CollectedDataset \| None` | function / method |
+| [`analyze_discovered_page`](../../collector/collection/page_analysis.py#L104) | `analyze_discovered_page(discovered_page: DiscoveredPage, config: CollectorConfig=DEFAULT_CONFIG, classifier: PageClassifier \| None=None) -> CollectedDataset \| None` | function / method |
+| [`_classifier_or_default`](../../collector/collection/page_analysis.py#L178) | `_classifier_or_default(classifier: PageClassifier \| None) -> PageClassifier` | function / method |
+| [`_usable_distribution`](../../collector/collection/page_analysis.py#L183) | `_usable_distribution(distribution: DistributionCandidate) -> bool` | function / method |
+| [`_merge_discovery_metadata`](../../collector/collection/page_analysis.py#L193) | `_merge_discovery_metadata(page: PageSnapshot, discovered: DiscoveredPage) -> PageSnapshot` | function / method |
+| [`eligible_resources`](../../collector/collection/page_analysis.py#L217) | `eligible_resources(resolved: StrategyResult, *, expected_identity: dict[str, str] \| None=None) -> list[DistributionCandidate]` | function / method |
+| [`classify_resolution`](../../collector/collection/page_analysis.py#L230) | `classify_resolution(resolved: StrategyResult, resources: list[DistributionCandidate], config: CollectorConfig, classifier: PageClassifier \| None, *, record_url: str \| None=None, known_record: NormalizedRecord \| None=None, record_identity: dict[str, str] \| None=None) -> CollectedDataset \| None` | function / method |
 
 <a id="collector-collection-record_mapping-py"></a>
 
@@ -1462,20 +1540,59 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`record_api_url`](../../collector/collection/strategies/dataverse.py#L12) | `record_api_url(url: str, hosts: tuple[str, ...]) -> str \| None` | function / method |
 | [`resolve_metadata`](../../collector/collection/strategies/dataverse.py#L16) | `resolve_metadata(url: str, payload: dict \| list) -> StrategyResult` | function / method |
 
+<a id="collector-collection-validation-distributions-py"></a>
+
+## collector/collection/validation/distributions.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`validate_distribution`](../../collector/collection/validation/distributions.py#L34) | `validate_distribution(distribution: DistributionCandidate, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_sample_bytes: int=DEFAULT_CONFIG.max_sample_bytes, probe: ProbeFunction \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> ValidationResult` | function / method |
+| [`page_access_diagnostic`](../../collector/collection/validation/distributions.py#L88) | `page_access_diagnostic(html: str) -> Diagnostic \| None` | function / method |
+| [`probe_url`](../../collector/collection/validation/distributions.py#L105) | `probe_url(url: str, method: str, timeout: float, max_bytes: int, headers: dict[str, str] \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> HTTPProbe` | function / method |
+| [`_needs_partial_get`](../../collector/collection/validation/distributions.py#L170) | `_needs_partial_get(probe: HTTPProbe) -> bool` | function / method |
+| [`_response_status`](../../collector/collection/validation/distributions.py#L177) | `_response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStatus, str]` | function / method |
+| [`_access_barrier`](../../collector/collection/validation/distributions.py#L281) | `_access_barrier(text: str) -> tuple[ValidationStatus, str] \| None` | function / method |
+| [`_AccessPage.__init__`](../../collector/collection/validation/distributions.py#L311) | `__init__(self) -> None` | function / method |
+| [`_AccessPage.handle_starttag`](../../collector/collection/validation/distributions.py#L319) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
+| [`_AccessPage.handle_endtag`](../../collector/collection/validation/distributions.py#L334) | `handle_endtag(self, tag: str) -> None` | function / method |
+| [`_AccessPage.handle_data`](../../collector/collection/validation/distributions.py#L340) | `handle_data(self, data: str) -> None` | function / method |
+| [`_prefix_range`](../../collector/collection/validation/distributions.py#L345) | `_prefix_range(probe: HTTPProbe) -> re.Match \| None` | function / method |
+| [`_sample_is_truncated`](../../collector/collection/validation/distributions.py#L359) | `_sample_is_truncated(probe: HTTPProbe) -> bool` | function / method |
+| [`_total_size`](../../collector/collection/validation/distributions.py#L370) | `_total_size(probe: HTTPProbe, head: HTTPProbe) -> int \| None` | function / method |
+| [`_validated_format`](../../collector/collection/validation/distributions.py#L393) | `_validated_format(distribution: DistributionCandidate, content_type: str, content_disposition: str, probe: HTTPProbe) -> str` | function / method |
+| [`_format_from_body_sample`](../../collector/collection/validation/distributions.py#L419) | `_format_from_body_sample(sample: bytes, truncated: bool=False) -> str` | function / method |
+| [`_decode_tabular_sample`](../../collector/collection/validation/distributions.py#L475) | `_decode_tabular_sample(sample: bytes, truncated: bool) -> str \| None` | function / method |
+| [`_plausible_table`](../../collector/collection/validation/distributions.py#L495) | `_plausible_table(text: str, delimiter: str, truncated: bool) -> bool` | function / method |
+| [`_header`](../../collector/collection/validation/distributions.py#L524) | `_header(probe: HTTPProbe, name: str) -> str` | function / method |
+| [`_parse_content_length`](../../collector/collection/validation/distributions.py#L528) | `_parse_content_length(value: str) -> int \| None` | function / method |
+
+<a id="collector-collection-validation-json_sample-py"></a>
+
+## collector/collection/validation/json_sample.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`reject_json_constant`](../../collector/collection/validation/json_sample.py#L24) | `reject_json_constant(value: str) -> None` | function / method |
+| [`read_json_prefix`](../../collector/collection/validation/json_sample.py#L29) | `read_json_prefix(sample: bytes) -> object` | function / method |
+| [`_PrefixReader.__init__`](../../collector/collection/validation/json_sample.py#L47) | `__init__(self, text: str)` | function / method |
+| [`_PrefixReader.whitespace`](../../collector/collection/validation/json_sample.py#L52) | `whitespace(self) -> None` | function / method |
+| [`_PrefixReader.value`](../../collector/collection/validation/json_sample.py#L56) | `value(self, depth: int) -> tuple[object, bool]` | function / method |
+| [`_PrefixReader.container`](../../collector/collection/validation/json_sample.py#L84) | `container(self, depth: int, mapping: bool) -> tuple[object, bool]` | function / method |
+
 <a id="collector-collection-workflows-record-py"></a>
 
 ## collector/collection/workflows/record.py
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`now`](../../collector/collection/workflows/record.py#L50) | `now()` | function / method |
-| [`collect_record`](../../collector/collection/workflows/record.py#L54) | `collect_record(url: str, config: CollectorConfig, *, fetch_html=None, fetch_json=None, validate=None, classifier=None, browser=None, observe=None, registry: ConnectorRegistry \| None=None) -> CollectionResult` | function / method |
-| [`collect_repository_candidate_with_report`](../../collector/collection/workflows/record.py#L295) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
-| [`_fetch_record_metadata`](../../collector/collection/workflows/record.py#L324) | `_fetch_record_metadata(url: str, selection: ConnectorSelection, api_url: str, fetch_json: Callable[[str], object], attempt: MethodAttempt) -> object` | function / method |
-| [`_fetch_record_metadata.<local>.related_json`](../../collector/collection/workflows/record.py#L341) | `related_json(metadata_url, *, evidence=evidence, request_count=request_count)` | function / method |
-| [`_validate_record_resources`](../../collector/collection/workflows/record.py#L385) | `_validate_record_resources(resources: list[DistributionCandidate], config: CollectorConfig, validate: ValidateDistributionFunction, *, attempt: MethodAttempt, check_state: ResourceCheckState, coverage: dict[str, object], context: str) -> ResourceSelection` | function / method |
-| [`_validate_record_resources.<local>.record_check`](../../collector/collection/workflows/record.py#L400) | `record_check(resource, validation, *, attempt=attempt)` | function / method |
-| [`_build_collection_result`](../../collector/collection/workflows/record.py#L419) | `_build_collection_result(datasets: list[CollectedDataset], *, analyzed: bool, rejected: bool, failed_checks: list[ValidationResult], unresolved: list[Diagnostic], attempts: list[MethodAttempt], coverage: dict[str, object]) -> CollectionResult` | function / method |
+| [`now`](../../collector/collection/workflows/record.py#L53) | `now()` | function / method |
+| [`collect_record`](../../collector/collection/workflows/record.py#L57) | `collect_record(url: str, config: CollectorConfig, *, fetch_html=None, fetch_json=None, validate=None, classifier=None, browser=None, observe=None, registry: ConnectorRegistry \| None=None) -> CollectionResult` | function / method |
+| [`collect_repository_candidate_with_report`](../../collector/collection/workflows/record.py#L298) | `collect_repository_candidate_with_report(candidate_url: str, config: CollectorConfig=DEFAULT_CONFIG, fetch_html: FetchHTMLFunction \| None=None, validate: ValidateDistributionFunction \| None=None, classifier: PageClassifier \| None=None, *, fetch_json=None, browser=None, observe=None, registry=None) -> CollectionResult` | function / method |
+| [`_fetch_record_metadata`](../../collector/collection/workflows/record.py#L327) | `_fetch_record_metadata(url: str, selection: ConnectorSelection, api_url: str, fetch_json: Callable[[str], object], attempt: MethodAttempt) -> object` | function / method |
+| [`_fetch_record_metadata.<local>.related_json`](../../collector/collection/workflows/record.py#L344) | `related_json(metadata_url, *, evidence=evidence, request_count=request_count)` | function / method |
+| [`_validate_record_resources`](../../collector/collection/workflows/record.py#L388) | `_validate_record_resources(resources: list[DistributionCandidate], config: CollectorConfig, validate: ValidateDistributionFunction, *, attempt: MethodAttempt, check_state: ResourceCheckState, coverage: dict[str, object], context: str) -> ResourceSelection` | function / method |
+| [`_validate_record_resources.<local>.record_check`](../../collector/collection/workflows/record.py#L403) | `record_check(resource, validation, *, attempt=attempt)` | function / method |
+| [`_build_collection_result`](../../collector/collection/workflows/record.py#L422) | `_build_collection_result(datasets: list[CollectedDataset], *, analyzed: bool, rejected: bool, failed_checks: list[ValidationResult], unresolved: list[Diagnostic], attempts: list[MethodAttempt], coverage: dict[str, object]) -> CollectionResult` | function / method |
 
 <a id="collector-collection-workflows-source-py"></a>
 
@@ -1531,143 +1648,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`BoundedThreadExecutor.submit`](../../collector/execution.py#L96) | `submit(self, fn, /, *args, **kwargs)` | function / method |
 | [`BoundedThreadExecutor._run`](../../collector/execution.py#L108) | `_run(self)` | function / method |
 | [`BoundedThreadExecutor.shutdown`](../../collector/execution.py#L128) | `shutdown(self, wait=True, *, cancel_futures=False)` | function / method |
-
-<a id="collector-extraction-dataset_metadata-py"></a>
-
-## collector/extraction/dataset_metadata.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`normalize_dataset_metadata`](../../collector/extraction/dataset_metadata.py#L25) | `normalize_dataset_metadata(metadata: Mapping[str, object] \| None) -> dict[str, str]` | function / method |
-| [`build_dataset_metadata`](../../collector/extraction/dataset_metadata.py#L35) | `build_dataset_metadata(*, title: str='', geography: Iterable[str]=(), date_of_publication: str='', dataset_url: str='', diseases: Iterable[str]=(), size_of_dataset: str='', demographic_information: Iterable[str]=(), sharing_license: str='', modality_of_data: Iterable[str]=(), description_of_dataset: str='') -> dict[str, str]` | function / method |
-| [`_value`](../../collector/extraction/dataset_metadata.py#L64) | `_value(value: object) -> str` | function / method |
-| [`_values`](../../collector/extraction/dataset_metadata.py#L72) | `_values(values: Iterable[str]) -> str` | function / method |
-| [`_diseases_from_text`](../../collector/extraction/dataset_metadata.py#L82) | `_diseases_from_text(value: str) -> list[str]` | function / method |
-| [`_demographics_from_text`](../../collector/extraction/dataset_metadata.py#L106) | `_demographics_from_text(value: str) -> list[str]` | function / method |
-| [`_modalities_from_text`](../../collector/extraction/dataset_metadata.py#L116) | `_modalities_from_text(value: str) -> list[str]` | function / method |
-| [`_country_values`](../../collector/extraction/dataset_metadata.py#L139) | `_country_values(value: object) -> list[str]` | function / method |
-| [`_metadata_text`](../../collector/extraction/dataset_metadata.py#L163) | `_metadata_text(value: object) -> str` | function / method |
-| [`_dedupe`](../../collector/extraction/dataset_metadata.py#L167) | `_dedupe(values: list[str]) -> list[str]` | function / method |
-
-<a id="collector-extraction-distributions-py"></a>
-
-## collector/extraction/distributions.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`extract_distributions`](../../collector/extraction/distributions.py#L58) | `extract_distributions(page: PageSnapshot) -> list[DistributionCandidate]` | function / method |
-| [`guess_format`](../../collector/extraction/distributions.py#L83) | `guess_format(url: str, anchor: str='', mime_type: str='') -> tuple[str, str]` | function / method |
-| [`_candidate_from_link`](../../collector/extraction/distributions.py#L103) | `_candidate_from_link(link: LinkCandidate) -> DistributionCandidate \| None` | function / method |
-| [`_schema_distribution_candidates`](../../collector/extraction/distributions.py#L146) | `_schema_distribution_candidates(page: PageSnapshot, scoped: tuple[object, ...]) -> list[DistributionCandidate]` | function / method |
-| [`_deduplicate_candidates`](../../collector/extraction/distributions.py#L191) | `_deduplicate_candidates(candidates: list[DistributionCandidate]) -> list[DistributionCandidate]` | function / method |
-| [`_guess_path_extension`](../../collector/extraction/distributions.py#L205) | `_guess_path_extension(url: str) -> str` | function / method |
-| [`_guess_query_extension`](../../collector/extraction/distributions.py#L219) | `_guess_query_extension(url: str) -> str` | function / method |
-| [`_looks_like_api`](../../collector/extraction/distributions.py#L229) | `_looks_like_api(url: str, anchor: str='') -> bool` | function / method |
-
-<a id="collector-extraction-errors-py"></a>
-
-## collector/extraction/errors.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`ExtractionError.__init__`](../../collector/extraction/errors.py#L7) | `__init__(self, reason: str, *, code: str='extraction_invalid_content') -> None` | function / method |
-
-<a id="collector-extraction-extractor-py"></a>
-
-## collector/extraction/extractor.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`extract_page`](../../collector/extraction/extractor.py#L31) | `extract_page(url: str, html: str, *, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS, expected_identity: dict[str, str] \| None=None) -> PageSnapshot` | function / method |
-
-<a id="collector-extraction-graph-py"></a>
-
-## collector/extraction/graph.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`select_dataset_scope`](../../collector/extraction/graph.py#L26) | `select_dataset_scope(evidence: object, page_url: str, canonical_url: str='', *, citation_doi: str='', expected_identity: dict[str, str] \| None=None, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS) -> DatasetScope` | function / method |
-| [`_is_type`](../../collector/extraction/graph.py#L92) | `_is_type(node: dict, name: str) -> bool` | function / method |
-| [`_identifiers`](../../collector/extraction/graph.py#L102) | `_identifiers(value: object) -> list[str]` | function / method |
-| [`_embedded_objects`](../../collector/extraction/graph.py#L113) | `_embedded_objects(value: object) -> list[dict]` | function / method |
-| [`_reference_id`](../../collector/extraction/graph.py#L119) | `_reference_id(value: object, page_url: str) -> str` | function / method |
-| [`_matches_url`](../../collector/extraction/graph.py#L128) | `_matches_url(node: dict, urls: set[str], page_url: str) -> bool` | function / method |
-| [`_identity_score`](../../collector/extraction/graph.py#L135) | `_identity_score(node: dict, urls: set[str], dois: set[str], entities: set[str], base: str, identifiers: set[str], values: list[str], is_main_entity: bool)` | function / method |
-| [`_LocalResolver.__init__`](../../collector/extraction/graph.py#L148) | `__init__(self, index, page_url: str, limits: ExtractionLimits)` | function / method |
-| [`_LocalResolver.resolve`](../../collector/extraction/graph.py#L152) | `resolve(self, value, depth: int=0, active: frozenset[str]=frozenset())` | function / method |
-
-<a id="collector-extraction-html-py"></a>
-
-## collector/extraction/html.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_PageHTMLParser.__init__`](../../collector/extraction/html.py#L24) | `__init__(self, url: str, limits: ExtractionLimits) -> None` | function / method |
-| [`_PageHTMLParser.handle_starttag`](../../collector/extraction/html.py#L45) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
-| [`_PageHTMLParser.handle_endtag`](../../collector/extraction/html.py#L84) | `handle_endtag(self, tag: str) -> None` | function / method |
-| [`_PageHTMLParser.handle_data`](../../collector/extraction/html.py#L108) | `handle_data(self, data: str) -> None` | function / method |
-| [`_PageHTMLParser._handle_meta`](../../collector/extraction/html.py#L136) | `_handle_meta(self, attributes: dict[str, str]) -> None` | function / method |
-| [`_PageHTMLParser._parse_json_ld`](../../collector/extraction/html.py#L184) | `_parse_json_ld(self, script_text: str) -> None` | function / method |
-| [`_url_extension`](../../collector/extraction/html.py#L193) | `_url_extension(url: str) -> str` | function / method |
-
-<a id="collector-extraction-json_ld-py"></a>
-
-## collector/extraction/json_ld.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_publisher_from_json_ld`](../../collector/extraction/json_ld.py#L15) | `_publisher_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
-| [`_geography_from_json_ld`](../../collector/extraction/json_ld.py#L28) | `_geography_from_json_ld(json_ld_items: list[object]) -> list[str]` | function / method |
-| [`_date_from_json_ld`](../../collector/extraction/json_ld.py#L47) | `_date_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
-| [`_license_from_json_ld`](../../collector/extraction/json_ld.py#L57) | `_license_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
-| [`_size_from_json_ld`](../../collector/extraction/json_ld.py#L71) | `_size_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
-| [`_modalities_from_json_ld`](../../collector/extraction/json_ld.py#L81) | `_modalities_from_json_ld(json_ld_items: list[object]) -> list[str]` | function / method |
-| [`_iter_json_objects`](../../collector/extraction/json_ld.py#L99) | `_iter_json_objects(value: object) -> list[dict[str, object]]` | function / method |
-| [`_root_objects`](../../collector/extraction/json_ld.py#L103) | `_root_objects(value: list[object])` | function / method |
-| [`_doi_from_json_ld`](../../collector/extraction/json_ld.py#L107) | `_doi_from_json_ld(json_ld_items: list[object]) -> str` | function / method |
-
-<a id="collector-extraction-limits-py"></a>
-
-## collector/extraction/limits.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`ExtractionLimits.__post_init__`](../../collector/extraction/limits.py#L26) | `__post_init__(self) -> None` | function / method |
-| [`enforce_limit`](../../collector/extraction/limits.py#L34) | `enforce_limit(value: int, maximum: int, reason: str) -> None` | function / method |
-| [`json_objects`](../../collector/extraction/limits.py#L39) | `json_objects(value: object, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS)` | function / method |
-| [`load_json_ld`](../../collector/extraction/limits.py#L61) | `load_json_ld(text: str, limits: ExtractionLimits)` | function / method |
-| [`_reject_constant`](../../collector/extraction/limits.py#L91) | `_reject_constant(value: str) -> None` | function / method |
-
-<a id="collector-extraction-source_identity-py"></a>
-
-## collector/extraction/source_identity.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`identify_source`](../../collector/extraction/source_identity.py#L24) | `identify_source(url: str) -> SourceIdentity` | function / method |
-| [`_kaggle_uploader`](../../collector/extraction/source_identity.py#L38) | `_kaggle_uploader(path: str) -> str` | function / method |
-
-<a id="collector-extraction-text-py"></a>
-
-## collector/extraction/text.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`_BoundedHTMLParser.__init__`](../../collector/extraction/text.py#L25) | `__init__(self, limits: ExtractionLimits) -> None` | function / method |
-| [`_BoundedHTMLParser._node`](../../collector/extraction/text.py#L31) | `_node(self) -> None` | function / method |
-| [`_BoundedHTMLParser._retain`](../../collector/extraction/text.py#L36) | `_retain(self, text: str) -> str` | function / method |
-| [`_BoundedHTMLParser._start`](../../collector/extraction/text.py#L42) | `_start(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
-| [`_BoundedHTMLParser._end`](../../collector/extraction/text.py#L53) | `_end(self, tag: str) -> None` | function / method |
-| [`_BoundedHTMLParser.handle_decl`](../../collector/extraction/text.py#L59) | `handle_decl(self, decl: str) -> None` | function / method |
-| [`_BoundedHTMLParser.handle_comment`](../../collector/extraction/text.py#L62) | `handle_comment(self, data: str) -> None` | function / method |
-| [`_BoundedHTMLParser.unknown_decl`](../../collector/extraction/text.py#L65) | `unknown_decl(self, data: str) -> None` | function / method |
-| [`_feed_html`](../../collector/extraction/text.py#L71) | `_feed_html(parser: _BoundedHTMLParser, html: str) -> None` | function / method |
-| [`_normalize_text`](../../collector/extraction/text.py#L86) | `_normalize_text(value: str) -> str` | function / method |
-| [`html_to_text`](../../collector/extraction/text.py#L90) | `html_to_text(value: str, *, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS) -> str` | function / method |
-| [`_TextHTMLParser.__init__`](../../collector/extraction/text.py#L103) | `__init__(self, limits: ExtractionLimits) -> None` | function / method |
-| [`_TextHTMLParser.handle_starttag`](../../collector/extraction/text.py#L107) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
-| [`_TextHTMLParser.handle_endtag`](../../collector/extraction/text.py#L110) | `handle_endtag(self, tag: str) -> None` | function / method |
-| [`_TextHTMLParser.handle_data`](../../collector/extraction/text.py#L113) | `handle_data(self, data: str) -> None` | function / method |
 
 <a id="collector-llm-checkpoints-py"></a>
 
@@ -1738,8 +1718,8 @@ Source links point to line numbers in this snapshot. Positions may change when t
 
 | Definition | Signature | Kind |
 | --- | --- | --- |
-| [`validate_default_classifier_configuration`](../../collector/llm/voter_factory.py#L34) | `validate_default_classifier_configuration() -> None` | function / method |
-| [`_voters`](../../collector/llm/voter_factory.py#L43) | `_voters(provider_builder, classifier_type, validate, vote_store)` | function / method |
+| [`validate_default_classifier_configuration`](../../collector/llm/voter_factory.py#L51) | `validate_default_classifier_configuration() -> None` | function / method |
+| [`build_llm_voters`](../../collector/llm/voter_factory.py#L60) | `build_llm_voters(provider_builder, classifier_type, validate, vote_store)` | function / method |
 
 <a id="collector-llm-voting-py"></a>
 
@@ -1757,6 +1737,46 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`VotingEnsemble.__init__`](../../collector/llm/voting.py#L167) | `__init__(self, voters: Sequence[tuple[str, ClassifierT]], minimum_accept_votes: int=2, minimum_successful_votes: int \| None=None, *, name: str='VotingEnsemble') -> None` | function / method |
 | [`VotingEnsemble.voter_ids`](../../collector/llm/voting.py#L190) | `voter_ids(self) -> tuple[str, ...]` | property |
 | [`VotingEnsemble.evaluate`](../../collector/llm/voting.py#L194) | `evaluate(self, *, classify: Callable[[ClassifierT], ClassificationT], make_vote: Callable[[str, ClassificationT], EnsembleVoteT], handled_errors: tuple[type[Exception], ...]) -> EnsembleVotingResult[EnsembleVoteT]` | function / method |
+
+<a id="collector-metadata-dataset-py"></a>
+
+## collector/metadata/dataset.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`normalize_dataset_metadata`](../../collector/metadata/dataset.py#L25) | `normalize_dataset_metadata(metadata: Mapping[str, object] \| None) -> dict[str, str]` | function / method |
+| [`build_dataset_metadata`](../../collector/metadata/dataset.py#L35) | `build_dataset_metadata(*, title: str='', geography: Iterable[str]=(), date_of_publication: str='', dataset_url: str='', diseases: Iterable[str]=(), size_of_dataset: str='', demographic_information: Iterable[str]=(), sharing_license: str='', modality_of_data: Iterable[str]=(), description_of_dataset: str='') -> dict[str, str]` | function / method |
+| [`_value`](../../collector/metadata/dataset.py#L64) | `_value(value: object) -> str` | function / method |
+| [`_values`](../../collector/metadata/dataset.py#L72) | `_values(values: Iterable[str]) -> str` | function / method |
+| [`_diseases_from_text`](../../collector/metadata/dataset.py#L82) | `_diseases_from_text(value: str) -> list[str]` | function / method |
+| [`_demographics_from_text`](../../collector/metadata/dataset.py#L106) | `_demographics_from_text(value: str) -> list[str]` | function / method |
+| [`_modalities_from_text`](../../collector/metadata/dataset.py#L116) | `_modalities_from_text(value: str) -> list[str]` | function / method |
+| [`_country_values`](../../collector/metadata/dataset.py#L139) | `_country_values(value: object) -> list[str]` | function / method |
+| [`_metadata_text`](../../collector/metadata/dataset.py#L163) | `_metadata_text(value: object) -> str` | function / method |
+| [`_dedupe`](../../collector/metadata/dataset.py#L167) | `_dedupe(values: list[str]) -> list[str]` | function / method |
+
+<a id="collector-metadata-provenance-py"></a>
+
+## collector/metadata/provenance.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`normalize_doi`](../../collector/metadata/provenance.py#L15) | `normalize_doi(value: object) -> str` | function / method |
+| [`metadata_evidence`](../../collector/metadata/provenance.py#L23) | `metadata_evidence(dataset: PageSnapshot \| CollectedDataset, *, kind: str, source_url: str) -> dict[str, object]` | function / method |
+| [`enrich_from_repository`](../../collector/metadata/provenance.py#L37) | `enrich_from_repository(dataset: CollectedDataset, candidate: dict[str, object]) -> CollectedDataset` | function / method |
+
+<a id="collector-models-py"></a>
+
+## collector/models.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`PageSnapshot.__post_init__`](../../collector/models.py#L65) | `__post_init__(self) -> None` | function / method |
+| [`PageSnapshot.dataset_metadata`](../../collector/models.py#L98) | `dataset_metadata(self) -> dict[str, str]` | function / method |
+| [`_first_text`](../../collector/models.py#L115) | `_first_text(*values: str) -> str` | function / method |
+| [`_normalized_values`](../../collector/models.py#L119) | `_normalized_values(values: tuple[str, ...]) -> tuple[str, ...]` | function / method |
+| [`ValidationResult.__post_init__`](../../collector/models.py#L186) | `__post_init__(self) -> None` | function / method |
+| [`CollectedDataset.__post_init__`](../../collector/models.py#L232) | `__post_init__(self) -> None` | function / method |
 
 <a id="collector-network-fetch-py"></a>
 
@@ -1847,6 +1867,48 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`operation_context`](../../collector/observability.py#L60) | `operation_context(*, job_id=None, candidate_id=None, search_id=None, queue=None)` | contextmanager |
 | [`measure_operation`](../../collector/observability.py#L75) | `measure_operation(event: str)` | contextmanager |
 
+<a id="collector-parsing-errors-py"></a>
+
+## collector/parsing/errors.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`ExtractionError.__init__`](../../collector/parsing/errors.py#L7) | `__init__(self, reason: str, *, code: str='extraction_invalid_content') -> None` | function / method |
+
+<a id="collector-parsing-html_text-py"></a>
+
+## collector/parsing/html_text.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`_BoundedHTMLParser.__init__`](../../collector/parsing/html_text.py#L25) | `__init__(self, limits: ExtractionLimits) -> None` | function / method |
+| [`_BoundedHTMLParser._node`](../../collector/parsing/html_text.py#L31) | `_node(self) -> None` | function / method |
+| [`_BoundedHTMLParser._retain`](../../collector/parsing/html_text.py#L36) | `_retain(self, text: str) -> str` | function / method |
+| [`_BoundedHTMLParser._start`](../../collector/parsing/html_text.py#L42) | `_start(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
+| [`_BoundedHTMLParser._end`](../../collector/parsing/html_text.py#L53) | `_end(self, tag: str) -> None` | function / method |
+| [`_BoundedHTMLParser.handle_decl`](../../collector/parsing/html_text.py#L59) | `handle_decl(self, decl: str) -> None` | function / method |
+| [`_BoundedHTMLParser.handle_comment`](../../collector/parsing/html_text.py#L62) | `handle_comment(self, data: str) -> None` | function / method |
+| [`_BoundedHTMLParser.unknown_decl`](../../collector/parsing/html_text.py#L65) | `unknown_decl(self, data: str) -> None` | function / method |
+| [`_feed_html`](../../collector/parsing/html_text.py#L71) | `_feed_html(parser: _BoundedHTMLParser, html: str) -> None` | function / method |
+| [`_normalize_text`](../../collector/parsing/html_text.py#L86) | `_normalize_text(value: str) -> str` | function / method |
+| [`html_to_text`](../../collector/parsing/html_text.py#L90) | `html_to_text(value: str, *, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS) -> str` | function / method |
+| [`_TextHTMLParser.__init__`](../../collector/parsing/html_text.py#L103) | `__init__(self, limits: ExtractionLimits) -> None` | function / method |
+| [`_TextHTMLParser.handle_starttag`](../../collector/parsing/html_text.py#L107) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
+| [`_TextHTMLParser.handle_endtag`](../../collector/parsing/html_text.py#L110) | `handle_endtag(self, tag: str) -> None` | function / method |
+| [`_TextHTMLParser.handle_data`](../../collector/parsing/html_text.py#L113) | `handle_data(self, data: str) -> None` | function / method |
+
+<a id="collector-parsing-limits-py"></a>
+
+## collector/parsing/limits.py
+
+| Definition | Signature | Kind |
+| --- | --- | --- |
+| [`ExtractionLimits.__post_init__`](../../collector/parsing/limits.py#L26) | `__post_init__(self) -> None` | function / method |
+| [`enforce_limit`](../../collector/parsing/limits.py#L34) | `enforce_limit(value: int, maximum: int, reason: str) -> None` | function / method |
+| [`json_objects`](../../collector/parsing/limits.py#L39) | `json_objects(value: object, limits: ExtractionLimits=DEFAULT_EXTRACTION_LIMITS)` | function / method |
+| [`load_json_ld`](../../collector/parsing/limits.py#L61) | `load_json_ld(text: str, limits: ExtractionLimits)` | function / method |
+| [`_reject_constant`](../../collector/parsing/limits.py#L91) | `_reject_constant(value: str) -> None` | function / method |
+
 <a id="collector-search-filtering-py"></a>
 
 ## collector/search/filtering.py
@@ -1927,29 +1989,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`_metadata_text`](../../collector/search/service.py#L134) | `_metadata_text(value: str, *, fallback: str='') -> str` | function / method |
 | [`_metadata_items`](../../collector/search/service.py#L138) | `_metadata_items(value: str) -> tuple[str, ...]` | function / method |
 
-<a id="collector-storage-metadata-py"></a>
-
-## collector/storage/metadata.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`normalize_doi`](../../collector/storage/metadata.py#L15) | `normalize_doi(value: object) -> str` | function / method |
-| [`metadata_evidence`](../../collector/storage/metadata.py#L23) | `metadata_evidence(dataset: PageSnapshot \| CollectedDataset, *, kind: str, source_url: str) -> dict[str, object]` | function / method |
-| [`enrich_from_repository`](../../collector/storage/metadata.py#L37) | `enrich_from_repository(dataset: CollectedDataset, candidate: dict[str, object]) -> CollectedDataset` | function / method |
-
-<a id="collector-storage-models-py"></a>
-
-## collector/storage/models.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`PageSnapshot.__post_init__`](../../collector/storage/models.py#L65) | `__post_init__(self) -> None` | function / method |
-| [`PageSnapshot.dataset_metadata`](../../collector/storage/models.py#L98) | `dataset_metadata(self) -> dict[str, str]` | function / method |
-| [`_first_text`](../../collector/storage/models.py#L115) | `_first_text(*values: str) -> str` | function / method |
-| [`_normalized_values`](../../collector/storage/models.py#L119) | `_normalized_values(values: tuple[str, ...]) -> tuple[str, ...]` | function / method |
-| [`ValidationResult.__post_init__`](../../collector/storage/models.py#L186) | `__post_init__(self) -> None` | function / method |
-| [`CollectedDataset.__post_init__`](../../collector/storage/models.py#L232) | `__post_init__(self) -> None` | function / method |
-
 <a id="collector-url_utils-py"></a>
 
 ## collector/url_utils.py
@@ -1961,45 +2000,6 @@ Source links point to line numbers in this snapshot. Positions may change when t
 | [`require_http_url`](../../collector/url_utils.py#L54) | `require_http_url(value: str) -> str` | function / method |
 | [`select_dataset_url`](../../collector/url_utils.py#L61) | `select_dataset_url(page_url: str, canonical_href: str='') -> str` | function / method |
 | [`same_domain`](../../collector/url_utils.py#L73) | `same_domain(left_url: str, right_url: str) -> bool` | function / method |
-
-<a id="collector-validation-distributions-py"></a>
-
-## collector/validation/distributions.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`validate_distribution`](../../collector/validation/distributions.py#L34) | `validate_distribution(distribution: DistributionCandidate, timeout: float=DEFAULT_CONFIG.request_timeout_seconds, max_sample_bytes: int=DEFAULT_CONFIG.max_sample_bytes, probe: ProbeFunction \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> ValidationResult` | function / method |
-| [`page_access_diagnostic`](../../collector/validation/distributions.py#L88) | `page_access_diagnostic(html: str) -> Diagnostic \| None` | function / method |
-| [`probe_url`](../../collector/validation/distributions.py#L105) | `probe_url(url: str, method: str, timeout: float, max_bytes: int, headers: dict[str, str] \| None=None, user_agent: str=DEFAULT_CONFIG.user_agent) -> HTTPProbe` | function / method |
-| [`_needs_partial_get`](../../collector/validation/distributions.py#L170) | `_needs_partial_get(probe: HTTPProbe) -> bool` | function / method |
-| [`_response_status`](../../collector/validation/distributions.py#L177) | `_response_status(probe: HTTPProbe, format_name: str) -> tuple[ValidationStatus, str]` | function / method |
-| [`_access_barrier`](../../collector/validation/distributions.py#L281) | `_access_barrier(text: str) -> tuple[ValidationStatus, str] \| None` | function / method |
-| [`_AccessPage.__init__`](../../collector/validation/distributions.py#L311) | `__init__(self) -> None` | function / method |
-| [`_AccessPage.handle_starttag`](../../collector/validation/distributions.py#L319) | `handle_starttag(self, tag: str, attrs: list[tuple[str, str \| None]]) -> None` | function / method |
-| [`_AccessPage.handle_endtag`](../../collector/validation/distributions.py#L334) | `handle_endtag(self, tag: str) -> None` | function / method |
-| [`_AccessPage.handle_data`](../../collector/validation/distributions.py#L340) | `handle_data(self, data: str) -> None` | function / method |
-| [`_prefix_range`](../../collector/validation/distributions.py#L345) | `_prefix_range(probe: HTTPProbe) -> re.Match \| None` | function / method |
-| [`_sample_is_truncated`](../../collector/validation/distributions.py#L359) | `_sample_is_truncated(probe: HTTPProbe) -> bool` | function / method |
-| [`_total_size`](../../collector/validation/distributions.py#L370) | `_total_size(probe: HTTPProbe, head: HTTPProbe) -> int \| None` | function / method |
-| [`_validated_format`](../../collector/validation/distributions.py#L393) | `_validated_format(distribution: DistributionCandidate, content_type: str, content_disposition: str, probe: HTTPProbe) -> str` | function / method |
-| [`_format_from_body_sample`](../../collector/validation/distributions.py#L419) | `_format_from_body_sample(sample: bytes, truncated: bool=False) -> str` | function / method |
-| [`_decode_tabular_sample`](../../collector/validation/distributions.py#L475) | `_decode_tabular_sample(sample: bytes, truncated: bool) -> str \| None` | function / method |
-| [`_plausible_table`](../../collector/validation/distributions.py#L495) | `_plausible_table(text: str, delimiter: str, truncated: bool) -> bool` | function / method |
-| [`_header`](../../collector/validation/distributions.py#L524) | `_header(probe: HTTPProbe, name: str) -> str` | function / method |
-| [`_parse_content_length`](../../collector/validation/distributions.py#L528) | `_parse_content_length(value: str) -> int \| None` | function / method |
-
-<a id="collector-validation-json_sample-py"></a>
-
-## collector/validation/json_sample.py
-
-| Definition | Signature | Kind |
-| --- | --- | --- |
-| [`reject_json_constant`](../../collector/validation/json_sample.py#L24) | `reject_json_constant(value: str) -> None` | function / method |
-| [`read_json_prefix`](../../collector/validation/json_sample.py#L29) | `read_json_prefix(sample: bytes) -> object` | function / method |
-| [`_PrefixReader.__init__`](../../collector/validation/json_sample.py#L47) | `__init__(self, text: str)` | function / method |
-| [`_PrefixReader.whitespace`](../../collector/validation/json_sample.py#L52) | `whitespace(self) -> None` | function / method |
-| [`_PrefixReader.value`](../../collector/validation/json_sample.py#L56) | `value(self, depth: int) -> tuple[object, bool]` | function / method |
-| [`_PrefixReader.container`](../../collector/validation/json_sample.py#L84) | `container(self, depth: int, mapping: bool) -> tuple[object, bool]` | function / method |
 
 <a id="scripts-api_client-py"></a>
 

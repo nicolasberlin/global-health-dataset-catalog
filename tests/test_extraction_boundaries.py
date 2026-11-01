@@ -4,12 +4,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
+from collector.collection.extraction.extractor import extract_page, html_to_text
+from collector.collection.extraction.html import _PageHTMLParser
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
-from collector.extraction.errors import ExtractionError
-from collector.extraction.extractor import extract_page, html_to_text
-from collector.extraction.html import _PageHTMLParser
-from collector.extraction.limits import DEFAULT_EXTRACTION_LIMITS
-from collector.extraction.text import _TextHTMLParser
+from collector.parsing.errors import ExtractionError
+from collector.parsing.html_text import _TextHTMLParser
+from collector.parsing.limits import DEFAULT_EXTRACTION_LIMITS
 
 URL = "https://example.org/dataset"
 

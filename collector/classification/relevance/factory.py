@@ -17,7 +17,7 @@ from collector.llm.checkpoints import VoteStore
 from collector.llm.providers.epfl_rcp import (
     epfl_rcp_chat_completions_provider_config,
 )
-from collector.llm.voter_factory import _voters
+from collector.llm.voter_factory import build_llm_voters
 
 
 def build_default_repository_result_classifier(
@@ -26,7 +26,7 @@ def build_default_repository_result_classifier(
 ) -> RepositoryResultClassifier:
     """Use the same durable voting policy with a separate repository relevance prompt."""
     return EnsembleRepositoryRelevanceClassifier(
-        _voters(
+        build_llm_voters(
             partial(
                 epfl_rcp_chat_completions_provider_config,
                 request_body_builder=_build_epfl_rcp_repository_relevance_request_body,

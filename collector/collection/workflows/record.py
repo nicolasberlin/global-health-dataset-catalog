@@ -25,26 +25,29 @@ from collector.collection.contracts import (
 )
 from collector.collection.eligibility.models import PageClassifier
 from collector.collection.failures import CollectionMetadataError, CollectionStepError
-from collector.collection.pipeline import classify_resolution, eligible_resources
+from collector.collection.page_analysis import classify_resolution, eligible_resources
 from collector.collection.record_mapping import to_strategy_result
 from collector.collection.resources import (
     ResourceCheckState,
     ResourceSelection,
     retain_validated_resources,
 )
+from collector.collection.validation.distributions import (
+    page_access_diagnostic,
+    validate_distribution,
+)
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.diagnostics import Diagnostic, PipelineFailure
-from collector.extraction.errors import ExtractionError
-from collector.network.fetch import PageFetchError, fetch_public_html, is_timeout_error
-from collector.storage.models import (
+from collector.models import (
     CollectedDataset,
     CollectionReport,
     CollectionResult,
     DistributionCandidate,
     ValidationResult,
 )
+from collector.network.fetch import PageFetchError, fetch_public_html, is_timeout_error
+from collector.parsing.errors import ExtractionError
 from collector.url_utils import normalize_http_url
-from collector.validation.distributions import page_access_diagnostic, validate_distribution
 
 
 def now():

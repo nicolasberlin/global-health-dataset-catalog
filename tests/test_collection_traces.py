@@ -5,7 +5,7 @@ from app.db.collection.traces.sanitization import safe_url
 from app.db.collection.traces.writing import write_collection_trace
 from helpers.workflows import claimed, observation
 
-from collector.storage.models import CollectionReport, CollectionResult
+from collector.models import CollectionReport, CollectionResult
 
 pytestmark = pytest.mark.anyio
 

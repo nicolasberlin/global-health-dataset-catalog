@@ -9,7 +9,7 @@ from collector.collection.eligibility.models import (
 )
 from collector.llm.errors import ClassificationError
 from collector.llm.voting import VotingEnsemble
-from collector.storage.models import DistributionCandidate, PageSnapshot
+from collector.models import DistributionCandidate, PageSnapshot
 
 
 class EnsemblePageClassifier:

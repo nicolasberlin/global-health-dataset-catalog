@@ -320,7 +320,7 @@ async def test_local_results_remain_available_when_external_budget_is_exhausted(
     public_api,
     monkeypatch,
 ):
-    from collector.storage.models import CollectedDataset
+    from collector.models import CollectedDataset
 
     monkeypatch.setenv("API_PUBLIC_ONLINE_SEARCHES_PER_DAY", "1")
     await consume_quota_limits((public_daily_quota("online_daily"),))

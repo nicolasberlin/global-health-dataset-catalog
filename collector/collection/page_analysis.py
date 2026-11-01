@@ -8,17 +8,17 @@ from collector.budget import check_collection_budget
 from collector.collection.contracts import DiscoveredPage, StrategyResult
 from collector.collection.eligibility.factory import build_default_page_classifier
 from collector.collection.eligibility.models import PageClassifier
+from collector.collection.extraction.distributions import EXCLUDED_EXTENSIONS, extract_distributions
+from collector.collection.extraction.extractor import extract_page
 from collector.collection.records import NormalizedRecord
 from collector.collection.resources import EXCLUDED_RESOURCE_FORMATS
+from collector.collection.validation.distributions import page_access_diagnostic
 from collector.config import DEFAULT_CONFIG, CollectorConfig
-from collector.extraction.distributions import EXCLUDED_EXTENSIONS, extract_distributions
-from collector.extraction.errors import ExtractionError
-from collector.extraction.extractor import extract_page
+from collector.metadata.provenance import metadata_evidence, normalize_doi
+from collector.models import CollectedDataset, DistributionCandidate, PageSnapshot
 from collector.network.fetch import PageFetchError
-from collector.storage.metadata import metadata_evidence, normalize_doi
-from collector.storage.models import CollectedDataset, DistributionCandidate, PageSnapshot
+from collector.parsing.errors import ExtractionError
 from collector.url_utils import normalize_http_url
-from collector.validation.distributions import page_access_diagnostic
 
 
 def analyze_html_page(

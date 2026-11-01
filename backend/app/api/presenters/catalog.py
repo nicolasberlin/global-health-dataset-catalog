@@ -8,7 +8,7 @@ from app.api.schemas.catalog import (
     DatasetDistributionView,
     DistributionValidationView,
 )
-from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
+from collector.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 
 def _build_dataset_distribution_view(

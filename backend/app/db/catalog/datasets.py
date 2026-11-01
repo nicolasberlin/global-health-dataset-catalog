@@ -22,8 +22,8 @@ from app.db.serialization import (
     _serialize_geography,
     _serialize_signals,
 )
-from collector.storage.metadata import METADATA_FIELDS, metadata_evidence
-from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
+from collector.metadata.provenance import METADATA_FIELDS, metadata_evidence
+from collector.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 
 async def save_collected_datasets(

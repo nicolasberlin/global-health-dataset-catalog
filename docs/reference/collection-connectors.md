@@ -67,13 +67,14 @@ cookies remain in the browser service.
 | `collection/connectors/registry.py` | Trusted connector selection |
 | `collection/connectors/http.py` | Bounded record metadata HTTP reads, response evidence and retries |
 | `collection/record_mapping.py` | Map normalized records to shared page and resolution contracts |
-| `collection/pipeline.py` | Common extraction and classification |
+| `collection/page_analysis.py` | Common extraction and classification |
 | `collection/resources.py` | Resource-format exclusions and shared bounded validation/retention policy |
-| `extraction/extractor.py` | Public page extraction and snapshot assembly |
-| `extraction/html.py`, `extraction/text.py` | HTML page evidence, shared bounded parsing and plain-text conversion |
-| `extraction/json_ld.py`, `extraction/dataset_metadata.py` | Selected JSON-LD fields and dataset metadata normalization/inference |
-| `extraction/limits.py`, `extraction/graph.py` | Bounded HTML/JSON-LD evidence and local Dataset identity selection |
-| `extraction/source_identity.py` | Source identity derived from extracted evidence |
+| `collection/validation/distributions.py`, `collection/validation/json_sample.py` | Bounded resource probes, access/format validation and truncated JSON evidence |
+| `collection/extraction/extractor.py` | Public page extraction and snapshot assembly |
+| `collection/extraction/html.py`, `parsing/html_text.py` | HTML page evidence, shared bounded parsing and plain-text conversion |
+| `collection/extraction/json_ld.py`, `metadata/dataset.py` | Selected JSON-LD fields and dataset metadata normalization/inference |
+| `parsing/limits.py`, `collection/extraction/graph.py` | Bounded HTML/JSON-LD evidence and local Dataset identity selection |
+| `collection/extraction/source_identity.py` | Source identity derived from extracted evidence |
 | `collection/workflows/record.py` | Candidate URL validation, API/HTML/browser attempts, fallback, limits and record reports |
 | `collection/browser.py` | Generic browser-service client and session probes |
 | `network/fetch.py`, `network/transport.py`, `network/resolver.py`, `network/policy.py` | Shared bounded HTTP, DNS and destination policy |

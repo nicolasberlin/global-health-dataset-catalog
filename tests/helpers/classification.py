@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import json
 
-from collector.storage.models import DistributionCandidate, PageSnapshot
+from collector.models import DistributionCandidate, PageSnapshot
 
 MODELS = (
     "deepseek-ai/DeepSeek-V4-Flash-0731",

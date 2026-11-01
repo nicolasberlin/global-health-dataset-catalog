@@ -20,7 +20,7 @@ from collector.classification.relevance.models import (
     MAX_REPOSITORY_METADATA_VALUE_CHARS,
     MAX_REPOSITORY_TITLE_CHARS,
 )
-from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
+from collector.metadata.dataset import DATASET_METADATA_KEYS
 from collector.search import (
     DataCiteRepositorySearchProvider,
     RepositorySearchResponse,

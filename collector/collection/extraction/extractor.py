@@ -2,16 +2,9 @@
 
 from __future__ import annotations
 
-from collector.extraction.dataset_metadata import (
-    _dedupe,
-    _demographics_from_text,
-    _diseases_from_text,
-    _metadata_text,
-)
-from collector.extraction.errors import ExtractionError
-from collector.extraction.graph import select_dataset_scope
-from collector.extraction.html import _PageHTMLParser
-from collector.extraction.json_ld import (
+from collector.collection.extraction.graph import select_dataset_scope
+from collector.collection.extraction.html import _PageHTMLParser
+from collector.collection.extraction.json_ld import (
     _date_from_json_ld,
     _doi_from_json_ld,
     _geography_from_json_ld,
@@ -20,11 +13,18 @@ from collector.extraction.json_ld import (
     _publisher_from_json_ld,
     _size_from_json_ld,
 )
-from collector.extraction.limits import DEFAULT_EXTRACTION_LIMITS, ExtractionLimits
-from collector.extraction.source_identity import identify_source
-from collector.extraction.text import _feed_html, _normalize_text
-from collector.extraction.text import html_to_text as html_to_text
-from collector.storage.models import PageSnapshot
+from collector.collection.extraction.source_identity import identify_source
+from collector.metadata.dataset import (
+    _dedupe,
+    _demographics_from_text,
+    _diseases_from_text,
+    _metadata_text,
+)
+from collector.models import PageSnapshot
+from collector.parsing.errors import ExtractionError
+from collector.parsing.html_text import _feed_html, _normalize_text
+from collector.parsing.html_text import html_to_text as html_to_text
+from collector.parsing.limits import DEFAULT_EXTRACTION_LIMITS, ExtractionLimits
 from collector.url_utils import select_dataset_url
 
 

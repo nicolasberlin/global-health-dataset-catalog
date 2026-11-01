@@ -6,8 +6,8 @@ import math
 import re
 from collections.abc import Iterable
 
-from collector.extraction.dataset_metadata import build_dataset_metadata
-from collector.extraction.extractor import html_to_text
+from collector.metadata.dataset import build_dataset_metadata
+from collector.parsing.html_text import html_to_text
 from collector.search.filtering import _text
 from collector.search.models import MISSING_METADATA_VALUE
 

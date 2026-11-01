@@ -8,8 +8,8 @@ from helpers.inspection import stored_datasets
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
-from collector.search import RepositorySearchResult
-from collector.storage.models import (
+from collector.collection.validation.distributions import validate_distribution
+from collector.models import (
     CollectedDataset,
     CollectionReport,
     CollectionResult,
@@ -17,7 +17,7 @@ from collector.storage.models import (
     HTTPProbe,
     ValidationResult,
 )
-from collector.validation.distributions import validate_distribution
+from collector.search import RepositorySearchResult
 
 pytestmark = pytest.mark.anyio
 URL = "https://example.org/data.csv"

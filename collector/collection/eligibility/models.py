@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from collector.storage.models import DistributionCandidate, PageSnapshot
+from collector.models import DistributionCandidate, PageSnapshot
 
 
 @dataclass(frozen=True)

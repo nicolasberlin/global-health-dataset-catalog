@@ -4,8 +4,8 @@ import re
 from urllib.parse import parse_qsl, urlsplit
 
 from collector.budget import check_collection_budget
-from collector.extraction.graph import select_dataset_scope
-from collector.storage.models import DistributionCandidate, LinkCandidate, PageSnapshot
+from collector.collection.extraction.graph import select_dataset_scope
+from collector.models import DistributionCandidate, LinkCandidate, PageSnapshot
 from collector.url_utils import canonicalize_url
 
 FORMAT_BY_EXTENSION = {

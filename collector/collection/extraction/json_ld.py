@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collector.extraction.dataset_metadata import (
+from collector.metadata.dataset import (
     _country_values,
     _dedupe,
     _modalities_from_text,
 )
-from collector.extraction.limits import json_objects
-from collector.extraction.text import _normalize_text
-from collector.storage.metadata import normalize_doi
+from collector.metadata.provenance import normalize_doi
+from collector.parsing.html_text import _normalize_text
+from collector.parsing.limits import json_objects
 
 
 def _publisher_from_json_ld(json_ld_items: list[object]) -> str:

@@ -11,7 +11,7 @@ from collector.collection.eligibility.ensemble import EnsemblePageClassifier
 from collector.collection.eligibility.models import PageClassification
 from collector.llm.errors import ClassificationError
 from collector.llm.voting import VotingEnsemble, run_voters
-from collector.storage.models import PageSnapshot
+from collector.models import PageSnapshot
 
 
 class _Classifier:

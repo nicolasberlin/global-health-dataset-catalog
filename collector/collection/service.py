@@ -8,11 +8,11 @@ from collector.collection.contracts import (
     ValidateDistributionFunction as ValidateDistributionFunction,
 )
 from collector.collection.eligibility.models import PageClassifier
-from collector.collection.pipeline import analyze_discovered_page as analyze_discovered_page
-from collector.collection.pipeline import analyze_html_page as analyze_html_page
+from collector.collection.page_analysis import analyze_discovered_page as analyze_discovered_page
+from collector.collection.page_analysis import analyze_html_page as analyze_html_page
 from collector.collection.workflows import record, source
 from collector.config import DEFAULT_CONFIG, CollectorConfig
-from collector.storage.models import CollectionResult
+from collector.models import CollectionResult
 
 
 def collect_source_with_report(

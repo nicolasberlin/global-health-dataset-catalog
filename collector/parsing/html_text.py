@@ -7,8 +7,8 @@ from html import unescape
 from html.parser import HTMLParser
 
 from collector.budget import check_collection_budget
-from collector.extraction.errors import ExtractionError
-from collector.extraction.limits import (
+from collector.parsing.errors import ExtractionError
+from collector.parsing.limits import (
     DEFAULT_EXTRACTION_LIMITS,
     ExtractionLimits,
     enforce_limit,

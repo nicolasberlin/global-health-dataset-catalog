@@ -88,7 +88,7 @@ falls back to the source page. The discovery-specific `DiscoveryAdapter` and
 live in `discovery/metadata.py`. The page candidate `DiscoveredPage` is defined
 once in `collection/contracts.py` and is also used by connector mapping and
 HTML/browser resolution. Resource-format exclusions, validation state and bounded
-retention belong to `collection/resources.py`. `collection/pipeline.py` remains
+retention belong to `collection/resources.py`. `collection/page_analysis.py` owns
 the shared preparation and classification path, and `collection/record_mapping.py`
 maps connector-normalized records to that path without changing metadata.
 Bounded JSON fetching lives in `collector/network/json.py`, also used directly by
@@ -124,16 +124,23 @@ selected entity. Remote contexts are never downloaded. CKAN, Socrata and
 relative references use that final document URL, including redirects. Supported
 Dataset type IRIs and local `@id` URL objects do not require general RDF expansion.
 
+Shared data contracts such as `PageSnapshot`, `CollectedDataset` and
+`ValidationResult` live in `collector/models.py`. Metadata evidence and repository
+enrichment live in `collector/metadata/provenance.py`. These modules contain no
+PostgreSQL persistence; SQL and transactions stay in `backend/app/db/`.
+
 ## Extraction limits
 
-`collector/extraction/extractor.py` retains the public `extract_page()` entry point.
-The page parser lives in `html.py`; shared bounded parsing and `html_to_text()`
-live in `text.py`, with the existing public `extractor.html_to_text` import still
-supported. `json_ld.py` reads fields from selected dataset evidence, and the
-existing `dataset_metadata.py` owns normalized metadata fields and text inference.
-Dataset selection stays in `graph.py`, resource discovery in `distributions.py`,
-and bounded decoding/traversal in `limits.py`. These modules preserve the same
-snapshot evidence and controlled failures used by the collection pipeline.
+`collector/collection/extraction/extractor.py` owns the public `extract_page()` entry point.
+The page parser lives in `collection/extraction/html.py`; shared bounded parsing and
+`html_to_text()` live in `parsing/html_text.py`; the moved extractor also exposes
+the same function. Connectors and DataCite use the neutral parsing module directly.
+`collection/extraction/json_ld.py` reads fields from selected dataset evidence, and `metadata/dataset.py` owns normalized
+metadata fields and text inference shared by extraction, search and storage.
+Dataset selection stays in `collection/extraction/graph.py`, resource discovery in
+`collection/extraction/distributions.py`, and bounded decoding/traversal in `parsing/limits.py`.
+`parsing/errors.py` defines the unchanged `ExtractionError`. These modules preserve
+the same snapshot evidence and controlled failures used by the collection pipeline.
 
 Limits apply during construction/traversal, not just after parsing:
 
@@ -154,10 +161,17 @@ Expected parse errors, unknown response charsets and excessive nesting become
 controlled failures. Exceeding a limit abandons that method and tries the next
 permitted fallback. Without recovery, the result is incomplete, not a semantic
 rejection. The implementation lives in
-[extraction limits](../../collector/extraction/limits.py) and the
-[shared pipeline](../../collector/collection/pipeline.py).
+[extraction limits](../../collector/parsing/limits.py) and the
+[shared page analysis](../../collector/collection/page_analysis.py).
 
 ## Resource validation and Socrata
+
+Resource checks belong to `collector/collection/validation/`.
+`distributions.py` owns bounded HTTP probes, access diagnostics and format evidence;
+`json_sample.py` reads complete evidence from truncated JSON prefixes. Collection
+workflows, the browser client and Search Lab import these modules directly. The
+former top-level validation package is removed without compatibility wrappers;
+probe signatures, protection rules, sample limits and validation outcomes are unchanged.
 
 An advertised URL, extension or HTTP 200 alone does not establish valid access.
 Validation combines response metadata with a bounded GET sample, normally up to

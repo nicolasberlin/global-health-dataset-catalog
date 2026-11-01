@@ -467,7 +467,7 @@ controlled admission errors and dataset retrieval by ID. The failure suites cove
 ownership, provider failures and retaining partial results. Contract and failure
 checks exercise FastAPI directly through ASGI. The runtime suite starts real
 Uvicorn processes and HTTP sockets against the disposable database; only external
-provider transports are simulated. It verifies the worker/vote/extraction/
+provider transports are simulated. It verifies the worker/vote/collection/extraction/
 validation pipeline after client disconnection, restoration after restart and
 local catalogue reuse. These runtime checks need permission to bind local sockets
 and launch child processes.

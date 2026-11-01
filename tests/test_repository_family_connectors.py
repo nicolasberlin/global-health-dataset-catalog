@@ -18,8 +18,8 @@ from collector.collection.eligibility.models import PageClassification
 from collector.collection.failures import CollectionResponseError, CollectionTransportError
 from collector.collection.service import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG, configured_repository_connectors
+from collector.models import DistributionCandidate, ValidationResult
 from collector.network.fetch import FetchedPage
-from collector.storage.models import DistributionCandidate, ValidationResult
 
 ITEM = "11111111-1111-4111-8111-111111111111"
 BUNDLE = "22222222-2222-4222-8222-222222222222"

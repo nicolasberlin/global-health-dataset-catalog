@@ -26,6 +26,7 @@ from helpers.workflows import candidate, headers, read, rows, wait_until
 from helpers.workflows import classification_decision as decision
 from httpx import ASGITransport, AsyncClient
 
+from collector.models import CollectedDataset, CollectionReport, CollectionResult
 from collector.search import (
     DataCiteRepositorySearchProvider,
     RepositorySearchResponse,
@@ -33,7 +34,6 @@ from collector.search import (
     RepositorySearchWarning,
     search_repository_metadata,
 )
-from collector.storage.models import CollectedDataset, CollectionReport, CollectionResult
 
 pytestmark = pytest.mark.anyio
 

@@ -6,8 +6,8 @@ from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
 from collector.config import CollectorConfig
+from collector.models import DistributionCandidate, ValidationResult
 from collector.network.fetch import FetchedPage, PageFetchError
-from collector.storage.models import DistributionCandidate, ValidationResult
 
 PAGE_URL = "https://example.org/dataset/malaria"
 FILE_URL = "https://example.org/malaria.csv"

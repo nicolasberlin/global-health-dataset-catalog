@@ -21,9 +21,9 @@ from app.workers.search.discovery import (
 )
 from app.workers.sql_retries import persist_with_retry
 from collector.diagnostics import Diagnostic, exception_diagnostics
+from collector.models import CollectedDataset
 from collector.observability import emit_event, measure_operation, operation_context
 from collector.search import RepositorySearchResponse, search_repository_metadata
-from collector.storage.models import CollectedDataset
 
 
 class SearchWorker:

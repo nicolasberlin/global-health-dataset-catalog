@@ -8,7 +8,7 @@ from collector.classification.relevance.models import (
     RepositoryClassificationVote,
 )
 from collector.llm.errors import ClassificationError
-from collector.storage.models import PageSnapshot
+from collector.models import PageSnapshot
 
 
 def test_repository_ensemble_accepts_by_majority():

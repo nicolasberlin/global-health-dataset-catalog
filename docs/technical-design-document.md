@@ -113,7 +113,7 @@ compatibility import surface for `collect_source_with_report`,
 `collect_repository_candidate_with_report`, `analyze_discovered_page` and
 `analyze_html_page`, plus the `DiscoverFunction`, `FetchHTMLFunction` and
 `ValidateDistributionFunction` type aliases. Internal callers import the service
-directly. Source identification belongs to `extraction/source_identity.py`.
+directly. Source identification belongs to `collection/extraction/source_identity.py`.
 
 `collection/contracts.py` owns the page candidate shared by source discovery,
 connector mapping, HTML resolution and browser rendering, along with
@@ -125,10 +125,10 @@ role from a page candidate. `collection/record_mapping.py` explicitly maps that
 record into `StrategyResult` through `to_strategy_result()`; it replaces the
 vaguely named compatibility module without changing the mapping.
 
-`collection/pipeline.py` remains the shared page preparation, evidence merging,
-candidate filtering and classification pipeline. `collection/resources.py` owns
-the shared `EXCLUDED_RESOURCE_FORMATS` policy, resource-check state and bounded
-validation/retention. Both workflows reuse that policy and the existing pipeline;
+`collection/page_analysis.py` owns shared page preparation, evidence merging,
+candidate filtering and classification for HTML and adapter-provided pages.
+`collection/resources.py` owns the shared `EXCLUDED_RESOURCE_FORMATS` policy, resource-check state and bounded
+validation/retention. Both workflows reuse that policy and the same page-analysis functions;
 no duplicate page model or additional abstraction layer is introduced. These
 shared modules, the record workflow and the browser do not depend on source
 discovery implementations.
@@ -151,8 +151,20 @@ collector/
 │   ├── contracts.py
 │   ├── records.py
 │   ├── record_mapping.py
-│   ├── pipeline.py
+│   ├── page_analysis.py
 │   ├── resources.py
+│   ├── validation/
+│   │   ├── __init__.py
+│   │   ├── distributions.py
+│   │   └── json_sample.py
+│   ├── extraction/
+│   │   ├── __init__.py
+│   │   ├── extractor.py
+│   │   ├── html.py
+│   │   ├── json_ld.py
+│   │   ├── distributions.py
+│   │   ├── graph.py
+│   │   └── source_identity.py
 │   ├── eligibility/
 │   │   ├── __init__.py
 │   │   ├── factory.py
@@ -255,44 +267,68 @@ target `datacite.mapping`; default public JSON transport remains in
 `collector/network/json.py`. Dependencies run from client to mapping to metadata,
 without reverse imports.
 
-`collector/extraction/` separates bounded HTML parsing, selected JSON-LD field
-reading, metadata normalization and dataset/resource identification:
+`collector/collection/extraction/` assembles dataset evidence for collection, while
+shared metadata and bounded parsing primitives live in independent packages:
 
 ```text
-collector/extraction/
-├── __init__.py
-├── extractor.py
-├── html.py
-├── text.py
-├── json_ld.py
-├── dataset_metadata.py
-├── distributions.py
-├── graph.py
-├── limits.py
-├── source_identity.py
-└── errors.py
+collector/
+├── models.py
+├── metadata/
+│   ├── __init__.py
+│   ├── dataset.py
+│   └── provenance.py
+├── parsing/
+│   ├── __init__.py
+│   ├── html_text.py
+│   ├── limits.py
+│   └── errors.py
+└── collection/
+    └── extraction/
+        ├── __init__.py
+        ├── extractor.py
+        ├── html.py
+        ├── json_ld.py
+        ├── distributions.py
+        ├── graph.py
+        └── source_identity.py
 ```
 
-`extractor.py` keeps `extract_page()` as the public orchestrator assembling
-`PageSnapshot`. `html.py` owns the page parser, links, HTML metadata and raw
-JSON-LD script evidence. `text.py` owns the shared bounded parser base, normalized
-HTML-to-text conversion and whitespace handling. This shared foundation lets
-metadata helpers clean embedded HTML without depending on the page parser.
-`html_to_text()` remains available through its existing `extractor.py` import.
+`collection/extraction/extractor.py` keeps `extract_page()` as the public orchestrator
+assembling `PageSnapshot`. `collection/extraction/html.py` owns the page parser,
+links, HTML metadata and
+raw JSON-LD script evidence. `parsing/html_text.py` owns the shared bounded parser
+base, normalized HTML-to-text conversion and whitespace handling. Metadata helpers
+can clean embedded HTML without depending on the page parser. The moved
+`collection/extraction/extractor.py` still exposes the same `html_to_text()` function.
+Connectors and DataCite import that function directly from `parsing/html_text.py`,
+so repository search does not depend on collection extraction. Validation continues
+to reuse `guess_format()` from `collection/extraction/distributions.py`.
 
-`json_ld.py` reads publisher, geography, dates, license, size, modality and DOI
-from the selected local evidence. Bounded JSON decoding and traversal remain in
-`limits.py`; dataset disambiguation and local-reference resolution remain in
-`graph.py`. `distributions.py` keeps resource extraction and ranking, while
-`source_identity.py` keeps source-specific publisher/platform inference.
+`collection/extraction/json_ld.py` reads publisher, geography, dates, license, size,
+modality and DOI from selected local evidence. Bounded JSON decoding and traversal live in
+`parsing/limits.py`, preserving `ExtractionLimits`, its defaults and every budget
+check. `parsing/errors.py` owns the unchanged `ExtractionError` contract. Dataset
+disambiguation and local-reference resolution remain in `collection/extraction/graph.py`;
+`collection/extraction/distributions.py` keeps resource extraction and ranking, while
+`collection/extraction/source_identity.py` keeps source-specific publisher/platform inference.
 
-The existing `dataset_metadata.py` is retained and extended with page-text
-normalization and inference helpers rather than adding a second metadata module.
-Its ten-field contract, normalization functions and missing-value behavior are
-unchanged. All parser callbacks, budgets, limits, exceptions, dataset-selection
-rules and output fields are preserved. The extraction parser tests import private
-classes from `html.py` and `text.py`; collection, classification and validation
-implementations remain unchanged.
+`collector/models.py` owns the immutable shared data contracts used by search,
+classification, collection and the backend. It performs no SQL or database writes.
+`metadata/provenance.py` owns DOI normalization, metadata evidence and conservative
+repository enrichment. It depends on the shared models and dataset metadata, not
+on collection workflows. PostgreSQL persistence and transactions remain in
+`backend/app/db/`; only their imports of shared contracts and evidence helpers change.
+The former `collector/storage` package is removed without compatibility re-exports.
+
+`metadata/dataset.py` owns the ten-field dataset metadata contract, normalization,
+missing-value behavior and page-text inference. Search, storage and extraction
+import it directly; it depends only on shared parsing primitives. Package
+initializers contain documentation only. These moves preserve parser callbacks,
+budgets, limits, exceptions, dataset-selection rules and output fields. The parser
+tests import the bounded text parser from `parsing/html_text.py`. The former
+`collector/extraction` package is removed without compatibility facades; the six
+collection-specific modules and their package initializer live under
+`collector/collection/extraction/`.
 
 Relevance and eligibility classifiers are owned by their features; LLM infrastructure
 is shared independently:
@@ -342,9 +378,11 @@ prompts and response schemas. Domain-specific helpers stay beside their callers.
 `build_default_repository_result_classifier()`, used by `ClassificationWorker`.
 `collection/eligibility/factory.py` owns `build_default_page_classifier()`, used by
 `CollectionWorker`, the pipeline default and AI-enabled Search Lab. Both import
-the same `_voters()` from `llm/voter_factory.py`. That shared module
-retains the ordered model/credential configuration, checkpoint-aware client
-construction and `validate_default_classifier_configuration()` used by readiness.
+the same `build_llm_voters()` from `llm/voter_factory.py`. Its frozen
+`LLMVoterConfig` dataclasses name each voter ID, model environment variable, default
+model and API-key environment variable. The ordered `_DEFAULT_VOTERS` tuple retains
+the same voter identities and configuration values. That shared module owns
+checkpoint-aware client construction and `validate_default_classifier_configuration()` used by readiness.
 The former central classification factory is removed; internal callers import
 the owning feature factory directly.
 
@@ -397,7 +435,8 @@ modules directly without compatibility re-exports.
 This separation preserves prompts, schemas, payload formats, voter identities and
 order, thresholds, checkpoint fingerprints, retries and HTTP behavior.
 
-Bounded access and format checks live in `collector/validation/distributions.py`;
+Bounded access and format checks live in
+`collector/collection/validation/distributions.py`;
 they inspect response samples rather than downloading whole datasets.
 
 Progress handlers and diagnostics share `api/search_progress.load_search_progress()`.

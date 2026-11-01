@@ -13,8 +13,8 @@ from collector.collection.connectors.metadata import (
 )
 from collector.collection.connectors.shared import positive_id, repository_origin, text
 from collector.collection.records import NormalizedRecord, RecordIdentity
-from collector.extraction.extractor import html_to_text
-from collector.storage.metadata import normalize_doi
+from collector.metadata.provenance import normalize_doi
+from collector.parsing.html_text import html_to_text
 
 RECORD_PATH = re.compile(r"^/records?/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})/?$")
 

@@ -8,29 +8,29 @@ from helpers.collection import DATASET_HTML, AcceptingPageClassifier
 
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
+from collector.collection.extraction.distributions import extract_distributions
+from collector.collection.extraction.extractor import extract_page, html_to_text
 from collector.collection.service import (
     analyze_discovered_page,
     analyze_html_page,
     collect_repository_candidate_with_report,
     collect_source_with_report,
 )
+from collector.collection.validation.distributions import validate_distribution
 from collector.config import CollectorConfig
-from collector.extraction.dataset_metadata import (
+from collector.llm.errors import ClassificationError
+from collector.metadata.dataset import (
     DATASET_METADATA_KEYS,
     MISSING_DATASET_METADATA_VALUE,
 )
-from collector.extraction.distributions import extract_distributions
-from collector.extraction.extractor import extract_page, html_to_text
-from collector.llm.errors import ClassificationError
-from collector.network.fetch import FetchedPage, PageFetchError
-from collector.storage.models import (
+from collector.models import (
     CollectedDataset,
     DistributionCandidate,
     HTTPProbe,
     PageSnapshot,
     ValidationResult,
 )
-from collector.validation.distributions import validate_distribution
+from collector.network.fetch import FetchedPage, PageFetchError
 
 
 class RejectingPageClassifier:
@@ -75,7 +75,9 @@ def test_collection_passes_config_to_network_operations(monkeypatch, repository_
         return Response(request, b"age,count\n" * 10_000, {"Content-Type": "text/csv"})
 
     monkeypatch.setattr("collector.network.fetch.open_public_http_url", open_response)
-    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", open_response)
+    monkeypatch.setattr(
+        "collector.collection.validation.distributions.open_public_http_url", open_response,
+    )
 
     # Consecutive runs must each bind their own settings, including a return
     # to defaults after custom configurations.
@@ -155,7 +157,9 @@ def test_pipeline_config_reaches_default_discovery_and_distribution_requests(mon
         return Response(request, json.dumps(data).encode(), "application/json")
 
     monkeypatch.setattr("collector.network.json.open_public_http_url", open_url)
-    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", open_url)
+    monkeypatch.setattr(
+        "collector.collection.validation.distributions.open_public_http_url", open_url,
+    )
     for config in (
         CollectorConfig(user_agent="Pipeline/1", request_timeout_seconds=1.25, max_sample_bytes=64),
         CollectorConfig(user_agent="Pipeline/2", request_timeout_seconds=2.5, max_sample_bytes=128),

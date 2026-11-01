@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from collector.collection.records import NormalizedRecord, RecordIdentity
-from collector.storage.models import DistributionCandidate
+from collector.models import DistributionCandidate
 
 
 class RecordConnector(Protocol):

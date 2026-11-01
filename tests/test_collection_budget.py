@@ -29,8 +29,8 @@ from collector.collection.service import (
 )
 from collector.config import CollectorConfig, configured_collection_budget_seconds
 from collector.llm.voting import run_voters
+from collector.models import DistributionCandidate, ValidationResult
 from collector.network.fetch import FetchedPage
-from collector.storage.models import DistributionCandidate, ValidationResult
 
 
 @pytest.fixture

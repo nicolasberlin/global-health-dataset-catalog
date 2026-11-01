@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
-from collector.storage.models import PageSnapshot
+from collector.models import PageSnapshot
 
 RepositoryRelevanceLabel = Literal[
     "relevant",

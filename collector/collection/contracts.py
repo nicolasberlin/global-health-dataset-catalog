@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from collector.collection.records import NormalizedRecord
+from collector.models import DistributionCandidate, PageSnapshot, ValidationResult
 from collector.network.fetch import FetchedPage
-from collector.storage.models import DistributionCandidate, PageSnapshot, ValidationResult
 
 
 @dataclass(frozen=True)

@@ -26,7 +26,7 @@ from psycopg.errors import (
 from psycopg_pool import PoolTimeout
 
 from collector import observability
-from collector.storage.models import CollectionResult
+from collector.models import CollectionResult
 
 pytestmark = pytest.mark.anyio
 VERSION = datetime(2026, 9, 25, tzinfo=timezone.utc)

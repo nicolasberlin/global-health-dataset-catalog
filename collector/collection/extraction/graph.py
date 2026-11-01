@@ -6,13 +6,13 @@ from dataclasses import dataclass
 from urllib.parse import urljoin
 
 from collector.budget import check_collection_budget
-from collector.extraction.limits import (
+from collector.metadata.provenance import normalize_doi
+from collector.parsing.limits import (
     DEFAULT_EXTRACTION_LIMITS,
     ExtractionLimits,
     enforce_limit,
     json_objects,
 )
-from collector.storage.metadata import normalize_doi
 from collector.url_utils import normalize_http_url
 
 

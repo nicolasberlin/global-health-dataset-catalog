@@ -7,7 +7,8 @@ from dataclasses import replace
 
 from collector.classification.relevance.models import RepositoryResultClassifier
 from collector.diagnostics import Diagnostic, PipelineFailure
-from collector.extraction.dataset_metadata import normalize_dataset_metadata
+from collector.metadata.dataset import normalize_dataset_metadata
+from collector.models import PageSnapshot
 from collector.observability import emit_event
 from collector.search.filtering import filter_repository_results
 from collector.search.models import (
@@ -19,7 +20,6 @@ from collector.search.models import (
     RepositorySearchWarning,
 )
 from collector.search.providers.datacite import DataCiteRepositorySearchProvider
-from collector.storage.models import PageSnapshot
 
 
 class RepositorySearchFailure(PipelineFailure, ValueError):

@@ -31,7 +31,7 @@ from psycopg.errors import DiskFull, QueryCanceled
 from collector import observability
 from collector.diagnostics import PersistenceFailure
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
-from collector.storage.models import CollectionResult
+from collector.models import CollectionResult
 
 pytestmark = pytest.mark.anyio
 VERSION = datetime(2026, 10, 14, tzinfo=timezone.utc).isoformat()

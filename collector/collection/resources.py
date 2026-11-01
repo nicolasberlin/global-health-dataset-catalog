@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 
 from collector.budget import CollectionBudgetExceeded, check_collection_budget
 from collector.config import CollectorConfig
-from collector.storage.models import DistributionCandidate, ValidationResult
+from collector.models import DistributionCandidate, ValidationResult
 from collector.url_utils import normalize_http_url
 
 EXCLUDED_RESOURCE_FORMATS = {"HTML", "HTM", "PDF", "PNG", "JPG", "JPEG", "GIF", "SVG"}

@@ -8,7 +8,7 @@ from app.db.connection import _fetchone, _require_database_pool
 from app.db.schema import CURRENT_SCHEMA_VERSION
 from helpers.inspection import stored_datasets
 
-from collector.storage.models import CollectedDataset
+from collector.models import CollectedDataset
 
 pytestmark = pytest.mark.anyio
 

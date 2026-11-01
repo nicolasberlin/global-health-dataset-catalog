@@ -15,8 +15,8 @@ from app.db.collection.traces.sanitization import safe_observation
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
 from app.db.schema import _require_current_schema
 from app.db.serialization import _jsonb, _serialize_discovery_methods
-from collector.storage.metadata import enrich_from_repository
-from collector.storage.models import CollectionReport, CollectionResult
+from collector.metadata.provenance import enrich_from_repository
+from collector.models import CollectionReport, CollectionResult
 
 
 async def complete_collection_job(

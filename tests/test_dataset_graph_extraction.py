@@ -4,12 +4,12 @@ from dataclasses import replace
 import pytest
 
 from collector.collection.eligibility.classifier import _build_llm_payload
-from collector.extraction.distributions import extract_distributions
-from collector.extraction.errors import ExtractionError
-from collector.extraction.extractor import extract_page
-from collector.extraction.limits import DEFAULT_EXTRACTION_LIMITS
-from collector.storage.metadata import enrich_from_repository, metadata_evidence
-from collector.storage.models import CollectedDataset, PageSnapshot
+from collector.collection.extraction.distributions import extract_distributions
+from collector.collection.extraction.extractor import extract_page
+from collector.metadata.provenance import enrich_from_repository, metadata_evidence
+from collector.models import CollectedDataset, PageSnapshot
+from collector.parsing.errors import ExtractionError
+from collector.parsing.limits import DEFAULT_EXTRACTION_LIMITS
 
 URL = "https://example.org/dataset/current"
 

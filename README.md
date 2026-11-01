@@ -152,8 +152,13 @@ backend/app/       FastAPI application, SQL storage and background workers
   db/              Catalogue, search, classification, collection and execution storage
     catalog/       Dataset aggregates, distributions, observations and full-text search
 collector/         Repository discovery, classification and bounded validation
-  collection/      Collection service, pipeline, orchestration and connectors
-  extraction/      Dataset metadata, source identity and evidence limits
+  models.py        Shared immutable collector data contracts
+  metadata/        Dataset normalization, provenance and repository enrichment
+  parsing/         Shared HTML text parsing, evidence limits and controlled errors
+  collection/      Collection workflows, connectors and source discovery
+    page_analysis.py  Page preparation, resource filtering and eligibility classification
+    extraction/    HTML/JSON-LD dataset evidence, resource discovery and source identity
+    validation/    Bounded HTTP probes, access checks and sampled format validation
   network/         HTTP fetching, transport, DNS and public-address policy
   main.py          Compatibility imports for public collection entry points
 browser/           Isolated browser service for collection fallback

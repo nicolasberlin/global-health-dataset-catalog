@@ -15,25 +15,25 @@ from collector.collection.contracts import (
 )
 from collector.collection.discovery.manager import discover_source
 from collector.collection.eligibility.models import PageClassifier
-from collector.collection.pipeline import (
+from collector.collection.page_analysis import (
     _classifier_or_default,
     _usable_distribution,
     analyze_discovered_page,
     analyze_html_page,
 )
 from collector.collection.resources import ResourceCheckState, retain_validated_resources
+from collector.collection.validation.distributions import validate_distribution
 from collector.collection.workflows.record import collect_repository_candidate_with_report
 from collector.config import DEFAULT_CONFIG, CollectorConfig
 from collector.diagnostics import Diagnostic
-from collector.extraction.errors import ExtractionError
-from collector.network.fetch import PageFetchError, fetch_public_html
-from collector.storage.models import (
+from collector.models import (
     CollectedDataset,
     CollectionReport,
     CollectionResult,
     ValidationResult,
 )
-from collector.validation.distributions import validate_distribution
+from collector.network.fetch import PageFetchError, fetch_public_html
+from collector.parsing.errors import ExtractionError
 
 
 def collect_source_with_report(

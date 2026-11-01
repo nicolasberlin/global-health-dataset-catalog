@@ -19,10 +19,10 @@ from collector.collection.contracts import DiscoveredPage
 from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
+from collector.collection.validation.distributions import probe_url
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.llm.errors import ClassificationError
-from collector.storage.models import DistributionCandidate
-from collector.validation.distributions import probe_url
+from collector.models import DistributionCandidate
 
 PROVIDER_URL = "https://llm.example/classify"
 DATA_URL = "https://data.example/health.csv"
@@ -136,7 +136,9 @@ def test_http_error_body_read_failure_is_unconfirmed_and_closed(
     def request(*args, **kwargs):
         raise HTTPError(DATA_URL, 403, "Forbidden", {}, body)
 
-    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
+    monkeypatch.setattr(
+        "collector.collection.validation.distributions.open_public_http_url", request,
+    )
     with collection_budget(seconds=5) if budgeted else nullcontext():
         result = probe_url(DATA_URL, "GET", 1, 100)
     assert result.status_code is None
@@ -155,7 +157,9 @@ def test_bodyless_http_error_retains_probe_metadata(
     def request(*args, **kwargs):
         raise HTTPError(final_url, 403, "Forbidden", headers, None)
 
-    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
+    monkeypatch.setattr(
+        "collector.collection.validation.distributions.open_public_http_url", request,
+    )
     with collection_budget(seconds=5) if budgeted else nullcontext():
         result = probe_url(DATA_URL, method, 1, max_bytes)
     assert result.url == DATA_URL
@@ -177,7 +181,9 @@ def test_http_error_read_timeout_at_deadline_preserves_budget_failure(monkeypatc
     def request(*args, **kwargs):
         raise HTTPError(DATA_URL, 403, "Forbidden", {}, body)
 
-    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
+    monkeypatch.setattr(
+        "collector.collection.validation.distributions.open_public_http_url", request,
+    )
     with collection_budget(seconds=5), pytest.raises(CollectionBudgetExceeded):
         probe_url(DATA_URL, "GET", 10, 100)
     assert body.closed
@@ -211,7 +217,9 @@ def test_collection_tries_next_distribution_after_error_body_timeout(monkeypatch
         def classify(self, page, distributions):
             return PageClassification(accepted=True)
 
-    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
+    monkeypatch.setattr(
+        "collector.collection.validation.distributions.open_public_http_url", request,
+    )
     result = collect_source_with_report(
         "https://data.example/dataset",
         classifier=Classifier(),

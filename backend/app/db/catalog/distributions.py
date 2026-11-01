@@ -7,7 +7,7 @@ from psycopg.rows import DictRow
 
 from app.db.connection import Row, _fetchall
 from app.db.serialization import _serialize_signals
-from collector.storage.models import CollectedDataset, DistributionCandidate, ValidationResult
+from collector.models import CollectedDataset, DistributionCandidate, ValidationResult
 
 
 def _validation_results_by_distribution_key(

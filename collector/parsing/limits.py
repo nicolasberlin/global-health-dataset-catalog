@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 
 from collector.budget import check_collection_budget
-from collector.extraction.errors import ExtractionError
+from collector.parsing.errors import ExtractionError
 
 
 @dataclass(frozen=True)

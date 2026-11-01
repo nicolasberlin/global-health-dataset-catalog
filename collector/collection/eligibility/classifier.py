@@ -5,7 +5,7 @@ from __future__ import annotations
 from collector.collection.eligibility.models import PageClassification
 from collector.llm.classifier import BaseLLMClassifier
 from collector.llm.errors import ClassificationError
-from collector.storage.models import DistributionCandidate, PageSnapshot
+from collector.models import DistributionCandidate, PageSnapshot
 
 # Bound untrusted evidence so model requests have predictable size.
 MAX_PAGE_TEXT_CHARS = 4_000

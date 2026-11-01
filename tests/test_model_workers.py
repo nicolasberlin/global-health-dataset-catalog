@@ -19,7 +19,7 @@ from psycopg.errors import DiskFull, QueryCanceled
 from collector.budget import active_collection_budget
 from collector.classification.relevance.models import RepositoryClassification
 from collector.diagnostics import Diagnostic, PipelineFailure
-from collector.storage.models import CollectionResult
+from collector.models import CollectionResult
 
 pytestmark = pytest.mark.anyio
 VERSION = datetime(2026, 10, 30, tzinfo=timezone.utc)

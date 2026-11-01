@@ -30,7 +30,6 @@ from collector.collection.eligibility.ensemble import EnsemblePageClassifier
 from collector.collection.eligibility.factory import build_default_page_classifier
 from collector.collection.eligibility.prompts import _build_dataset_page_eligibility_request_body
 from collector.diagnostics import Diagnostic, PipelineFailure
-from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.llm.errors import ClassificationError
 from collector.llm.providers.epfl_rcp import (
@@ -38,7 +37,8 @@ from collector.llm.providers.epfl_rcp import (
     EPFL_RCP_CHAT_COMPLETIONS_URL,
     epfl_rcp_chat_completions_provider_config,
 )
-from collector.storage.models import DistributionCandidate, PageSnapshot
+from collector.metadata.dataset import DATASET_METADATA_KEYS
+from collector.models import DistributionCandidate, PageSnapshot
 
 
 def test_llm_page_classifier_returns_validated_classification():

@@ -18,7 +18,7 @@ from helpers.workers import execute_worker
 from helpers.workflows import candidate_for, decision, rows
 from psycopg import OperationalError
 
-from collector.storage.models import CollectedDataset, CollectionResult
+from collector.models import CollectedDataset, CollectionResult
 
 pytestmark = pytest.mark.anyio
 

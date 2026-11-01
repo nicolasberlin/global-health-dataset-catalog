@@ -13,8 +13,10 @@ import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget, read_with_budget
 from collector.collection.discovery.sitemap import fetch_text_url
+from collector.collection.validation.distributions import probe_url, validate_distribution
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
 from collector.llm.errors import ClassificationError
+from collector.models import DistributionCandidate, HTTPProbe
 from collector.network.fetch import (
     _connect_public,
     _PublicHTTPRedirectHandler,
@@ -23,8 +25,6 @@ from collector.network.fetch import (
     open_public_http_url,
 )
 from collector.network.json import fetch_json_url
-from collector.storage.models import DistributionCandidate, HTTPProbe
-from collector.validation.distributions import probe_url, validate_distribution
 
 
 @pytest.fixture
@@ -186,7 +186,7 @@ def test_validation_rechecks_budget_between_head_and_get(clock, head_duration, e
         ),
         ("collector.collection.discovery.sitemap", lambda: fetch_text_url("https://public.example/sitemap")),
         (
-            "collector.validation.distributions",
+            "collector.collection.validation.distributions",
             lambda: probe_url(
                 "https://public.example/data",
                 method="GET",
@@ -323,7 +323,9 @@ def test_http_error_sample_closes_response_on_expiration(clock, monkeypatch):
     def request(*args, **kwargs):
         raise HTTPError("https://public.example/data", 403, "Forbidden", {}, body)
 
-    monkeypatch.setattr("collector.validation.distributions.open_public_http_url", request)
+    monkeypatch.setattr(
+        "collector.collection.validation.distributions.open_public_http_url", request,
+    )
     with collection_budget(seconds=5), pytest.raises(CollectionBudgetExceeded):
         probe_url("https://public.example/data", method="GET", timeout=10, max_bytes=100)
     assert body.closed
