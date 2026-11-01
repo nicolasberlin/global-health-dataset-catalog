@@ -3,8 +3,8 @@
 from collector.diagnostics import Diagnostic, PipelineFailure
 
 
-class PageClassificationError(PipelineFailure):
-    """Raised when a page classifier cannot produce a usable classification."""
+class ClassificationError(PipelineFailure):
+    """Raised when LLM classification or its voting process cannot complete successfully."""
 
     def __init__(
         self,

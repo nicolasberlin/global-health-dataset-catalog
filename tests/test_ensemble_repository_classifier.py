@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from collector.classification.errors import PageClassificationError
 from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
 from collector.classification.relevance.models import (
     RepositoryClassification,
     RepositoryClassificationVote,
 )
+from collector.llm.errors import ClassificationError
 from collector.storage.models import PageSnapshot
 
 
@@ -80,7 +80,7 @@ def test_repository_ensemble_raises_when_fewer_than_two_voters_succeed():
         ]
     )
 
-    with pytest.raises(PageClassificationError, match="At least 2 classifier votes"):
+    with pytest.raises(ClassificationError, match="At least 2 classifier votes"):
         classifier.classify(_page())
 
 
@@ -157,7 +157,7 @@ class _FailingClassifier:
         self._error = error
 
     def classify(self, page):
-        raise PageClassificationError(self._error)
+        raise ClassificationError(self._error)
 
 
 def _classification(

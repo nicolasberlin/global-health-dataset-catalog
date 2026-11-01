@@ -13,9 +13,9 @@ import pytest
 from app.workers import stores
 from psycopg.errors import InsufficientPrivilege
 
-from collector.classification.errors import PageClassificationError
 from collector.diagnostics import PersistenceFailure, exception_diagnostics
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
+from collector.llm.errors import ClassificationError
 
 pytestmark = pytest.mark.anyio
 
@@ -103,7 +103,7 @@ async def test_submission_abort_closes_coroutine_and_propagates_cancellation(mon
 @pytest.mark.parametrize(
     "failure",
     [
-        PageClassificationError("Not due."),
+        ClassificationError("Not due."),
         PersistenceFailure("Old."),
     ],
 )

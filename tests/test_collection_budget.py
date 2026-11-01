@@ -22,13 +22,13 @@ from collector.budget import (
     check_collection_budget,
     collection_budget,
 )
-from collector.classification.voting import run_voters
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.service import (
     collect_repository_candidate_with_report,
     collect_source_with_report,
 )
 from collector.config import CollectorConfig, configured_collection_budget_seconds
+from collector.llm.voting import run_voters
 from collector.network.fetch import FetchedPage
 from collector.storage.models import DistributionCandidate, ValidationResult
 

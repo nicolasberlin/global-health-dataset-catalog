@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from threading import Barrier, Event
 
 import pytest
 
-from collector.classification.errors import PageClassificationError
 from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
 from collector.classification.relevance.models import RepositoryClassification
-from collector.classification.voting import run_voters
 from collector.collection.eligibility.ensemble import EnsemblePageClassifier
 from collector.collection.eligibility.models import PageClassification
+from collector.llm.errors import ClassificationError
+from collector.llm.voting import VotingEnsemble, run_voters
 from collector.storage.models import PageSnapshot
 
 
@@ -69,7 +70,7 @@ def test_voters_run_concurrently_but_keep_configured_order(kind):
 
 
 @pytest.mark.parametrize("kind", ["page", "repository"])
-@pytest.mark.parametrize("error_type", [PageClassificationError, ValueError, RuntimeError])
+@pytest.mark.parametrize("error_type", [ClassificationError, ValueError, RuntimeError])
 def test_ensembles_preserve_their_expected_error_policy(kind, error_type):
     def fail():
         raise error_type("invalid response")
@@ -79,7 +80,7 @@ def test_ensembles_preserve_their_expected_error_policy(kind, error_type):
         ("second", _Classifier(lambda: _classification(kind))),
         ("third", _Classifier(lambda: _classification(kind))),
     ]
-    handled = error_type is PageClassificationError or (
+    handled = error_type is ClassificationError or (
         kind == "repository" and error_type is ValueError
     )
     if not handled:
@@ -145,3 +146,88 @@ def test_cancelled_ensemble_cannot_start_a_new_model_invocation():
     finally:
         execution_control.reset(token)
     classify.assert_not_called()
+
+
+@dataclass(frozen=True)
+class _AcceptanceVote:
+    voter_id: str
+    accepted: bool
+
+
+@pytest.mark.parametrize(
+    "decisions, minimum_accept_votes, minimum_successful_votes, accepted, reason, supporting",
+    [
+        ([True, False, True], 2, 3, True, "enough_accept_votes", ["0", "2"]),
+        ([True, False, False], 2, 3, False, "rejected_by_majority", ["1", "2"]),
+        ([True, False], 2, 2, False, "insufficient_accept_votes", ["1"]),
+        ([False, False, True], 3, 3, False, "insufficient_accept_votes", ["0", "1"]),
+        ([False], 1, 1, False, "rejected_by_majority", ["0"]),
+        ([True], 1, None, True, "enough_accept_votes", ["0"]),
+    ],
+)
+def test_shared_ensemble_preserves_threshold_decisions_and_summary_contract(
+    decisions, minimum_accept_votes, minimum_successful_votes, accepted, reason, supporting,
+):
+    ensemble = VotingEnsemble(
+        [(str(index), decision) for index, decision in enumerate(decisions)],
+        minimum_accept_votes=minimum_accept_votes,
+        minimum_successful_votes=minimum_successful_votes,
+    )
+    result = ensemble.evaluate(
+        classify=lambda decision: decision,
+        make_vote=_AcceptanceVote,
+        handled_errors=(ClassificationError,),
+    )
+
+    assert result.accepted is accepted
+    assert result.decision_reason == reason
+    assert [vote.voter_id for vote in result.supporting_votes] == supporting
+    summary = result.to_summary(
+        lambda vote: {"voter_id": vote.voter_id, "accepted": vote.accepted},
+    )
+    assert summary == {
+        "votes_required": minimum_accept_votes,
+        "minimum_successful_votes": minimum_successful_votes or minimum_accept_votes,
+        "successful_votes": len(decisions),
+        "failed_votes": 0,
+        "accepted_votes": sum(decisions),
+        "decision": "accepted" if accepted else "rejected",
+        "decision_reason": reason,
+        "decision_voter_ids": supporting,
+        "voters": [
+            {"voter_id": str(index), "accepted": decision}
+            for index, decision in enumerate(decisions)
+        ],
+        "failures": [],
+    }
+
+
+def test_shared_ensemble_preserves_incomplete_vote_errors_and_diagnostic_order():
+    def classify(value):
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    ensemble = VotingEnsemble(
+        [
+            ("good", True),
+            ("timeout", ClassificationError("timed out", code="llm_timeout")),
+            ("invalid", ClassificationError("bad JSON", code="llm_invalid_response")),
+        ],
+        minimum_accept_votes=2,
+        minimum_successful_votes=3,
+    )
+    with pytest.raises(ClassificationError) as caught:
+        ensemble.evaluate(
+            classify=classify,
+            make_vote=_AcceptanceVote,
+            handled_errors=(ClassificationError,),
+        )
+
+    assert str(caught.value) == (
+        "At least 3 classifier votes are required; 1 succeeded. "
+        "Failures: timeout: timed out; invalid: bad JSON"
+    )
+    assert [(item.code, item.voter_id) for item in caught.value.diagnostics] == [
+        ("llm_timeout", "timeout"), ("llm_invalid_response", "invalid"),
+    ]

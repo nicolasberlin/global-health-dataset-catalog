@@ -302,23 +302,24 @@ collector/
 ├── llm/
 │   ├── __init__.py
 │   ├── client.py
+│   ├── classifier.py
 │   ├── voter_factory.py
+│   ├── voting.py
 │   ├── checkpoints.py
+│   ├── errors.py
 │   ├── prompts.py
 │   └── providers/
 │       ├── __init__.py
 │       └── epfl_rcp.py
 ├── classification/
 │   ├── __init__.py
-│   ├── relevance/
-│   │   ├── __init__.py
-│   │   ├── factory.py
-│   │   ├── models.py
-│   │   ├── classifier.py
-│   │   ├── ensemble.py
-│   │   └── prompts.py
-│   ├── voting.py
-│   └── errors.py
+│   └── relevance/
+│       ├── __init__.py
+│       ├── factory.py
+│       ├── models.py
+│       ├── classifier.py
+│       ├── ensemble.py
+│       └── prompts.py
 └── collection/
     └── eligibility/
         ├── __init__.py
@@ -347,11 +348,34 @@ construction and `validate_default_classifier_configuration()` used by readiness
 The former central classification factory is removed; internal callers import
 the owning feature factory directly.
 
+`llm/classifier.py` defines the abstract `BaseLLMClassifier[ResultT]`. Its inherited
+constructor stores the injected client. `_classify_payload()` preserves known
+`PipelineFailure` instances, wraps unexpected client exceptions with the feature's
+`failure_message`, then invokes the abstract `_parse_response()` outside the error
+handler. `LLMPageClassifier` and `LLMRepositoryRelevanceClassifier` inherit this
+sequence while keeping their existing `classify()` signatures, payload builders,
+limits and response parsers in their feature modules. The base does not import
+feature models or prompts.
+
 `llm/client.py` defines `LLMClassificationClient.classify_payload()` and the shared
 HTTP implementation. `llm/checkpoints.py` provides `CheckpointedLLMClient`, which
-implements the same method while reusing validated votes. `classification/voting.py` owns parallel
-execution, threshold validation and common ensemble audit summaries; the final
-acceptance and relevance-label rules remain in the domain ensembles.
+implements the same method while reusing validated votes. `llm/voting.py` contains
+`VoteOutcome` and `run_voters()` for parallel execution, plus the generic
+`VotingEnsemble.evaluate()` for usable-vote checks, failures, acceptance thresholds
+and supporting-vote selection. It returns an `EnsembleVotingResult`; its
+`to_summary()` method preserves the existing persisted summary format while each
+feature supplies its own individual-vote serializer.
+
+The two feature ensembles use composition rather than inheritance. Eligibility
+constructs `PageClassification`; relevance selects the final label, applies the
+existing conservative tie order and combines missing information before returning
+`RepositoryClassification`. Eligibility handles `ClassificationError`; relevance
+also handles `ValueError`. Both retain their public constructor signatures,
+properties and validation messages. The common engine calls the acceptance
+threshold `minimum_accept_votes`, while the public feature parameter and stored
+summary key remain `votes_required`. Likewise, `voter_failures` and
+`supporting_votes` are internal result names; stored keys remain `failures` and
+`decision_voter_ids`. No prompt, checkpoint or database format changes.
 
 The eligibility prompt belongs to `collection/eligibility/prompts.py`: it defines
 the collection-specific accepted-page decision and the `accepted`/`dataset_signals`
@@ -364,8 +388,8 @@ configures HTTP conventions without importing either feature. The two formerly
 duplicated provider configuration functions are replaced by this single injectable
 configuration builder; HTTP transport injection remains available to tests.
 
-`classification/errors.py` owns `PageClassificationError`, whose existing name is retained even
-though both domains and the HTTP client use it. Feature factories and provider
+`llm/errors.py` owns `ClassificationError`, shared by relevance and eligibility
+classifiers, the HTTP client and persisted vote recovery. Feature factories and provider
 configuration assemble the classifiers using the shared transport and voting code.
 Package initializers contain documentation only, and callers import the owning
 modules directly without compatibility re-exports.

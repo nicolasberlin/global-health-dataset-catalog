@@ -17,9 +17,9 @@ from collector.budget import (
     remaining_timeout,
     request_budget,
 )
-from collector.classification.errors import PageClassificationError
 from collector.diagnostics import retry_after
 from collector.execution import check_execution_active
+from collector.llm.errors import ClassificationError
 from collector.network.fetch import decode_json_body, is_timeout_error
 from collector.network.transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 from collector.observability import measure_operation
@@ -39,7 +39,7 @@ class _RejectLLMRedirects(HTTPRedirectHandler):
 def extract_chat_completions_message_text(response_payload: object) -> str:
     """Extract assistant text from an OpenAI-compatible Chat Completions envelope."""
     if not isinstance(response_payload, dict):
-        raise PageClassificationError(
+        raise ClassificationError(
             "LLM response must be a JSON object.", code="llm_invalid_response"
         )
 
@@ -55,7 +55,7 @@ def extract_chat_completions_message_text(response_payload: object) -> str:
             if isinstance(content, str) and content.strip():
                 return content
 
-    raise PageClassificationError(
+    raise ClassificationError(
         "LLM response did not include classification text.", code="llm_invalid_response"
     )
 
@@ -116,7 +116,7 @@ class HTTPJSONLLMClient:
 
         Missing configuration, HTTP and timeout failures, malformed provider
         envelopes, and non-object model output all become
-        ``PageClassificationError``.
+        ``ClassificationError``.
         """
 
         with measure_operation("provider_request") as measurement:
@@ -128,7 +128,7 @@ class HTTPJSONLLMClient:
         api_key = self._api_key or os.getenv(self._provider.api_key_env_var, "")
         if not api_key:
             measurement["outcome"] = "configuration_error"
-            raise PageClassificationError(
+            raise ClassificationError(
                 f"{self._provider.api_key_env_var} is required for LLM page classification.",
                 code="llm_configuration_error",
                 recovery="configuration_required",
@@ -154,7 +154,7 @@ class HTTPJSONLLMClient:
                 payload_bytes = read_with_budget(response, MAX_LLM_RESPONSE_BYTES + 1)
                 measurement["outcome"] = "invalid_response"
                 if len(payload_bytes) > MAX_LLM_RESPONSE_BYTES:
-                    raise PageClassificationError(
+                    raise ClassificationError(
                         "Provider response is too large.",
                         code="llm_response_too_large",
                         recovery="none",
@@ -173,7 +173,7 @@ class HTTPJSONLLMClient:
                 }.get(exception.code, "processing_failed")
                 if 300 <= exception.code < 400:
                     code = "llm_configuration_error"
-                raise PageClassificationError(
+                raise ClassificationError(
                     f"{self._provider.name} classification request failed "
                     f"with HTTP {exception.code}.",
                     code=code,
@@ -191,12 +191,12 @@ class HTTPJSONLLMClient:
                 if is_timeout_error(exception)
                 else "network_error"
             )
-            raise PageClassificationError(
+            raise ClassificationError(
                 f"{self._provider.name} classification request failed.",
                 code="llm_timeout" if measurement["outcome"] == "timeout" else "llm_network_error",
             ) from exception
         except ValueError as exception:
-            raise PageClassificationError(
+            raise ClassificationError(
                 f"{self._provider.name} classification response was not valid JSON.",
                 code="llm_invalid_response",
             ) from exception
@@ -208,13 +208,13 @@ class HTTPJSONLLMClient:
         try:
             raw_classification = json.loads(output_text)
         except (json.JSONDecodeError, RecursionError) as exception:
-            raise PageClassificationError(
+            raise ClassificationError(
                 f"{self._provider.name} classification output was not valid JSON.",
                 code="llm_invalid_response",
             ) from exception
 
         if not isinstance(raw_classification, dict):
-            raise PageClassificationError(
+            raise ClassificationError(
                 f"{self._provider.name} classification output must be a JSON object.",
                 code="llm_invalid_response",
             )

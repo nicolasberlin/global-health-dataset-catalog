@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import cast
 
-from collector.classification.errors import PageClassificationError
 from collector.classification.relevance.models import (
     MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS,
     MAX_REPOSITORY_MISSING_INFORMATION_CHARS,
@@ -16,8 +15,8 @@ from collector.classification.relevance.models import (
     RepositoryClassification,
     RepositoryRelevanceLabel,
 )
-from collector.diagnostics import PipelineFailure
-from collector.llm.client import LLMClassificationClient
+from collector.llm.classifier import BaseLLMClassifier
+from collector.llm.errors import ClassificationError
 from collector.storage.models import PageSnapshot
 
 # PageSnapshot permits larger values; these tighter limits keep prompts bounded.
@@ -27,38 +26,28 @@ MAX_REPOSITORY_LLM_TEXT_CHARS = 4_000
 MAX_REPOSITORY_LLM_URL_CHARS = 2_048
 
 
-class LLMRepositoryRelevanceClassifier:
+class LLMRepositoryRelevanceClassifier(BaseLLMClassifier[RepositoryClassification]):
     """Classify a repository candidate against the original user query.
 
     Only bounded provider metadata is sent. A valid relevance label produces a
     decision, while missing queries, provider failures, and malformed or
-    inconsistent responses raise ``PageClassificationError``.
+    inconsistent responses raise ``ClassificationError``.
     """
 
-    def __init__(
-        self,
-        client: LLMClassificationClient,
-    ) -> None:
-        self._client = client
+    failure_message = "LLM repository relevance classification failed."
 
     def classify(self, page: PageSnapshot) -> RepositoryClassification:
         payload = _build_repository_relevance_payload(page)
 
-        try:
-            raw_classification = self._client.classify_payload(payload)
-        except PipelineFailure:
-            raise
-        except Exception as exception:
-            raise PageClassificationError(
-                "LLM repository relevance classification failed.", code="processing_failed"
-            ) from exception
+        return self._classify_payload(payload)
 
-        return _parse_repository_relevance_classification(raw_classification)
+    def _parse_response(self, response: dict[str, object]) -> RepositoryClassification:
+        return _parse_repository_relevance_classification(response)
 
 
 def _build_repository_relevance_payload(page: PageSnapshot) -> dict[str, object]:
     if not page.search_query:
-        raise PageClassificationError(
+        raise ClassificationError(
             "Search query is required for repository relevance classification.",
             code="llm_invalid_response",
         )
@@ -97,7 +86,7 @@ def _parse_repository_relevance_classification(
     raw: dict[str, object],
 ) -> RepositoryClassification:
     if not isinstance(raw, dict):
-        raise PageClassificationError(
+        raise ClassificationError(
             "LLM classification output must be a JSON object.", code="llm_invalid_response"
         )
 
@@ -111,7 +100,7 @@ def _parse_repository_relevance_classification(
             missing_information=missing_information,
         )
     except ValueError as exception:
-        raise PageClassificationError(
+        raise ClassificationError(
             f"Invalid repository classification: {exception}", code="llm_invalid_response"
         ) from exception
 
@@ -122,7 +111,7 @@ def _required_relevance_label(
 ) -> RepositoryRelevanceLabel:
     value = raw.get(field_name)
     if not isinstance(value, str) or value not in REPOSITORY_RELEVANCE_LABELS:
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} must be a supported relevance label.",
             code="llm_invalid_response",
         )
@@ -132,13 +121,13 @@ def _required_relevance_label(
 def _required_non_empty_string(raw: dict[str, object], field_name: str) -> str:
     value = raw.get(field_name)
     if not isinstance(value, str) or not value.strip():
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} must be a non-empty string.",
             code="llm_invalid_response",
         )
     normalized_value = value.strip()
     if len(normalized_value) > MAX_REPOSITORY_CLASSIFICATION_REASON_CHARS:
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} is too long.", code="llm_invalid_response"
         )
     return normalized_value
@@ -147,18 +136,18 @@ def _required_non_empty_string(raw: dict[str, object], field_name: str) -> str:
 def _required_string_list(raw: dict[str, object], field_name: str) -> list[str]:
     value = raw.get(field_name)
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} must be a list of strings.",
             code="llm_invalid_response",
         )
     normalized_items = [item.strip() for item in value if item.strip()]
     if len(normalized_items) > MAX_REPOSITORY_MISSING_INFORMATION_ITEMS:
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} contains too many items.",
             code="llm_invalid_response",
         )
     if any(len(item) > MAX_REPOSITORY_MISSING_INFORMATION_CHARS for item in normalized_items):
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} contains an item that is too long.",
             code="llm_invalid_response",
         )

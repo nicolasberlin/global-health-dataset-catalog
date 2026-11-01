@@ -12,9 +12,9 @@ from urllib.request import Request
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget, read_with_budget
-from collector.classification.errors import PageClassificationError
 from collector.collection.discovery.sitemap import fetch_text_url
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
+from collector.llm.errors import ClassificationError
 from collector.network.fetch import (
     _connect_public,
     _PublicHTTPRedirectHandler,
@@ -245,7 +245,7 @@ def test_llm_request_does_not_start_after_deadline(clock):
 
 
 @pytest.mark.parametrize(
-    "duration, expected", [(1, PageClassificationError), (5, CollectionBudgetExceeded)]
+    "duration, expected", [(1, ClassificationError), (5, CollectionBudgetExceeded)]
 )
 def test_llm_timeout_is_retryable_only_while_collection_has_time(clock, duration, expected):
     def request(*args, **kwargs):

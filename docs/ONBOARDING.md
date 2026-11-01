@@ -141,7 +141,8 @@ installations. No setup script moves or deletes database volumes.
 | Dataset page eligibility during collection: contracts, prompts, parsing and aggregation | `collector/collection/eligibility/` |
 | Default relevance classifier construction | `collector/classification/relevance/factory.py` |
 | Default collection eligibility classifier construction | `collector/collection/eligibility/factory.py` |
-| Shared voter construction, readiness checks and vote execution | `collector/llm/voter_factory.py`, `collector/classification/voting.py` |
+| Shared voter construction, readiness checks and ensemble voting | `collector/llm/voter_factory.py`, `collector/llm/voting.py` |
+| Shared LLM classifier invocation and error handling | `collector/llm/classifier.py` |
 | Shared LLM client and durable response checkpoints | `collector/llm/client.py`, `collector/llm/checkpoints.py` |
 | Distribution access checks | `collector/validation/distributions.py` |
 | HTTP fetching and request deadlines | `collector/network/fetch.py`, `collector/network/transport.py` |

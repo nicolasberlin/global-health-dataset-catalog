@@ -4,10 +4,10 @@ import io
 import json
 
 import pytest
+from helpers.classification import PAGE
 from helpers.classification import distribution as _distribution
 from helpers.classification import page as _page
 
-from collector.classification.errors import PageClassificationError
 from collector.classification.relevance.classifier import LLMRepositoryRelevanceClassifier
 from collector.classification.relevance.ensemble import EnsembleRepositoryRelevanceClassifier
 from collector.classification.relevance.factory import build_default_repository_result_classifier
@@ -29,8 +29,10 @@ from collector.collection.eligibility.classifier import (
 from collector.collection.eligibility.ensemble import EnsemblePageClassifier
 from collector.collection.eligibility.factory import build_default_page_classifier
 from collector.collection.eligibility.prompts import _build_dataset_page_eligibility_request_body
+from collector.diagnostics import Diagnostic, PipelineFailure
 from collector.extraction.dataset_metadata import DATASET_METADATA_KEYS
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
+from collector.llm.errors import ClassificationError
 from collector.llm.providers.epfl_rcp import (
     DEFAULT_DEEPSEEK_RCP_MODEL,
     EPFL_RCP_CHAT_COMPLETIONS_URL,
@@ -188,7 +190,7 @@ def test_llm_page_classifier_rejects_missing_accepted_decision():
 
     classifier = LLMPageClassifier(FakeClient())
 
-    with pytest.raises(PageClassificationError, match="accepted"):
+    with pytest.raises(ClassificationError, match="accepted"):
         classifier.classify(_page(), [_distribution()])
 
 
@@ -213,7 +215,7 @@ def test_llm_page_classifier_rejects_invalid_signal_contract(
 
     classifier = LLMPageClassifier(FakeClient())
 
-    with pytest.raises(PageClassificationError, match=expected_error):
+    with pytest.raises(ClassificationError, match=expected_error):
         classifier.classify(_page(), [_distribution()])
 
 
@@ -224,7 +226,7 @@ def test_llm_page_classifier_wraps_client_failures():
 
     classifier = LLMPageClassifier(FailingClient())
 
-    with pytest.raises(PageClassificationError, match="LLM page classification failed"):
+    with pytest.raises(ClassificationError, match="LLM page classification failed"):
         classifier.classify(_page(), [_distribution()])
 
 
@@ -364,7 +366,7 @@ def test_repository_relevance_classifier_rejects_non_health_query_result():
 def test_repository_relevance_classifier_rejects_missing_query():
     classifier = LLMRepositoryRelevanceClassifier(FakeUnusedClient())
 
-    with pytest.raises(PageClassificationError, match="Search query is required"):
+    with pytest.raises(ClassificationError, match="Search query is required"):
         classifier.classify(_page())
 
 
@@ -379,7 +381,7 @@ def test_repository_relevance_classifier_requires_missing_information_details():
 
     classifier = LLMRepositoryRelevanceClassifier(FakeClient())
 
-    with pytest.raises(PageClassificationError, match="missing_information"):
+    with pytest.raises(ClassificationError, match="missing_information"):
         classifier.classify(_repository_page())
 
 
@@ -394,7 +396,7 @@ def test_repository_relevance_classifier_rejects_unexpected_missing_information(
 
     classifier = LLMRepositoryRelevanceClassifier(FakeClient())
 
-    with pytest.raises(PageClassificationError, match="must be empty"):
+    with pytest.raises(ClassificationError, match="must be empty"):
         classifier.classify(_repository_page())
 
 
@@ -482,7 +484,7 @@ def test_http_json_llm_client_bounds_response_before_parsing(extra_bytes):
     )
     if extra_bytes:
         with pytest.raises(
-            PageClassificationError, match="Provider response is too large",
+            ClassificationError, match="Provider response is too large",
         ) as caught:
             client.classify_payload({})
         assert caught.value.diagnostics[0].code == "llm_response_too_large"
@@ -509,7 +511,7 @@ def test_http_json_llm_client_requires_configured_api_key(monkeypatch):
         api_key="",
     )
 
-    with pytest.raises(PageClassificationError, match="FAKE_LLM_API_KEY"):
+    with pytest.raises(ClassificationError, match="FAKE_LLM_API_KEY"):
         client.classify_payload({"page": {"title": "Mortality dataset"}})
 
 
@@ -553,13 +555,76 @@ def _fake_request_body(payload: dict[str, object], model: str) -> dict[str, obje
 
 def _fake_response_text(response_payload: object) -> str:
     if not isinstance(response_payload, dict):
-        raise PageClassificationError("FakeProvider response must be a JSON object.")
+        raise ClassificationError("FakeProvider response must be a JSON object.")
     output_text = response_payload.get("output_text")
     if not isinstance(output_text, str):
-        raise PageClassificationError("FakeProvider response did not include output_text.")
+        raise ClassificationError("FakeProvider response did not include output_text.")
     return output_text
 
 
 class FakeUnusedClient:
     def classify_payload(self, payload):
         raise AssertionError("Client should not be called.")
+
+
+@pytest.mark.parametrize("kind", ["page", "repository"])
+@pytest.mark.parametrize("error_type", [PipelineFailure, ClassificationError])
+def test_feature_classifiers_preserve_known_client_failure_identity(kind, error_type):
+    failure = error_type(
+        "retry later",
+        diagnostics=[Diagnostic("llm_timeout", "classification", recovery="automatic")],
+    )
+
+    class Client:
+        def classify_payload(self, payload):
+            raise failure
+
+    classifier, args = _feature_classifier(kind, Client())
+    with pytest.raises(error_type) as caught:
+        classifier.classify(*args)
+    assert caught.value is failure
+    assert caught.value.diagnostics == failure.diagnostics
+
+
+@pytest.mark.parametrize("kind", ["page", "repository"])
+def test_feature_classifiers_wrap_unexpected_client_failures_with_original_cause(kind):
+    failure = RuntimeError("unexpected client failure")
+
+    class Client:
+        def classify_payload(self, payload):
+            raise failure
+
+    classifier, args = _feature_classifier(kind, Client())
+    with pytest.raises(ClassificationError) as caught:
+        classifier.classify(*args)
+    expected = (
+        "LLM page classification failed."
+        if kind == "page" else "LLM repository relevance classification failed."
+    )
+    assert str(caught.value) == expected
+    assert caught.value.__cause__ is failure
+    assert caught.value.diagnostics[0].code == "processing_failed"
+
+
+@pytest.mark.parametrize("kind", ["page", "repository"])
+def test_feature_classifiers_do_not_wrap_parser_failures_as_client_failures(kind, monkeypatch):
+    failure = ValueError("parser failure")
+
+    class Client:
+        def classify_payload(self, payload):
+            return {}
+
+    def fail_to_parse(response):
+        raise failure
+
+    classifier, args = _feature_classifier(kind, Client())
+    monkeypatch.setattr(classifier, "_parse_response", fail_to_parse)
+    with pytest.raises(ValueError) as caught:
+        classifier.classify(*args)
+    assert caught.value is failure
+
+
+def _feature_classifier(kind, client):
+    if kind == "page":
+        return LLMPageClassifier(client), (PAGE, [_distribution()])
+    return LLMRepositoryRelevanceClassifier(client), (PAGE,)

@@ -38,12 +38,20 @@ The implementations belong to their features:
 `collector/classification/relevance/` owns candidate relevance to the user's query,
 while `collector/collection/eligibility/` owns dataset page acceptance during
 collection. Each contains `models.py`, `classifier.py`, `ensemble.py`, `prompts.py` and
-its own `factory.py`. The classification worker uses the relevance factory;
+its own `factory.py`. Both feature classifiers inherit `BaseLLMClassifier` from
+`collector/llm/classifier.py`, sharing client invocation and error handling while
+keeping their payload limits, response validation and public signatures. Parsing
+errors retain their own meaning and are not wrapped as client failures.
+The classification worker uses the relevance factory;
 the collection worker, pipeline default and AI-enabled Search Lab use the
 eligibility factory. Both delegate voter construction to
 `collector/llm/voter_factory.py`; HTTP transport and persisted checkpoints
-are also shared in `collector/llm/`, while common vote execution stays in
-`collector/classification/voting.py`.
+are also shared in `collector/llm/`. Both feature ensembles delegate parallel voting,
+usable-response checks and acceptance thresholds to `VotingEnsemble` in
+`collector/llm/voting.py`. Its `EnsembleVotingResult` keeps supporting votes and
+failures in voter order and serializes the existing audit summary. Eligibility
+constructs its page decision; relevance retains label selection and missing-information
+aggregation. Public `votes_required` parameters and stored summary keys are unchanged.
 
 The eligibility prompt and response schema live with the collection feature
 because they define the accepted-page decision consumed by collection. Only

@@ -20,7 +20,6 @@ from collector.budget import (
     active_request_budget,
     collection_budget,
 )
-from collector.classification.errors import PageClassificationError
 from collector.collection.browser import BrowserSession
 from collector.collection.connectors.http import fetch_record_json
 from collector.collection.discovery.sitemap import fetch_text_url
@@ -28,6 +27,7 @@ from collector.collection.failures import CollectionResponseError, CollectionTra
 from collector.config import DEFAULT_CONFIG
 from collector.execution import ExecutionControl, ExecutionStopped, execution_control
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
+from collector.llm.errors import ClassificationError
 from collector.network.fetch import (
     PageFetchError,
     decode_text_body,
@@ -234,7 +234,7 @@ def test_default_llm_transport_also_bounds_slow_headers(monkeypatch, clock):
     connection = ClockedSocket(stream)
     install_sockets(monkeypatch, [connection])
     monkeypatch.setattr("urllib.request.getproxies", lambda: {})
-    with pytest.raises(PageClassificationError) as caught:
+    with pytest.raises(ClassificationError) as caught:
         llm_client().classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_timeout"
     assert clock[0] == 5 and stream.closed and connection.closed

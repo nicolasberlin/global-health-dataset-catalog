@@ -10,8 +10,8 @@ from app.db.classification.voting.coordination import _lock_run, _publish_progre
 from app.db.connection import _fetchall, _fetchone, _require_database_pool
 from app.db.serialization import _jsonb
 from app.policies.retries import TRANSIENT, RetryPolicy, as_datetime
-from collector.classification.errors import PageClassificationError
 from collector.diagnostics import Diagnostic, PersistenceFailure
+from collector.llm.errors import ClassificationError
 
 
 async def claim_vote(
@@ -90,7 +90,7 @@ def _check_vote_retry(scope, vote):
         and scope["retry_started_at"] is not None
         and now >= scope["retry_started_at"] + timedelta(seconds=policy.window_seconds)
     ):
-        raise PageClassificationError(
+        raise ClassificationError(
             "Automatic retry budget exhausted.", code="llm_retry_exhausted"
         )
     errors = [
@@ -100,7 +100,7 @@ def _check_vote_retry(scope, vote):
     # A provider deadline also applies to a newly authorized manual cycle.
     future = [item for item in errors if item.retry_at and as_datetime(item.retry_at) > now]
     if future:
-        raise PageClassificationError("Model retry is not due.", diagnostics=future)
+        raise ClassificationError("Model retry is not due.", diagnostics=future)
     if vote["retry_cycle"] != scope["retry_cycle"]:
         return
     blocked = [
@@ -110,7 +110,7 @@ def _check_vote_retry(scope, vote):
         or vote["cycle_attempts"] >= policy.limit(item.code)
     ]
     if blocked:
-        raise PageClassificationError(
+        raise ClassificationError(
             "Model retry budget exhausted.",
             diagnostics=[
                 replace(

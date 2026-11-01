@@ -15,12 +15,12 @@ from urllib.response import addinfourl
 import pytest
 
 from collector.budget import CollectionBudgetExceeded, collection_budget
-from collector.classification.errors import PageClassificationError
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.discovery.sitemap import fetch_text_url
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import collect_source_with_report
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
+from collector.llm.errors import ClassificationError
 from collector.storage.models import DistributionCandidate
 from collector.validation.distributions import probe_url
 
@@ -78,7 +78,7 @@ def test_llm_redirect_never_forwards_credentials_and_closes_body(
         "collector.llm.client.build_opener",
         lambda *handlers: build_opener(RedirectingTransport(), *handlers),
     )
-    expected = CollectionBudgetExceeded if expired else PageClassificationError
+    expected = CollectionBudgetExceeded if expired else ClassificationError
     with collection_budget(seconds=5), pytest.raises(expected) as caught:
         client().classify_payload({})
     assert requests == [(PROVIDER_URL, "POST", "Bearer test-key")]
@@ -100,7 +100,7 @@ def test_llm_http_errors_close_response_without_reading_it(status):
     def request(*args, **kwargs):
         raise HTTPError(PROVIDER_URL, status, "Error", {"Retry-After": "30"}, body)
 
-    with pytest.raises(PageClassificationError) as caught:
+    with pytest.raises(ClassificationError) as caught:
         client(request).classify_payload({})
     assert body.closed
     assert caught.value.diagnostics[0].retry_at is not None
@@ -112,7 +112,7 @@ def test_deep_json_is_a_recoverable_invalid_llm_response(stage):
     nested_json = "[" * levels + "0" + "]" * levels
     payload = nested_json if stage == "provider_envelope" else json.dumps({"text": nested_json})
     body = io.BytesIO(payload.encode())
-    with pytest.raises(PageClassificationError) as caught:
+    with pytest.raises(ClassificationError) as caught:
         client(lambda *args, **kwargs: body).classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_invalid_response"
     assert caught.value.diagnostics[0].recovery == "manual"

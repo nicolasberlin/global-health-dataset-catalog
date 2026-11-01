@@ -8,7 +8,6 @@ from dataclasses import replace
 import pytest
 
 from collector.budget import check_collection_budget
-from collector.classification.errors import PageClassificationError
 from collector.collection.contracts import DiscoveredPage, StrategyResult
 from collector.collection.eligibility.classifier import LLMPageClassifier
 from collector.collection.eligibility.models import PageClassification
@@ -19,6 +18,7 @@ from collector.collection.service import (
 from collector.config import CollectorConfig
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page
+from collector.llm.errors import ClassificationError
 from collector.network.fetch import FetchedPage
 from collector.storage.models import PageSnapshot, ValidationResult
 
@@ -116,7 +116,7 @@ def test_nested_model_signal_is_rejected_without_recursively_copying_it():
         def classify_payload(self, payload):
             return {"accepted": True, "dataset_signals": {"reason": "Dataset", "evidence": nested}}
 
-    with pytest.raises(PageClassificationError) as caught:
+    with pytest.raises(ClassificationError) as caught:
         LLMPageClassifier(Client()).classify(PageSnapshot(URL, URL), [])
     assert caught.value.diagnostics[0].code == "llm_invalid_response"
 

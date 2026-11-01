@@ -11,11 +11,11 @@ import pytest
 from helpers.classification import KEY_VARIABLES, KEYS, MODEL_VARIABLES, MODELS, PAGE
 from helpers.classification import response as _response
 
-from collector.classification.errors import PageClassificationError
 from collector.classification.relevance import factory as relevance_factory
 from collector.collection.eligibility import factory as eligibility_factory
 from collector.llm import voter_factory
 from collector.llm.client import HTTPJSONLLMClient
+from collector.llm.errors import ClassificationError
 from collector.llm.providers.epfl_rcp import EPFL_RCP_CHAT_COMPLETIONS_URL
 
 
@@ -106,7 +106,7 @@ def test_missing_key_never_reuses_another_models_credentials(monkeypatch, kind, 
         return _response(kind, True)
 
     _inject_transport(monkeypatch, request)
-    with pytest.raises(PageClassificationError, match=KEY_VARIABLES[model_index]):
+    with pytest.raises(ClassificationError, match=KEY_VARIABLES[model_index]):
         _classify(kind)
     assert set(observed) == set(MODELS) - {MODELS[model_index]}
 
@@ -125,7 +125,7 @@ def test_failed_model_is_an_error_even_when_other_two_accept(
         return _response(kind, True)
 
     _inject_transport(monkeypatch, request)
-    with pytest.raises(PageClassificationError, match="At least 3 classifier votes"):
+    with pytest.raises(ClassificationError, match="At least 3 classifier votes"):
         _classify(kind)
 
 

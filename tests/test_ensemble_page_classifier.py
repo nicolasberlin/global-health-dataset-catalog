@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from collector.classification.errors import PageClassificationError
 from collector.collection.eligibility.ensemble import EnsemblePageClassifier
 from collector.collection.eligibility.models import PageClassification
+from collector.llm.errors import ClassificationError
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 
@@ -138,7 +138,7 @@ def test_ensemble_classifier_raises_when_fewer_than_two_voters_succeed():
         ]
     )
 
-    with pytest.raises(PageClassificationError, match="At least 2 classifier votes"):
+    with pytest.raises(ClassificationError, match="At least 2 classifier votes"):
         classifier.classify(_page(), [_distribution()])
 
 
@@ -183,7 +183,7 @@ class _FailingClassifier:
         self._error = error
 
     def classify(self, page, distributions):
-        raise PageClassificationError(self._error)
+        raise ClassificationError(self._error)
 
 
 def _classification(accepted: bool) -> PageClassification:

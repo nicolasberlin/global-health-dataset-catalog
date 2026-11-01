@@ -6,7 +6,6 @@ import json
 import pytest
 from helpers.collection import DATASET_HTML, AcceptingPageClassifier
 
-from collector.classification.errors import PageClassificationError
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.models import PageClassification
 from collector.collection.service import (
@@ -22,6 +21,7 @@ from collector.extraction.dataset_metadata import (
 )
 from collector.extraction.distributions import extract_distributions
 from collector.extraction.extractor import extract_page, html_to_text
+from collector.llm.errors import ClassificationError
 from collector.network.fetch import FetchedPage, PageFetchError
 from collector.storage.models import (
     CollectedDataset,
@@ -410,7 +410,7 @@ def test_analyze_html_page_uses_llm_default_classifier(monkeypatch):
     monkeypatch.setenv("RCP_DEEPSEEK_MODEL", "deepseek-test-model")
     monkeypatch.delenv("RCP_DEEPSEEK_API_KEY", raising=False)
 
-    with pytest.raises(PageClassificationError, match="RCP_DEEPSEEK_API_KEY"):
+    with pytest.raises(ClassificationError, match="RCP_DEEPSEEK_API_KEY"):
         analyze_html_page("https://example.org/data/catalog", DATASET_HTML)
 
 

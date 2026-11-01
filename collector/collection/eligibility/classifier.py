@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collector.classification.errors import PageClassificationError
 from collector.collection.eligibility.models import PageClassification
-from collector.diagnostics import PipelineFailure
-from collector.llm.client import LLMClassificationClient
+from collector.llm.classifier import BaseLLMClassifier
+from collector.llm.errors import ClassificationError
 from collector.storage.models import DistributionCandidate, PageSnapshot
 
 # Bound untrusted evidence so model requests have predictable size.
@@ -20,20 +19,16 @@ MAX_HEADINGS = 20
 MAX_DISTRIBUTIONS = 10
 
 
-class LLMPageClassifier:
+class LLMPageClassifier(BaseLLMClassifier[PageClassification]):
     """Ask an LLM whether a discovered page is eligible for collection.
 
     The payload independently bounds page text, metadata, headings, and the
     first ``MAX_DISTRIBUTIONS`` candidates. Provider errors and malformed
-    decisions raise ``PageClassificationError``; a valid ``accepted=false``
+    decisions raise ``ClassificationError``; a valid ``accepted=false``
     response is a normal rejection.
     """
 
-    def __init__(
-        self,
-        client: LLMClassificationClient,
-    ) -> None:
-        self._client = client
+    failure_message = "LLM page classification failed."
 
     def classify(
         self,
@@ -42,16 +37,10 @@ class LLMPageClassifier:
     ) -> PageClassification:
         payload = _build_llm_payload(page, distributions)
 
-        try:
-            raw_classification = self._client.classify_payload(payload)
-        except PipelineFailure:
-            raise
-        except Exception as exception:
-            raise PageClassificationError(
-                "LLM page classification failed.", code="processing_failed"
-            ) from exception
+        return self._classify_payload(payload)
 
-        return _parse_page_classification(raw_classification)
+    def _parse_response(self, response: dict[str, object]) -> PageClassification:
+        return _parse_page_classification(response)
 
 
 def _build_llm_payload(
@@ -111,7 +100,7 @@ def _parse_page_classification(
     raw: dict[str, object],
 ) -> PageClassification:
     if not isinstance(raw, dict):
-        raise PageClassificationError(
+        raise ClassificationError(
             "LLM classification output must be a JSON object.", code="llm_invalid_response"
         )
 
@@ -127,7 +116,7 @@ def _parse_page_classification(
 def _required_bool(raw: dict[str, object], field_name: str) -> bool:
     value = raw.get(field_name)
     if not isinstance(value, bool):
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} must be a boolean.", code="llm_invalid_response"
         )
     return value
@@ -139,18 +128,18 @@ def _required_signal_object(
 ) -> dict[str, object]:
     value = raw.get(field_name)
     if not isinstance(value, dict):
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} must be an object.", code="llm_invalid_response"
         )
     expected_fields = {"reason", "evidence"}
     if set(value) != expected_fields:
-        raise PageClassificationError(
+        raise ClassificationError(
             f"LLM classification field {field_name} must contain exactly reason and evidence.",
             code="llm_invalid_response",
         )
     for signal_field in expected_fields:
         if not isinstance(value[signal_field], str):
-            raise PageClassificationError(
+            raise ClassificationError(
                 f"LLM classification field {field_name}.{signal_field} must be a string.",
                 code="llm_invalid_response",
             )

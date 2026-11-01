@@ -19,10 +19,10 @@ from helpers.classification import KEYS, MODELS, PAGE
 from helpers.classification import response as _response
 from helpers.workflows import candidate_for, rows, wait_until
 
-from collector.classification.errors import PageClassificationError
 from collector.classification.relevance import factory as relevance_factory
 from collector.collection.eligibility import factory as eligibility_factory
 from collector.diagnostics import PersistenceFailure
+from collector.llm.errors import ClassificationError
 
 pytestmark = pytest.mark.anyio
 
@@ -70,7 +70,7 @@ async def test_retry_only_failed_model_preserves_negative_votes(
 
     transport(request)
     loop = asyncio.get_running_loop()
-    with pytest.raises(PageClassificationError, match="At least 3 classifier votes"):
+    with pytest.raises(ClassificationError, match="At least 3 classifier votes"):
         await asyncio.to_thread(classify, kind, scope, loop)
     saved = await rows("SELECT * FROM classification_votes ORDER BY voter_id")
     failed_history = (await rows(
@@ -231,7 +231,7 @@ async def test_new_internal_collection_job_inherits_partial_votes(database, tran
         return _response("page", True)
 
     transport(request)
-    with pytest.raises(PageClassificationError):
+    with pytest.raises(ClassificationError):
         await asyncio.to_thread(classify, "page", scope, loop)
     await database.mark_collection_job_error(scope["job_id"], "Model unavailable")
     new = await database.create_collection_job(PAGE.url)

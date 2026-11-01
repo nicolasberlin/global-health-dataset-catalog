@@ -12,12 +12,12 @@ from helpers.classification import page as _page
 from helpers.collection import Accept, collect
 from helpers.workflows import collection_job as _collection_job
 
-from collector.classification.errors import PageClassificationError
 from collector.collection.contracts import DiscoveredPage
 from collector.collection.eligibility.classifier import LLMPageClassifier
 from collector.collection.service import collect_source_with_report
 from collector.diagnostics import Diagnostic, PersistenceFailure, public_diagnostics, retry_after
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
+from collector.llm.errors import ClassificationError
 from collector.network.fetch import FetchedPage, PageFetchError
 
 SEARCH = {"status": "completed", "origin": "online", "discovery_complete": True}
@@ -217,7 +217,7 @@ def test_llm_causes_survive_without_exposing_provider_details(failure, code, rec
     def request(*args, **kwargs):
         raise failure
 
-    with pytest.raises(PageClassificationError) as caught:
+    with pytest.raises(ClassificationError) as caught:
         client(request).classify_payload({})
     error = caught.value.diagnostics[0]
     assert (error.code, error.recovery) == (code, recovery)
@@ -228,12 +228,12 @@ def test_llm_causes_survive_without_exposing_provider_details(failure, code, rec
 
 def test_missing_configuration_and_invalid_json_are_distinct(monkeypatch):
     monkeypatch.delenv("UNSET_TEST_KEY", raising=False)
-    with pytest.raises(PageClassificationError) as caught:
+    with pytest.raises(ClassificationError) as caught:
         client(
             lambda *a, **k: pytest.fail("must not call provider"), api_key="",
         ).classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_configuration_error"
-    with pytest.raises(PageClassificationError) as caught:
+    with pytest.raises(ClassificationError) as caught:
         client(lambda *a, **k: io.BytesIO(b"not json")).classify_payload({})
     assert caught.value.diagnostics[0].code == "llm_invalid_response"
 

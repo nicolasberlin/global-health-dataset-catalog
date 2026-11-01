@@ -11,9 +11,9 @@ import pytest
 from app.workers import sql_retries
 
 from collector import observability
-from collector.classification.errors import PageClassificationError
-from collector.classification.voting import run_voters
 from collector.llm.client import HTTPJSONLLMClient, LLMProviderConfig
+from collector.llm.errors import ClassificationError
+from collector.llm.voting import run_voters
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def test_provider_events_measure_and_redact(outcome, events, caplog, monkeypatch
                 "text": "secret-response",
             }
         else:
-            with pytest.raises(PageClassificationError):
+            with pytest.raises(ClassificationError):
                 provider.classify_request({"prompt": "secret-prompt"})
     assert events() == [{"event": "provider_request", "outcome": outcome,
                          "job_id": 12, "duration_seconds": 2.5}]
