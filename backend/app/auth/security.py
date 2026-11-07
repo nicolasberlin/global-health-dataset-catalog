@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -32,6 +33,10 @@ from app.policies.quotas import (
     public_daily_quota,
     public_ip_quota,
     validate_quota_configuration,
+)
+
+_HOST_LABEL = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 )
 
 APIQuotaOperation = Literal[
@@ -187,6 +192,25 @@ def _require_session_origin(request: Request, settings: VisitorSessionSettings) 
         raise HTTPException(status_code=403, detail="Request origin is not allowed.")
 
 
+def _is_valid_hostname(hostname: str | None) -> bool:
+    if not hostname:
+        return False
+
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    if len(hostname) > 253:
+        return False
+
+    return all(
+        _HOST_LABEL.fullmatch(label) is not None
+        for label in hostname.split(".")
+    )
+
+
 def api_cors_origins() -> list[str]:
     """Validate the explicit browser origins allowed to call this API."""
     value = os.getenv("API_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
@@ -199,8 +223,11 @@ def api_cors_origins() -> list[str]:
             raise RuntimeError(
                 "API_CORS_ORIGINS must contain valid HTTP(S) origins."
             ) from exception
-        if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path
-                or parsed.query or parsed.fragment or parsed.username or parsed.password
+        if (parsed.scheme not in {"http", "https"}
+                or not _is_valid_hostname(parsed.hostname) or parsed.path
+                or parsed.query or parsed.fragment or parsed.username is not None
+                or parsed.password is not None
+                or parsed.netloc.endswith(":")
                 or any(character.isspace() for character in origin) or "\\" in origin):
             raise RuntimeError(
                 "API_CORS_ORIGINS must contain explicit HTTP(S) origins without paths."

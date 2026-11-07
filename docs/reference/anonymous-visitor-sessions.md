@@ -202,7 +202,7 @@ IP/global budgets, whole-batch rollback, queue capacity across concurrent reques
 and retries that charge only once. External providers are stubbed; tests incur
 no LLM charges.
 
-`tests/test_api_cors.py` verifies configured browser origins and response
+`tests/api/test_api_cors.py` verifies configured browser origins and response
 headers. These HTTP-level checks do not execute a real browser. When connecting
 a browser client, verify actual cookie behavior over the intended HTTP or HTTPS
 origin, bootstrap reuse, expiration, foreign-origin rejection and explicit retry

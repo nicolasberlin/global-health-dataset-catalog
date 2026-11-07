@@ -303,7 +303,7 @@ are removed when it stops; no application volume is reused.
 | Ownership, errors or recovery | `tests/test_standalone_api_failures.py`, relevant worker/database tests |
 | Process startup/restart | `tests/test_standalone_api_runtime.py`, with the disposable test database |
 | Connector | Its contract fixtures; see [connector development](reference/collection-connectors.md#adding-a-connector) |
-| Browser session or CORS contract | `tests/test_visitor_sessions.py`, `tests/test_security.py`, `tests/test_api_cors.py` |
+| Browser session or CORS contract | `tests/test_visitor_sessions.py`, `tests/test_security.py`, `tests/api/test_api_cors.py` |
 | Browser collection service | `npm --prefix browser ci`, then `npm --prefix browser test` |
 | Laboratory | [Its own test instructions](../search_lab/README.md#test-and-remove) |
 
